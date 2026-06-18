@@ -11,6 +11,23 @@ Each implementation is intended to provide a reusable library plus client and se
 test environments. The project goal is to build the required protocol layers without
 external libraries.
 
+## Project Bible
+
+The authoritative protocol reference for this project is the latest IETF
+`draft-ietf-webtrans-http3` document:
+
+- Canonical datatracker page: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
+- Current draft snapshot checked on 2026-06-19: `draft-ietf-webtrans-http3-15`
+- Intended RFC status: Proposed Standard
+
+Until the document is published as a final RFC, implementation decisions must follow
+the latest draft available from the canonical datatracker page. Do not treat an older
+draft revision, browser behavior, blog post, sample implementation, or local design
+note as more authoritative than the current IETF draft.
+
+See [docs/Protocol-Bible.md](docs/Protocol-Bible.md) for the project rules around
+using this reference.
+
 ## Project Goals
 
 - Implement HTTP/3 WebTransport natively in Swift, C99, and C++.
