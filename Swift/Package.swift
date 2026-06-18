@@ -16,5 +16,8 @@ let package = Package(
         .executableTarget(
             name: "AppleQUICSpike"
         )
+    ],
+    swiftLanguageModes: [
+        .v6
     ]
 )
