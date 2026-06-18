@@ -1,6 +1,10 @@
 import Foundation
 import Network
 
+#if !arch(arm64)
+#error("WebTransport Swift supports Apple Silicon arm64 only. Intel/x86_64 builds are unsupported.")
+#endif
+
 @available(macOS 26.0, *)
 @main
 enum AppleQUICSpike {
