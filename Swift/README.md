@@ -17,12 +17,23 @@ Current Phase 1 status:
 - Full close/reset/application-error behavior is not yet proven. The relevant
   properties are exposed by Network.framework, but runtime mutation was not safe
   enough to claim as complete in the spike.
+- `WebTransportQUICCore` now contains native QUIC byte, varint, packet-number,
+  transport-parameter, long-header packet, and frame codecs.
+- `WebTransportCryptoApple` derives QUIC v1 Initial secrets with Apple CryptoKit
+  and is tested against the RFC 9001 sample vector.
+- `WebTransportUDPApple` provides prompt-free loopback UDP I/O for native packet
+  tests.
+- `NativeQUICCoreSpike` proves native STREAM, DATAGRAM, RESET_STREAM,
+  STOP_SENDING, and CONNECTION_CLOSE frame exchange over Apple UDP without using
+  Network.framework QUIC.
 
 Commands:
 
 ```sh
 swift build
+swift test
 swift run AppleQUICSpike --loopback
+swift run NativeQUICCoreSpike
 ./build-release-apple-silicon.sh
 ```
 
