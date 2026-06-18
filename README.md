@@ -28,6 +28,13 @@ note as more authoritative than the current IETF draft.
 See [docs/Protocol-Bible.md](docs/Protocol-Bible.md) for the project rules around
 using this reference.
 
+## Swift macOS 26 Plan
+
+The Swift implementation plan for macOS 26 server and client apps is documented in
+[docs/Swift-macOS26-Plan.md](docs/Swift-macOS26-Plan.md). The plan keeps the
+implementation strictly limited to Apple and Xcode-provided libraries, with no
+third-party dependencies.
+
 ## Project Goals
 
 - Implement HTTP/3 WebTransport natively in Swift, C99, and C++.
