@@ -1,6 +1,7 @@
 import Foundation
 import WebTransportCryptoApple
 import WebTransportQUICCore
+import WebTransportTLSCore
 import WebTransportUDPApple
 
 #if !arch(arm64)
@@ -44,6 +45,7 @@ enum NativeQUICCoreSpike {
             try assert(clientFrames == responseFrames, "client decoded server frames")
             print("udp: server-to-client frame packet received")
             try provePacketProtection()
+            try proveTLSForQUICScaffold()
             print("phase1b: native QUIC core frame exchange over Apple UDP passed without security prompts")
         } catch {
             fputs("NativeQUICCoreSpike failed: \(error)\n", stderr)
@@ -85,6 +87,36 @@ enum NativeQUICCoreSpike {
         )
         try assert(mask.count == 5, "header protection mask is five bytes")
         print("protection: Handshake/1-RTT style AEAD seal/open and header mask passed")
+    }
+
+    private static func proveTLSForQUICScaffold() throws {
+        var parameters = QUICTransportParameters()
+        try parameters.setInteger(1_200, for: QUICTransportParameterID.maxDatagramFrameSize)
+        let extensionList = try TLSExtension.encodeList([
+            TLSALPNExtension.make(protocols: ["h3"]),
+            TLSQUICTransportParametersExtension.make(parameters)
+        ])
+        let decodedExtensions = try TLSExtension.decodeList(extensionList)
+        try assert(decodedExtensions.count == 2, "decoded TLS extensions")
+
+        var transcript = TLS13Transcript()
+        try transcript.append(TLSHandshakeMessage(type: .clientHello, body: extensionList))
+        try transcript.append(TLSHandshakeMessage(type: .encryptedExtensions, body: extensionList))
+
+        let baseSecret = Data(repeating: 0x33, count: 32)
+        let trafficSecret = try TLS13KeySchedule.deriveSecret(
+            secret: baseSecret,
+            label: "c hs traffic",
+            transcriptHash: transcript.hash
+        )
+        let verifyData = try TLS13KeySchedule.finishedVerifyData(
+            baseKey: trafficSecret,
+            transcriptHash: transcript.hash
+        )
+        let trafficKeys = try TLS13KeySchedule.trafficKeys(trafficSecret: trafficSecret)
+        try assert(verifyData.count == 32, "Finished verify data length")
+        try assert(trafficKeys.key.count == 16 && trafficKeys.iv.count == 12, "TLS traffic key lengths")
+        print("tls: ALPN h3, QUIC transport parameters, transcript hash, Finished verify data, and traffic keys passed")
     }
 }
 

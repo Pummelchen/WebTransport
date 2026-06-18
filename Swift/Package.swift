@@ -19,6 +19,10 @@ let package = Package(
             name: "WebTransportCryptoApple",
             targets: ["WebTransportCryptoApple"]
         ),
+        .library(
+            name: "WebTransportTLSCore",
+            targets: ["WebTransportTLSCore"]
+        ),
         .executable(
             name: "AppleQUICSpike",
             targets: ["AppleQUICSpike"]
@@ -39,6 +43,12 @@ let package = Package(
             name: "WebTransportCryptoApple",
             dependencies: ["WebTransportQUICCore"]
         ),
+        .target(
+            name: "WebTransportTLSCore",
+            dependencies: [
+                "WebTransportQUICCore"
+            ]
+        ),
         .executableTarget(
             name: "AppleQUICSpike"
         ),
@@ -47,6 +57,7 @@ let package = Package(
             dependencies: [
                 "WebTransportCryptoApple",
                 "WebTransportQUICCore",
+                "WebTransportTLSCore",
                 "WebTransportUDPApple"
             ]
         ),
@@ -64,6 +75,13 @@ let package = Package(
         .testTarget(
             name: "WebTransportCryptoAppleTests",
             dependencies: ["WebTransportCryptoApple"]
+        ),
+        .testTarget(
+            name: "WebTransportTLSCoreTests",
+            dependencies: [
+                "WebTransportQUICCore",
+                "WebTransportTLSCore"
+            ]
         )
     ],
     swiftLanguageModes: [

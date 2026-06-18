@@ -30,6 +30,9 @@ Current Phase 1 status: closed.
   STOP_SENDING, and CONNECTION_CLOSE frame exchange over Apple UDP without using
   Network.framework QUIC, then proves packet-protection seal/open and header-mask
   generation.
+- `WebTransportTLSCore` now contains TLS 1.3 transcript hashing, HKDF label/key
+  schedule helpers, Finished verify-data generation, ALPN `h3` extension encoding,
+  and QUIC transport-parameter extension encoding.
 
 Commands:
 
