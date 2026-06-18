@@ -45,6 +45,7 @@ let package = Package(
         .executableTarget(
             name: "NativeQUICCoreSpike",
             dependencies: [
+                "WebTransportCryptoApple",
                 "WebTransportQUICCore",
                 "WebTransportUDPApple"
             ]

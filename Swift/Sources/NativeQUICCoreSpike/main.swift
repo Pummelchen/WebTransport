@@ -1,4 +1,5 @@
 import Foundation
+import WebTransportCryptoApple
 import WebTransportQUICCore
 import WebTransportUDPApple
 
@@ -42,6 +43,7 @@ enum NativeQUICCoreSpike {
             let clientFrames = try QUICFrame.decodeFrames(clientBytes)
             try assert(clientFrames == responseFrames, "client decoded server frames")
             print("udp: server-to-client frame packet received")
+            try provePacketProtection()
             print("phase1b: native QUIC core frame exchange over Apple UDP passed without security prompts")
         } catch {
             fputs("NativeQUICCoreSpike failed: \(error)\n", stderr)
@@ -53,6 +55,36 @@ enum NativeQUICCoreSpike {
         if !condition {
             throw SpikeError.assertionFailed(message)
         }
+    }
+
+    private static func provePacketProtection() throws {
+        let trafficSecret = Data(repeating: 0x42, count: 32)
+        let keys = try QUICPacketProtection.deriveKeys(trafficSecret: trafficSecret)
+        let associatedData = Data("phase1b-handshake-header".utf8)
+        let plaintext = try QUICFrame.encodeFrames([
+            .stream(id: 0, offset: 0, fin: false, data: Data("protected-stream".utf8)),
+            .datagram(Data("protected-datagram".utf8))
+        ])
+        let sealed = try QUICPacketProtection.seal(
+            plaintext: plaintext,
+            packetNumber: 7,
+            associatedData: associatedData,
+            keys: keys
+        )
+        let opened = try QUICPacketProtection.open(
+            ciphertextAndTag: sealed,
+            packetNumber: 7,
+            associatedData: associatedData,
+            keys: keys
+        )
+        try assert(opened == plaintext, "packet protection opened sealed payload")
+
+        let mask = try QUICPacketProtection.headerProtectionMask(
+            sample: Data(repeating: 0x11, count: 16),
+            headerProtectionKey: keys.headerProtectionKey
+        )
+        try assert(mask.count == 5, "header protection mask is five bytes")
+        print("protection: Handshake/1-RTT style AEAD seal/open and header mask passed")
     }
 }
 

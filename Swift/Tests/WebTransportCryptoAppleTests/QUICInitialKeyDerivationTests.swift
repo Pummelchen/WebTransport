@@ -27,6 +27,64 @@ func derivesRFC9001InitialSecretVector() throws {
     #expect(secrets.serverHeaderProtectionKey == serverHeaderProtectionKey)
 }
 
+@Test
+func derivesRFC9001ClientHeaderProtectionMaskVector() throws {
+    let mask = try QUICPacketProtection.headerProtectionMask(
+        sample: try Data(hex: "d1b1c98dd7689fb8ec11d242b123dc9b"),
+        headerProtectionKey: try Data(hex: "9f50449e04a0e810283a1e9933adedd2")
+    )
+    let expected = try Data(hex: "437b9aec36")
+
+    #expect(mask == expected)
+}
+
+@Test
+func packetProtectionSealsAndOpensHandshakeStylePayload() throws {
+    let handshakeKeys = try QUICPacketProtection.deriveKeys(
+        trafficSecret: try Data(hex: "1111111111111111111111111111111111111111111111111111111111111111")
+    )
+    let associatedData = Data("handshake-header".utf8)
+    let plaintext = Data("handshake protected payload".utf8)
+
+    let sealed = try QUICPacketProtection.seal(
+        plaintext: plaintext,
+        packetNumber: 4,
+        associatedData: associatedData,
+        keys: handshakeKeys
+    )
+    let opened = try QUICPacketProtection.open(
+        ciphertextAndTag: sealed,
+        packetNumber: 4,
+        associatedData: associatedData,
+        keys: handshakeKeys
+    )
+    #expect(sealed != plaintext)
+    #expect(opened == plaintext)
+}
+
+@Test
+func packetProtectionRejectsTamperedAssociatedData() throws {
+    let oneRTTKeys = try QUICPacketProtection.deriveKeys(
+        trafficSecret: try Data(hex: "2222222222222222222222222222222222222222222222222222222222222222")
+    )
+    let plaintext = Data("1rtt protected payload".utf8)
+    let sealed = try QUICPacketProtection.seal(
+        plaintext: plaintext,
+        packetNumber: 12,
+        associatedData: Data("1rtt-header".utf8),
+        keys: oneRTTKeys
+    )
+
+    #expect(throws: Error.self) {
+        _ = try QUICPacketProtection.open(
+            ciphertextAndTag: sealed,
+            packetNumber: 12,
+            associatedData: Data("tampered-header".utf8),
+            keys: oneRTTKeys
+        )
+    }
+}
+
 private extension Data {
     init(hex: String) throws {
         guard hex.count.isMultiple(of: 2) else {

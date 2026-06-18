@@ -2,7 +2,7 @@
 
 This directory will contain the native Swift implementation of HTTP/3 WebTransport.
 
-Current Phase 1 status:
+Current Phase 1 status: closed.
 
 - `AppleQUICSpike` proves prompt-free localhost QUIC listener/client startup,
   HTTP/3 ALPN negotiation, client-initiated bidirectional streams,
@@ -20,12 +20,16 @@ Current Phase 1 status:
 - `WebTransportQUICCore` now contains native QUIC byte, varint, packet-number,
   transport-parameter, long-header packet, and frame codecs.
 - `WebTransportCryptoApple` derives QUIC v1 Initial secrets with Apple CryptoKit
-  and is tested against the RFC 9001 sample vector.
+  and is tested against RFC 9001 sample vectors.
+- `WebTransportCryptoApple` also proves Handshake/1-RTT style packet protection
+  mechanics with AEAD seal/open, tamper rejection, nonce construction, and AES
+  header-protection mask generation.
 - `WebTransportUDPApple` provides prompt-free loopback UDP I/O for native packet
   tests.
 - `NativeQUICCoreSpike` proves native STREAM, DATAGRAM, RESET_STREAM,
   STOP_SENDING, and CONNECTION_CLOSE frame exchange over Apple UDP without using
-  Network.framework QUIC.
+  Network.framework QUIC, then proves packet-protection seal/open and header-mask
+  generation.
 
 Commands:
 
