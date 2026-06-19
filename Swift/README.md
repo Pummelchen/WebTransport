@@ -45,6 +45,11 @@ Current Phase 1 status: closed.
 - `WebTransportHTTP3Core` contains HTTP/3 frame header codecs, SETTINGS payload
   encoding/decoding, unidirectional stream type parsing, and a versioned
   WebTransport-over-HTTP/3 draft-15 constants table.
+- `WebTransportHTTP3Core` also contains the minimal QPACK support needed for
+  WebTransport session establishment: static table lookup, literal field-line
+  encoding/decoding, required extended CONNECT request and response
+  pseudo-header validation, decoder limits, malformed-input rejection, and QPACK
+  HEADERS frame helpers.
 
 Commands:
 

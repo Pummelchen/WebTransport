@@ -238,7 +238,15 @@ enum NativeQUICCoreSpike {
         let expectedSessionPrefix = try QUICVarInt.encode(4)
         try assert(webTransportStream.type == constants.webTransportStream, "WebTransport stream type")
         try assert(webTransportStream.remainingBytes == expectedSessionPrefix, "WebTransport session prefix")
-        print("http3: frame headers, SETTINGS, stream types, and draft-15 constants passed")
+
+        let connectFrame = try WebTransportHTTP3Headers.connectRequestHeadersFrame(
+            authority: "example.com",
+            path: "/wt"
+        )
+        try WebTransportHTTP3Headers.validateConnectRequest(try QPACK.decodeHeadersFrame(connectFrame))
+        let responseFrame = try WebTransportHTTP3Headers.successfulResponseHeadersFrame()
+        try WebTransportHTTP3Headers.validateSuccessfulResponse(try QPACK.decodeHeadersFrame(responseFrame))
+        print("http3: frame headers, SETTINGS, stream types, draft-15 constants, and QPACK HEADERS passed")
     }
 }
 
