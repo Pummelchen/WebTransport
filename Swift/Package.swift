@@ -23,6 +23,10 @@ let package = Package(
             name: "WebTransportTLSCore",
             targets: ["WebTransportTLSCore"]
         ),
+        .library(
+            name: "WebTransportHTTP3Core",
+            targets: ["WebTransportHTTP3Core"]
+        ),
         .executable(
             name: "AppleQUICSpike",
             targets: ["AppleQUICSpike"]
@@ -49,6 +53,12 @@ let package = Package(
                 "WebTransportQUICCore"
             ]
         ),
+        .target(
+            name: "WebTransportHTTP3Core",
+            dependencies: [
+                "WebTransportQUICCore"
+            ]
+        ),
         .executableTarget(
             name: "AppleQUICSpike"
         ),
@@ -56,6 +66,7 @@ let package = Package(
             name: "NativeQUICCoreSpike",
             dependencies: [
                 "WebTransportCryptoApple",
+                "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
                 "WebTransportTLSCore",
                 "WebTransportUDPApple"
@@ -84,6 +95,13 @@ let package = Package(
             dependencies: [
                 "WebTransportQUICCore",
                 "WebTransportTLSCore"
+            ]
+        ),
+        .testTarget(
+            name: "WebTransportHTTP3CoreTests",
+            dependencies: [
+                "WebTransportHTTP3Core",
+                "WebTransportQUICCore"
             ]
         )
     ],

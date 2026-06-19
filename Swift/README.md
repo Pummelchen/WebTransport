@@ -42,6 +42,9 @@ Current Phase 1 status: closed.
   decoder that fragments typed TLS messages into QUIC CRYPTO frames, reassembles
   out-of-order CRYPTO data, emits complete handshake messages, and updates the
   TLS transcript.
+- `WebTransportHTTP3Core` contains HTTP/3 frame header codecs, SETTINGS payload
+  encoding/decoding, unidirectional stream type parsing, and a versioned
+  WebTransport-over-HTTP/3 draft-15 constants table.
 
 Commands:
 

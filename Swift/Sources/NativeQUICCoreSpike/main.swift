@@ -1,5 +1,6 @@
 import Foundation
 import WebTransportCryptoApple
+import WebTransportHTTP3Core
 import WebTransportQUICCore
 import WebTransportTLSCore
 import WebTransportUDPApple
@@ -46,6 +47,7 @@ enum NativeQUICCoreSpike {
             print("udp: server-to-client frame packet received")
             try provePacketProtection()
             try proveTLSForQUICScaffold()
+            try proveHTTP3ByteCodecs()
             print("phase1b: native QUIC core frame exchange over Apple UDP passed without security prompts")
         } catch {
             fputs("NativeQUICCoreSpike failed: \(error)\n", stderr)
@@ -205,6 +207,38 @@ enum NativeQUICCoreSpike {
         )
         try assert(openedPayload == Data("1rtt webtransport payload".utf8), "1-RTT QUIC packet protection")
         print("tls: CRYPTO flights, X25519, ALPN h3, QUIC transport parameters, Finished verify data, and QUIC handshake/1-RTT keys passed")
+    }
+
+    private static func proveHTTP3ByteCodecs() throws {
+        let constants = WebTransportHTTP3DraftConstants.current
+        let settings = try HTTP3Settings([
+            constants.settingsWTEnabled: 1,
+            constants.settingsWTInitialMaxStreamsUni: 3,
+            constants.settingsWTInitialMaxStreamsBidi: 5,
+            constants.settingsWTInitialMaxData: 65_536
+        ])
+        let frames = [
+            try settings.frame(),
+            try HTTP3Frame(type: HTTP3FrameType.headers, payload: Data([0x00, 0x00])),
+            try HTTP3Frame(type: HTTP3FrameType.goaway, varIntValue: 4)
+        ]
+        let decodedFrames = try HTTP3Frame.decodeFrames(try HTTP3Frame.encodeFrames(frames))
+        try assert(decodedFrames == frames, "HTTP/3 frame codec")
+        try assert(
+            try HTTP3Settings.decodeFrame(decodedFrames[0]).entries == settings.entries,
+            "HTTP/3 SETTINGS codec"
+        )
+
+        let webTransportStream = try HTTP3StreamTypeParser.parsePrefix(
+            HTTP3StreamTypeParser.encodePrefix(
+                type: constants.webTransportStream,
+                payload: try QUICVarInt.encode(4)
+            )
+        )
+        let expectedSessionPrefix = try QUICVarInt.encode(4)
+        try assert(webTransportStream.type == constants.webTransportStream, "WebTransport stream type")
+        try assert(webTransportStream.remainingBytes == expectedSessionPrefix, "WebTransport session prefix")
+        print("http3: frame headers, SETTINGS, stream types, and draft-15 constants passed")
     }
 }
 
