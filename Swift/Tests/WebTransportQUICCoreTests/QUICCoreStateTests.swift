@@ -87,6 +87,24 @@ func ackTrackerBuildsAckRangesAndDecodesThem() throws {
 }
 
 @Test
+func ackTrackerRejectsPathologicallyLargeExpandedAckRanges() throws {
+    let frame = QUICFrame.ack(
+        largestAcknowledged: 100_000,
+        ackDelay: 0,
+        firstAckRange: 100_000,
+        ranges: []
+    )
+
+    #expect(throws: Error.self) {
+        _ = try QUICAckTracker.acknowledgedPacketNumbers(from: frame)
+    }
+    let ranges = try QUICAckTracker.acknowledgedPacketNumberRanges(from: frame)
+    #expect(ranges.count == 1)
+    #expect(ranges.first?.low == 0)
+    #expect(ranges.first?.high == 100_000)
+}
+
+@Test
 func lossRecoveryReturnsRetransmittableFrames() throws {
     var recovery = QUICLossRecovery(packetThreshold: 3)
     recovery.recordSent(QUICSentPacket(
@@ -123,6 +141,33 @@ func lossRecoveryReturnsRetransmittableFrames() throws {
         .stream(id: 0, offset: 0, fin: false, data: Data("lost".utf8))
     ])
     #expect(recovery.sentPackets[.applicationData]?.keys.sorted() == [2])
+}
+
+@Test
+func lossRecoveryProcessesLargeAckRangesWithoutExpandingEveryPacketNumber() throws {
+    var recovery = QUICLossRecovery(packetThreshold: 3)
+    recovery.recordSent(QUICSentPacket(
+        packetNumberSpace: .applicationData,
+        packetNumber: 1,
+        sentTimeMicros: 100,
+        bytes: 1,
+        frames: [.ping]
+    ))
+    recovery.recordSent(QUICSentPacket(
+        packetNumberSpace: .applicationData,
+        packetNumber: 100_000,
+        sentTimeMicros: 200,
+        bytes: 1,
+        frames: [.ping]
+    ))
+
+    let result = try recovery.processAck(
+        .ack(largestAcknowledged: 100_000, ackDelay: 0, firstAckRange: 100_000, ranges: []),
+        in: .applicationData
+    )
+
+    #expect(result.acknowledged.map(\.packetNumber) == [1, 100_000])
+    #expect(recovery.sentPackets[.applicationData]?.isEmpty == true)
 }
 
 @Test

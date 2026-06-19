@@ -65,8 +65,13 @@ public struct TLSExtension: Equatable, Sendable {
 
         var extensionCursor = QUICByteCursor(extensionBytes)
         var extensions: [TLSExtension] = []
+        var seenTypes: Set<UInt16> = []
         while !extensionCursor.isAtEnd {
-            extensions.append(try decode(from: &extensionCursor))
+            let item = try decode(from: &extensionCursor)
+            guard seenTypes.insert(item.type).inserted else {
+                throw QUICCodecError.malformed("TLS extension list contains duplicate extension type \(item.type)")
+            }
+            extensions.append(item)
         }
         return extensions
     }

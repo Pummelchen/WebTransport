@@ -1,9 +1,13 @@
 # Swift Implementation
 
-This directory will contain the native Swift implementation of HTTP/3 WebTransport.
+This directory contains the active native Swift implementation of HTTP/3
+WebTransport protocol layers.
 
-Current Phase 1 through Phase 12 status: audited and closed. Phase 13
-draft-15 compliance closure is in progress.
+Current Phase 1 through Phase 13 status: the draft-15 core compliance matrix
+builds and passes. A 2026-06-19 production-readiness audit is recorded in
+`PRODUCTION_READINESS_AUDIT.md`; that audit landed targeted correctness and
+hardening fixes, but the Swift package is not yet a go-live public client/server
+SDK until the remaining blockers in that audit are closed.
 
 - `AppleQUICSpike` proves prompt-free localhost QUIC listener/client startup,
   HTTP/3 ALPN negotiation, client-initiated bidirectional streams,
@@ -68,8 +72,9 @@ draft-15 compliance closure is in progress.
   accept path with session ownership registration, session-scoped stream registry,
   backpressure-limited receive buffering, and reset/stop-sending frame emission.
 - `WebTransportHTTP3Core` now contains the Phase 9 datagram layer: QUIC datagram
-  framing for WebTransport sessions with per-session receive buffering, session
-  routing, frame-size validation, and loss-tolerant queue pop APIs.
+  framing for WebTransport sessions using the HTTP Datagram Quarter Stream ID,
+  with per-session receive buffering, session routing, frame-size validation, and
+  loss-tolerant queue pop APIs.
 - `WebTransportHTTP3Core` now contains the Phase 10 flow-control layer:
   per-session flow-control settings from SETTINGS, capsule codec and parsing for
   max-*/blocked WebTransport capsules, stream-open and stream/send-path data
@@ -85,7 +90,7 @@ draft-15 compliance closure is in progress.
   behavior for deterministic tests: `WT_DRAIN_SESSION`, `WT_CLOSE_SESSION`,
   CONNECT stream finish-as-close, close-result FIN/STOP_SENDING actions,
   `WT_SESSION_GONE` post-close stream/datagram cleanup, additional CONNECT stream
-  data reset with `H3_MESSAGE_ERROR` after received close, bounded close-message
+  data reset with `H3_MESSAGE_ERROR` after received close, bounded 8192-byte close-message
   validation, client and server buffered stream/datagram ingress before session
   acceptance, per-session and connection-level buffered ingress exhaustion,
   rejected-session buffer cleanup, explicit draft error mapping and QUIC frame
@@ -102,6 +107,10 @@ draft-15 compliance closure is in progress.
   `WebTransportDraft15ComplianceMatrix` covering the Phase 13J definition of done:
   establishment/negotiation, streams/datagrams, close/drain, flow-control/errors,
   H3 stream constraints, and prompt-free security/identity handling.
+- The 2026-06-19 audit also hardened QUIC ACK handling, UDP receive validation,
+  TLS extension-list decoding, role-sensitive HTTP/3 WebTransport SETTINGS
+  validation, WebTransport datagram prefixing, `WT_CLOSE_SESSION` message bounds,
+  and `WT_MAX_STREAMS` bounds.
 
 Commands:
 
@@ -115,10 +124,10 @@ swift run NativeQUICCoreSpike
 
 Planned contents:
 
-- Reusable Swift library package.
+- Public `WebTransport` client/server library target.
 - Client test environment.
 - Server test environment.
-- Swift-specific protocol tests.
+- Swift-specific protocol and interoperability tests.
 
 Constraints:
 

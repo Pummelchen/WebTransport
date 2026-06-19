@@ -11,8 +11,15 @@ func webTransportDatagramPrefixesRoundTrip() throws {
     let parsed = try WebTransportDatagramSignaling.parse(serialized)
 
     #expect(parsed.sessionID == WebTransportSessionID(rawValue: 0))
+    #expect(parsed.quarterStreamID == 0)
     #expect(parsed.bytesConsumed == emptyPrefix.count)
     #expect(parsed.payload == payload)
+
+    let later = try WebTransportDatagramSignaling.serialize(sessionID: 4, payload: payload)
+    let parsedLater = try WebTransportDatagramSignaling.parse(later)
+    #expect(later.first == 1)
+    #expect(parsedLater.sessionID == WebTransportSessionID(rawValue: 4))
+    #expect(parsedLater.quarterStreamID == 1)
 }
 
 @Test

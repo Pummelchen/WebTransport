@@ -52,6 +52,18 @@ func extensionListRoundTripsALPNAndQUICTransportParameters() throws {
 }
 
 @Test
+func extensionListRejectsDuplicateExtensionTypes() throws {
+    let duplicateList = try TLSExtension.encodeList([
+        try TLSALPNExtension.make(protocols: ["h3"]),
+        try TLSALPNExtension.make(protocols: ["h3-29"])
+    ])
+
+    #expect(throws: Error.self) {
+        _ = try TLSExtension.decodeList(duplicateList)
+    }
+}
+
+@Test
 func keyScheduleDerivesFinishedVerifyDataAndTrafficKeys() throws {
     let secret = try Data(hex: "1111111111111111111111111111111111111111111111111111111111111111")
     let transcriptHash = Data(SHA256.hash(data: Data("client-server-transcript".utf8)))

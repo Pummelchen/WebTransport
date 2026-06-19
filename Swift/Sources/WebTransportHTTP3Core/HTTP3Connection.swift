@@ -184,8 +184,9 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
             throw QUICCodecError.malformed("HTTP/3 control stream must start with SETTINGS")
         }
 
+        let peerRole: HTTP3ConnectionRole = role == .client ? .server : .client
         let decodedSettings = try HTTP3Settings.decodeFrame(firstFrame)
-        try decodedSettings.validateWebTransportDraft15Requirements()
+        try decodedSettings.validateWebTransportDraft15Requirements(peerRole: peerRole)
         if let zeroRTTRememberedSettings {
             try decodedSettings.validateWebTransportZeroRTTCompatibility(
                 remembered: zeroRTTRememberedSettings
@@ -279,10 +280,12 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
 }
 
 extension HTTP3Settings {
-    public func validateWebTransportDraft15Requirements() throws {
+    public func validateWebTransportDraft15Requirements(peerRole: HTTP3ConnectionRole? = nil) throws {
         let constants = WebTransportHTTP3DraftConstants.current
-        guard self[constants.settingsEnableConnectProtocol] == 1 else {
-            throw QUICCodecError.malformed("WebTransport over HTTP/3 requires SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")
+        if peerRole != .client {
+            guard self[constants.settingsEnableConnectProtocol] == 1 else {
+                throw QUICCodecError.malformed("WebTransport over HTTP/3 requires server SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")
+            }
         }
         guard self[constants.settingsH3Datagram] == 1 else {
             throw QUICCodecError.malformed("WebTransport over HTTP/3 requires SETTINGS_H3_DATAGRAM = 1")

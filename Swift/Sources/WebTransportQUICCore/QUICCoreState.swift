@@ -198,6 +198,8 @@ public enum QUICPacketNumberSpace: UInt8, CaseIterable, Equatable, Sendable {
 }
 
 public struct QUICAckTracker: Equatable, Sendable {
+    public static let maximumExpandedAckedPacketNumbers = 16_384
+
     public let packetNumberSpace: QUICPacketNumberSpace
     public var ackDelayExponent: UInt8
     public private(set) var receivedPacketNumbers: Set<UInt64>
@@ -265,6 +267,27 @@ public struct QUICAckTracker: Equatable, Sendable {
     }
 
     public static func acknowledgedPacketNumbers(from frame: QUICFrame) throws -> Set<UInt64> {
+        let ranges = try acknowledgedPacketNumberRanges(from: frame)
+        let total = try ranges.reduce(UInt64(0)) { partial, range in
+            let count = range.high - range.low + 1
+            let (sum, overflow) = partial.addingReportingOverflow(count)
+            guard !overflow else {
+                throw QUICStateError.invalidAckFrame
+            }
+            return sum
+        }
+        guard total <= UInt64(maximumExpandedAckedPacketNumbers) else {
+            throw QUICStateError.invalidAckFrame
+        }
+
+        var numbers: Set<UInt64> = []
+        for range in ranges {
+            insertClosedRange(low: range.low, high: range.high, into: &numbers)
+        }
+        return numbers
+    }
+
+    public static func acknowledgedPacketNumberRanges(from frame: QUICFrame) throws -> [(low: UInt64, high: UInt64)] {
         guard case .ack(let largest, _, let firstRange, let ranges) = frame else {
             throw QUICStateError.invalidAckFrame
         }
@@ -272,10 +295,9 @@ public struct QUICAckTracker: Equatable, Sendable {
             throw QUICStateError.invalidAckFrame
         }
 
-        var numbers: Set<UInt64> = []
         var rangeHigh = largest
         var rangeLow = largest - firstRange
-        insertClosedRange(low: rangeLow, high: rangeHigh, into: &numbers)
+        var decodedRanges: [(low: UInt64, high: UInt64)] = [(low: rangeLow, high: rangeHigh)]
 
         for range in ranges {
             guard range.gap <= UInt64.max - 2 else {
@@ -290,10 +312,10 @@ public struct QUICAckTracker: Equatable, Sendable {
                 throw QUICStateError.invalidAckFrame
             }
             rangeLow = rangeHigh - range.length
-            insertClosedRange(low: rangeLow, high: rangeHigh, into: &numbers)
+            decodedRanges.append((low: rangeLow, high: rangeHigh))
         }
 
-        return numbers
+        return decodedRanges
     }
 }
 
@@ -351,17 +373,17 @@ public struct QUICLossRecovery: Equatable, Sendable {
         _ ackFrame: QUICFrame,
         in packetNumberSpace: QUICPacketNumberSpace
     ) throws -> QUICAckProcessingResult {
-        let acknowledgedNumbers = try QUICAckTracker.acknowledgedPacketNumbers(from: ackFrame)
-        guard !acknowledgedNumbers.isEmpty else {
+        let acknowledgedRanges = try QUICAckTracker.acknowledgedPacketNumberRanges(from: ackFrame)
+        guard !acknowledgedRanges.isEmpty else {
             throw QUICStateError.invalidAckFrame
         }
-        let largestAcknowledged = acknowledgedNumbers.max() ?? 0
+        let largestAcknowledged = acknowledgedRanges.map(\.high).max() ?? 0
 
         var acknowledged: [QUICSentPacket] = []
         var lost: [QUICSentPacket] = []
         var packets = sentPackets[packetNumberSpace, default: [:]]
 
-        for packetNumber in acknowledgedNumbers.sorted() {
+        for packetNumber in packets.keys.sorted() where acknowledgedRanges.contains(where: { packetNumber >= $0.low && packetNumber <= $0.high }) {
             if let packet = packets.removeValue(forKey: packetNumber) {
                 acknowledged.append(packet)
             }

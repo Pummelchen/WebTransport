@@ -93,7 +93,7 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
         wtALPNError: 0x0817_b3dd,
         wtRequirementsNotMetError: 0x212c_0d48,
         wtApplicationErrorRange: 0x52e4_a40f_a8db...0x52e5_ac98_3162,
-        wtCloseSessionMaxMessageBytes: 1_024
+        wtCloseSessionMaxMessageBytes: 8_192
     )
 
     public static let current = draft15

@@ -121,7 +121,13 @@ func webTransportReceivedCloseResetsAdditionalConnectStreamDataWithH3MessageErro
 
 @Test
 func webTransportCloseSessionRejectsOversizedMessages() throws {
+    let maximumSized = String(repeating: "x", count: WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes)
     let oversized = String(repeating: "x", count: WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes + 1)
+
+    _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(
+        applicationErrorCode: 1,
+        message: maximumSized
+    ))
 
     #expect(throws: Error.self) {
         _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(

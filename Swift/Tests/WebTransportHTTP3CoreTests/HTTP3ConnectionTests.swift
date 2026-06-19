@@ -28,6 +28,7 @@ func http3SettingsValidationRejectsMissingWebTransportRequirements() throws {
     #expect(throws: Error.self) {
         try missingConnect.validateWebTransportDraft15Requirements()
     }
+    try missingConnect.validateWebTransportDraft15Requirements(peerRole: .client)
 
     let invalidControl = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
@@ -39,6 +40,28 @@ func http3SettingsValidationRejectsMissingWebTransportRequirements() throws {
     var server = HTTP3ConnectionState(role: .server)
     #expect(throws: Error.self) {
         _ = try server.receivePeerControlStream(invalidControl)
+    }
+}
+
+@Test
+func http3ServerAcceptsClientSettingsWithoutEnableConnectProtocol() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    let clientSettings = try HTTP3Settings([
+        constants.settingsH3Datagram: 1,
+        constants.settingsWTEnabled: 1
+    ])
+    let clientControl = try HTTP3StreamTypeParser.encodePrefix(
+        type: HTTP3StreamType.control,
+        payload: try clientSettings.frame().encode()
+    )
+    var server = HTTP3ConnectionState(role: .server)
+
+    _ = try server.receivePeerControlStream(clientControl)
+    #expect(server.remoteSettings?.entries == clientSettings.entries)
+
+    var client = HTTP3ConnectionState(role: .client)
+    #expect(throws: Error.self) {
+        _ = try client.receivePeerControlStream(clientControl)
     }
 }
 

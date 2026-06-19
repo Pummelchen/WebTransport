@@ -18,3 +18,21 @@ func udpPortExchangesNativeFramesOnLoopback() throws {
     #expect(endpoint.port == client.localEndpoint.port)
     #expect(try QUICFrame.decodeFrames(bytes) == frames)
 }
+
+@Test
+func udpPortRejectsInvalidReceiveConfiguration() throws {
+    let server = try QUICUDPPort()
+
+    #expect(throws: Error.self) {
+        _ = try server.receive(maximumBytes: 0, timeoutMilliseconds: 1)
+    }
+    #expect(throws: Error.self) {
+        _ = try server.receive(maximumBytes: -1, timeoutMilliseconds: 1)
+    }
+    #expect(throws: Error.self) {
+        _ = try server.receive(maximumBytes: 65_536, timeoutMilliseconds: 1)
+    }
+    #expect(throws: Error.self) {
+        _ = try server.receive(maximumBytes: 1, timeoutMilliseconds: -1)
+    }
+}

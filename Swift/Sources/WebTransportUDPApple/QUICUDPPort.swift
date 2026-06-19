@@ -15,6 +15,7 @@ public enum QUICUDPError: Error, CustomStringConvertible, Sendable {
     case posix(operation: String, code: Int32)
     case timeout
     case invalidAddress
+    case invalidReceiveConfiguration(String)
 
     public var description: String {
         switch self {
@@ -24,12 +25,17 @@ public enum QUICUDPError: Error, CustomStringConvertible, Sendable {
             "UDP receive timed out"
         case .invalidAddress:
             "invalid UDP address"
+        case .invalidReceiveConfiguration(let message):
+            message
         }
     }
 }
 
 public final class QUICUDPPort: @unchecked Sendable {
+    private static let maximumUDPDatagramBytes = 65_535
+
     private let descriptor: Int32
+    private let receiveLock = NSLock()
     public let localEndpoint: QUICUDPEndpoint
 
     public init(bindPort: UInt16 = 0) throws {
@@ -114,6 +120,16 @@ public final class QUICUDPPort: @unchecked Sendable {
     }
 
     public func receive(maximumBytes: Int = 65_535, timeoutMilliseconds: Int32 = 1_000) throws -> (Data, QUICUDPEndpoint) {
+        guard maximumBytes > 0 && maximumBytes <= Self.maximumUDPDatagramBytes else {
+            throw QUICUDPError.invalidReceiveConfiguration("maximumBytes must be in 1...\(Self.maximumUDPDatagramBytes)")
+        }
+        guard timeoutMilliseconds >= 0 else {
+            throw QUICUDPError.invalidReceiveConfiguration("timeoutMilliseconds must be non-negative")
+        }
+
+        receiveLock.lock()
+        defer { receiveLock.unlock() }
+
         var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
         let pollResult = Darwin.poll(&pollDescriptor, 1, timeoutMilliseconds)
         guard pollResult > 0 else {
@@ -126,9 +142,14 @@ public final class QUICUDPPort: @unchecked Sendable {
         var storage = sockaddr_storage()
         var storageLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
         var buffer = [UInt8](repeating: 0, count: maximumBytes)
-        let received = withUnsafeMutablePointer(to: &storage) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                recvfrom(descriptor, &buffer, buffer.count, 0, sockaddrPointer, &storageLength)
+        let received = try buffer.withUnsafeMutableBytes { bytes in
+            try withUnsafeMutablePointer(to: &storage) { pointer in
+                try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                    guard let baseAddress = bytes.baseAddress else {
+                        throw QUICUDPError.invalidReceiveConfiguration("receive buffer is empty")
+                    }
+                    return recvfrom(descriptor, baseAddress, bytes.count, 0, sockaddrPointer, &storageLength)
+                }
             }
         }
         guard received >= 0 else {

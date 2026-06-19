@@ -78,6 +78,25 @@ func webTransportFlowControlStreamLimitsEmitStreamsBlockedCapsules() throws {
 }
 
 @Test
+func webTransportMaxStreamsCapsulesRejectValuesAboveDraftLimit() throws {
+    let invalidLimit = WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue + 1
+
+    #expect(throws: Error.self) {
+        _ = try WebTransportFlowCapsuleCodec.parse(try WebTransportFlowCapsuleCodec.serialize(
+            .maxStreamsBidi(limit: invalidLimit)
+        ))
+    }
+    #expect(throws: Error.self) {
+        _ = try WebTransportFlowCapsuleCodec.parse(try WebTransportFlowCapsuleCodec.serialize(
+            .maxStreamsUni(limit: invalidLimit)
+        ))
+    }
+    _ = try WebTransportFlowCapsuleCodec.parse(try WebTransportFlowCapsuleCodec.serialize(
+        .maxStreamsBidi(limit: WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue)
+    ))
+}
+
+@Test
 func webTransportFlowControlDataLimitsEmitDataBlockedCapsules() throws {
     var pair = try WebTransportFlowControlTestSupport.makeReadyManagers(maxData: 4)
     let sessionID = try WebTransportFlowControlTestSupport.establishSession(

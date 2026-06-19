@@ -117,7 +117,7 @@ public enum WebTransportFlowCapsuleCodec {
         case .closeSession(let applicationErrorCode, let message):
             let messageBytes = Data(message.utf8)
             guard messageBytes.count <= WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes else {
-                throw QUICCodecError.valueOutOfRange("WT_CLOSE_SESSION message exceeds 1024 bytes")
+                throw QUICCodecError.valueOutOfRange("WT_CLOSE_SESSION message exceeds \(WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes) bytes")
             }
             var payload = Data()
             payload.append(UInt8((applicationErrorCode >> 24) & 0xff))
@@ -160,7 +160,7 @@ public enum WebTransportFlowCapsuleCodec {
             | UInt32(bytes[3])
         let messageBytes = payload.dropFirst(4)
         guard messageBytes.count <= WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes else {
-            throw QUICCodecError.valueOutOfRange("WT_CLOSE_SESSION message exceeds 1024 bytes")
+            throw QUICCodecError.valueOutOfRange("WT_CLOSE_SESSION message exceeds \(WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes) bytes")
         }
         guard let message = String(data: Data(messageBytes), encoding: .utf8) else {
             throw QUICCodecError.malformed("WT_CLOSE_SESSION message must be UTF-8")
@@ -179,7 +179,18 @@ public enum WebTransportFlowCapsuleCodec {
         guard cursor.isAtEnd else {
             throw QUICCodecError.malformed("flow control capsule payload has trailing bytes for \(label)")
         }
+        if label == "wt-max-streams-bidi" || label == "wt-max-streams-uni" {
+            guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
+                throw QUICCodecError.valueOutOfRange("\(label) exceeds the draft-15 2^60 maximum")
+            }
+        }
         return value
+    }
+}
+
+extension WebTransportHTTP3DraftConstants {
+    public var maximumMaxStreamsValue: UInt64 {
+        1 << 60
     }
 }
 
