@@ -333,6 +333,31 @@ func promptFreeIdentityAndTrustRejectInvalidInputs() throws {
 }
 
 @Test
+func promptFreeTrustPolicyRejectsWrongPinForValidCertificate() throws {
+    let certificateDER = try PromptFreeCertificateFixture.makeCertificateDER()
+    #expect(SecCertificateCreateWithData(nil, certificateDER as CFData) != nil)
+
+    let wrongPolicy = try TLSPinnedCertificateTrustPolicy(
+        allowedLeafCertificateSHA256Fingerprints: [
+            Data(repeating: 0x7a, count: TLS13KeySchedule.sha256Length)
+        ]
+    )
+    do {
+        try wrongPolicy.evaluate(certificateChainDER: [certificateDER])
+        Issue.record("wrong certificate pin should be rejected")
+    } catch let error as QUICCodecError {
+        #expect(error == .malformed("peer leaf certificate fingerprint is not pinned"))
+    }
+
+    let correctPolicy = try TLSPinnedCertificateTrustPolicy(
+        allowedLeafCertificateSHA256Fingerprints: [
+            TLSPinnedCertificateTrustPolicy.sha256Fingerprint(certificateDER: certificateDER)
+        ]
+    )
+    try correctPolicy.evaluate(certificateChainDER: [certificateDER])
+}
+
+@Test
 func certificateHandshakeMessagesRoundTrip() throws {
     let entry = try TLSCertificateEntry(
         certificateData: Data([0x30, 0x03, 0x02, 0x01, 0x05]),
@@ -573,6 +598,189 @@ func tlsQUICConnectionStateMapsApplicationCloseAndFinalSizeErrors() throws {
         frameType: nil,
         reason: Data("stream state violation: STREAM data exceeds final size".utf8)
     ))
+}
+
+private enum PromptFreeCertificateFixture {
+    static func makeCertificateDER() throws -> Data {
+        let attributes: [CFString: Any] = [
+            kSecAttrKeyType: kSecAttrKeyTypeRSA,
+            kSecAttrKeySizeInBits: 2_048,
+            kSecAttrIsPermanent: false
+        ]
+        var error: Unmanaged<CFError>?
+        guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
+            throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+        }
+        guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
+            throw ExpectedThrowError.missingThrow
+        }
+        guard let publicKeyDER = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
+            throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+        }
+
+        let signatureAlgorithm = try DERFixture.sequence([
+            DERFixture.objectIdentifier([1, 2, 840, 113_549, 1, 1, 11]),
+            DERFixture.null()
+        ])
+        let rsaAlgorithm = try DERFixture.sequence([
+            DERFixture.objectIdentifier([1, 2, 840, 113_549, 1, 1, 1]),
+            DERFixture.null()
+        ])
+        let name = DERFixture.sequence([
+            DERFixture.set([
+                try DERFixture.sequence([
+                    DERFixture.objectIdentifier([2, 5, 4, 3]),
+                    DERFixture.utf8String("localhost")
+                ])
+            ])
+        ])
+        let validity = DERFixture.sequence([
+            DERFixture.utcTime(Date(timeIntervalSince1970: 1_700_000_000)),
+            DERFixture.utcTime(Date(timeIntervalSince1970: 1_800_000_000))
+        ])
+        let subjectPublicKeyInfo = DERFixture.sequence([
+            rsaAlgorithm,
+            DERFixture.bitString(publicKeyDER)
+        ])
+        let extensions = try DERFixture.explicit(3, DERFixture.sequence([
+            DERFixture.sequence([
+                DERFixture.objectIdentifier([2, 5, 29, 19]),
+                DERFixture.boolean(true),
+                DERFixture.octetString(DERFixture.sequence([DERFixture.boolean(false)]))
+            ]),
+            DERFixture.sequence([
+                DERFixture.objectIdentifier([2, 5, 29, 17]),
+                DERFixture.octetString(DERFixture.sequence([
+                    DERFixture.contextSpecificPrimitive(2, Data("localhost".utf8))
+                ]))
+            ])
+        ]))
+
+        let tbsCertificate = DERFixture.sequence([
+            DERFixture.explicit(0, DERFixture.integer(Data([0x02]))),
+            DERFixture.integer(Data([0x01])),
+            signatureAlgorithm,
+            name,
+            validity,
+            name,
+            subjectPublicKeyInfo,
+            extensions
+        ])
+        guard let signature = SecKeyCreateSignature(
+            privateKey,
+            .rsaSignatureMessagePKCS1v15SHA256,
+            tbsCertificate as CFData,
+            &error
+        ) as Data? else {
+            throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+        }
+
+        return DERFixture.sequence([
+            tbsCertificate,
+            signatureAlgorithm,
+            DERFixture.bitString(signature)
+        ])
+    }
+}
+
+private enum DERFixture {
+    static func sequence(_ parts: [Data]) -> Data {
+        tagged(0x30, parts.reduce(into: Data()) { $0.append($1) })
+    }
+
+    static func set(_ parts: [Data]) -> Data {
+        tagged(0x31, parts.reduce(into: Data()) { $0.append($1) })
+    }
+
+    static func explicit(_ tag: UInt8, _ content: Data) -> Data {
+        tagged(0xa0 + tag, content)
+    }
+
+    static func contextSpecificPrimitive(_ tag: UInt8, _ content: Data) -> Data {
+        tagged(0x80 + tag, content)
+    }
+
+    static func integer(_ value: Data) -> Data {
+        var bytes = Array(value)
+        while bytes.count > 1, bytes[0] == 0, bytes[1] < 0x80 {
+            bytes.removeFirst()
+        }
+        if let first = bytes.first, first >= 0x80 {
+            bytes.insert(0, at: 0)
+        }
+        return tagged(0x02, Data(bytes))
+    }
+
+    static func boolean(_ value: Bool) -> Data {
+        tagged(0x01, Data([value ? 0xff : 0x00]))
+    }
+
+    static func bitString(_ value: Data, unusedBits: UInt8 = 0) -> Data {
+        tagged(0x03, Data([unusedBits]) + value)
+    }
+
+    static func octetString(_ value: Data) -> Data {
+        tagged(0x04, value)
+    }
+
+    static func null() -> Data {
+        Data([0x05, 0x00])
+    }
+
+    static func objectIdentifier(_ components: [UInt64]) throws -> Data {
+        guard components.count >= 2 else {
+            throw ExpectedThrowError.missingThrow
+        }
+        guard components[0] <= 2, components[1] < 40 || components[0] == 2 else {
+            throw ExpectedThrowError.missingThrow
+        }
+        let rootValue = components[0] * 40 + components[1]
+        guard rootValue <= UInt64(UInt8.max) else {
+            throw ExpectedThrowError.missingThrow
+        }
+
+        var bytes = [UInt8(rootValue)]
+        for component in components.dropFirst(2) {
+            var encoded = [UInt8(component & 0x7f)]
+            var value = component >> 7
+            while value > 0 {
+                encoded.insert(UInt8(value & 0x7f) | 0x80, at: 0)
+                value >>= 7
+            }
+            bytes.append(contentsOf: encoded)
+        }
+        return tagged(0x06, Data(bytes))
+    }
+
+    static func utf8String(_ value: String) -> Data {
+        tagged(0x0c, Data(value.utf8))
+    }
+
+    static func utcTime(_ value: Date) -> Data {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyMMddHHmmss'Z'"
+        return tagged(0x17, Data(formatter.string(from: value).utf8))
+    }
+
+    private static func tagged(_ tag: UInt8, _ content: Data) -> Data {
+        Data([tag]) + length(content.count) + content
+    }
+
+    private static func length(_ count: Int) -> Data {
+        if count < 128 {
+            return Data([UInt8(count)])
+        }
+
+        var value = count
+        var bytes: [UInt8] = []
+        while value > 0 {
+            bytes.insert(UInt8(value & 0xff), at: 0)
+            value >>= 8
+        }
+        return Data([0x80 | UInt8(bytes.count)] + bytes)
+    }
 }
 
 private func expectThrowing(_ operation: () throws -> Void) throws {

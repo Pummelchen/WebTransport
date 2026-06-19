@@ -371,6 +371,79 @@ func webTransportDraft15ErrorMapperCoversRequiredOutcomes() throws {
 }
 
 @Test
+func webTransportSecurityNegativesAreDeterministicAndPromptFree() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+
+    do {
+        try WebTransportALPNPolicy.validateNegotiatedProtocol("hq-interop")
+        Issue.record("wrong negotiated ALPN should be rejected")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .alpn)
+        #expect(error.code == constants.wtALPNError)
+        #expect(WebTransportDraft15ErrorMapper.connectionCloseFrame(
+            for: error.kind,
+            reason: error.message
+        ) == .connectionClose(
+            errorCode: constants.wtALPNError,
+            frameType: nil,
+            reason: Data(error.message.utf8)
+        ))
+    }
+    do {
+        try WebTransportALPNPolicy.validateOfferedProtocols(["webtransport"])
+        Issue.record("wrong offered ALPN should be rejected")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .alpn)
+        #expect(error.code == constants.wtALPNError)
+    }
+    try WebTransportALPNPolicy.validateOfferedProtocols(["h3"])
+
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    let badOriginFrame = try pair.client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(
+            authority: "example.com",
+            path: "/wt",
+            origin: "https://bad.example"
+        )
+    )
+    let originDecision = try pair.server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: badOriginFrame,
+        policy: try WebTransportServerSessionPolicy(allowedOrigins: ["https://example.com"])
+    )
+    #expect(originDecision.session.state == .rejected(status: 403))
+    #expect(originDecision.rejectionError?.kind == .requirementsNotMet)
+    #expect(originDecision.rejectionError?.code == constants.wtRequirementsNotMetError)
+    #expect(pair.server.session(forRequestStreamID: 0)?.state == .rejected(status: 403))
+
+    var wrongSettings = HTTP3Settings.webTransportDraft15Defaults
+    try wrongSettings.set(0, for: constants.settingsWTEnabled)
+    let wrongSettingsControl = try HTTP3StreamTypeParser.encodePrefix(
+        type: HTTP3StreamType.control,
+        payload: wrongSettings.frame().encode()
+    )
+    var connection = HTTP3ConnectionState(role: .client)
+    do {
+        _ = try connection.receivePeerControlStream(wrongSettingsControl)
+        Issue.record("wrong WebTransport SETTINGS should be rejected")
+    } catch let error as QUICCodecError {
+        #expect(error == .malformed("WebTransport over HTTP/3 requires SETTINGS_WT_ENABLE_WEBTRANSPORT = 1"))
+    }
+    #expect(connection.remoteSettings == nil)
+    #expect(connection.receivedPeerControlStream == false)
+    #expect(connection.closeFrame(
+        error: .settingsError,
+        reason: "WebTransport settings rejected",
+        frameType: HTTP3FrameType.settings
+    ) == .connectionClose(
+        errorCode: HTTP3ApplicationErrorCode.settingsError.rawValue,
+        frameType: HTTP3FrameType.settings,
+        reason: Data("WebTransport settings rejected".utf8)
+    ))
+}
+
+@Test
 func webTransportRejectsMalformedConnectDataOrderingWithRequirementsNotMet() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
     do {
