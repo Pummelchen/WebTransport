@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
 
-Draft-15 score: **84%**
+Draft-15 score: **86%**
 
 ## Current Status
 
@@ -18,14 +18,14 @@ Implemented:
 - Structured Fields parsing/serialization for `WT-Protocol` and `WT-Available-Protocols`.
 - QPACK static, literal, Huffman, dynamic table, Base, and post-Base behavior covered by tests.
 - WebTransport streams, datagrams, buffering, rejection, close, drain, reset, stop-sending, and flow-control behavior.
-- TLS/QUIC primitive state, QUIC packet protection helpers, transport-parameter codecs, UDP loopback support, and prompt-free identity/trust test paths.
-- Real UDP probe mode for separate-process `WebTransportClient` / `WebTransportServer` networking.
+- TLS/QUIC primitive state, QUIC packet protection helpers, transport-parameter codecs, QUIC Initial packet probe over UDP, UDP loopback support, and prompt-free identity/trust test paths.
+- Cleartext QUIC Initial packet probe mode for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame probe compatibility mode.
 - CLI conformance harness with 35 scenarios shared by `WebTransportClient` and `WebTransportServer`.
 - Apple Silicon release script for production CLI binaries.
 
 Known limitation:
 
-- WebTransport sessions still do not run over a complete external QUIC/TLS/HTTP/3 network connection.
+- WebTransport sessions still do not run over a complete encrypted external QUIC/TLS/HTTP/3 network connection.
 
 ## Commands
 
@@ -34,8 +34,8 @@ swift build
 swift test
 swift run WebTransportClient --scenario all
 swift run WebTransportServer --scenario all
-swift run WebTransportServer --listen 127.0.0.1:4433
-swift run WebTransportClient --connect 127.0.0.1:4433
+swift run WebTransportServer --listen 127.0.0.1:4433 --transport packet
+swift run WebTransportClient --connect 127.0.0.1:4433 --transport packet
 swift run WebTransportClient
 swift run WebTransportServer
 ./build-release-apple-silicon.sh

@@ -11,11 +11,21 @@ struct WebTransportServerCLI {
         if arguments.contains("--listen") || arguments.contains(where: { $0.hasPrefix("--listen=") }) {
             do {
                 let options = try NetworkServerOptions.parse(arguments)
-                let server = try WebTransportNetworkProbeServer(bindPort: options.endpoint.port)
-                let local = server.localEndpoint
-                print("network probe listening: \(local.host):\(local.port)")
-                let result = try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
-                print("network probe served: remote=\(result.remoteEndpoint.host):\(result.remoteEndpoint.port) message=\"\(result.message)\"")
+                let result: WebTransportNetworkProbeResult
+                let local: WebTransportNetworkEndpoint
+                switch options.transport {
+                case .packet:
+                    let server = try WebTransportQUICPacketProbeServer(bindPort: options.endpoint.port)
+                    local = server.localEndpoint
+                    print("network packet probe listening: \(local.host):\(local.port)")
+                    result = try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
+                case .frame:
+                    let server = try WebTransportNetworkProbeServer(bindPort: options.endpoint.port)
+                    local = server.localEndpoint
+                    print("network frame probe listening: \(local.host):\(local.port)")
+                    result = try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
+                }
+                print("network \(result.transport.rawValue) probe served: remote=\(result.remoteEndpoint.host):\(result.remoteEndpoint.port) message=\"\(result.message)\"")
                 return
             } catch {
                 fputs("\(executable) network probe failed: \(error)\n", stderr)
@@ -61,10 +71,12 @@ struct WebTransportServerCLI {
 private struct NetworkServerOptions {
     var endpoint: WebTransportNetworkEndpoint
     var timeoutMilliseconds: Int32
+    var transport: WebTransportNetworkProbeTransport
 
     static func parse(_ arguments: [String]) throws -> NetworkServerOptions {
         var endpoint: WebTransportNetworkEndpoint?
         var timeoutMilliseconds: Int32 = 10_000
+        var transport = WebTransportNetworkProbeTransport.packet
         var index = 0
 
         while index < arguments.count {
@@ -82,12 +94,20 @@ private struct NetworkServerOptions {
                     throw WebTransportNetworkRuntimeError.invalidProbePayload
                 }
                 timeoutMilliseconds = value
+            case "--transport":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport("--transport requires packet or frame")
+                }
+                transport = try WebTransportNetworkProbeTransport.parse(arguments[index])
             default:
                 if argument.hasPrefix("--listen=") {
                     endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--listen=".count)))
                 } else if argument.hasPrefix("--timeout-ms="),
                           let value = Int32(argument.dropFirst("--timeout-ms=".count)) {
                     timeoutMilliseconds = value
+                } else if argument.hasPrefix("--transport=") {
+                    transport = try WebTransportNetworkProbeTransport.parse(String(argument.dropFirst("--transport=".count)))
                 } else {
                     throw WebTransportNetworkRuntimeError.invalidProbePayload
                 }
@@ -100,7 +120,8 @@ private struct NetworkServerOptions {
         }
         return NetworkServerOptions(
             endpoint: endpoint,
-            timeoutMilliseconds: timeoutMilliseconds
+            timeoutMilliseconds: timeoutMilliseconds,
+            transport: transport
         )
     }
 }
