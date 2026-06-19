@@ -1,3 +1,5 @@
+![WebTransport project status infographic](Assets/webtransport-infographic.svg)
+
 # WebTransport
 
 Native WebTransport over HTTP/3 implementations.

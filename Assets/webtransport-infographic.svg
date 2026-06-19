@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">WebTransport project status infographic</title>
+  <desc id="desc">Swift WebTransport is 100 percent compatible with draft-ietf-webtrans-http3-15 and validated against pywebtransport/aioquic, web-transport-quinn, and web-transport-quiche.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08111f"/>
+      <stop offset="0.52" stop-color="#0c1020"/>
+      <stop offset="1" stop-color="#071b19"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1ea7ff"/>
+      <stop offset="0.5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#18d6a3"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.12 0 0 0 0 0.67 0 0 0 0 1 0 0 0 0.35 0"/>
+      <feBlend in="SourceGraphic"/>
+    </filter>
+    <style>
+      .base { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .muted { fill: #9ca3af; }
+      .text { fill: #f8fafc; }
+      .cyan { fill: #38bdf8; }
+      .green { fill: #34d399; }
+      .purple { fill: #a78bfa; }
+      .panel { fill: rgba(15, 23, 42, 0.74); stroke: rgba(148, 163, 184, 0.26); stroke-width: 2; }
+      .panel-blue { stroke: #38bdf8; }
+      .panel-green { stroke: #34d399; }
+      .panel-purple { stroke: #a78bfa; }
+      .small { font-size: 28px; }
+      .body { font-size: 34px; }
+      .label { font-size: 42px; font-weight: 700; }
+      .title { font-size: 104px; font-weight: 800; }
+      .score { font-size: 112px; font-weight: 850; }
+      .mono { font-family: "SFMono-Regular", Consolas, monospace; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <path d="M86 762 C370 674 492 734 682 650 C856 574 996 634 1204 530 C1330 468 1418 496 1530 438" fill="none" stroke="url(#accent)" stroke-width="3" opacity="0.35"/>
+  <path d="M92 206 H360 C455 206 486 342 594 342 H1054 C1164 342 1186 470 1302 470 H1508" fill="none" stroke="#38bdf8" stroke-width="4" stroke-linecap="round" opacity="0.34" stroke-dasharray="10 18"/>
+  <path d="M92 332 H354 C450 332 492 450 600 450 H1056 C1162 450 1188 570 1304 570 H1508" fill="none" stroke="#a78bfa" stroke-width="4" stroke-linecap="round" opacity="0.28" stroke-dasharray="8 20"/>
+
+  <text class="base title" x="510" y="150" fill="url(#accent)">WebTransport</text>
+  <text class="base mono muted" x="558" y="214" font-size="35">draft-ietf-webtrans-http3-15</text>
+
+  <rect class="panel panel-blue" x="78" y="188" width="294" height="156" rx="22"/>
+  <path d="M112 244 H306 M112 284 H302 M112 324 H306" stroke="#38bdf8" stroke-width="8" stroke-linecap="round"/>
+  <path d="M286 224 L326 244 L286 264 M286 304 L326 324 L286 344" fill="none" stroke="#38bdf8" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text class="base label text" x="130" y="396">Streams</text>
+
+  <rect class="panel panel-purple" x="78" y="424" width="294" height="156" rx="22"/>
+  <circle cx="120" cy="486" r="8" fill="#a78bfa"/><circle cx="154" cy="486" r="8" fill="#60a5fa"/><circle cx="188" cy="486" r="8" fill="#a78bfa"/>
+  <circle cx="120" cy="526" r="8" fill="#60a5fa"/><circle cx="154" cy="526" r="8" fill="#a78bfa"/><circle cx="188" cy="526" r="8" fill="#60a5fa"/>
+  <path d="M230 486 H320 M230 526 H320" stroke="#a78bfa" stroke-width="8" stroke-linecap="round" stroke-dasharray="34 22"/>
+  <text class="base label text" x="116" y="632">Datagrams</text>
+
+  <g filter="url(#glow)">
+    <rect class="panel panel-blue" x="520" y="284" width="560" height="86" rx="18"/>
+    <rect class="panel panel-purple" x="548" y="392" width="520" height="86" rx="18"/>
+    <rect class="panel panel-green" x="576" y="500" width="480" height="86" rx="18"/>
+  </g>
+  <text class="base label text" x="718" y="340">HTTP/3</text>
+  <text class="base label text" x="742" y="448">QUIC</text>
+  <text class="base label text" x="708" y="556">TLS 1.3</text>
+  <circle cx="642" cy="326" r="31" fill="none" stroke="#cbd5e1" stroke-width="4"/>
+  <path d="M612 326 H672 M642 296 C624 314 624 338 642 356 M642 296 C660 314 660 338 642 356" fill="none" stroke="#cbd5e1" stroke-width="3"/>
+  <path d="M640 408 L672 426 V462 L640 480 L608 462 V426 Z M608 426 L640 444 L672 426 M640 444 V480" fill="none" stroke="#cbd5e1" stroke-width="4"/>
+  <path d="M626 536 V520 C626 500 658 500 658 520 V536 M616 536 H668 V570 H616 Z" fill="none" stroke="#cbd5e1" stroke-width="4" stroke-linejoin="round"/>
+
+  <rect class="panel panel-green" x="1240" y="92" width="280" height="184" rx="24"/>
+  <text class="base label green" x="1324" y="152">Swift</text>
+  <text class="base score text" x="1280" y="246">100%</text>
+
+  <text class="base label green" x="626" y="656">Interop Validated</text>
+  <line x1="112" y1="648" x2="582" y2="648" stroke="#34d399" stroke-width="2" opacity="0.7"/>
+  <line x1="976" y1="648" x2="1490" y2="648" stroke="#34d399" stroke-width="2" opacity="0.7"/>
+
+  <rect class="panel panel-blue" x="78" y="688" width="452" height="130" rx="20"/>
+  <text class="base body cyan" x="128" y="742">pywebtransport / aioquic</text>
+  <text class="base small muted" x="128" y="784">pywebtransport 0.1.2, aioquic 1.2.0</text>
+  <text class="base small text" x="128" y="824">CONNECT + stream echo</text>
+  <circle cx="448" cy="752" r="34" fill="none" stroke="#38bdf8" stroke-width="5"/>
+  <path d="M430 752 L444 766 L470 736" fill="none" stroke="#38bdf8" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect class="panel panel-purple" x="574" y="688" width="452" height="130" rx="20"/>
+  <text class="base body purple" x="624" y="742">web-transport-quinn</text>
+  <text class="base small muted" x="624" y="784">0.11.9</text>
+  <text class="base small text" x="624" y="824">CONNECT + stream + datagram echo</text>
+  <circle cx="944" cy="752" r="34" fill="none" stroke="#a78bfa" stroke-width="5"/>
+  <path d="M926 752 L940 766 L966 736" fill="none" stroke="#a78bfa" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <rect class="panel panel-green" x="1070" y="688" width="452" height="130" rx="20"/>
+  <text class="base body green" x="1120" y="742">web-transport-quiche</text>
+  <text class="base small muted" x="1120" y="784">0.4.1</text>
+  <text class="base small text" x="1120" y="824">CONNECT + stream echo</text>
+  <circle cx="1440" cy="752" r="34" fill="none" stroke="#34d399" stroke-width="5"/>
+  <path d="M1422 752 L1436 766 L1462 736" fill="none" stroke="#34d399" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
