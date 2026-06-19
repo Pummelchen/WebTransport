@@ -9,7 +9,7 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 | Implementation | Status | Draft-15 Score |
 | --- | --- | ---: |
-| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, packet-protected QUIC Initial CRYPTO flight with Certificate/CertificateVerify/Finished validation, transcript-derived 1-RTT packet keys, protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, explicit TLS/QUIC application-key readiness gating, expanded positive/negative interop conformance scenarios, and release packaging are present. | 96% |
+| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, packet-protected QUIC Initial CRYPTO flight with Certificate/CertificateVerify/Finished validation, transcript-derived 1-RTT packet keys, protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, explicit TLS/QUIC application-key readiness gating, expanded positive/negative interop conformance scenarios, parser/resource hardening tests, and release packaging are present. | 96% |
 | C99 | Placeholder only. No protocol implementation is present. | 0% |
 | C++ (`CPP`) | Placeholder only. No protocol implementation is present. | 0% |
 
@@ -27,6 +27,7 @@ Current Swift coverage includes:
 - WebTransport flow-control capsules, monotonic limit handling, disabled/zero/unlimited state distinction, and receive-side violation close behavior.
 - TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; packet protection, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, transcript-derived 1-RTT packet keys for protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing over UDP, UDP loopback support, and prompt-free identity/trust test paths.
 - CLI positive/negative interop matrices for CONNECT, streams, datagrams, GOAWAY, close/drain, malformed input, and flow-control errors.
+- Deterministic parser/property hardening tests for QPACK, HTTP/3 frames, capsules, QUIC varints, QUIC transport parameters, WebTransport stream prefixes, resource limits, malformed peers, ordering, replay, exhaustion, and close/reset races.
 - Public Swift package product: `WebTransport`.
 - Network runtime package product: `WebTransportNetworkRuntime`.
 - CLI products: `WebTransportClient` and `WebTransportServer`.
