@@ -16,6 +16,8 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 | C99 | 0% | Planned. No protocol implementation yet. |
 | C++ (`CPP`) | 0% | Planned. No protocol implementation yet. |
 
+License: MIT.
+
 ## Swift
 
 The Swift implementation is the active implementation and is exposed as a normal Swift package from the repository root:
@@ -35,6 +37,25 @@ Products:
 - `WebTransportUDPApple`
 - `WebTransportClient`
 - `WebTransportServer`
+
+Minimal client example:
+
+```swift
+import Foundation
+import WebTransport
+
+let client = WebTransportClient(configuration: WebTransportClientConfiguration(
+    authority: "example.com",
+    path: "/wt",
+    origin: "https://example.com",
+    availableProtocols: ["demo.v1"]
+))
+
+let session = try await client.connect(to: WebTransportEndpoint(host: "example.com", port: 443))
+let stream = try await session.openBidirectionalStream()
+try await stream.send(Data("hello".utf8), endOfStream: true)
+let response = try await stream.receive()
+```
 
 Validation against independent WebTransport implementations:
 
@@ -65,6 +86,25 @@ Release checks:
 cd Swift && ./check-api-compatibility.sh
 cd Swift && ./build-release-apple-silicon.sh
 ```
+
+## Public Launch Checklist
+
+Done:
+
+- MIT `LICENSE` file.
+- Root SwiftPM package.
+- Short API usage example.
+- `SECURITY.md` vulnerability reporting policy.
+- `CHANGELOG.md`.
+- Local build/test/release validation.
+- External interop validation against independent WebTransport implementations.
+
+Remaining before a polished public release:
+
+- Create a semantic version tag, for example `1.0.0`, so SwiftPM users do not need `branch: "main"`.
+- Add a GitHub Release with release artifacts and checksums.
+- Confirm GitHub Actions is green on the remote.
+- Optionally add DocC or expand public API comments for generated documentation.
 
 ## C99
 
