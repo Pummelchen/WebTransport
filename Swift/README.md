@@ -65,6 +65,8 @@ swift run WebTransportClient
 swift run WebTransportServer
 ./run-pywebtransport-interop.sh
 ./run-third-party-interop.sh
+swift run LibrarySmokeServer --port 45500
+swift run LibrarySmokeClient --host 127.0.0.1 --port 45500
 ./build-release-apple-silicon.sh
 ./check-api-compatibility.sh
 ```
