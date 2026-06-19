@@ -7,6 +7,7 @@ public enum WebTransportHTTP3Headers {
         path: String,
         scheme: String = "https",
         origin: String? = nil,
+        upgradeToken: String = WebTransportHTTP3DraftConstants.current.upgradeToken,
         constants: WebTransportHTTP3DraftConstants = .current
     ) throws -> [HTTPFieldLine] {
         guard !authority.isEmpty else {
@@ -21,7 +22,7 @@ public enum WebTransportHTTP3Headers {
             try HTTPFieldLine(name: ":scheme", value: scheme),
             try HTTPFieldLine(name: ":authority", value: authority),
             try HTTPFieldLine(name: ":path", value: path),
-            try HTTPFieldLine(name: ":protocol", value: constants.upgradeToken)
+            try HTTPFieldLine(name: ":protocol", value: upgradeToken)
         ]
         if let origin {
             fields.append(try HTTPFieldLine(name: "origin", value: origin))
@@ -38,10 +39,15 @@ public enum WebTransportHTTP3Headers {
         ]
     }
 
-    public static func validateConnectRequest(_ fields: [HTTPFieldLine]) throws {
+    public static func validateConnectRequest(
+        _ fields: [HTTPFieldLine],
+        acceptedProtocolTokens: Set<String> = [WebTransportHTTP3DraftConstants.current.upgradeToken]
+    ) throws {
         let map = try pseudoHeaderMap(fields)
         try require(map, ":method", equals: "CONNECT")
-        try require(map, ":protocol", equals: WebTransportHTTP3DraftConstants.current.upgradeToken)
+        guard let protocolToken = map[":protocol"], acceptedProtocolTokens.contains(protocolToken) else {
+            throw QUICCodecError.malformed("WebTransport CONNECT :protocol is not accepted")
+        }
         try require(map, ":scheme", equals: "https")
         try requirePresent(map, ":authority")
         try requirePresent(map, ":path")
@@ -62,6 +68,7 @@ public enum WebTransportHTTP3Headers {
         path: String,
         scheme: String = "https",
         origin: String? = nil,
+        upgradeToken: String = WebTransportHTTP3DraftConstants.current.upgradeToken,
         constants: WebTransportHTTP3DraftConstants = .current
     ) throws -> HTTP3Frame {
         try QPACK.headersFrame(fields: connectRequest(
@@ -69,6 +76,7 @@ public enum WebTransportHTTP3Headers {
             path: path,
             scheme: scheme,
             origin: origin,
+            upgradeToken: upgradeToken,
             constants: constants
         ))
     }

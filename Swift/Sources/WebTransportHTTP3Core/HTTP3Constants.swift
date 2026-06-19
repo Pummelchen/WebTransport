@@ -20,6 +20,7 @@ public enum HTTP3SettingID {
     public static let qpackBlockedStreams: UInt64 = 0x07
     public static let enableConnectProtocol: UInt64 = 0x08
     public static let h3Datagram: UInt64 = 0x33
+    public static let legacyEnableWebTransport: UInt64 = 0x2b60_3742
 
     public static func isReservedHTTP2Setting(_ value: UInt64) -> Bool {
         value == 0x02 || value == 0x03 || value == 0x04 || value == 0x05

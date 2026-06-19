@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 import Security
 
@@ -26,6 +27,17 @@ public enum WebTransportQUICPeerTrustPolicy: Equatable, Sendable {
     case systemTrust
     /// Allow the generated localhost identity used by the CLI and tests.
     case localDevelopmentSelfSigned
+
+    public static func parse(_ value: String) throws -> WebTransportQUICPeerTrustPolicy {
+        switch value {
+        case "system":
+            return .systemTrust
+        case "local-self-signed":
+            return .localDevelopmentSelfSigned
+        default:
+            throw WebTransportNetworkRuntimeError.invalidTransport("unknown trust policy: \(value)")
+        }
+    }
 }
 
 public struct WebTransportQUICClient: Sendable {
@@ -44,6 +56,11 @@ public struct WebTransportQUICClient: Sendable {
     public func run(
         to endpoint: WebTransportNetworkEndpoint,
         message: String,
+        authority: String? = nil,
+        path: String = "/wt",
+        origin: String? = "https://localhost",
+        protocols: [String] = ["demo.v1"],
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSessionResult {
         let host = InteroperableQUICRuntime.host(for: endpoint.host)
@@ -98,7 +115,10 @@ public struct WebTransportQUICClient: Sendable {
         let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
         InteroperableQUICDebug.log("client datagrams usable=\(useDatagrams)")
 
-        var http3 = HTTP3ConnectionState(role: .client)
+        var http3 = HTTP3ConnectionState(
+            role: .client,
+            localSettings: settingsValidation.localSettings
+        )
         let localControlPayload = try http3.localControlStreamBytes()
         let localControlStream = try await InteroperableQUICHelpers.withTimeout(
             remainingTimeout()
@@ -107,22 +127,24 @@ public struct WebTransportQUICClient: Sendable {
         }
         InteroperableQUICDebug.log("client opened local control stream \(localControlStream.streamID)")
         try await runWithTimeout {
-            try await localControlStream.send(localControlPayload, endOfStream: true)
+            try await localControlStream.send(localControlPayload, endOfStream: false)
         }
         InteroperableQUICDebug.log("client sent local control payload")
 
-        let peerControlStream = try await inboundStreams.next(
-            direction: InteroperableQUICHelpers.unidirectionalStreamDirection,
-            timeoutMilliseconds: remainingTimeout()
-        )
-        InteroperableQUICDebug.log("client got peer control stream \(peerControlStream.streamID)")
-        let peerControlBytes = try await InteroperableQUICHelpers.readStream(
-            peerControlStream,
+        let peerControlBytes = try await InteroperableQUICHelpers.readPeerControlStream(
+            from: inboundStreams,
+            role: "client",
             timeoutMilliseconds: remainingTimeout()
         )
         InteroperableQUICDebug.log("client peer control bytes=\(peerControlBytes.count)")
-        _ = try http3.receivePeerControlStream(peerControlBytes)
-        var manager = WebTransportSessionManager(http3: http3)
+        _ = try http3.receivePeerControlStream(
+            peerControlBytes,
+            settingsValidation: settingsValidation
+        )
+        var manager = WebTransportSessionManager(
+            http3: http3,
+            settingsValidation: settingsValidation
+        )
 
         let requestStream = try await InteroperableQUICHelpers.withTimeout(
             remainingTimeout()
@@ -132,10 +154,10 @@ public struct WebTransportQUICClient: Sendable {
         let requestStreamID = requestStream.streamID
         InteroperableQUICDebug.log("client opened request stream \(requestStreamID)")
         let request = try WebTransportSessionRequest(
-            authority: InteroperableQUICRuntime.defaultAuthority,
-            path: InteroperableQUICRuntime.defaultPath,
-            origin: InteroperableQUICRuntime.defaultOrigin,
-            availableProtocols: [InteroperableQUICRuntime.defaultProtocol]
+            authority: authority ?? endpoint.host,
+            path: path,
+            origin: origin,
+            availableProtocols: protocols
         )
         let requestFrame = try manager.makeClientSessionRequest(streamID: requestStreamID, request: request)
         let connectPayload = try InteroperableQUICHelpers.makeRequestStreamPayload(
@@ -189,14 +211,17 @@ public struct WebTransportQUICClient: Sendable {
             ) {
                 try await connection.openStream(directionality: .bidirectional)
             }
+            var mutableFallbackPayload = try WebTransportStreamSignaling.serializeBidirectionalPrefix(sessionID: sessionID.rawValue)
+            mutableFallbackPayload.append(contentsOf: Data(message.utf8))
+            let fallbackPayload = mutableFallbackPayload
             try await runWithTimeout {
-                try await fallbackStream.send(Data(message.utf8), endOfStream: true)
+                try await fallbackStream.send(fallbackPayload, endOfStream: true)
             }
-            let fallbackPayload = try await InteroperableQUICHelpers.readStream(
+            let fallbackResponse = try await InteroperableQUICHelpers.readStream(
                 fallbackStream,
                 timeoutMilliseconds: remainingTimeout()
             )
-            guard let responseMessageValue = String(data: fallbackPayload, encoding: .utf8) else {
+            guard let responseMessageValue = String(data: fallbackResponse, encoding: .utf8) else {
                 throw WebTransportNetworkRuntimeError.invalidPayload
             }
             responseMessage = responseMessageValue
@@ -213,23 +238,51 @@ public struct WebTransportQUICClient: Sendable {
 }
 public final class WebTransportQUICServer: @unchecked Sendable {
     public var localEndpoint: WebTransportNetworkEndpoint
+    public let certificateSHA256: Data
 
     private let listener: NetworkListener<QUIC>
     private let acceptedConnections: InteroperableQUICConnectionQueue
     private let listenerTask: Task<Void, Never>
+    private let authority: String
+    private let path: String
+    private let allowedOrigin: String?
+    private let protocols: [String]
+    private let settingsValidation: HTTP3WebTransportSettingsValidation
 
-    public convenience init(bindPort: UInt16, maxConcurrentConnections: Int = 16) throws {
+    public convenience init(
+        bindPort: UInt16,
+        maxConcurrentConnections: Int = 16,
+        authority: String = "localhost",
+        path: String = "/wt",
+        allowedOrigin: String? = "https://localhost",
+        protocols: [String] = ["demo.v1"],
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict
+    ) throws {
         try self.init(
             endpoint: WebTransportNetworkEndpoint(port: bindPort),
-            maxConcurrentConnections: maxConcurrentConnections
+            maxConcurrentConnections: maxConcurrentConnections,
+            authority: authority,
+            path: path,
+            allowedOrigin: allowedOrigin,
+            protocols: protocols,
+            settingsValidation: settingsValidation
         )
     }
 
-    public init(endpoint: WebTransportNetworkEndpoint, maxConcurrentConnections: Int = 16) throws {
+    public init(
+        endpoint: WebTransportNetworkEndpoint,
+        maxConcurrentConnections: Int = 16,
+        authority: String = "localhost",
+        path: String = "/wt",
+        allowedOrigin: String? = "https://localhost",
+        protocols: [String] = ["demo.v1"],
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict
+    ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
         let identity = try InteroperableTLSIdentity.create()
+        certificateSHA256 = Data(SHA256.hash(data: identity.certificateDER))
         let parameters = NWParametersBuilder(auto: {
-            InteroperableQUICRuntime.makeServerQUIC(identity: identity)
+            InteroperableQUICRuntime.makeServerQUIC(identity: identity.networkIdentity)
         })
         .localEndpoint(
             .hostPort(
@@ -240,9 +293,14 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         .localOnly(true)
 
         listener = try NetworkListener<QUIC>(using: parameters)
-            .newConnectionLimit(max(1, max(8, maxConcurrentConnections)))
+            .newConnectionLimit(max(1, max(16, maxConcurrentConnections * 2)))
         acceptedConnections = InteroperableQUICConnectionQueue()
         localEndpoint = endpoint
+        self.authority = authority
+        self.path = path
+        self.allowedOrigin = allowedOrigin
+        self.protocols = protocols
+        self.settingsValidation = settingsValidation
         listener.onStateUpdate { _, state in
             InteroperableQUICDebug.log("server listener state update: \(state)")
         }
@@ -290,6 +348,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             try await InteroperableQUICHelpers.waitForReady(
                 connection: connection,
                 role: "server",
+                allowSetupProceed: true,
                 timeoutMilliseconds: timeoutMilliseconds
             )
         } catch {
@@ -353,33 +412,36 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
         InteroperableQUICDebug.log("server datagrams usable=\(useDatagrams)")
 
-        var http3 = HTTP3ConnectionState(role: .server)
+        var http3 = HTTP3ConnectionState(
+            role: .server,
+            localSettings: settingsValidation.localSettings
+        )
         let localControlPayload = try http3.localControlStreamBytes()
         let localControlStream = try await runWithTimeout {
             try await connection.openStream(directionality: .unidirectional)
         }
         InteroperableQUICDebug.log("server opened local control stream \(localControlStream.streamID)")
         try await runWithTimeout {
-            try await localControlStream.send(localControlPayload, endOfStream: true)
+            try await localControlStream.send(localControlPayload, endOfStream: false)
         }
         InteroperableQUICDebug.log("server sent local control payload")
 
-        let controlStream = try await runWithTimeout {
-            try await inboundStreams.next(
-                direction: InteroperableQUICHelpers.unidirectionalStreamDirection,
-                timeoutMilliseconds: remainingTimeout()
-            )
-        }
-        InteroperableQUICDebug.log("server got client control stream \(controlStream.streamID)")
         let controlPayload = try await runWithTimeout {
-            try await InteroperableQUICHelpers.readStream(
-                controlStream,
+            try await InteroperableQUICHelpers.readPeerControlStream(
+                from: inboundStreams,
+                role: "server",
                 timeoutMilliseconds: remainingTimeout()
             )
         }
         InteroperableQUICDebug.log("server control payload bytes=\(controlPayload.count)")
-        _ = try http3.receivePeerControlStream(controlPayload)
-        var manager = WebTransportSessionManager(http3: http3)
+        _ = try http3.receivePeerControlStream(
+            controlPayload,
+            settingsValidation: settingsValidation
+        )
+        var manager = WebTransportSessionManager(
+            http3: http3,
+            settingsValidation: settingsValidation
+        )
 
         let requestStream = try await runWithTimeout {
             try await inboundStreams.next(
@@ -395,18 +457,26 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             )
         }
         InteroperableQUICDebug.log("server request payload bytes=\(requestPayload.count)")
-        let prefix = try WebTransportStreamSignaling.parsePrefix(requestPayload)
-        let requestFrames = try HTTP3Frame.decodeFrames(prefix.remainingPayload)
+        let requestFramePayload: Data
+        if let prefixed = try? WebTransportStreamSignaling.parsePrefix(requestPayload),
+           prefixed.form == .bidirectional {
+            requestFramePayload = prefixed.remainingPayload
+        } else {
+            requestFramePayload = requestPayload
+        }
+        let requestFrames = try HTTP3Frame.decodeFrames(requestFramePayload)
         guard let requestFrame = requestFrames.first(where: { $0.type == HTTP3FrameType.headers }) else {
             throw WebTransportNetworkRuntimeError.unexpectedFrame
         }
 
+        var allowedAuthorities = Set([authority])
+        allowedAuthorities.insert("\(authority):\(localEndpoint.port)")
         let policy = try WebTransportServerSessionPolicy(
-            allowedAuthorities: [InteroperableQUICRuntime.defaultAuthority],
-            allowedPaths: [InteroperableQUICRuntime.defaultPath],
-            allowedOrigins: [InteroperableQUICRuntime.defaultOrigin],
-            supportedProtocols: [InteroperableQUICRuntime.defaultProtocol],
-            requireProtocolSelection: true
+            allowedAuthorities: allowedAuthorities,
+            allowedPaths: [path],
+            allowedOrigins: allowedOrigin.map { [$0] },
+            supportedProtocols: protocols,
+            requireProtocolSelection: !protocols.isEmpty
         )
 
         let decision = try manager.receiveClientSessionRequest(
@@ -454,11 +524,15 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                 timeoutMilliseconds: remainingTimeout()
             )
         }
-        let fallbackPayload = try await runWithTimeout {
+        var fallbackPayload = try await runWithTimeout {
             try await InteroperableQUICHelpers.readStream(
                 fallbackStream,
                 timeoutMilliseconds: remainingTimeout()
             )
+        }
+        if let prefixed = try? WebTransportStreamSignaling.parsePrefix(fallbackPayload),
+           prefixed.form == .bidirectional {
+            fallbackPayload = prefixed.remainingPayload
         }
         guard let echoedMessage = String(data: fallbackPayload, encoding: .utf8) else {
             throw WebTransportNetworkRuntimeError.invalidPayload
@@ -520,7 +594,7 @@ private enum InteroperableQUICRuntime {
         .initialMaxStreamDataUnidirectional(262_144)
         .initialMaxBidirectionalStreams(16)
         .initialMaxUnidirectionalStreams(16)
-        .maxDatagramFrameSize(1_200)
+        .maxDatagramFrameSize(65_535)
     }
 
     static func makeClientQUIC(trustPolicy: WebTransportQUICPeerTrustPolicy) -> QUIC {
@@ -554,23 +628,21 @@ private enum InteroperableQUICHelpers {
     }
 
     static func makeRequestStreamPayload(streamID: UInt64, requestFrame: HTTP3Frame) throws -> Data {
-        let prefix = try WebTransportStreamSignaling.serializeBidirectionalPrefix(sessionID: streamID)
-        var requestPayload = prefix
-        requestPayload.append(contentsOf: try requestFrame.encode())
-        return requestPayload
+        try requestFrame.encode()
     }
 
     static func waitForReady(
         connection: NetworkConnection<QUIC>,
         role: String = "client",
         start: (@Sendable () -> Void)? = nil,
+        allowSetupProceed: Bool = false,
         timeoutMilliseconds: Int32
     ) async throws {
         if connection.state == .ready {
             InteroperableQUICDebug.log("\(role) connection already ready")
             return
         }
-        if case .setup = connection.state {
+        if allowSetupProceed, case .setup = connection.state {
             InteroperableQUICDebug.log("\(role) connection in setup state; proceeding to stream negotiation")
             return
         }
@@ -587,20 +659,31 @@ private enum InteroperableQUICHelpers {
             try await withCheckedThrowingContinuation { continuation in
                 let completion = OneShotContinuation()
                 let handleState: @Sendable (NetworkConnection<QUIC>.State) -> Void = { state in
-                    Task {
-                        await completion.complete {
-                            InteroperableQUICDebug.log("\(role) connection state handled: \(state)")
-                            switch state {
-                            case .ready:
+                    InteroperableQUICDebug.log("\(role) connection state observed: \(state)")
+                    switch state {
+                    case .ready:
+                        Task {
+                            await completion.complete {
+                                InteroperableQUICDebug.log("\(role) connection became ready")
                                 continuation.resume()
-                            case .failed(let error):
-                                continuation.resume(throwing: error)
-                            case .cancelled:
-                                continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
-                            default:
-                                break
                             }
                         }
+                    case .failed(let error):
+                        Task {
+                            await completion.complete {
+                                InteroperableQUICDebug.log("\(role) connection failed: \(error)")
+                                continuation.resume(throwing: error)
+                            }
+                        }
+                    case .cancelled:
+                        Task {
+                            await completion.complete {
+                                InteroperableQUICDebug.log("\(role) connection cancelled")
+                                continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
+                            }
+                        }
+                    default:
+                        break
                     }
                 }
 
@@ -658,6 +741,31 @@ private enum InteroperableQUICHelpers {
         try await withTimeout(timeoutMilliseconds) {
             let chunk = try await stream.receive(atMost: maxBytes)
             return chunk.content
+        }
+    }
+
+    static func readPeerControlStream(
+        from inboundStreams: InteroperableQUICInboundStreamCollector,
+        role: String,
+        timeoutMilliseconds: Int32
+    ) async throws -> Data {
+        while true {
+            let stream = try await inboundStreams.next(
+                direction: unidirectionalStreamDirection,
+                timeoutMilliseconds: timeoutMilliseconds
+            )
+            InteroperableQUICDebug.log("\(role) got peer unidirectional stream \(stream.streamID)")
+            let bytes = try await readStream(stream, timeoutMilliseconds: timeoutMilliseconds)
+            let prefix = try HTTP3StreamTypeParser.parsePrefix(bytes)
+            switch prefix.type {
+            case HTTP3StreamType.control:
+                return bytes
+            case HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
+                InteroperableQUICDebug.log("\(role) ignoring peer QPACK stream type=\(prefix.type)")
+                continue
+            default:
+                throw WebTransportNetworkRuntimeError.unexpectedFrame
+            }
         }
     }
 
@@ -838,11 +946,14 @@ private extension QUICFrame {
 }
 
 private struct InteroperableTLSIdentity {
-    static func create() throws -> sec_identity_t {
+    var networkIdentity: sec_identity_t
+    var certificateDER: Data
+
+    static func create() throws -> InteroperableTLSIdentity {
         var error: Unmanaged<CFError>?
         let attributes: [CFString: Any] = [
-            kSecAttrKeyType: kSecAttrKeyTypeRSA,
-            kSecAttrKeySizeInBits: 2_048,
+            kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
+            kSecAttrKeySizeInBits: 256,
             kSecAttrIsPermanent: false
         ]
 
@@ -858,7 +969,7 @@ private struct InteroperableTLSIdentity {
 
         let certificateDER = try SelfSignedCertificate.make(
             privateKey: privateKey,
-            rsaPublicKeyDER: publicKeyData
+            p256PublicKeyDER: publicKeyData
         )
         guard let certificate = SecCertificateCreateWithData(nil, certificateDER as CFData) else {
             throw WebTransportNetworkRuntimeError.invalidTransport("server certificate generation produced invalid DER")
@@ -869,19 +980,21 @@ private struct InteroperableTLSIdentity {
         guard let networkIdentity = sec_identity_create_with_certificates(identity, [certificate] as CFArray) else {
             throw WebTransportNetworkRuntimeError.invalidTransport("server QUIC identity conversion failed")
         }
-        return networkIdentity
+        return InteroperableTLSIdentity(
+            networkIdentity: networkIdentity,
+            certificateDER: certificateDER
+        )
     }
 }
 
 private enum SelfSignedCertificate {
-    static func make(privateKey: SecKey, rsaPublicKeyDER: Data) throws -> Data {
+    static func make(privateKey: SecKey, p256PublicKeyDER: Data) throws -> Data {
         let signatureAlgorithm = DER.sequence([
-            try DER.objectIdentifier([1, 2, 840, 113_549, 1, 1, 11]),
-            DER.null()
+            try DER.objectIdentifier([1, 2, 840, 10045, 4, 3, 2])
         ])
-        let rsaAlgorithm = DER.sequence([
-            try DER.objectIdentifier([1, 2, 840, 113_549, 1, 1, 1]),
-            DER.null()
+        let ecPublicKeyAlgorithm = DER.sequence([
+            try DER.objectIdentifier([1, 2, 840, 10045, 2, 1]),
+            try DER.objectIdentifier([1, 2, 840, 10045, 3, 1, 7])
         ])
         let name = DER.sequence([
             DER.set([
@@ -896,8 +1009,8 @@ private enum SelfSignedCertificate {
             DER.utcTime(Date(timeIntervalSinceNow: 86_400))
         ])
         let subjectPublicKeyInfo = DER.sequence([
-            rsaAlgorithm,
-            DER.bitString(rsaPublicKeyDER)
+            ecPublicKeyAlgorithm,
+            DER.bitString(p256PublicKeyDER)
         ])
         let extensions = DER.explicit(3, DER.sequence([
             DER.sequence([
@@ -908,7 +1021,7 @@ private enum SelfSignedCertificate {
             DER.sequence([
                 try DER.objectIdentifier([2, 5, 29, 15]),
                 DER.boolean(true),
-                DER.octetString(DER.bitString(Data([0xa0]), unusedBits: 5))
+                DER.octetString(DER.bitString(Data([0x80]), unusedBits: 7))
             ]),
             DER.sequence([
                 try DER.objectIdentifier([2, 5, 29, 37]),
@@ -919,7 +1032,8 @@ private enum SelfSignedCertificate {
             DER.sequence([
                 try DER.objectIdentifier([2, 5, 29, 17]),
                 DER.octetString(DER.sequence([
-                    DER.contextSpecificPrimitive(2, Data("localhost".utf8))
+                    DER.contextSpecificPrimitive(2, Data("localhost".utf8)),
+                    DER.contextSpecificPrimitive(7, Data([127, 0, 0, 1]))
                 ]))
             ])
         ]))
@@ -938,7 +1052,7 @@ private enum SelfSignedCertificate {
         var signError: Unmanaged<CFError>?
         guard let signature = SecKeyCreateSignature(
             privateKey,
-            .rsaSignatureMessagePKCS1v15SHA256,
+            .ecdsaSignatureMessageX962SHA256,
             tbsCertificate as CFData,
             &signError
         ) as Data? else {

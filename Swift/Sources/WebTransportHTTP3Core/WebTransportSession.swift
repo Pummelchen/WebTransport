@@ -81,11 +81,14 @@ public struct WebTransportSessionRequest: Equatable, Sendable {
         self.availableProtocols = availableProtocols
     }
 
-    public func headers() throws -> [HTTPFieldLine] {
+    public func headers(
+        upgradeToken: String = WebTransportHTTP3DraftConstants.current.upgradeToken
+    ) throws -> [HTTPFieldLine] {
         var fields = try WebTransportHTTP3Headers.connectRequest(
             authority: authority,
             path: path,
-            origin: origin
+            origin: origin,
+            upgradeToken: upgradeToken
         )
         if !availableProtocols.isEmpty {
             fields.append(try HTTPFieldLine(
@@ -210,6 +213,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public let maxBufferedStreamsPerSession: Int
     public let maxBufferedDatagramsPerSession: Int
     public let maxBufferedSessions: Int
+    public let settingsValidation: HTTP3WebTransportSettingsValidation
     private var datagramPayloadBytesBySessionID: [WebTransportSessionID: Int]
     private var closedStreamSessionIDsByStreamID: [UInt64: WebTransportSessionID]
     private var requestStreamIDsClosedByReceivedCloseCapsule: Set<UInt64>
@@ -221,7 +225,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         maxDatagramReceiveBufferBytes: Int = 64 * 1024,
         maxBufferedStreamsPerSession: Int = 64,
         maxBufferedDatagramsPerSession: Int = 64,
-        maxBufferedSessions: Int = 64
+        maxBufferedSessions: Int = 64,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict
     ) {
         self.http3 = http3
         self.sessionsByID = [:]
@@ -239,6 +244,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.maxBufferedStreamsPerSession = maxBufferedStreamsPerSession
         self.maxBufferedDatagramsPerSession = maxBufferedDatagramsPerSession
         self.maxBufferedSessions = maxBufferedSessions
+        self.settingsValidation = settingsValidation
         self.datagramPayloadBytesBySessionID = [:]
         self.closedStreamSessionIDsByStreamID = [:]
         self.requestStreamIDsClosedByReceivedCloseCapsule = []
@@ -268,7 +274,10 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         try validateSessionAdmission()
 
         var requestStream = try http3.openRequestStream(streamID: streamID)
-        let frame = try requestStream.makeRequestHeadersFrame(request.headers())
+        let frame = try requestStream.makeRequestHeadersFrame(
+            request.headers(upgradeToken: settingsValidation.upgradeToken),
+            acceptedProtocolTokens: settingsValidation.acceptedUpgradeTokens
+        )
         http3.storeRequestStream(requestStream)
         let session = WebTransportSession(
             id: sessionID,
@@ -352,11 +361,17 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
 
         var requestStream = try http3.acceptRequestStream(streamID: streamID)
-        try requestStream.receive(frame: frame)
+        try requestStream.receive(
+            frame: frame,
+            acceptedProtocolTokens: settingsValidation.acceptedUpgradeTokens
+        )
         http3.storeRequestStream(requestStream)
 
         let fields = try QPACK.decodeHeadersFrame(frame)
-        let request = try WebTransportSessionHeaders.request(from: fields)
+        let request = try WebTransportSessionHeaders.request(
+            from: fields,
+            acceptedProtocolTokens: settingsValidation.acceptedUpgradeTokens
+        )
         let selectedProtocol = try WebTransportSessionHeaders.selectProtocol(
             requestProtocols: request.availableProtocols,
             policy: policy
@@ -1221,12 +1236,26 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     private func validateSettingsReady() throws {
-        try http3.localSettings.validateWebTransportDraft15Requirements()
+        switch settingsValidation {
+        case .draft15Strict:
+            try http3.localSettings.validateWebTransportDraft15Requirements()
+        case .chromiumInterop:
+            try http3.localSettings.validateWebTransportChromiumInteropRequirements()
+        case .pywebtransportStreamInterop:
+            try http3.localSettings.validateWebTransportPyWebTransportStreamInteropRequirements()
+        }
         guard let remoteSettings = http3.remoteSettings else {
             throw QUICCodecError.malformed("peer HTTP/3 SETTINGS are required before WebTransport session establishment")
         }
         let peerRole: HTTP3ConnectionRole = http3.role == .client ? .server : .client
-        try remoteSettings.validateWebTransportDraft15Requirements(peerRole: peerRole)
+        switch settingsValidation {
+        case .draft15Strict:
+            try remoteSettings.validateWebTransportDraft15Requirements(peerRole: peerRole)
+        case .chromiumInterop:
+            try remoteSettings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
+        case .pywebtransportStreamInterop:
+            try remoteSettings.validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: peerRole)
+        }
     }
 
     private func validateSessionAdmission() throws {
@@ -1372,8 +1401,14 @@ public enum WebTransportProtocolNegotiation {
 }
 
 enum WebTransportSessionHeaders {
-    static func request(from fields: [HTTPFieldLine]) throws -> WebTransportSessionRequest {
-        try WebTransportHTTP3Headers.validateConnectRequest(fields)
+    static func request(
+        from fields: [HTTPFieldLine],
+        acceptedProtocolTokens: Set<String> = [WebTransportHTTP3DraftConstants.current.upgradeToken]
+    ) throws -> WebTransportSessionRequest {
+        try WebTransportHTTP3Headers.validateConnectRequest(
+            fields,
+            acceptedProtocolTokens: acceptedProtocolTokens
+        )
         return try WebTransportSessionRequest(
             authority: try requiredField(":authority", from: fields),
             path: try requiredField(":path", from: fields),

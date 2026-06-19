@@ -25,7 +25,7 @@ Implemented:
 - Process-level CLI tests for help/list/error/scenario exit codes and IPv4/IPv6 frame/packet loopback.
 - Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
-- Environment-gated external interop hook via `WEBTRANSPORT_EXTERNAL_INTEROP_ENDPOINT`.
+- External interoperability proof runner via `./run-pywebtransport-interop.sh`, which starts an independent `pywebtransport`/`aioquic` endpoint and records a passing QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream echo proof in `.build/external-interop/pywebtransport-latest.json`. Configured public endpoint probing remains available through `./run-external-interop.sh`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
 - Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
 - Apple Silicon release script for reproducibility-checked production CLI binaries with `SHA256SUMS`.
@@ -62,6 +62,21 @@ swift run WebTransportServer --listen '[::1]:4433' --transport packet
 swift run WebTransportClient --connect '[::1]:4433' --transport packet
 swift run WebTransportClient
 swift run WebTransportServer
+./run-pywebtransport-interop.sh
 ./build-release-apple-silicon.sh
 ./check-api-compatibility.sh
+```
+
+## External Interop
+
+`./run-pywebtransport-interop.sh` installs `pywebtransport==0.1.2` into `.build/external-interop/pywebtransport-venv`, starts a local independent `pywebtransport`/`aioquic` echo server, runs the Swift client against it, and records the result in `.build/external-interop/pywebtransport-latest.json`. This proof covers QUIC/TLS/HTTP/3 CONNECT and reliable WebTransport stream echo. QUIC DATAGRAM interop remains a separate gate because the current Network.framework runtime reports datagrams unavailable against external peers.
+
+`./run-external-interop.sh` runs the Swift client against a configured independent WebTransport endpoint and records the result in `.build/external-interop/latest.json`. Configure the target with:
+
+```sh
+WEBTRANSPORT_EXTERNAL_INTEROP_ENDPOINT=host:443 \
+WEBTRANSPORT_EXTERNAL_INTEROP_AUTHORITY=host \
+WEBTRANSPORT_EXTERNAL_INTEROP_PATH=/ \
+WEBTRANSPORT_EXTERNAL_INTEROP_TRUST=system \
+./run-external-interop.sh
 ```

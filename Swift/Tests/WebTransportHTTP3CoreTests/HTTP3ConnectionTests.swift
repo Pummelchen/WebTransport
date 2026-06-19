@@ -44,6 +44,30 @@ func http3SettingsValidationRejectsMissingWebTransportRequirements() throws {
 }
 
 @Test
+func http3ChromiumInteropValidationAcceptsMissingDraft15ClientMarker() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    let chromiumClientSettings = try HTTP3Settings([
+        constants.settingsH3Datagram: 1
+    ])
+    let controlBytes = try HTTP3StreamTypeParser.encodePrefix(
+        type: HTTP3StreamType.control,
+        payload: try chromiumClientSettings.frame().encode()
+    )
+
+    var strictServer = HTTP3ConnectionState(role: .server)
+    #expect(throws: Error.self) {
+        _ = try strictServer.receivePeerControlStream(controlBytes)
+    }
+
+    var chromiumInteropServer = HTTP3ConnectionState(role: .server)
+    _ = try chromiumInteropServer.receivePeerControlStream(
+        controlBytes,
+        settingsValidation: .chromiumInterop
+    )
+    #expect(chromiumInteropServer.remoteSettings?.entries == chromiumClientSettings.entries)
+}
+
+@Test
 func http3ServerAcceptsClientSettingsWithoutEnableConnectProtocol() throws {
     let constants = WebTransportHTTP3DraftConstants.current
     let clientSettings = try HTTP3Settings([

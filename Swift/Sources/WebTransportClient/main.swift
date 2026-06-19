@@ -1,6 +1,7 @@
 import Foundation
 import WebTransport
 import WebTransportCLIConformance
+import WebTransportHTTP3Core
 import WebTransportNetworkRuntime
 
 @main
@@ -15,18 +16,28 @@ struct WebTransportClientCLI {
                 switch options.transport {
                 case .packet:
                     result = try await WebTransportQUICClient(
-                        trustPolicy: .localDevelopmentSelfSigned
+                        trustPolicy: options.trustPolicy
                     ).run(
                         to: options.endpoint,
                         message: options.message,
+                        authority: options.authority,
+                        path: options.path,
+                        origin: options.origin,
+                        protocols: options.protocols,
+                        settingsValidation: options.settingsValidation,
                         timeoutMilliseconds: options.timeoutMilliseconds
                     )
                 case .frame:
                     result = try await WebTransportQUICClient(
-                        trustPolicy: .localDevelopmentSelfSigned
+                        trustPolicy: options.trustPolicy
                     ).run(
                         to: options.endpoint,
                         message: options.message,
+                        authority: options.authority,
+                        path: options.path,
+                        origin: options.origin,
+                        protocols: options.protocols,
+                        settingsValidation: options.settingsValidation,
                         timeoutMilliseconds: options.timeoutMilliseconds
                     )
                 }
@@ -96,12 +107,24 @@ private struct NetworkClientOptions {
     var message: String
     var timeoutMilliseconds: Int32
     var transport: WebTransportNetworkTransport
+    var authority: String?
+    var path: String
+    var origin: String?
+    var protocols: [String]
+    var trustPolicy: WebTransportQUICPeerTrustPolicy
+    var settingsValidation: HTTP3WebTransportSettingsValidation
 
     static func parse(_ arguments: [String]) throws -> NetworkClientOptions {
         var endpoint: WebTransportNetworkEndpoint?
         var message = "webtransport-network-session"
         var timeoutMilliseconds: Int32 = 1_000
         var transport = WebTransportNetworkTransport.packet
+        var authority: String?
+        var path = "/wt"
+        var origin: String? = "https://localhost"
+        var protocols = ["demo.v1"]
+        var trustPolicy = WebTransportQUICPeerTrustPolicy.localDevelopmentSelfSigned
+        var settingsValidation = HTTP3WebTransportSettingsValidation.draft15Strict
         var index = 0
 
         while index < arguments.count {
@@ -131,6 +154,42 @@ private struct NetworkClientOptions {
                     throw WebTransportNetworkRuntimeError.invalidTransport("--transport requires packet or frame")
                 }
                 transport = try WebTransportNetworkTransport.parse(arguments[index])
+            case "--authority":
+                index += 1
+                guard index < arguments.count, !arguments[index].isEmpty else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                authority = arguments[index]
+            case "--path":
+                index += 1
+                guard index < arguments.count, arguments[index].hasPrefix("/") else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                path = arguments[index]
+            case "--origin":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                origin = arguments[index] == "none" ? nil : arguments[index]
+            case "--protocol":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                protocols = arguments[index] == "none" ? [] : [arguments[index]]
+            case "--trust":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                trustPolicy = try WebTransportQUICPeerTrustPolicy.parse(arguments[index])
+            case "--settings-validation":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                settingsValidation = try HTTP3WebTransportSettingsValidation.parse(arguments[index])
             default:
                 if argument.hasPrefix("--connect=") {
                     endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--connect=".count)))
@@ -141,6 +200,28 @@ private struct NetworkClientOptions {
                     timeoutMilliseconds = value
                 } else if argument.hasPrefix("--transport=") {
                     transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))
+                } else if argument.hasPrefix("--authority=") {
+                    let value = String(argument.dropFirst("--authority=".count))
+                    guard !value.isEmpty else {
+                        throw WebTransportNetworkRuntimeError.invalidPayload
+                    }
+                    authority = value
+                } else if argument.hasPrefix("--path=") {
+                    let value = String(argument.dropFirst("--path=".count))
+                    guard value.hasPrefix("/") else {
+                        throw WebTransportNetworkRuntimeError.invalidPayload
+                    }
+                    path = value
+                } else if argument.hasPrefix("--origin=") {
+                    let value = String(argument.dropFirst("--origin=".count))
+                    origin = value == "none" ? nil : value
+                } else if argument.hasPrefix("--protocol=") {
+                    let value = String(argument.dropFirst("--protocol=".count))
+                    protocols = value == "none" ? [] : [value]
+                } else if argument.hasPrefix("--trust=") {
+                    trustPolicy = try WebTransportQUICPeerTrustPolicy.parse(String(argument.dropFirst("--trust=".count)))
+                } else if argument.hasPrefix("--settings-validation=") {
+                    settingsValidation = try HTTP3WebTransportSettingsValidation.parse(String(argument.dropFirst("--settings-validation=".count)))
                 } else {
                     throw WebTransportNetworkRuntimeError.invalidPayload
                 }
@@ -155,7 +236,13 @@ private struct NetworkClientOptions {
             endpoint: endpoint,
             message: message,
             timeoutMilliseconds: timeoutMilliseconds,
-            transport: transport
+            transport: transport,
+            authority: authority,
+            path: path,
+            origin: origin,
+            protocols: protocols,
+            trustPolicy: trustPolicy,
+            settingsValidation: settingsValidation
         )
     }
 }

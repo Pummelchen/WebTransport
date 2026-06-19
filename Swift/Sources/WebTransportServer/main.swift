@@ -1,6 +1,7 @@
 import Foundation
 import WebTransport
 import WebTransportCLIConformance
+import WebTransportHTTP3Core
 import WebTransportNetworkRuntime
 
 @main
@@ -17,10 +18,16 @@ struct WebTransportServerCLI {
                 case .packet:
                     let server = try WebTransportQUICServer(
                         endpoint: options.endpoint,
-                        maxConcurrentConnections: options.maxSessions
+                        maxConcurrentConnections: options.maxSessions,
+                        authority: options.authority,
+                        path: options.path,
+                        allowedOrigin: options.allowedOrigin,
+                        protocols: options.protocols,
+                        settingsValidation: options.settingsValidation
                     )
                     local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
                     print("network packet session listening: \(local.commandLineValue)")
+                    print("network packet session certificate-sha256: \(server.certificateSHA256.base64EncodedString())")
                     fflush(stdout)
                     let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
                         Task {
@@ -38,10 +45,16 @@ struct WebTransportServerCLI {
                 case .frame:
                     let server = try WebTransportQUICServer(
                         endpoint: options.endpoint,
-                        maxConcurrentConnections: options.maxSessions
+                        maxConcurrentConnections: options.maxSessions,
+                        authority: options.authority,
+                        path: options.path,
+                        allowedOrigin: options.allowedOrigin,
+                        protocols: options.protocols,
+                        settingsValidation: options.settingsValidation
                     )
                     local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
                     print("network frame session listening: \(local.commandLineValue)")
+                    print("network frame session certificate-sha256: \(server.certificateSHA256.base64EncodedString())")
                     fflush(stdout)
                     let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
                         Task {
@@ -108,12 +121,22 @@ private struct NetworkServerOptions {
     var timeoutMilliseconds: Int32
     var transport: WebTransportNetworkTransport
     var maxSessions: Int
+    var authority: String
+    var path: String
+    var allowedOrigin: String?
+    var protocols: [String]
+    var settingsValidation: HTTP3WebTransportSettingsValidation
 
     static func parse(_ arguments: [String]) throws -> NetworkServerOptions {
         var endpoint: WebTransportNetworkEndpoint?
         var timeoutMilliseconds: Int32 = 10_000
         var transport = WebTransportNetworkTransport.packet
         var maxSessions = 1
+        var authority = "localhost"
+        var path = "/wt"
+        var allowedOrigin: String? = "https://localhost"
+        var protocols = ["demo.v1"]
+        var settingsValidation = HTTP3WebTransportSettingsValidation.draft15Strict
         var index = 0
 
         while index < arguments.count {
@@ -143,6 +166,36 @@ private struct NetworkServerOptions {
                     throw WebTransportNetworkRuntimeError.invalidPayload
                 }
                 maxSessions = value
+            case "--authority":
+                index += 1
+                guard index < arguments.count, !arguments[index].isEmpty else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                authority = arguments[index]
+            case "--path":
+                index += 1
+                guard index < arguments.count, arguments[index].hasPrefix("/") else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                path = arguments[index]
+            case "--origin":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                allowedOrigin = arguments[index] == "none" ? nil : arguments[index]
+            case "--protocol":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                protocols = arguments[index] == "none" ? [] : [arguments[index]]
+            case "--settings-validation":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                settingsValidation = try HTTP3WebTransportSettingsValidation.parse(arguments[index])
             default:
                 if argument.hasPrefix("--listen=") {
                     endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--listen=".count)))
@@ -154,6 +207,27 @@ private struct NetworkServerOptions {
                 } else if argument.hasPrefix("--max-sessions="),
                           let value = Int(argument.dropFirst("--max-sessions=".count)), value > 0 {
                     maxSessions = value
+                } else if argument.hasPrefix("--authority=") {
+                    let value = String(argument.dropFirst("--authority=".count))
+                    guard !value.isEmpty else {
+                        throw WebTransportNetworkRuntimeError.invalidPayload
+                    }
+                    authority = value
+                } else if argument.hasPrefix("--path=") {
+                    let value = String(argument.dropFirst("--path=".count))
+                    guard value.hasPrefix("/") else {
+                        throw WebTransportNetworkRuntimeError.invalidPayload
+                    }
+                    path = value
+                } else if argument.hasPrefix("--origin=") {
+                    let value = String(argument.dropFirst("--origin=".count))
+                    allowedOrigin = value == "none" ? nil : value
+                } else if argument.hasPrefix("--protocol=") {
+                    let value = String(argument.dropFirst("--protocol=".count))
+                    protocols = value == "none" ? [] : [value]
+                } else if argument.hasPrefix("--settings-validation=") {
+                    let value = String(argument.dropFirst("--settings-validation=".count))
+                    settingsValidation = try HTTP3WebTransportSettingsValidation.parse(value)
                 } else {
                     throw WebTransportNetworkRuntimeError.invalidPayload
                 }
@@ -168,7 +242,12 @@ private struct NetworkServerOptions {
             endpoint: endpoint,
             timeoutMilliseconds: timeoutMilliseconds,
             transport: transport,
-            maxSessions: maxSessions
+            maxSessions: maxSessions,
+            authority: authority,
+            path: path,
+            allowedOrigin: allowedOrigin,
+            protocols: protocols,
+            settingsValidation: settingsValidation
         )
     }
 }

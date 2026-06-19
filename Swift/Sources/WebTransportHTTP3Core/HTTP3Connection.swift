@@ -31,6 +31,54 @@ public enum HTTP3DataFramePolicy: Equatable, Sendable {
     case buffer
 }
 
+public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
+    case draft15Strict
+    case chromiumInterop
+    case pywebtransportStreamInterop
+
+    public static func parse(_ value: String) throws -> HTTP3WebTransportSettingsValidation {
+        switch value {
+        case "draft15-strict":
+            return .draft15Strict
+        case "chromium-interop":
+            return .chromiumInterop
+        case "pywebtransport-stream-interop":
+            return .pywebtransportStreamInterop
+        default:
+            throw QUICCodecError.malformed("unknown HTTP/3 WebTransport settings validation mode: \(value)")
+        }
+    }
+
+    public var localSettings: HTTP3Settings {
+        switch self {
+        case .draft15Strict:
+            return .webTransportDraft15Defaults
+        case .chromiumInterop:
+            return .webTransportChromiumInteropDefaults
+        case .pywebtransportStreamInterop:
+            return .webTransportPyWebTransportStreamInteropDefaults
+        }
+    }
+
+    public var upgradeToken: String {
+        switch self {
+        case .draft15Strict:
+            return WebTransportHTTP3DraftConstants.current.upgradeToken
+        case .chromiumInterop, .pywebtransportStreamInterop:
+            return "webtransport"
+        }
+    }
+
+    public var acceptedUpgradeTokens: Set<String> {
+        switch self {
+        case .draft15Strict:
+            return [WebTransportHTTP3DraftConstants.current.upgradeToken]
+        case .chromiumInterop, .pywebtransportStreamInterop:
+            return [WebTransportHTTP3DraftConstants.current.upgradeToken, "webtransport"]
+        }
+    }
+}
+
 public enum HTTP3RequestStreamState: Equatable, Sendable {
     case idle
     case open
@@ -55,14 +103,20 @@ public struct HTTP3RequestStream: Equatable, Sendable {
         self.dataChunks = []
     }
 
-    public mutating func makeRequestHeadersFrame(_ fields: [HTTPFieldLine]) throws -> HTTP3Frame {
+    public mutating func makeRequestHeadersFrame(
+        _ fields: [HTTPFieldLine],
+        acceptedProtocolTokens: Set<String> = [WebTransportHTTP3DraftConstants.current.upgradeToken]
+    ) throws -> HTTP3Frame {
         guard role == .client else {
             throw QUICCodecError.malformed("only clients send HTTP/3 request HEADERS")
         }
         guard state == .idle else {
             throw QUICCodecError.malformed("request HEADERS already sent")
         }
-        try WebTransportHTTP3Headers.validateConnectRequest(fields)
+        try WebTransportHTTP3Headers.validateConnectRequest(
+            fields,
+            acceptedProtocolTokens: acceptedProtocolTokens
+        )
         requestHeaders = fields
         state = .open
         return try QPACK.headersFrame(fields: fields)
@@ -84,12 +138,13 @@ public struct HTTP3RequestStream: Equatable, Sendable {
     public mutating func receive(
         frame: HTTP3Frame,
         dataPolicy: HTTP3DataFramePolicy = .reject,
-        qpackLimits: QPACKDecoderLimits = .default
+        qpackLimits: QPACKDecoderLimits = .default,
+        acceptedProtocolTokens: Set<String> = [WebTransportHTTP3DraftConstants.current.upgradeToken]
     ) throws {
         switch frame.type {
         case HTTP3FrameType.headers:
             let headers = try QPACK.decodeHeadersFrame(frame, limits: qpackLimits)
-            try receiveHeaders(headers)
+            try receiveHeaders(headers, acceptedProtocolTokens: acceptedProtocolTokens)
         case HTTP3FrameType.data:
             try receiveData(frame.payload, policy: dataPolicy)
         case HTTP3FrameType.goaway, HTTP3FrameType.settings:
@@ -99,7 +154,10 @@ public struct HTTP3RequestStream: Equatable, Sendable {
         }
     }
 
-    public mutating func receiveHeaders(_ fields: [HTTPFieldLine]) throws {
+    public mutating func receiveHeaders(
+        _ fields: [HTTPFieldLine],
+        acceptedProtocolTokens: Set<String> = [WebTransportHTTP3DraftConstants.current.upgradeToken]
+    ) throws {
         switch role {
         case .client:
             guard state == .open || state == .halfClosedRemote else {
@@ -112,7 +170,10 @@ public struct HTTP3RequestStream: Equatable, Sendable {
             guard state == .idle else {
                 throw QUICCodecError.malformed("server received duplicate request HEADERS")
             }
-            try WebTransportHTTP3Headers.validateConnectRequest(fields)
+            try WebTransportHTTP3Headers.validateConnectRequest(
+                fields,
+                acceptedProtocolTokens: acceptedProtocolTokens
+            )
             requestHeaders = fields
             state = .open
         }
@@ -170,7 +231,8 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
 
     public mutating func receivePeerControlStream(
         _ bytes: Data,
-        zeroRTTRememberedSettings: HTTP3Settings? = nil
+        zeroRTTRememberedSettings: HTTP3Settings? = nil,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict
     ) throws -> [HTTP3Frame] {
         guard !receivedPeerControlStream else {
             throw QUICCodecError.malformed("duplicate HTTP/3 control stream")
@@ -186,7 +248,14 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
 
         let peerRole: HTTP3ConnectionRole = role == .client ? .server : .client
         let decodedSettings = try HTTP3Settings.decodeFrame(firstFrame)
-        try decodedSettings.validateWebTransportDraft15Requirements(peerRole: peerRole)
+        switch settingsValidation {
+        case .draft15Strict:
+            try decodedSettings.validateWebTransportDraft15Requirements(peerRole: peerRole)
+        case .chromiumInterop:
+            try decodedSettings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
+        case .pywebtransportStreamInterop:
+            try decodedSettings.validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: peerRole)
+        }
         if let zeroRTTRememberedSettings {
             try decodedSettings.validateWebTransportZeroRTTCompatibility(
                 remembered: zeroRTTRememberedSettings
@@ -292,6 +361,37 @@ extension HTTP3Settings {
         }
         guard self[constants.settingsWTEnabled] == 1 else {
             throw QUICCodecError.malformed("WebTransport over HTTP/3 requires SETTINGS_WT_ENABLE_WEBTRANSPORT = 1")
+        }
+    }
+
+    public func validateWebTransportChromiumInteropRequirements(peerRole: HTTP3ConnectionRole? = nil) throws {
+        let constants = WebTransportHTTP3DraftConstants.current
+        if peerRole != .client {
+            guard self[constants.settingsEnableConnectProtocol] == 1 else {
+                throw QUICCodecError.malformed("Chromium WebTransport interop requires server SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")
+            }
+        }
+        guard self[constants.settingsH3Datagram] == 1 else {
+            throw QUICCodecError.malformed("Chromium WebTransport interop requires SETTINGS_H3_DATAGRAM = 1")
+        }
+        if peerRole != .client {
+            guard self[constants.settingsWTEnabled] == 1 || self[HTTP3SettingID.legacyEnableWebTransport] == 1 else {
+                throw QUICCodecError.malformed("Chromium WebTransport interop requires a WebTransport enable setting")
+            }
+        }
+    }
+
+    public func validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: HTTP3ConnectionRole? = nil) throws {
+        let constants = WebTransportHTTP3DraftConstants.current
+        if peerRole != .client {
+            guard self[constants.settingsEnableConnectProtocol] == 1 else {
+                throw QUICCodecError.malformed("pywebtransport stream interop requires server SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")
+            }
+        }
+        if self[constants.settingsH3Datagram] == 1 {
+            guard self[constants.settingsWTEnabled] == 1 || self[HTTP3SettingID.legacyEnableWebTransport] == 1 else {
+                throw QUICCodecError.malformed("pywebtransport stream interop requires a WebTransport enable setting when H3_DATAGRAM is advertised")
+            }
         }
     }
 

@@ -100,6 +100,7 @@ let package = Package(
             dependencies: [
                 "WebTransport",
                 "WebTransportCLIConformance",
+                "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime"
             ]
         ),
@@ -108,6 +109,7 @@ let package = Package(
             dependencies: [
                 "WebTransport",
                 "WebTransportCLIConformance",
+                "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime"
             ]
         ),

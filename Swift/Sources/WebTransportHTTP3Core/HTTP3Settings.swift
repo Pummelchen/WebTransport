@@ -83,4 +83,15 @@ public struct HTTP3Settings: Equatable, Sendable {
         WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
         WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1
     ])
+
+    public static let webTransportChromiumInteropDefaults = HTTP3Settings(unchecked: [
+        WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
+        WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
+        WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1,
+        HTTP3SettingID.legacyEnableWebTransport: 1
+    ])
+
+    public static let webTransportPyWebTransportStreamInteropDefaults = HTTP3Settings(unchecked: [
+        WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1
+    ])
 }

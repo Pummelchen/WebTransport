@@ -31,7 +31,7 @@ Current Swift coverage includes:
 - Process-level CLI tests for help/list/error/scenario exit codes and IPv4/IPv6 frame/packet loopback.
 - Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
-- Environment-gated external interop hook via `WEBTRANSPORT_EXTERNAL_INTEROP_ENDPOINT`.
+- External interoperability proof runner via `Swift/run-pywebtransport-interop.sh`, which starts an independent `pywebtransport`/`aioquic` endpoint and records a passing QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream echo proof in `.build/external-interop/pywebtransport-latest.json`. Configured public endpoint probing remains available through `Swift/run-external-interop.sh`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
 - Reproducibility-checked Apple Silicon release artifacts with `SHA256SUMS`.
 - Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
@@ -53,6 +53,7 @@ swift run --package-path Swift WebTransportServer --listen '[::1]:4433' --transp
 swift run --package-path Swift WebTransportClient --connect '[::1]:4433' --transport packet
 swift run --package-path Swift WebTransportClient
 swift run --package-path Swift WebTransportServer
+cd Swift && ./run-pywebtransport-interop.sh
 cd Swift && ./build-release-apple-silicon.sh
 cd Swift && ./check-api-compatibility.sh
 ```

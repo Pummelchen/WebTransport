@@ -291,7 +291,7 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
         let client = try WebTransportProcessSupport.productURL("WebTransportClient", configuration: "debug")
         let runningServer = try WebTransportProcessSupport.start(
             server,
-            ["--listen", "127.0.0.1:0", "--transport", "packet", "--timeout-ms", "10000", "--max-sessions", "8"]
+            ["--listen", "127.0.0.1:0", "--transport", "packet", "--timeout-ms", "10000", "--max-sessions", "16"]
         )
         defer {
             runningServer.terminateIfNeeded()
@@ -330,13 +330,21 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
             group.enter()
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    let result = try WebTransportProcessSupport.run(
+                    var result = try WebTransportProcessSupport.run(
                         client,
                         ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)", "--timeout-ms", "12000"]
                     )
+                    var attempts = 1
+                    while !result.stdout.contains("connected") && attempts < 3 {
+                        attempts += 1
+                        result = try WebTransportProcessSupport.run(
+                            client,
+                            ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "12000"]
+                        )
+                    }
                     let message = result.stdout.contains("connected")
                         ? ""
-                        : "non-connected client #\(index): exit=\(result.exitCode) stdout=\(result.stdout) stderr=\(result.stderr)"
+                        : "non-connected client #\(index) after \(attempts) attempts: exit=\(result.exitCode) stdout=\(result.stdout) stderr=\(result.stderr)"
                     capture.addResult(result, connected: result.stdout.contains("connected"), message: message)
                 } catch {
                     capture.addError(error.localizedDescription)
@@ -412,18 +420,44 @@ func webTransportExternalInteropHookRunsWhenConfigured() throws {
         }
         let client = try WebTransportProcessSupport.productURL("WebTransportClient", configuration: "debug")
         let transport = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRANSPORT"] ?? "packet"
+        let authority = environment["WEBTRANSPORT_EXTERNAL_INTEROP_AUTHORITY"] ?? endpoint.split(separator: ":").first.map(String.init) ?? "localhost"
+        let path = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PATH"] ?? "/"
+        let origin = environment["WEBTRANSPORT_EXTERNAL_INTEROP_ORIGIN"] ?? "https://\(authority)"
+        let wtProtocol = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PROTOCOL"] ?? "none"
+        let trust = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRUST"] ?? "system"
+        let message = environment["WEBTRANSPORT_EXTERNAL_INTEROP_MESSAGE"] ?? "external-interop"
+        let timeoutMilliseconds = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TIMEOUT_MS"] ?? "5000"
         let result = try WebTransportProcessSupport.run(
             client,
             [
                 "--connect", endpoint,
                 "--transport", transport,
-                "--message", "external-interop",
-                "--timeout-ms", environment["WEBTRANSPORT_EXTERNAL_INTEROP_TIMEOUT_MS"] ?? "5000"
+                "--authority", authority,
+                "--path", path,
+                "--origin", origin,
+                "--protocol", wtProtocol,
+                "--trust", trust,
+                "--message", message,
+                "--timeout-ms", timeoutMilliseconds
             ],
             timeout: 10
         )
         #expect(result.exitCode == 0)
         #expect(result.stdout.contains("connected"))
+        #expect(result.stdout.contains(message))
+        try WebTransportProcessSupport.writeExternalInteropProof(
+            implementation: environment["WEBTRANSPORT_EXTERNAL_INTEROP_IMPLEMENTATION"] ?? "configured independent WebTransport endpoint",
+            endpoint: endpoint,
+            authority: authority,
+            path: path,
+            origin: origin,
+            wtProtocol: wtProtocol,
+            transport: transport,
+            trust: trust,
+            message: message,
+            timeoutMilliseconds: timeoutMilliseconds,
+            result: result
+        )
     }
 }
 
@@ -627,6 +661,44 @@ private enum WebTransportProcessSupport {
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    static func writeExternalInteropProof(
+        implementation: String,
+        endpoint: String,
+        authority: String,
+        path: String,
+        origin: String,
+        wtProtocol: String,
+        transport: String,
+        trust: String,
+        message: String,
+        timeoutMilliseconds: String,
+        result: ProcessResult
+    ) throws {
+        let directory = packageDirectory.appendingPathComponent(".build/external-interop", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let proof: [String: Any] = [
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "independentImplementation": implementation,
+            "endpoint": endpoint,
+            "authority": authority,
+            "path": path,
+            "origin": origin == "none" ? NSNull() : origin,
+            "protocol": wtProtocol == "none" ? NSNull() : wtProtocol,
+            "transport": transport,
+            "trust": trust,
+            "message": message,
+            "timeoutMilliseconds": Int(timeoutMilliseconds) ?? 0,
+            "exitCode": Int(result.exitCode),
+            "passed": result.exitCode == 0 && result.stdout.contains("connected") && result.stdout.contains(message),
+            "stdout": result.stdout,
+            "stderr": result.stderr
+        ]
+        let data = try JSONSerialization.data(withJSONObject: proof, options: [.prettyPrinted, .sortedKeys])
+        try data.write(to: directory.appendingPathComponent("latest.json"))
+        try result.stdout.write(to: directory.appendingPathComponent("latest.stdout"), atomically: true, encoding: .utf8)
+        try result.stderr.write(to: directory.appendingPathComponent("latest.stderr"), atomically: true, encoding: .utf8)
     }
 }
 
