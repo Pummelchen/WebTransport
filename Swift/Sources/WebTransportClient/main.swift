@@ -78,22 +78,22 @@ struct WebTransportClientCLI {
                 authority: "localhost",
                 path: "/wt",
                 origin: "https://localhost",
-                supportedProtocols: ["demo.v1"]
+                supportedProtocols: ["demo.v1"],
+                timeoutMilliseconds: 12_000
             ))
             let client = WebTransportClient(configuration: WebTransportClientConfiguration(
                 authority: "localhost",
                 path: "/wt",
                 origin: "https://localhost",
-                availableProtocols: ["demo.v1"]
+                availableProtocols: ["demo.v1"],
+                trustPolicy: .localDevelopmentSelfSigned,
+                timeoutMilliseconds: 12_000
             ))
-            let session = try await client.connect(to: server)
-            let stream = session.receiveDatagrams()
-            try await session.sendDatagram(Data("hello from WebTransportClient".utf8))
-            var iterator = stream.makeAsyncIterator()
-            if let datagram = try await iterator.next(), let text = String(data: datagram, encoding: .utf8) {
-                print("client received datagram echo path: \(text)")
-            }
-            try await session.close(code: 0, reason: "client demo complete")
+            let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
+            async let served = listener.serveOne()
+            let result = try await client.connect(to: listener.localEndpoint, message: "hello from WebTransportClient")
+            _ = try await served
+            print("client received reliable stream echo path: \(result.message)")
             print("WebTransportClient demo completed")
         } catch {
             fputs("WebTransportClient failed: \(error)\n", stderr)
@@ -123,7 +123,7 @@ private struct NetworkClientOptions {
         var path = "/wt"
         var origin: String? = "https://localhost"
         var protocols = ["demo.v1"]
-        var trustPolicy = WebTransportQUICPeerTrustPolicy.localDevelopmentSelfSigned
+        var trustPolicy: WebTransportQUICPeerTrustPolicy?
         var settingsValidation = HTTP3WebTransportSettingsValidation.draft15Strict
         var index = 0
 
@@ -232,6 +232,7 @@ private struct NetworkClientOptions {
         guard let endpoint else {
             throw WebTransportNetworkRuntimeError.invalidEndpoint("--connect requires host:port")
         }
+        let resolvedTrustPolicy = trustPolicy ?? (Self.isLoopback(endpoint.host) ? .localDevelopmentSelfSigned : .systemTrust)
         return NetworkClientOptions(
             endpoint: endpoint,
             message: message,
@@ -241,8 +242,12 @@ private struct NetworkClientOptions {
             path: path,
             origin: origin,
             protocols: protocols,
-            trustPolicy: trustPolicy,
+            trustPolicy: resolvedTrustPolicy,
             settingsValidation: settingsValidation
         )
+    }
+
+    private static func isLoopback(_ host: String) -> Bool {
+        host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 }

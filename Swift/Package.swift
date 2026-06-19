@@ -49,6 +49,7 @@ let package = Package(
             name: "WebTransport",
             dependencies: [
                 "WebTransportHTTP3Core",
+                "WebTransportNetworkRuntime",
                 "WebTransportQUICCore"
             ]
         ),

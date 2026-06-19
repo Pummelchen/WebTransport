@@ -68,6 +68,18 @@ func runtimeSecurityNegativesDoNotExposeSensitiveHandshakeMaterial() throws {
     }
 }
 
+@Test
+func localSelfSignedTrustPolicyIsLoopbackOnly() async throws {
+    let client = WebTransportQUICClient(trustPolicy: .localDevelopmentSelfSigned)
+    await #expect(throws: WebTransportNetworkRuntimeError.self) {
+        _ = try await client.run(
+            to: WebTransportNetworkEndpoint(host: "example.com", port: 443),
+            message: "must-not-connect",
+            timeoutMilliseconds: 5_000
+        )
+    }
+}
+
 private func protectedClientInitialForRuntimeHardening(
     message: String,
     alpn: String,

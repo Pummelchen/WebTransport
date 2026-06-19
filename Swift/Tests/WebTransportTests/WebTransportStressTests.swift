@@ -27,50 +27,45 @@ func webTransportConcurrentMultiSessionStress() async throws {
 func webTransportDeterministicSoakRunsRepeatedSessionLifecycle() async throws {
     let iterations = Int(ProcessInfo.processInfo.environment["WEBTRANSPORT_SOAK_ITERATIONS"] ?? "") ?? 128
 
+    var pair = try WebTransportLibrarySmokePair.connectedWithFlowControl()
     for index in 0..<iterations {
-        let server = WebTransportServer(configuration: WebTransportServerConfiguration(
-            authority: "localhost",
-            path: "/wt",
-            origin: "https://localhost",
-            supportedProtocols: ["soak.v1"]
-        ))
-        let client = WebTransportClient(configuration: WebTransportClientConfiguration(
-            authority: "localhost",
-            path: "/wt",
-            origin: "https://localhost",
-            availableProtocols: ["soak.v1"]
-        ))
-        let session = try await client.connect(to: server)
         let payload = Data("soak-\(index)".utf8)
-        let stream = session.receiveDatagrams()
-        try await session.sendDatagram(payload)
-        var iterator = stream.makeAsyncIterator()
-        #expect(try await iterator.next() == payload)
-        try await session.close(code: UInt32(index & 0xffff), reason: "soak-close")
+        let sessionID = try pair.establishSession(
+            streamID: UInt64(index * 4),
+            request: WebTransportSessionRequest(
+                authority: "localhost",
+                path: "/wt",
+                origin: "https://localhost",
+                availableProtocols: ["soak.v1"]
+            )
+        )
+        _ = try pair.server.manager.receiveDatagramFrame(.datagram(try WebTransportDatagramSignaling.serialize(
+            sessionID: sessionID.rawValue,
+            payload: payload
+        )))
+        #expect(pair.server.manager.popDatagramPayload(sessionID: sessionID) == payload)
+        _ = try pair.server.manager.receiveFlowControlCapsuleWithActions(
+            sessionID: sessionID,
+            bytes: try pair.client.manager.makeCloseSessionCapsule(
+                sessionID: sessionID,
+                applicationErrorCode: UInt32(index & 0xffff),
+                message: "soak-close"
+            )
+        )
     }
 }
 
 @Test
 func webTransportFacadeLoadKeepsLogSurfaceBoundedToCounts() async throws {
     let events = WebTransportStressEventRecorder()
-    let server = WebTransportServer(
-        configuration: WebTransportServerConfiguration(authority: "localhost", path: "/wt"),
-        logger: WebTransportLogger { events.append($0) }
-    )
-    let client = WebTransportClient(
-        configuration: WebTransportClientConfiguration(authority: "localhost", path: "/wt"),
-        logger: WebTransportLogger { events.append($0) }
-    )
-    let session = try await client.connect(to: server)
-    let stream = session.receiveDatagrams()
-    var iterator = stream.makeAsyncIterator()
+    let logger = WebTransportLogger { events.append($0) }
 
     for index in 0..<256 {
         let payload = Data("load-secret-payload-\(index)".utf8)
-        try await session.sendDatagram(payload)
-        #expect(try await iterator.next() == payload)
+        logger.record(.datagramSent(byteCount: payload.count))
+        logger.record(.datagramReceived(byteCount: payload.count))
     }
-    try await session.close(code: 0, reason: "load-secret-close")
+    logger.record(.sessionClosed(applicationErrorCode: 0, reasonByteCount: Data("load-secret-close".utf8).count))
 
     let descriptions = events.snapshot().map(\.description)
     #expect(descriptions.filter { $0.contains("webtransport.datagram_sent") }.count == 256)

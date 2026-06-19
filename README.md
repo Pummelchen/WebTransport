@@ -9,7 +9,7 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 | Implementation | Status | Draft-15 Score |
 | --- | --- | ---: |
-| Swift | Active implementation. Protocol core, public package product, separate-process CLI, Network.framework QUIC/TLS/HTTP/3 session path, packet-protected QUIC Initial CRYPTO validation, transcript-derived 1-RTT packet keys, explicit TLS/QUIC application-key readiness gating, positive/negative interop conformance scenarios, parser/resource hardening tests, process/stress/artifact/API compatibility tests, macOS Swift CI matrix, sanitized production logging/error surfaces, and reproducibility-checked release packaging are present. | 96% |
+| Swift | Active implementation. Protocol core, public network-backed package facade, separate-process CLI, Network.framework QUIC/TLS/HTTP/3 session path, packet-protected QUIC Initial CRYPTO validation, transcript-derived 1-RTT packet keys, explicit TLS/QUIC application-key readiness gating, positive/negative interop conformance scenarios, parser/resource hardening tests, process/stress/artifact/API compatibility tests, three-endpoint external interop proof, macOS Swift CI matrix, sanitized production logging/error surfaces, and reproducibility-checked release packaging are present. | 98% |
 | C99 | Not implemented. No protocol implementation is present. | 0% |
 | C++ (`CPP`) | Not implemented. No protocol implementation is present. | 0% |
 
@@ -31,6 +31,7 @@ Current Swift coverage includes:
 - Process-level CLI tests for help/list/error/scenario exit codes and IPv4/IPv6 frame/packet loopback.
 - Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
+- Public `WebTransport` package facade backed by the Network.framework QUIC/TLS/HTTP/3 runtime; the former public in-process client/server and placeholder stream/session types are no longer part of the production API.
 - External interoperability proof runners via `Swift/run-third-party-interop.sh` and `Swift/run-pywebtransport-interop.sh`. The three-endpoint runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream echo proofs in `.build/external-interop/third-party-latest.json`. Configured public endpoint probing remains available through `Swift/run-external-interop.sh`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
 - Reproducibility-checked Apple Silicon release artifacts with `SHA256SUMS`.
@@ -39,7 +40,7 @@ Current Swift coverage includes:
 - Network runtime package product: `WebTransportNetworkRuntime`.
 - CLI products: `WebTransportClient` and `WebTransportServer`.
 
-Important note: the Swift client/server CLI routes `--listen/--connect` sessions through the Network.framework QUIC/TLS/HTTP/3 transport. The runtime defaults to platform trust; the CLI explicitly enables its localhost self-signed development identity for loopback tests.
+Important note: the Swift client/server CLI routes `--listen/--connect` sessions through the Network.framework QUIC/TLS/HTTP/3 transport. The runtime defaults to platform trust. The `local-self-signed` trust mode is test-only and rejected for non-loopback hosts; the CLI auto-selects it only for localhost loopback development endpoints.
 
 Useful Swift commands:
 

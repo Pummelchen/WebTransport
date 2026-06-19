@@ -25,7 +25,10 @@ private enum InteroperableQUICDebug {
 public enum WebTransportQUICPeerTrustPolicy: Equatable, Sendable {
     /// Use Network.framework's default platform certificate validation.
     case systemTrust
-    /// Allow the generated localhost identity used by the CLI and tests.
+    /// Test-only trust bypass for generated localhost identities.
+    ///
+    /// This mode is rejected for non-loopback endpoints before any network
+    /// connection is attempted.
     case localDevelopmentSelfSigned
 
     public static func parse(_ value: String) throws -> WebTransportQUICPeerTrustPolicy {
@@ -37,6 +40,23 @@ public enum WebTransportQUICPeerTrustPolicy: Equatable, Sendable {
         default:
             throw WebTransportNetworkRuntimeError.invalidTransport("unknown trust policy: \(value)")
         }
+    }
+
+    func validate(endpoint: WebTransportNetworkEndpoint) throws {
+        switch self {
+        case .systemTrust:
+            return
+        case .localDevelopmentSelfSigned:
+            guard Self.isLoopbackHost(endpoint.host) else {
+                throw WebTransportNetworkRuntimeError.invalidTransport(
+                    "local-self-signed trust is restricted to localhost, 127.0.0.1, and ::1"
+                )
+            }
+        }
+    }
+
+    private static func isLoopbackHost(_ host: String) -> Bool {
+        host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 }
 
@@ -63,6 +83,7 @@ public struct WebTransportQUICClient: Sendable {
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSessionResult {
+        try trustPolicy.validate(endpoint: endpoint)
         let host = InteroperableQUICRuntime.host(for: endpoint.host)
         let destination = NWEndpoint.hostPort(
             host: host,

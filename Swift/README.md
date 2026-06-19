@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
 
-Draft-15 score: **96%**
+Draft-15 score: **98%**
 
 ## Current Status
 
@@ -25,6 +25,7 @@ Implemented:
 - Process-level CLI tests for help/list/error/scenario exit codes and IPv4/IPv6 frame/packet loopback.
 - Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
+- Public `WebTransport` package facade backed by the Network.framework QUIC/TLS/HTTP/3 runtime; the former public in-process client/server and placeholder stream/session types are no longer part of the production API.
 - External interoperability proof runners via `./run-third-party-interop.sh` and `./run-pywebtransport-interop.sh`. The three-endpoint runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream echo proofs in `.build/external-interop/third-party-latest.json`. Configured public endpoint probing remains available through `./run-external-interop.sh`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
 - Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
@@ -32,16 +33,15 @@ Implemented:
 
 Recent status:
 
-- The separate-process `--transport packet` and `--transport frame` paths are wired to the Network.framework QUIC/TLS/HTTP/3 runtime. Platform trust is the runtime default; the CLI explicitly opts into its localhost self-signed development identity for loopback tests.
+- The separate-process `--transport packet` and `--transport frame` paths are wired to the Network.framework QUIC/TLS/HTTP/3 runtime. Platform trust is the runtime default. The `local-self-signed` trust mode is test-only and rejected for non-loopback hosts; the CLI auto-selects it only for localhost loopback development endpoints.
 
 ## Public API Surface
 
 The high-level `WebTransport` product exposes:
 
-- `WebTransportClientConfiguration` and `WebTransportServerConfiguration` for authority, path, origin, and subprotocol policy.
-- `WebTransportClient` and `WebTransportServer` actors for Swift concurrency session establishment.
-- `WebTransportSendStream`, `WebTransportReceiveStream`, and `WebTransportBidirectionalStream` with bounded async byte delivery.
-- `WebTransportClientSession` through the `WebTransportSession` protocol for datagram send/receive and close.
+- `WebTransportClientConfiguration` and `WebTransportServerConfiguration` for authority, path, origin, subprotocol policy, trust policy, settings validation, and timeouts.
+- `WebTransportEndpoint` and `WebTransportConnectionResult` for network endpoint and session-result values.
+- `WebTransportClient`, `WebTransportServer`, and `WebTransportListeningServer` for Swift concurrency network session establishment over the production runtime.
 - `WebTransportLogger` and `WebTransportLogEvent` for sanitized opt-in production events.
 - `WebTransportErrorSurface.publicDescription(for:)` for user-visible/logged error text that redacts peer-controlled detail.
 

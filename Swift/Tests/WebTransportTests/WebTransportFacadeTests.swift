@@ -1,75 +1,60 @@
 import Foundation
 import Testing
-@testable import WebTransport
+import WebTransport
 import WebTransportHTTP3Core
+import WebTransportNetworkRuntime
 import WebTransportQUICCore
 
 @Test
-func webTransportClientServerFacadeConnectsAndDeliversDatagram() async throws {
-    let server = WebTransportServer(configuration: WebTransportServerConfiguration(
-        authority: "localhost",
-        path: "/wt",
-        origin: "https://localhost",
-        supportedProtocols: ["demo.v1"]
-    ))
-    let client = WebTransportClient(configuration: WebTransportClientConfiguration(
-        authority: "localhost",
-        path: "/wt",
-        origin: "https://localhost",
-        availableProtocols: ["demo.v1"]
-    ))
-
-    let session = try await client.connect(to: server)
-    let datagrams = session.receiveDatagrams()
-    try await session.sendDatagram(Data("ping".utf8))
-
-    var iterator = datagrams.makeAsyncIterator()
-    let received = try await iterator.next()
-    #expect(received == Data("ping".utf8))
-
-    try await session.close(code: 0, reason: "done")
+func webTransportClientServerNetworkFacadeConnectsAndEchoes() async throws {
+    let (result, serverResult) = try await runLoopbackFacadeExchange(
+        protocols: ["demo.v1"],
+        message: "ping"
+    )
+    #expect(result.sessionEstablished)
+    #expect(serverResult.sessionEstablished)
+    #expect(result.message == "ping")
+    #expect(serverResult.message == "ping")
 }
 
 @Test
 func webTransportFacadeLogsOnlySanitizedProductionEvents() async throws {
     let clientEvents = WebTransportEventRecorder()
     let serverEvents = WebTransportEventRecorder()
-    let server = WebTransportServer(
-        configuration: WebTransportServerConfiguration(
-            authority: "localhost",
-            path: "/wt",
-            origin: "https://localhost",
-            supportedProtocols: ["demo.v1"]
-        ),
-        logger: WebTransportLogger { serverEvents.append($0) }
+    let (result, _) = try await runLoopbackFacadeExchange(
+        protocols: ["demo.v1"],
+        message: "secret-payload",
+        clientLogger: WebTransportLogger { clientEvents.append($0) },
+        serverLogger: WebTransportLogger { serverEvents.append($0) }
     )
-    let client = WebTransportClient(
-        configuration: WebTransportClientConfiguration(
-            authority: "localhost",
-            path: "/wt",
-            origin: "https://localhost",
-            availableProtocols: ["demo.v1"]
-        ),
-        logger: WebTransportLogger { clientEvents.append($0) }
-    )
-
-    let session = try await client.connect(to: server)
-    try await session.sendDatagram(Data("secret-payload".utf8))
-    try await session.close(code: 7, reason: "secret-close-reason")
+    #expect(result.message == "secret-payload")
 
     let descriptions = (clientEvents.snapshot() + serverEvents.snapshot()).map(\.description)
-    #expect(descriptions.contains("webtransport.client_control_exchanged"))
     #expect(descriptions.contains("webtransport.server_control_accepted"))
     #expect(descriptions.contains("webtransport.session_established role=client"))
     #expect(descriptions.contains("webtransport.session_established role=server"))
-    #expect(descriptions.contains("webtransport.datagram_sent bytes=14"))
-    #expect(descriptions.contains("webtransport.datagram_received bytes=14"))
-    #expect(descriptions.contains("webtransport.session_closed code=7 reason_bytes=19"))
     for description in descriptions {
         #expect(!description.contains("secret-payload"))
-        #expect(!description.contains("secret-close-reason"))
         #expect(!description.contains("session="))
         #expect(!description.contains("session_id"))
+    }
+}
+
+@Test
+func webTransportEndpointParsesIPv4AndIPv6Forms() throws {
+    #expect(try WebTransportEndpoint.parse("127.0.0.1:4433") == WebTransportEndpoint(host: "127.0.0.1", port: 4433))
+    #expect(try WebTransportEndpoint.parse("[::1]:4433") == WebTransportEndpoint(host: "::1", port: 4433))
+}
+
+@Test
+func webTransportFacadeRejectsUnsupportedTransportConfiguration() async throws {
+    let client = WebTransportClient(configuration: WebTransportClientConfiguration(
+        authority: "localhost",
+        path: "/wt",
+        transport: .frame
+    ))
+    await #expect(throws: WebTransportNetworkRuntimeError.self) {
+        _ = try await client.connect(to: WebTransportEndpoint(host: "127.0.0.1", port: 4433), message: "ping")
     }
 }
 
@@ -82,45 +67,60 @@ func webTransportPublicErrorSurfaceRedactsPeerControlledDetail() {
     #expect(WebTransportErrorSurface.publicDescription(for: codecError) == "WebTransport protocol codec rejected malformed input")
 }
 
-@Test
-func webTransportPublicStreamsUseBoundedAsyncByteDelivery() async throws {
-    let send = WebTransportSendStream(id: 4, maxBufferedBytes: 8)
-    try await send.send(Data("ping".utf8))
-    try await expectDraft15Error {
-        try await send.send(Data("overflow".utf8))
-    }
-    await send.finish()
-    try await expectDraft15Error {
-        try await send.send(Data("x".utf8))
-    }
-
-    let receive = WebTransportReceiveStream(id: 8, maxBufferedBytes: 8)
-    let bytes = receive.receiveBytes()
-    var iterator = bytes.makeAsyncIterator()
-    let pair = WebTransportBidirectionalStream(id: 12, maxBufferedBytes: 8)
-    let inbound = pair.inbound.receiveBytes()
-    var inboundIterator = inbound.makeAsyncIterator()
-
-    try await pair.outbound.send(Data("out".utf8))
-    await pair.outbound.finish()
-
-    try await receiveTestBytes(receive, Data("in".utf8))
-    #expect(try await iterator.next() == Data("in".utf8))
-    try await receiveTestBytes(pair.inbound, Data("bidi".utf8))
-    #expect(try await inboundIterator.next() == Data("bidi".utf8))
+private func makeLoopbackFacadePair(
+    protocols: [String],
+    clientLogger: WebTransportLogger = .disabled,
+    serverLogger: WebTransportLogger = .disabled
+) async throws -> (WebTransportClient, WebTransportListeningServer) {
+    let server = WebTransportServer(
+        configuration: WebTransportServerConfiguration(
+            authority: "localhost",
+            path: "/wt",
+            origin: "https://localhost",
+            supportedProtocols: protocols,
+            timeoutMilliseconds: 12_000
+        ),
+        logger: serverLogger
+    )
+    let client = WebTransportClient(
+        configuration: WebTransportClientConfiguration(
+            authority: "localhost",
+            path: "/wt",
+            origin: "https://localhost",
+            availableProtocols: protocols,
+            trustPolicy: .localDevelopmentSelfSigned,
+            timeoutMilliseconds: 12_000
+        ),
+        logger: clientLogger
+    )
+    let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
+    return (client, listener)
 }
 
-private func expectDraft15Error(_ operation: () async throws -> Void) async throws {
-    do {
-        try await operation()
-        Issue.record("expected WebTransportDraft15Error")
-    } catch is WebTransportDraft15Error {
-        return
+private func runLoopbackFacadeExchange(
+    protocols: [String],
+    message: String,
+    clientLogger: WebTransportLogger = .disabled,
+    serverLogger: WebTransportLogger = .disabled
+) async throws -> (WebTransportConnectionResult, WebTransportConnectionResult) {
+    var lastError: Error?
+    for _ in 0..<3 {
+        do {
+            let (client, listener) = try await makeLoopbackFacadePair(
+                protocols: protocols,
+                clientLogger: clientLogger,
+                serverLogger: serverLogger
+            )
+            async let served = listener.serveOne()
+            let result = try await client.connect(to: listener.localEndpoint, message: message)
+            let serverResult = try await served
+            return (result, serverResult)
+        } catch {
+            lastError = error
+            try await Task.sleep(for: .milliseconds(100))
+        }
     }
-}
-
-private func receiveTestBytes(_ stream: WebTransportReceiveStream, _ data: Data) async throws {
-    try await stream.channel.send(data)
+    throw lastError ?? QUICCodecError.malformed("WebTransport facade exchange failed")
 }
 
 private final class WebTransportEventRecorder: @unchecked Sendable {

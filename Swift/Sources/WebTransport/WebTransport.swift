@@ -1,5 +1,6 @@
 import Foundation
 import WebTransportHTTP3Core
+import WebTransportNetworkRuntime
 import WebTransportQUICCore
 
 /// Client-side options for Swift concurrency WebTransport session establishment.
@@ -12,17 +13,33 @@ public struct WebTransportClientConfiguration: Equatable, Sendable {
     public var origin: String?
     /// Client-offered WebTransport subprotocol tokens.
     public var availableProtocols: [String]
+    /// Transport path used by the Network.framework runtime.
+    public var transport: WebTransportNetworkTransport
+    /// Certificate trust policy. Defaults to platform system trust.
+    public var trustPolicy: WebTransportQUICPeerTrustPolicy
+    /// HTTP/3 WebTransport settings validation profile.
+    public var settingsValidation: HTTP3WebTransportSettingsValidation
+    /// End-to-end connect timeout in milliseconds.
+    public var timeoutMilliseconds: Int32
 
     public init(
         authority: String,
         path: String,
         origin: String? = nil,
-        availableProtocols: [String] = []
+        availableProtocols: [String] = [],
+        transport: WebTransportNetworkTransport = .packet,
+        trustPolicy: WebTransportQUICPeerTrustPolicy = .systemTrust,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        timeoutMilliseconds: Int32 = 15_000
     ) {
         self.authority = authority
         self.path = path
         self.origin = origin
         self.availableProtocols = availableProtocols
+        self.transport = transport
+        self.trustPolicy = trustPolicy
+        self.settingsValidation = settingsValidation
+        self.timeoutMilliseconds = timeoutMilliseconds
     }
 }
 
@@ -36,17 +53,25 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
     public var origin: String?
     /// Server-supported WebTransport subprotocol tokens.
     public var supportedProtocols: [String]
+    /// HTTP/3 WebTransport settings validation profile.
+    public var settingsValidation: HTTP3WebTransportSettingsValidation
+    /// Listener/session timeout in milliseconds.
+    public var timeoutMilliseconds: Int32
 
     public init(
         authority: String = "localhost",
         path: String = "/wt",
         origin: String? = nil,
-        supportedProtocols: [String] = []
+        supportedProtocols: [String] = [],
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        timeoutMilliseconds: Int32 = 15_000
     ) {
         self.authority = authority
         self.path = path
         self.origin = origin
         self.supportedProtocols = supportedProtocols
+        self.settingsValidation = settingsValidation
+        self.timeoutMilliseconds = timeoutMilliseconds
     }
 }
 
@@ -93,7 +118,7 @@ public struct WebTransportLogger: Sendable {
         self.sink = sink
     }
 
-    func record(_ event: WebTransportLogEvent) {
+    public func record(_ event: WebTransportLogEvent) {
         sink?(event)
     }
 }
@@ -127,377 +152,152 @@ public enum WebTransportErrorSurface {
     }
 }
 
-/// Minimal async session contract for sending datagrams, receiving datagrams,
-/// and closing a WebTransport session.
-public protocol WebTransportSession: Sendable {
-    /// Draft session identifier. Treat as protocol state, not as log-safe user data.
-    var id: WebTransportSessionID { get }
+/// Network endpoint for the production WebTransport runtime.
+public struct WebTransportEndpoint: Equatable, Sendable, CustomStringConvertible {
+    public var host: String
+    public var port: UInt16
 
-    /// Sends one datagram payload on this session.
-    func sendDatagram(_ data: Data) async throws
-
-    /// Returns an async datagram stream for this session.
-    func receiveDatagrams() -> AsyncThrowingStream<Data, Error>
-
-    /// Closes the session with a 32-bit application code and optional reason.
-    func close(code: UInt32, reason: String?) async throws
-}
-
-/// Send half of a WebTransport stream with bounded buffering.
-public struct WebTransportSendStream: Sendable {
-    public let id: UInt64
-    private let channel: WebTransportStreamChannel
-
-    public init(id: UInt64, maxBufferedBytes: Int = 1_048_576) {
-        self.id = id
-        self.channel = WebTransportStreamChannel(maxBufferedBytes: maxBufferedBytes)
+    public init(host: String, port: UInt16) {
+        self.host = host
+        self.port = port
     }
 
-    fileprivate init(id: UInt64, channel: WebTransportStreamChannel) {
-        self.id = id
-        self.channel = channel
+    public static func parse(_ value: String) throws -> WebTransportEndpoint {
+        let endpoint = try WebTransportNetworkEndpoint.parse(value)
+        return WebTransportEndpoint(host: endpoint.host, port: endpoint.port)
     }
 
-    public func send(_ data: Data) async throws {
-        try await channel.send(data)
+    public var description: String {
+        host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
     }
 
-    public func finish() async {
-        await channel.finish()
+    var networkEndpoint: WebTransportNetworkEndpoint {
+        WebTransportNetworkEndpoint(host: host, port: port)
+    }
+
+    init(_ endpoint: WebTransportNetworkEndpoint) {
+        self.host = endpoint.host
+        self.port = endpoint.port
     }
 }
 
-/// Receive half of a WebTransport stream with async byte delivery.
-public struct WebTransportReceiveStream: Sendable {
-    public let id: UInt64
-    let channel: WebTransportStreamChannel
+/// Result returned by the production network WebTransport facade.
+public struct WebTransportConnectionResult: Equatable, Sendable {
+    public var localEndpoint: WebTransportEndpoint
+    public var remoteEndpoint: WebTransportEndpoint
+    public var message: String
+    public var transport: WebTransportNetworkTransport
+    public var sessionEstablished: Bool
 
-    public init(id: UInt64, maxBufferedBytes: Int = 1_048_576) {
-        self.id = id
-        self.channel = WebTransportStreamChannel(maxBufferedBytes: maxBufferedBytes)
-    }
-
-    fileprivate init(id: UInt64, channel: WebTransportStreamChannel) {
-        self.id = id
-        self.channel = channel
-    }
-
-    public func receiveBytes() -> AsyncThrowingStream<Data, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                await channel.attach(continuation)
-            }
-        }
+    init(_ result: WebTransportNetworkSessionResult) {
+        self.localEndpoint = WebTransportEndpoint(result.localEndpoint)
+        self.remoteEndpoint = WebTransportEndpoint(result.remoteEndpoint)
+        self.message = result.message
+        self.transport = result.transport
+        self.sessionEstablished = result.sessionEstablished
     }
 }
 
-/// Bidirectional WebTransport stream represented as paired send and receive halves.
-public struct WebTransportBidirectionalStream: Sendable {
-    public let id: UInt64
-    public let outbound: WebTransportSendStream
-    public let inbound: WebTransportReceiveStream
-
-    public init(id: UInt64, maxBufferedBytes: Int = 1_048_576) {
-        let outboundChannel = WebTransportStreamChannel(maxBufferedBytes: maxBufferedBytes)
-        let inboundChannel = WebTransportStreamChannel(maxBufferedBytes: maxBufferedBytes)
-        self.id = id
-        self.outbound = WebTransportSendStream(id: id, channel: outboundChannel)
-        self.inbound = WebTransportReceiveStream(id: id, channel: inboundChannel)
-    }
-}
-
-/// Client API backed by the package's HTTP/3 WebTransport core.
+/// Client API backed by the Network.framework QUIC/TLS/HTTP/3 WebTransport runtime.
 public actor WebTransportClient {
     public let configuration: WebTransportClientConfiguration
     private let logger: WebTransportLogger
-    private var http3: HTTP3ConnectionState
-    private var manager: WebTransportSessionManager?
-    private var nextRequestStreamID: UInt64
 
     public init(configuration: WebTransportClientConfiguration, logger: WebTransportLogger = .disabled) {
         self.configuration = configuration
         self.logger = logger
-        self.http3 = HTTP3ConnectionState(role: .client)
-        self.manager = nil
-        self.nextRequestStreamID = 0
     }
 
-    /// Establishes a WebTransport session against a paired server instance.
-    public func connect(to server: WebTransportServer) async throws -> WebTransportClientSession {
-        let serverControl = try await server.receiveClientControl(http3.localControlStreamBytes())
-        _ = try http3.receivePeerControlStream(serverControl)
-        logger.record(.clientControlExchanged)
-        if manager == nil {
-            manager = WebTransportSessionManager(http3: http3)
+    /// Establishes a real WebTransport session to a network endpoint and performs
+    /// a reliable-stream echo exchange used by the current runtime smoke path.
+    public func connect(
+        to endpoint: WebTransportEndpoint,
+        message: String
+    ) async throws -> WebTransportConnectionResult {
+        guard configuration.transport == .packet else {
+            throw WebTransportNetworkRuntimeError.invalidTransport(
+                "WebTransport facade currently supports packet transport only"
+            )
         }
-
-        let streamID = nextRequestStreamID
-        nextRequestStreamID += 4
-        let request = try WebTransportSessionRequest(
+        let result = try await WebTransportQUICClient(
+            trustPolicy: configuration.trustPolicy
+        ).run(
+            to: endpoint.networkEndpoint,
+            message: message,
             authority: configuration.authority,
             path: configuration.path,
             origin: configuration.origin,
-            availableProtocols: configuration.availableProtocols
+            protocols: configuration.availableProtocols,
+            settingsValidation: configuration.settingsValidation,
+            timeoutMilliseconds: configuration.timeoutMilliseconds
         )
-        guard var manager else {
-            throw QUICCodecError.malformed("WebTransport client manager was not initialized")
-        }
-        let requestFrame = try manager.makeClientSessionRequest(streamID: streamID, request: request)
-        let decision = try await server.receiveClientSessionRequest(streamID: streamID, frame: requestFrame)
-        let session = try manager.receiveServerSessionResponse(streamID: streamID, frame: decision.responseFrame)
-        self.manager = manager
         logger.record(.sessionEstablished(role: "client"))
-
-        let datagrams = WebTransportDatagramChannel()
-        await server.registerDatagramChannel(datagrams, for: session.id)
-        return WebTransportClientSession(id: session.id, client: self, server: server, datagrams: datagrams)
-    }
-
-    fileprivate func makeDatagramFrame(sessionID: WebTransportSessionID, payload: Data) throws -> QUICFrame {
-        guard var manager else {
-            throw QUICCodecError.malformed("WebTransport client is not connected")
-        }
-        let frame = try manager.makeDatagramFrame(sessionID: sessionID, payload: payload)
-        self.manager = manager
-        logger.record(.datagramSent(byteCount: payload.count))
-        return frame
-    }
-
-    fileprivate func close(sessionID: WebTransportSessionID, code: UInt32, reason: String?) throws -> Data {
-        guard var manager else {
-            throw QUICCodecError.malformed("WebTransport client is not connected")
-        }
-        let capsule = try manager.makeCloseSessionCapsule(
-            sessionID: sessionID,
-            applicationErrorCode: code,
-            message: reason ?? ""
-        )
-        self.manager = manager
-        logger.record(.sessionClosed(
-            applicationErrorCode: code,
-            reasonByteCount: Data((reason ?? "").utf8).count
-        ))
-        return capsule
+        return WebTransportConnectionResult(result)
     }
 }
 
-/// Server API backed by the package's HTTP/3 WebTransport core.
+/// Server factory backed by the Network.framework QUIC/TLS/HTTP/3 WebTransport runtime.
 public actor WebTransportServer {
     public let configuration: WebTransportServerConfiguration
     private let logger: WebTransportLogger
-    private var http3: HTTP3ConnectionState
-    private var manager: WebTransportSessionManager?
-    private var datagramChannels: [WebTransportSessionID: WebTransportDatagramChannel]
 
     public init(configuration: WebTransportServerConfiguration, logger: WebTransportLogger = .disabled) {
         self.configuration = configuration
         self.logger = logger
-        self.http3 = HTTP3ConnectionState(role: .server)
-        self.manager = nil
-        self.datagramChannels = [:]
     }
 
-    fileprivate func receiveClientControl(_ bytes: Data) throws -> Data {
-        _ = try http3.receivePeerControlStream(bytes)
-        manager = WebTransportSessionManager(http3: http3)
+    /// Starts a network listener. The returned server owns the underlying
+    /// listener and can serve accepted WebTransport sessions.
+    public func listen(
+        on endpoint: WebTransportEndpoint,
+        maxConcurrentConnections: Int = 16
+    ) async throws -> WebTransportListeningServer {
+        let server = try WebTransportQUICServer(
+            endpoint: endpoint.networkEndpoint,
+            maxConcurrentConnections: maxConcurrentConnections,
+            authority: configuration.authority,
+            path: configuration.path,
+            allowedOrigin: configuration.origin,
+            protocols: configuration.supportedProtocols,
+            settingsValidation: configuration.settingsValidation
+        )
+        let local = try await server.waitForListening(timeoutMilliseconds: configuration.timeoutMilliseconds)
         logger.record(.serverControlAccepted)
-        return try http3.localControlStreamBytes()
-    }
-
-    fileprivate func receiveClientSessionRequest(
-        streamID: UInt64,
-        frame: HTTP3Frame
-    ) throws -> WebTransportServerSessionDecision {
-        guard var manager else {
-            throw QUICCodecError.malformed("WebTransport server manager was not initialized")
-        }
-        let policy = try WebTransportServerSessionPolicy(
-            allowedAuthorities: [configuration.authority],
-            allowedPaths: [configuration.path],
-            allowedOrigins: configuration.origin.map { [$0] },
-            supportedProtocols: configuration.supportedProtocols,
-            requireProtocolSelection: !configuration.supportedProtocols.isEmpty
+        return WebTransportListeningServer(
+            runtime: server,
+            localEndpoint: WebTransportEndpoint(local),
+            logger: logger,
+            timeoutMilliseconds: configuration.timeoutMilliseconds
         )
-        let decision = try manager.receiveClientSessionRequest(
-            streamID: streamID,
-            frame: frame,
-            policy: policy
-        )
-        self.manager = manager
-        if decision.rejectionError == nil {
-            logger.record(.sessionEstablished(role: "server"))
-        }
-        return decision
     }
+}
 
-    fileprivate func registerDatagramChannel(
-        _ channel: WebTransportDatagramChannel,
-        for sessionID: WebTransportSessionID
+/// Active network WebTransport listener returned by `WebTransportServer.listen`.
+public final class WebTransportListeningServer: @unchecked Sendable {
+    public let localEndpoint: WebTransportEndpoint
+    public let certificateSHA256: Data
+
+    private let runtime: WebTransportQUICServer
+    private let logger: WebTransportLogger
+    private let timeoutMilliseconds: Int32
+
+    init(
+        runtime: WebTransportQUICServer,
+        localEndpoint: WebTransportEndpoint,
+        logger: WebTransportLogger,
+        timeoutMilliseconds: Int32
     ) {
-        datagramChannels[sessionID] = channel
+        self.runtime = runtime
+        self.localEndpoint = localEndpoint
+        self.certificateSHA256 = runtime.certificateSHA256
+        self.logger = logger
+        self.timeoutMilliseconds = timeoutMilliseconds
     }
 
-    fileprivate func receiveDatagram(_ frame: QUICFrame) async throws {
-        guard var manager else {
-            throw QUICCodecError.malformed("WebTransport server is not connected")
-        }
-        let sessionID = try manager.receiveDatagramFrame(frame)
-        let payload = manager.popDatagramPayload(sessionID: sessionID)
-        self.manager = manager
-        if let payload, let channel = datagramChannels[sessionID] {
-            logger.record(.datagramReceived(byteCount: payload.count))
-            await channel.yield(payload)
-        }
-    }
-
-    fileprivate func receiveClose(sessionID: WebTransportSessionID, capsule: Data) throws {
-        guard var manager else {
-            throw QUICCodecError.malformed("WebTransport server is not connected")
-        }
-        let received = try manager.receiveFlowControlCapsuleWithActions(sessionID: sessionID, bytes: capsule)
-        self.manager = manager
-        if case .closeSession(let applicationErrorCode, let message) = received.capsule {
-            logger.record(.sessionClosed(
-                applicationErrorCode: applicationErrorCode,
-                reasonByteCount: Data(message.utf8).count
-            ))
-        }
-    }
-}
-
-/// Client-side session returned by `WebTransportClient.connect(to:)`.
-public struct WebTransportClientSession: WebTransportSession {
-    public let id: WebTransportSessionID
-    private let client: WebTransportClient
-    private let server: WebTransportServer
-    private let datagrams: WebTransportDatagramChannel
-
-    fileprivate init(
-        id: WebTransportSessionID,
-        client: WebTransportClient,
-        server: WebTransportServer,
-        datagrams: WebTransportDatagramChannel
-    ) {
-        self.id = id
-        self.client = client
-        self.server = server
-        self.datagrams = datagrams
-    }
-
-    public func sendDatagram(_ data: Data) async throws {
-        let frame = try await client.makeDatagramFrame(sessionID: id, payload: data)
-        try await server.receiveDatagram(frame)
-    }
-
-    public func receiveDatagrams() -> AsyncThrowingStream<Data, Error> {
-        AsyncThrowingStream { continuation in
-            Task {
-                await datagrams.attach(continuation)
-            }
-        }
-    }
-
-    public func close(code: UInt32, reason: String?) async throws {
-        let capsule = try await client.close(sessionID: id, code: code, reason: reason)
-        try await server.receiveClose(sessionID: id, capsule: capsule)
-        await datagrams.finish()
-    }
-}
-
-/// Async in-memory datagram fan-out used by the high-level API.
-public actor WebTransportDatagramChannel {
-    private var continuations: [UUID: AsyncThrowingStream<Data, Error>.Continuation] = [:]
-    private var pending: [Data] = []
-
-    func attach(_ continuation: AsyncThrowingStream<Data, Error>.Continuation) {
-        let id = UUID()
-        continuations[id] = continuation
-        for item in pending {
-            continuation.yield(item)
-        }
-        pending.removeAll()
-        continuation.onTermination = { [weak self] _ in
-            Task { await self?.remove(id) }
-        }
-    }
-
-    func yield(_ data: Data) {
-        guard !continuations.isEmpty else {
-            pending.append(data)
-            return
-        }
-        for continuation in continuations.values {
-            continuation.yield(data)
-        }
-    }
-
-    func finish() {
-        for continuation in continuations.values {
-            continuation.finish()
-        }
-        continuations.removeAll()
-    }
-
-    private func remove(_ id: UUID) {
-        continuations.removeValue(forKey: id)
-    }
-}
-
-public actor WebTransportStreamChannel {
-    private let maxBufferedBytes: Int
-    private var bufferedBytes = 0
-    private var continuations: [UUID: AsyncThrowingStream<Data, Error>.Continuation] = [:]
-    private var pending: [Data] = []
-    private var finished = false
-
-    public init(maxBufferedBytes: Int = 1_048_576) {
-        self.maxBufferedBytes = max(0, maxBufferedBytes)
-    }
-
-    func attach(_ continuation: AsyncThrowingStream<Data, Error>.Continuation) {
-        let id = UUID()
-        continuations[id] = continuation
-        for item in pending {
-            continuation.yield(item)
-        }
-        pending.removeAll()
-        bufferedBytes = 0
-        if finished {
-            continuation.finish()
-        }
-        continuation.onTermination = { [weak self] _ in
-            Task { await self?.remove(id) }
-        }
-    }
-
-    func send(_ data: Data) throws {
-        guard !finished else {
-            throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport stream is closed")
-        }
-        guard bufferedBytes + data.count <= maxBufferedBytes else {
-            throw WebTransportDraft15Error(kind: .flowControl, message: "WebTransport stream buffer limit exceeded")
-        }
-        guard !continuations.isEmpty else {
-            pending.append(data)
-            bufferedBytes += data.count
-            return
-        }
-        for continuation in continuations.values {
-            continuation.yield(data)
-        }
-    }
-
-    func finish() {
-        finished = true
-        for continuation in continuations.values {
-            continuation.finish()
-        }
-        continuations.removeAll()
-        pending.removeAll()
-        bufferedBytes = 0
-    }
-
-    private func remove(_ id: UUID) {
-        continuations.removeValue(forKey: id)
+    @discardableResult
+    public func serveOne() async throws -> WebTransportConnectionResult {
+        let result = try await runtime.serveOne(timeoutMilliseconds: timeoutMilliseconds)
+        logger.record(.sessionEstablished(role: "server"))
+        return WebTransportConnectionResult(result)
     }
 }

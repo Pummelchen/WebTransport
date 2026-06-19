@@ -923,26 +923,48 @@ private func runMalformedFlowInteropMatrix() throws {
 }
 
 private func runClientServerAPIDemo() async throws {
-    let server = WebTransportServer(configuration: WebTransportServerConfiguration(
-        authority: "localhost",
-        path: "/wt",
-        origin: "https://localhost",
-        supportedProtocols: ["demo.v1"]
-    ))
-    let client = WebTransportClient(configuration: WebTransportClientConfiguration(
-        authority: "localhost",
-        path: "/wt",
-        origin: "https://localhost",
-        availableProtocols: ["demo.v1"]
-    ))
-    let session = try await client.connect(to: server)
-    let stream = session.receiveDatagrams()
-    try await session.sendDatagram(Data("hello from WebTransportClient".utf8))
-    var iterator = stream.makeAsyncIterator()
-    guard try await iterator.next() == Data("hello from WebTransportClient".utf8) else {
-        throw QUICCodecError.malformed("WebTransport datagram was not delivered")
+    let message = "hello from WebTransportClient"
+    let (connected, serverResult) = try await runClientServerAPIDemoAttempt(message: message)
+    guard connected.sessionEstablished,
+          serverResult.sessionEstablished,
+          connected.message == message,
+          serverResult.message == message else {
+        throw QUICCodecError.malformed("WebTransport network facade did not complete echo session")
     }
-    try await session.close(code: 0, reason: "client demo complete")
+}
+
+private func runClientServerAPIDemoAttempt(
+    message: String
+) async throws -> (WebTransportConnectionResult, WebTransportConnectionResult) {
+    var lastError: Error?
+    for _ in 0..<3 {
+        do {
+            let server = WebTransportServer(configuration: WebTransportServerConfiguration(
+                authority: "localhost",
+                path: "/wt",
+                origin: "https://localhost",
+                supportedProtocols: ["demo.v1"],
+                timeoutMilliseconds: 12_000
+            ))
+            let client = WebTransportClient(configuration: WebTransportClientConfiguration(
+                authority: "localhost",
+                path: "/wt",
+                origin: "https://localhost",
+                availableProtocols: ["demo.v1"],
+                trustPolicy: .localDevelopmentSelfSigned,
+                timeoutMilliseconds: 12_000
+            ))
+            let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
+            async let served = listener.serveOne()
+            let connected = try await client.connect(to: listener.localEndpoint, message: message)
+            let serverResult = try await served
+            return (connected, serverResult)
+        } catch {
+            lastError = error
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+    throw lastError ?? QUICCodecError.malformed("WebTransport network facade demo failed")
 }
 
 private func expectThrows(_ operation: () throws -> Void) throws {
