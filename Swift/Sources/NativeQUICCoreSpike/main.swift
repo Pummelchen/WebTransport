@@ -54,6 +54,7 @@ enum NativeQUICCoreSpike {
             try proveHTTP3ConnectionLayer()
             try proveWebTransportSessionEstablishment()
             try proveWebTransportLibrarySmokeMatrix()
+            try proveWebTransportComplianceMatrix()
             print("phase1b: native QUIC core frame exchange over Apple UDP passed without security prompts")
         } catch {
             fputs("NativeQUICCoreSpike failed: \(error)\n", stderr)
@@ -488,6 +489,15 @@ enum NativeQUICCoreSpike {
         try assert(failures.isEmpty, "library smoke matrix passed: \(failures)")
         try assert(results.map(\.scenario) == WebTransportLibrarySmokeScenario.allCases, "library smoke matrix covers all scenarios")
         print("library-smoke: close/drain, rejection, backpressure, ordering, and multi-session matrix passed")
+    }
+
+    private static func proveWebTransportComplianceMatrix() throws {
+        try assert(WebTransportDraft15ComplianceMatrix.allPass, "draft-15 compliance matrix all pass")
+        try assert(
+            WebTransportDraft15ComplianceMatrix.definitionOfDone.count == 6,
+            "draft-15 compliance matrix covers Phase 13J requirement families"
+        )
+        print("compliance: draft-15 Phase 13 definition-of-done matrix passed")
     }
 }
 

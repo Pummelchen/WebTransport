@@ -98,6 +98,10 @@ draft-15 compliance closure is in progress.
   `LibrarySmokeServer` in-memory smoke drivers and a strict pass/fail smoke matrix
   for close/drain, rejection, backpressure, early-ingress ordering promotion, and
   multi-session isolation scenarios. `NativeQUICCoreSpike` runs this matrix.
+- `WebTransportHTTP3Core` also provides an executable
+  `WebTransportDraft15ComplianceMatrix` covering the Phase 13J definition of done:
+  establishment/negotiation, streams/datagrams, close/drain, flow-control/errors,
+  H3 stream constraints, and prompt-free security/identity handling.
 
 Commands:
 

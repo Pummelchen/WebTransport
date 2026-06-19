@@ -452,6 +452,23 @@ func webTransportLibrarySmokeMatrixCoversPhase13IScenarios() throws {
 }
 
 @Test
+func webTransportDraft15ComplianceDefinitionOfDoneIsExplicitAndPassing() {
+    let items = WebTransportDraft15ComplianceMatrix.definitionOfDone
+    #expect(WebTransportDraft15ComplianceMatrix.allPass)
+    #expect(items.map(\.requirementFamily) == [
+        "Session establishment and application protocol negotiation",
+        "Streams and datagrams, including buffered ingress and rejection behavior",
+        "Session close/drain behavior",
+        "Flow-control and error codes",
+        "H3 control and request stream constraints",
+        "Security and identity handling without prompts"
+    ])
+    #expect(items.allSatisfy { $0.status == .pass })
+    #expect(items.allSatisfy { !$0.documentedBehavior.isEmpty })
+    #expect(items.allSatisfy { !$0.evidence.isEmpty })
+}
+
+@Test
 func webTransportRejectsMalformedConnectDataOrderingWithRequirementsNotMet() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
     do {
