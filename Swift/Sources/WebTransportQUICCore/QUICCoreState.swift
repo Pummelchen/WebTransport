@@ -583,7 +583,7 @@ public struct QUICStreamState: Equatable, Sendable {
         }
         let frameOffset = offset ?? 0
         guard frameOffset == receiveOffset else {
-            throw QUICStateError.streamStateViolation("out-of-order STREAM data is not accepted by this deterministic core")
+            throw QUICStateError.streamStateViolation("out-of-order STREAM data is not accepted")
         }
         let (attempted, receiveOverflow) = frameOffset.addingReportingOverflow(UInt64(data.count))
         guard !receiveOverflow else {

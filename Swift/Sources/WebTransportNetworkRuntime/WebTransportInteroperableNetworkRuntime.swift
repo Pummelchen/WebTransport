@@ -21,11 +21,23 @@ private enum InteroperableQUICDebug {
     }
 }
 
-public struct WebTransportQUICInteroperablePacketProbeClient: Sendable {
-    public var localPort: UInt16
+public enum WebTransportQUICPeerTrustPolicy: Equatable, Sendable {
+    /// Use Network.framework's default platform certificate validation.
+    case systemTrust
+    /// Allow the generated localhost identity used by the CLI and tests.
+    case localDevelopmentSelfSigned
+}
 
-    public init(localPort: UInt16 = 0) {
+public struct WebTransportQUICClient: Sendable {
+    public var localPort: UInt16
+    public var trustPolicy: WebTransportQUICPeerTrustPolicy
+
+    public init(
+        localPort: UInt16 = 0,
+        trustPolicy: WebTransportQUICPeerTrustPolicy = .systemTrust
+    ) {
         self.localPort = localPort
+        self.trustPolicy = trustPolicy
     }
 
     @discardableResult
@@ -33,7 +45,7 @@ public struct WebTransportQUICInteroperablePacketProbeClient: Sendable {
         to endpoint: WebTransportNetworkEndpoint,
         message: String,
         timeoutMilliseconds: Int32 = 1_000
-    ) async throws -> WebTransportNetworkProbeResult {
+    ) async throws -> WebTransportNetworkSessionResult {
         let host = InteroperableQUICRuntime.host(for: endpoint.host)
         let destination = NWEndpoint.hostPort(
             host: host,
@@ -41,7 +53,7 @@ public struct WebTransportQUICInteroperablePacketProbeClient: Sendable {
         )
         InteroperableQUICDebug.log("client connecting to \(endpoint.host):\(endpoint.port)")
         let connection = NetworkConnection(to: destination) {
-            InteroperableQUICRuntime.makeClientQUIC()
+            InteroperableQUICRuntime.makeClientQUIC(trustPolicy: trustPolicy)
         }
         InteroperableQUICDebug.log("client state before start: \(connection.state)")
         InteroperableQUICDebug.log("client started")
@@ -164,10 +176,10 @@ public struct WebTransportQUICInteroperablePacketProbeClient: Sendable {
             InteroperableQUICDebug.log("client received datagram bytes=\(receivedDatagram.count)")
             let responseSessionID = try manager.receiveDatagramFrame(.datagram(receivedDatagram))
             guard let responsePayload = manager.popDatagramPayload(sessionID: responseSessionID) else {
-                throw WebTransportNetworkRuntimeError.invalidProbePayload
+                throw WebTransportNetworkRuntimeError.invalidPayload
             }
             guard let responseMessageValue = String(data: responsePayload, encoding: .utf8) else {
-                throw WebTransportNetworkRuntimeError.invalidProbePayload
+                throw WebTransportNetworkRuntimeError.invalidPayload
             }
             responseMessage = responseMessageValue
         } else {
@@ -185,12 +197,12 @@ public struct WebTransportQUICInteroperablePacketProbeClient: Sendable {
                 timeoutMilliseconds: remainingTimeout()
             )
             guard let responseMessageValue = String(data: fallbackPayload, encoding: .utf8) else {
-                throw WebTransportNetworkRuntimeError.invalidProbePayload
+                throw WebTransportNetworkRuntimeError.invalidPayload
             }
             responseMessage = responseMessageValue
         }
 
-        return WebTransportNetworkProbeResult(
+        return WebTransportNetworkSessionResult(
             localEndpoint: WebTransportNetworkEndpoint(host: endpoint.host, port: endpoint.port),
             remoteEndpoint: endpoint,
             message: responseMessage,
@@ -199,7 +211,7 @@ public struct WebTransportQUICInteroperablePacketProbeClient: Sendable {
         )
     }
 }
-public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Sendable {
+public final class WebTransportQUICServer: @unchecked Sendable {
     public var localEndpoint: WebTransportNetworkEndpoint
 
     private let listener: NetworkListener<QUIC>
@@ -264,7 +276,7 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
     }
 
     @discardableResult
-    public func serveOne(timeoutMilliseconds: Int32 = 1_000) async throws -> WebTransportNetworkProbeResult {
+    public func serveOne(timeoutMilliseconds: Int32 = 1_000) async throws -> WebTransportNetworkSessionResult {
         let connection = try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
             try await self.acceptedConnections.dequeue()
         }
@@ -294,7 +306,7 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
     private func serveSession(
         on connection: NetworkConnection<QUIC>,
         timeoutMilliseconds: Int32
-    ) async throws -> WebTransportNetworkProbeResult {
+    ) async throws -> WebTransportNetworkSessionResult {
         let started = Date()
         let remainingTimeout: @Sendable () -> Int32 = { [timeoutMilliseconds] () -> Int32 in
             InteroperableQUICHelpers.remainingTimeout(
@@ -416,7 +428,7 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
             }
             let sessionID = try manager.receiveDatagramFrame(.datagram(incoming))
             guard let requestDatagram = manager.popDatagramPayload(sessionID: sessionID) else {
-                throw WebTransportNetworkRuntimeError.invalidProbePayload
+                throw WebTransportNetworkRuntimeError.invalidPayload
             }
             let echoed = requestDatagram
             let responseDatagram = try manager.makeDatagramFrame(sessionID: sessionID, payload: echoed)
@@ -424,9 +436,9 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
                 try await datagrams.send(responseDatagram.datagramPayload)
             }
             guard let echoedMessage = String(data: echoed, encoding: .utf8) else {
-                throw WebTransportNetworkRuntimeError.invalidProbePayload
+                throw WebTransportNetworkRuntimeError.invalidPayload
             }
-            return WebTransportNetworkProbeResult(
+            return WebTransportNetworkSessionResult(
                 localEndpoint: localEndpoint,
                 remoteEndpoint: localEndpoint,
                 message: echoedMessage,
@@ -449,13 +461,13 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
             )
         }
         guard let echoedMessage = String(data: fallbackPayload, encoding: .utf8) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         try await runWithTimeout {
             try await fallbackStream.send(Data(echoedMessage.utf8), endOfStream: true)
         }
 
-        return WebTransportNetworkProbeResult(
+        return WebTransportNetworkSessionResult(
             localEndpoint: localEndpoint,
             remoteEndpoint: localEndpoint,
             message: echoedMessage,
@@ -511,16 +523,18 @@ private enum InteroperableQUICRuntime {
         .maxDatagramFrameSize(1_200)
     }
 
-    static func makeClientQUIC() -> QUIC {
-        makeBaseQUIC()
-            .tls
-            .peerAuthentication(.none)
+    static func makeClientQUIC(trustPolicy: WebTransportQUICPeerTrustPolicy) -> QUIC {
+        switch trustPolicy {
+        case .systemTrust:
+            return makeBaseQUIC()
+        case .localDevelopmentSelfSigned:
+            return makeBaseQUIC().tls.peerAuthentication(.none)
+        }
     }
 
     static func makeServerQUIC(identity: sec_identity_t) -> QUIC {
         makeBaseQUIC()
             .tls.localIdentity(identity)
-            .tls.peerAuthentication(.none)
     }
 }
 
@@ -928,7 +942,7 @@ private enum SelfSignedCertificate {
             tbsCertificate as CFData,
             &signError
         ) as Data? else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
         return DER.sequence([
@@ -998,7 +1012,7 @@ private enum DER {
 
     static func objectIdentifier(_ components: [UInt64]) throws -> Data {
         guard components.count >= 2 else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let firstTwo = components[0] * 40 + components[1]
         var bytes = [UInt8(firstTwo)]

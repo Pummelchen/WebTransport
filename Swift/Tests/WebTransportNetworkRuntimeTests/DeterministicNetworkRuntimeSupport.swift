@@ -4,112 +4,9 @@ import WebTransportHTTP3Core
 import WebTransportQUICCore
 import WebTransportTLSCore
 import WebTransportUDPApple
+@testable import WebTransportNetworkRuntime
 
-public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConvertible, Sendable {
-    case invalidEndpoint(String)
-    case invalidProbePayload
-    case invalidTransport(String)
-    case unexpectedPacket
-    case unexpectedFrame
-    case timeout(Int32)
-
-    public var description: String {
-        switch self {
-        case .invalidEndpoint(let value):
-            return "invalid endpoint: \(value)"
-        case .invalidProbePayload:
-            return "invalid WebTransport network probe payload"
-        case .invalidTransport(let value):
-            return "invalid WebTransport network probe transport: \(value)"
-        case .unexpectedPacket:
-            return "unexpected packet in WebTransport network probe"
-        case .unexpectedFrame:
-            return "unexpected frame in WebTransport network probe packet"
-        case .timeout(let value):
-            return "network runtime operation timed out after \(value)ms"
-        }
-    }
-}
-
-public enum WebTransportNetworkProbeTransport: String, CaseIterable, Sendable {
-    case packet
-    case frame
-
-    public static func parse(_ value: String) throws -> WebTransportNetworkProbeTransport {
-        guard let transport = WebTransportNetworkProbeTransport(rawValue: value) else {
-            throw WebTransportNetworkRuntimeError.invalidTransport(value)
-        }
-        return transport
-    }
-}
-
-public struct WebTransportNetworkEndpoint: Equatable, Sendable {
-    public var host: String
-    public var port: UInt16
-
-    public init(host: String = "127.0.0.1", port: UInt16) {
-        self.host = host
-        self.port = port
-    }
-
-    public static func parse(_ value: String) throws -> WebTransportNetworkEndpoint {
-        if value.hasPrefix("[") {
-            guard let close = value.firstIndex(of: "]"),
-                  value.index(after: close) < value.endIndex,
-                  value[value.index(after: close)] == ":" else {
-                throw WebTransportNetworkRuntimeError.invalidEndpoint(value)
-            }
-            let host = String(value[value.index(after: value.startIndex)..<close])
-            let portStart = value.index(close, offsetBy: 2)
-            guard !host.isEmpty,
-                  portStart < value.endIndex,
-                  let port = UInt16(value[portStart...]) else {
-                throw WebTransportNetworkRuntimeError.invalidEndpoint(value)
-            }
-            return WebTransportNetworkEndpoint(host: host, port: port)
-        }
-
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2,
-              !parts[0].isEmpty,
-              let port = UInt16(parts[1]) else {
-            throw WebTransportNetworkRuntimeError.invalidEndpoint(value)
-        }
-        return WebTransportNetworkEndpoint(host: String(parts[0]), port: port)
-    }
-
-    public var commandLineValue: String {
-        host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
-    }
-
-    var udpEndpoint: QUICUDPEndpoint {
-        QUICUDPEndpoint(host: host, port: port)
-    }
-}
-
-public struct WebTransportNetworkProbeResult: Equatable, Sendable {
-    public var localEndpoint: WebTransportNetworkEndpoint
-    public var remoteEndpoint: WebTransportNetworkEndpoint
-    public var message: String
-    public var transport: WebTransportNetworkProbeTransport
-    public var sessionEstablished: Bool
-
-    public init(
-        localEndpoint: WebTransportNetworkEndpoint,
-        remoteEndpoint: WebTransportNetworkEndpoint,
-        message: String,
-        transport: WebTransportNetworkProbeTransport = .frame,
-        sessionEstablished: Bool = false
-    ) {
-        self.localEndpoint = localEndpoint
-        self.remoteEndpoint = remoteEndpoint
-        self.message = message
-        self.transport = transport
-        self.sessionEstablished = sessionEstablished
-    }
-}
-
-public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
+final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
     private let port: QUICUDPPort
     private var bufferedInitialPackets: [String: [BufferedInitialPacket]] = [:]
     private let bufferLock = NSLock()
@@ -119,19 +16,19 @@ public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
         let bytes: Data
     }
 
-    public var localEndpoint: WebTransportNetworkEndpoint {
+    var localEndpoint: WebTransportNetworkEndpoint {
         WebTransportNetworkEndpoint(
             host: port.localEndpoint.host,
             port: port.localEndpoint.port
         )
     }
 
-    public init(bindPort: UInt16) throws {
+    init(bindPort: UInt16) throws {
         self.port = try QUICUDPPort(bindPort: bindPort)
     }
 
     @discardableResult
-    public func serveOne(timeoutMilliseconds: Int32 = 1_000) throws -> WebTransportNetworkProbeResult {
+    func serveOne(timeoutMilliseconds: Int32 = 1_000) throws -> WebTransportNetworkSessionResult {
         let (bytes, remote) = try receiveOrTakePendingInitial(timeoutMilliseconds: timeoutMilliseconds)
         let decoded = try WebTransportQUICPacketProbeCodec.decodeClientInitial(bytes)
         let handshakeContext = try WebTransportQUICPacketProbeCodec.serverHandshakeContext(
@@ -149,14 +46,14 @@ public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
             handshakeContext: handshakeContext
         )
         guard applicationRequest.message == decoded.message else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let applicationResponse = try WebTransportQUICPacketProbeCodec.encodeServerApplicationResponse(
             handshakeContext: handshakeContext,
             message: applicationRequest.message
         )
         try port.send(applicationResponse, to: remote)
-        return WebTransportNetworkProbeResult(
+        return WebTransportNetworkSessionResult(
             localEndpoint: localEndpoint,
             remoteEndpoint: WebTransportNetworkEndpoint(host: remote.host, port: remote.port),
             message: applicationRequest.message,
@@ -248,19 +145,19 @@ public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
     }
 }
 
-public struct WebTransportQUICPacketProbeClient: Sendable {
-    public var localPort: UInt16
+struct WebTransportQUICPacketProbeClient: Sendable {
+    var localPort: UInt16
 
-    public init(localPort: UInt16 = 0) {
+    init(localPort: UInt16 = 0) {
         self.localPort = localPort
     }
 
     @discardableResult
-    public func run(
+    func run(
         to endpoint: WebTransportNetworkEndpoint,
         message: String,
         timeoutMilliseconds: Int32 = 1_000
-    ) throws -> WebTransportNetworkProbeResult {
+    ) throws -> WebTransportNetworkSessionResult {
         let port = try QUICUDPPort(bindPort: localPort)
         let packet = try WebTransportQUICPacketProbeCodec.encodeClientInitial(message: message)
         let request = try WebTransportQUICPacketProbeCodec.decodeClientInitial(packet)
@@ -275,7 +172,7 @@ public struct WebTransportQUICPacketProbeClient: Sendable {
             request: request
         )
         guard handshakeContext.message == message else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let applicationRequest = try WebTransportQUICPacketProbeCodec.encodeClientApplicationRequest(
             handshakeContext: handshakeContext,
@@ -291,9 +188,9 @@ public struct WebTransportQUICPacketProbeClient: Sendable {
             handshakeContext: handshakeContext
         )
         guard applicationMessage == message else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
-        return WebTransportNetworkProbeResult(
+        return WebTransportNetworkSessionResult(
             localEndpoint: WebTransportNetworkEndpoint(
                 host: port.localEndpoint.host,
                 port: port.localEndpoint.port
@@ -306,27 +203,27 @@ public struct WebTransportQUICPacketProbeClient: Sendable {
     }
 }
 
-public final class WebTransportNetworkProbeServer: @unchecked Sendable {
+final class WebTransportNetworkProbeServer: @unchecked Sendable {
     private let port: QUICUDPPort
 
-    public var localEndpoint: WebTransportNetworkEndpoint {
+    var localEndpoint: WebTransportNetworkEndpoint {
         WebTransportNetworkEndpoint(
             host: port.localEndpoint.host,
             port: port.localEndpoint.port
         )
     }
 
-    public init(bindPort: UInt16) throws {
+    init(bindPort: UInt16) throws {
         self.port = try QUICUDPPort(bindPort: bindPort)
     }
 
     @discardableResult
-    public func serveOne(timeoutMilliseconds: Int32 = 1_000) throws -> WebTransportNetworkProbeResult {
+    func serveOne(timeoutMilliseconds: Int32 = 1_000) throws -> WebTransportNetworkSessionResult {
         let (bytes, remote) = try port.receive(timeoutMilliseconds: timeoutMilliseconds)
         let message = try WebTransportNetworkProbeCodec.decodeProbePacket(bytes)
         let response = try WebTransportNetworkProbeCodec.encodeAckPacket(message: message)
         try port.send(response, to: remote)
-        return WebTransportNetworkProbeResult(
+        return WebTransportNetworkSessionResult(
             localEndpoint: localEndpoint,
             remoteEndpoint: WebTransportNetworkEndpoint(host: remote.host, port: remote.port),
             message: message,
@@ -335,19 +232,19 @@ public final class WebTransportNetworkProbeServer: @unchecked Sendable {
     }
 }
 
-public struct WebTransportNetworkProbeClient: Sendable {
-    public var localPort: UInt16
+struct WebTransportNetworkProbeClient: Sendable {
+    var localPort: UInt16
 
-    public init(localPort: UInt16 = 0) {
+    init(localPort: UInt16 = 0) {
         self.localPort = localPort
     }
 
     @discardableResult
-    public func run(
+    func run(
         to endpoint: WebTransportNetworkEndpoint,
         message: String,
         timeoutMilliseconds: Int32 = 1_000
-    ) throws -> WebTransportNetworkProbeResult {
+    ) throws -> WebTransportNetworkSessionResult {
         let port = try QUICUDPPort(bindPort: localPort)
         let packet = try WebTransportNetworkProbeCodec.encodeProbePacket(message: message)
         try port.send(packet, to: endpoint.udpEndpoint)
@@ -358,9 +255,9 @@ public struct WebTransportNetworkProbeClient: Sendable {
         }
         let responseMessage = try WebTransportNetworkProbeCodec.decodeAckPacket(bytes)
         guard responseMessage == message else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
-        return WebTransportNetworkProbeResult(
+        return WebTransportNetworkSessionResult(
             localEndpoint: WebTransportNetworkEndpoint(
                 host: port.localEndpoint.host,
                 port: port.localEndpoint.port
@@ -372,14 +269,14 @@ public struct WebTransportNetworkProbeClient: Sendable {
     }
 }
 
-public struct WebTransportQUICPacketProbeRequest: Equatable, Sendable {
-    public var message: String
-    public var packetNumber: UInt64
-    public var destinationConnectionID: Data
-    public var sourceConnectionID: Data
-    public var handshakeMessages: [TLSHandshakeMessage]
+struct WebTransportQUICPacketProbeRequest: Equatable, Sendable {
+    var message: String
+    var packetNumber: UInt64
+    var destinationConnectionID: Data
+    var sourceConnectionID: Data
+    var handshakeMessages: [TLSHandshakeMessage]
 
-    public init(
+    init(
         message: String,
         packetNumber: UInt64,
         destinationConnectionID: Data,
@@ -394,14 +291,14 @@ public struct WebTransportQUICPacketProbeRequest: Equatable, Sendable {
     }
 }
 
-public struct WebTransportQUICPacketHandshakeContext: Equatable, Sendable {
-    public var request: WebTransportQUICPacketProbeRequest
-    public var message: String
-    public var serverHandshakeMessages: [TLSHandshakeMessage]
-    public var clientApplicationKeys: QUICPacketProtectionKeys
-    public var serverApplicationKeys: QUICPacketProtectionKeys
+struct WebTransportQUICPacketHandshakeContext: Equatable, Sendable {
+    var request: WebTransportQUICPacketProbeRequest
+    var message: String
+    var serverHandshakeMessages: [TLSHandshakeMessage]
+    var clientApplicationKeys: QUICPacketProtectionKeys
+    var serverApplicationKeys: QUICPacketProtectionKeys
 
-    public init(
+    init(
         request: WebTransportQUICPacketProbeRequest,
         message: String,
         serverHandshakeMessages: [TLSHandshakeMessage],
@@ -416,9 +313,9 @@ public struct WebTransportQUICPacketHandshakeContext: Equatable, Sendable {
     }
 }
 
-public enum WebTransportQUICPacketProbeCodec {
-    public static let quicVersion: UInt32 = 0x0000_0001
-    public static let minimumInitialDatagramBytes = 1_200
+enum WebTransportQUICPacketProbeCodec {
+    static let quicVersion: UInt32 = 0x0000_0001
+    static let minimumInitialDatagramBytes = 1_200
 
     private static let clientDestinationConnectionID = Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65])
     private static let clientSourceConnectionID = Data([0x77, 0x74, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e])
@@ -434,7 +331,7 @@ public enum WebTransportQUICPacketProbeCodec {
     private static let clientCryptoFramePayloadBytes = 7
     private static let serverCryptoFramePayloadBytes = 9
 
-    public static func encodeClientInitial(
+    static func encodeClientInitial(
         message: String,
         packetNumber: UInt64 = 0
     ) throws -> Data {
@@ -452,7 +349,7 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func encodeServerInitial(
+    static func encodeServerInitial(
         request: WebTransportQUICPacketProbeRequest,
         message: String,
         packetNumber: UInt64 = 0
@@ -463,7 +360,7 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func encodeServerInitial(
+    static func encodeServerInitial(
         handshakeContext: WebTransportQUICPacketHandshakeContext,
         packetNumber: UInt64 = 0
     ) throws -> Data {
@@ -481,7 +378,7 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func decodeClientInitial(_ data: Data) throws -> WebTransportQUICPacketProbeRequest {
+    static func decodeClientInitial(_ data: Data) throws -> WebTransportQUICPacketProbeRequest {
         guard data.count >= minimumInitialDatagramBytes else {
             throw WebTransportNetworkRuntimeError.unexpectedPacket
         }
@@ -502,14 +399,14 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func decodeServerInitial(
+    static func decodeServerInitial(
         _ data: Data,
         request: WebTransportQUICPacketProbeRequest
     ) throws -> String {
         try decodeServerInitialContext(data, request: request).message
     }
 
-    public static func decodeServerInitialContext(
+    static func decodeServerInitialContext(
         _ data: Data,
         request: WebTransportQUICPacketProbeRequest
     ) throws -> WebTransportQUICPacketHandshakeContext {
@@ -537,7 +434,7 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func serverHandshakeContext(
+    static func serverHandshakeContext(
         request: WebTransportQUICPacketProbeRequest,
         message: String
     ) throws -> WebTransportQUICPacketHandshakeContext {
@@ -548,7 +445,7 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func encodeClientApplicationRequest(
+    static func encodeClientApplicationRequest(
         handshakeContext: WebTransportQUICPacketHandshakeContext,
         message: String
     ) throws -> Data {
@@ -578,7 +475,7 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func decodeClientApplicationRequest(
+    static func decodeClientApplicationRequest(
         _ data: Data,
         handshakeContext: WebTransportQUICPacketHandshakeContext
     ) throws -> WebTransportQUICPacketApplicationRequest {
@@ -596,7 +493,7 @@ public enum WebTransportQUICPacketProbeCodec {
         let fields = try requestHeaderFields(from: frames)
         try WebTransportHTTP3Headers.validateConnectRequest(fields)
         guard try availableProtocols(from: fields).contains(sessionProtocol) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let message = try messageDatagram(from: frames)
         return WebTransportQUICPacketApplicationRequest(
@@ -606,7 +503,7 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func encodeServerApplicationResponse(
+    static func encodeServerApplicationResponse(
         handshakeContext: WebTransportQUICPacketHandshakeContext,
         message: String
     ) throws -> Data {
@@ -636,7 +533,7 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func decodeServerApplicationResponse(
+    static func decodeServerApplicationResponse(
         _ data: Data,
         handshakeContext: WebTransportQUICPacketHandshakeContext
     ) throws -> String {
@@ -654,7 +551,7 @@ public enum WebTransportQUICPacketProbeCodec {
         let fields = try responseHeaderFields(from: frames)
         try WebTransportHTTP3Headers.validateSuccessfulResponse(fields)
         guard try selectedProtocol(from: fields) == sessionProtocol else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         return try messageDatagram(from: frames)
     }
@@ -930,14 +827,14 @@ public enum WebTransportQUICPacketProbeCodec {
 
         guard (!requiresPing || hasPing),
               (!requiresAck || hasAck) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
         var decoder = TLSHandshakeFlightDecoder()
         let messages = try decoder.receive(frames: cryptoFrames)
         guard messages.map(\.type) == expectedTypes,
               let first = messages.first else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
         switch first.type {
@@ -945,7 +842,7 @@ public enum WebTransportQUICPacketProbeCodec {
             let hello = try TLSClientHello.decode(first.body)
             try validateClientHello(hello)
             guard let message = String(data: hello.legacySessionID, encoding: .utf8) else {
-                throw WebTransportNetworkRuntimeError.invalidProbePayload
+                throw WebTransportNetworkRuntimeError.invalidPayload
             }
             return (message, messages)
         case .serverHello:
@@ -956,17 +853,17 @@ public enum WebTransportQUICPacketProbeCodec {
                   messages[2].type == .certificate,
                   messages[3].type == .certificateVerify,
                   messages[4].type == .finished else {
-                throw WebTransportNetworkRuntimeError.invalidProbePayload
+                throw WebTransportNetworkRuntimeError.invalidPayload
             }
             let encryptedExtensions = try TLSEncryptedExtensions.decode(messages[1].body)
             try validateEncryptedExtensions(encryptedExtensions)
             try validateServerAuthentication(messages, peerHandshakeMessages: peerHandshakeMessages)
             guard let message = String(data: hello.legacySessionIDEcho, encoding: .utf8) else {
-                throw WebTransportNetworkRuntimeError.invalidProbePayload
+                throw WebTransportNetworkRuntimeError.invalidPayload
             }
             return (message, messages)
         default:
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
     }
 
@@ -975,25 +872,25 @@ public enum WebTransportQUICPacketProbeCodec {
         try validateTransportParameters(hello.extensions, requiresOriginalDestinationConnectionID: false)
         let supportedVersions = try requireExtension(.supportedVersions, in: hello.extensions)
         guard try TLSSupportedVersionsExtension.clientVersions(from: supportedVersions.data).contains(TLSProtocolVersion.tls13) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let keyShare = try requireExtension(.keyShare, in: hello.extensions)
         guard try TLSKeyShareExtension.clientShares(from: keyShare.data).contains(where: {
             $0.group == TLSNamedGroup.x25519 && $0.keyExchange.count == 32
         }) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
     }
 
     private static func validateServerHello(_ hello: TLSServerHello) throws {
         let supportedVersions = try requireExtension(.supportedVersions, in: hello.extensions)
         guard try TLSSupportedVersionsExtension.serverVersion(from: supportedVersions.data) == TLSProtocolVersion.tls13 else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let keyShare = try requireExtension(.keyShare, in: hello.extensions)
         let share = try TLSKeyShareExtension.serverShare(from: keyShare.data)
         guard share.group == TLSNamedGroup.x25519, share.keyExchange.count == 32 else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
     }
 
@@ -1013,7 +910,7 @@ public enum WebTransportQUICPacketProbeCodec {
         guard certificate.requestContext.isEmpty,
               certificate.entries.count == 1,
               certificate.entries[0].certificateData == deterministicServerCertificateDER else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
         var transcript = TLS13Transcript()
@@ -1026,7 +923,7 @@ public enum WebTransportQUICPacketProbeCodec {
         let certificateVerify = try TLSCertificateVerify.decode(messages[3].body)
         guard certificateVerify.algorithm == TLSSignatureScheme.ed25519,
               certificateVerify.signature == deterministicCertificateVerifySignature(transcriptHash: transcript.hash) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
         try transcript.append(messages[3])
@@ -1036,14 +933,14 @@ public enum WebTransportQUICPacketProbeCodec {
             transcriptHash: transcript.hash
         )
         guard finished.verifyData == expectedVerifyData else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
     }
 
     private static func validateALPN(_ extensions: [TLSExtension]) throws {
         let alpn = try requireExtension(.applicationLayerProtocolNegotiation, in: extensions)
         guard try TLSALPNExtension.protocols(from: alpn.data) == [h3ALPN] else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
     }
 
@@ -1056,11 +953,11 @@ public enum WebTransportQUICPacketProbeCodec {
         guard try parameters.integer(for: QUICTransportParameterID.maxDatagramFrameSize) == UInt64(minimumInitialDatagramBytes),
               try parameters.integer(for: QUICTransportParameterID.maxUDPPayloadSize) == UInt64(minimumInitialDatagramBytes),
               parameters[QUICTransportParameterID.initialSourceConnectionID] != nil else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         if requiresOriginalDestinationConnectionID,
            parameters[QUICTransportParameterID.originalDestinationConnectionID] == nil {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
     }
 
@@ -1069,7 +966,7 @@ public enum WebTransportQUICPacketProbeCodec {
         in extensions: [TLSExtension]
     ) throws -> TLSExtension {
         guard let item = extensions.first(where: { $0.type == type.rawValue }) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         return item
     }
@@ -1081,7 +978,7 @@ public enum WebTransportQUICPacketProbeCodec {
     private static func responseHeaderFields(from frames: [QUICFrame]) throws -> [HTTPFieldLine] {
         let fields = try headerFields(from: frames)
         guard fields.contains(where: { $0.name == ":status" }) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         return fields
     }
@@ -1090,7 +987,7 @@ public enum WebTransportQUICPacketProbeCodec {
         let streamData = try streamData(from: frames)
         let httpFrames = try HTTP3Frame.decodeFrames(streamData)
         guard let headers = httpFrames.first(where: { $0.type == HTTP3FrameType.headers }) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         return try QPACK.decodeHeadersFrame(headers)
     }
@@ -1103,7 +1000,7 @@ public enum WebTransportQUICPacketProbeCodec {
             return data
         }
         guard streams.count == 1, let data = streams.first else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         return data
     }
@@ -1116,12 +1013,12 @@ public enum WebTransportQUICPacketProbeCodec {
             return payload
         }
         guard datagrams.count == 1, let datagram = datagrams.first else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let parsed = try WebTransportDatagramSignaling.parse(datagram)
         guard parsed.sessionID.rawValue == sessionStreamID,
               let message = String(data: parsed.payload, encoding: .utf8) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         return message
     }
@@ -1180,12 +1077,12 @@ public enum WebTransportQUICPacketProbeCodec {
     }
 }
 
-public struct WebTransportQUICPacketApplicationRequest: Equatable, Sendable {
-    public var message: String
-    public var packetNumber: UInt64
-    public var requestHeaders: [HTTPFieldLine]
+struct WebTransportQUICPacketApplicationRequest: Equatable, Sendable {
+    var message: String
+    var packetNumber: UInt64
+    var requestHeaders: [HTTPFieldLine]
 
-    public init(message: String, packetNumber: UInt64, requestHeaders: [HTTPFieldLine]) {
+    init(message: String, packetNumber: UInt64, requestHeaders: [HTTPFieldLine]) {
         self.message = message
         self.packetNumber = packetNumber
         self.requestHeaders = requestHeaders
@@ -1498,23 +1395,23 @@ enum QUICInitialPacketProtection {
     }
 }
 
-public enum WebTransportNetworkProbeCodec {
+enum WebTransportNetworkProbeCodec {
     private static let probePrefix = Data("WT-NET-PROBE\0".utf8)
     private static let ackPrefix = Data("WT-NET-ACK\0".utf8)
 
-    public static func encodeProbePacket(message: String) throws -> Data {
+    static func encodeProbePacket(message: String) throws -> Data {
         try QUICFrame.encodeFrames([.datagram(probePrefix + Data(message.utf8))])
     }
 
-    public static func encodeAckPacket(message: String) throws -> Data {
+    static func encodeAckPacket(message: String) throws -> Data {
         try QUICFrame.encodeFrames([.datagram(ackPrefix + Data(message.utf8))])
     }
 
-    public static func decodeProbePacket(_ packet: Data) throws -> String {
+    static func decodeProbePacket(_ packet: Data) throws -> String {
         try decode(packet, expectedPrefix: probePrefix)
     }
 
-    public static func decodeAckPacket(_ packet: Data) throws -> String {
+    static func decodeAckPacket(_ packet: Data) throws -> String {
         try decode(packet, expectedPrefix: ackPrefix)
     }
 
@@ -1524,11 +1421,11 @@ public enum WebTransportNetworkProbeCodec {
             throw WebTransportNetworkRuntimeError.unexpectedFrame
         }
         guard payload.starts(with: expectedPrefix) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let messageBytes = payload.dropFirst(expectedPrefix.count)
         guard let message = String(data: Data(messageBytes), encoding: .utf8) else {
-            throw WebTransportNetworkRuntimeError.invalidProbePayload
+            throw WebTransportNetworkRuntimeError.invalidPayload
         }
         return message
     }

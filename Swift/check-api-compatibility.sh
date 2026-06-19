@@ -54,6 +54,10 @@ let logger = WebTransportLogger { event in
 _ = WebTransportClient(configuration: clientConfig, logger: logger)
 _ = WebTransportServer(configuration: serverConfig, logger: logger)
 _ = WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433)
+_ = WebTransportQUICClient(trustPolicy: .systemTrust)
+_ = WebTransportSendStream(id: 4)
+_ = WebTransportReceiveStream(id: 8)
+_ = WebTransportBidirectionalStream(id: 12)
 _ = WebTransportErrorSurface.publicDescription(for: WebTransportSampleError())
 
 struct WebTransportSampleError: Error {}

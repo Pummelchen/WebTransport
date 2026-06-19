@@ -11,18 +11,18 @@ struct WebTransportServerCLI {
         if arguments.contains("--listen") || arguments.contains(where: { $0.hasPrefix("--listen=") }) {
             do {
                 let options = try NetworkServerOptions.parse(arguments)
-                var results: [WebTransportNetworkProbeResult] = []
+                var results: [WebTransportNetworkSessionResult] = []
                 let local: WebTransportNetworkEndpoint
                 switch options.transport {
                 case .packet:
-                    let server = try WebTransportQUICInteroperablePacketProbeServer(
+                    let server = try WebTransportQUICServer(
                         endpoint: options.endpoint,
                         maxConcurrentConnections: options.maxSessions
                     )
                     local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
-                    print("network packet probe listening: \(local.commandLineValue)")
+                    print("network packet session listening: \(local.commandLineValue)")
                     fflush(stdout)
-                    let tasks: [Task<WebTransportNetworkProbeResult, Error>] = (0..<options.maxSessions).map { _ in
+                    let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
                         Task {
                             try await server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
                         }
@@ -32,18 +32,18 @@ struct WebTransportServerCLI {
                             let result = try await task.value
                             results.append(result)
                         } catch {
-                            fputs("network packet probe serve error: \(error)\n", stderr)
+                            fputs("network packet session serve error: \(error)\n", stderr)
                         }
                     }
                 case .frame:
-                    let server = try WebTransportQUICInteroperablePacketProbeServer(
+                    let server = try WebTransportQUICServer(
                         endpoint: options.endpoint,
                         maxConcurrentConnections: options.maxSessions
                     )
                     local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
-                    print("network frame probe listening: \(local.commandLineValue)")
+                    print("network frame session listening: \(local.commandLineValue)")
                     fflush(stdout)
-                    let tasks: [Task<WebTransportNetworkProbeResult, Error>] = (0..<options.maxSessions).map { _ in
+                    let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
                         Task {
                             try await server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
                         }
@@ -53,17 +53,17 @@ struct WebTransportServerCLI {
                             let result = try await task.value
                             results.append(result)
                         } catch {
-                            fputs("network frame probe serve error: \(error)\n", stderr)
+                            fputs("network frame session serve error: \(error)\n", stderr)
                         }
                     }
                 }
                 for result in results {
                     let session = result.sessionEstablished ? " session=established" : ""
-                    print("network \(result.transport.rawValue) probe served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
+                    print("network \(result.transport.rawValue) session served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
                 }
                 return
             } catch {
-                fputs("\(executable) network probe failed: \(error)\n", stderr)
+                fputs("\(executable) network session failed: \(error)\n", stderr)
                 Foundation.exit(1)
             }
         }
@@ -98,21 +98,21 @@ struct WebTransportServerCLI {
             supportedProtocols: ["demo.v1"]
         )
         _ = WebTransportServer(configuration: configuration)
-        print("WebTransportServer demo endpoint ready: authority=\(configuration.authority) path=\(configuration.path)")
-        print("Use `swift run WebTransportClient` to run the deterministic client/server facade demo.")
+        print("WebTransportServer local demo endpoint ready: authority=\(configuration.authority) path=\(configuration.path)")
+        print("Use `swift run WebTransportClient --connect HOST:PORT` with a listening server for the Network.framework QUIC session path.")
     }
 }
 
 private struct NetworkServerOptions {
     var endpoint: WebTransportNetworkEndpoint
     var timeoutMilliseconds: Int32
-    var transport: WebTransportNetworkProbeTransport
+    var transport: WebTransportNetworkTransport
     var maxSessions: Int
 
     static func parse(_ arguments: [String]) throws -> NetworkServerOptions {
         var endpoint: WebTransportNetworkEndpoint?
         var timeoutMilliseconds: Int32 = 10_000
-        var transport = WebTransportNetworkProbeTransport.packet
+        var transport = WebTransportNetworkTransport.packet
         var maxSessions = 1
         var index = 0
 
@@ -128,7 +128,7 @@ private struct NetworkServerOptions {
             case "--timeout-ms":
                 index += 1
                 guard index < arguments.count, let value = Int32(arguments[index]) else {
-                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                    throw WebTransportNetworkRuntimeError.invalidPayload
                 }
                 timeoutMilliseconds = value
             case "--transport":
@@ -136,11 +136,11 @@ private struct NetworkServerOptions {
                 guard index < arguments.count else {
                     throw WebTransportNetworkRuntimeError.invalidTransport("--transport requires packet or frame")
                 }
-                transport = try WebTransportNetworkProbeTransport.parse(arguments[index])
+                transport = try WebTransportNetworkTransport.parse(arguments[index])
             case "--max-sessions":
                 index += 1
                 guard index < arguments.count, let value = Int(arguments[index]), value > 0 else {
-                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                    throw WebTransportNetworkRuntimeError.invalidPayload
                 }
                 maxSessions = value
             default:
@@ -150,12 +150,12 @@ private struct NetworkServerOptions {
                           let value = Int32(argument.dropFirst("--timeout-ms=".count)) {
                     timeoutMilliseconds = value
                 } else if argument.hasPrefix("--transport=") {
-                    transport = try WebTransportNetworkProbeTransport.parse(String(argument.dropFirst("--transport=".count)))
+                    transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))
                 } else if argument.hasPrefix("--max-sessions="),
                           let value = Int(argument.dropFirst("--max-sessions=".count)), value > 0 {
                     maxSessions = value
                 } else {
-                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                    throw WebTransportNetworkRuntimeError.invalidPayload
                 }
             }
             index += 1

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import WebTransport
+@testable import WebTransport
 import WebTransportHTTP3Core
 import WebTransportQUICCore
 
@@ -80,6 +80,47 @@ func webTransportPublicErrorSurfaceRedactsPeerControlledDetail() {
 
     let codecError = QUICCodecError.malformed("secret packet bytes 010203")
     #expect(WebTransportErrorSurface.publicDescription(for: codecError) == "WebTransport protocol codec rejected malformed input")
+}
+
+@Test
+func webTransportPublicStreamsUseBoundedAsyncByteDelivery() async throws {
+    let send = WebTransportSendStream(id: 4, maxBufferedBytes: 8)
+    try await send.send(Data("ping".utf8))
+    try await expectDraft15Error {
+        try await send.send(Data("overflow".utf8))
+    }
+    await send.finish()
+    try await expectDraft15Error {
+        try await send.send(Data("x".utf8))
+    }
+
+    let receive = WebTransportReceiveStream(id: 8, maxBufferedBytes: 8)
+    let bytes = receive.receiveBytes()
+    var iterator = bytes.makeAsyncIterator()
+    let pair = WebTransportBidirectionalStream(id: 12, maxBufferedBytes: 8)
+    let inbound = pair.inbound.receiveBytes()
+    var inboundIterator = inbound.makeAsyncIterator()
+
+    try await pair.outbound.send(Data("out".utf8))
+    await pair.outbound.finish()
+
+    try await receiveTestBytes(receive, Data("in".utf8))
+    #expect(try await iterator.next() == Data("in".utf8))
+    try await receiveTestBytes(pair.inbound, Data("bidi".utf8))
+    #expect(try await inboundIterator.next() == Data("bidi".utf8))
+}
+
+private func expectDraft15Error(_ operation: () async throws -> Void) async throws {
+    do {
+        try await operation()
+        Issue.record("expected WebTransportDraft15Error")
+    } catch is WebTransportDraft15Error {
+        return
+    }
+}
+
+private func receiveTestBytes(_ stream: WebTransportReceiveStream, _ data: Data) async throws {
+    try await stream.channel.send(data)
 }
 
 private final class WebTransportEventRecorder: @unchecked Sendable {

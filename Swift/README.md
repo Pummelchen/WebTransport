@@ -18,12 +18,12 @@ Implemented:
 - Structured Fields parsing/serialization for `WT-Protocol` and `WT-Available-Protocols`.
 - QPACK static, literal, Huffman, dynamic table, Base, and post-Base behavior covered by tests.
 - WebTransport streams, datagrams, buffering, rejection, close, drain, reset, stop-sending, and flow-control behavior.
-- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; QUIC packet protection helpers, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, transcript-derived 1-RTT packet keys for protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing over UDP, UDP loopback support, and prompt-free identity/trust test paths.
-- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, validated Certificate/CertificateVerify/Finished handling, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame compatibility mode.
+- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; QUIC packet protection helpers, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, transcript-derived 1-RTT packet keys for protected HTTP/3 WebTransport CONNECT/DATAGRAM session signaling over UDP, UDP loopback support, and prompt-free identity/trust test paths.
+- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, validated Certificate/CertificateVerify/Finished handling, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session signaling for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame compatibility mode.
 - CLI conformance harness with 40 scenarios shared by `WebTransportClient` and `WebTransportServer`, including positive/negative interop matrices for CONNECT, streams, datagrams, GOAWAY, close/drain, malformed input, and flow-control errors.
 - Deterministic parser/property hardening tests for QPACK, HTTP/3 frames, capsules, QUIC varints, QUIC transport parameters, WebTransport stream prefixes, resource limits, malformed peers, ordering, replay, exhaustion, and close/reset races.
 - Process-level CLI tests for help/list/error/scenario exit codes and IPv4/IPv6 frame/packet loopback.
-- Concurrent multi-session stress, deterministic soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
+- Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
 - Environment-gated external interop hook via `WEBTRANSPORT_EXTERNAL_INTEROP_ENDPOINT`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
@@ -32,14 +32,15 @@ Implemented:
 
 Recent status:
 
-- The separate-process `--transport packet` and `--transport frame` paths are now wired to the interoperable Network.framework QUIC/TLS/HTTP/3 runtime.
+- The separate-process `--transport packet` and `--transport frame` paths are wired to the Network.framework QUIC/TLS/HTTP/3 runtime. Platform trust is the runtime default; the CLI explicitly opts into its localhost self-signed development identity for loopback tests.
 
 ## Public API Surface
 
 The high-level `WebTransport` product exposes:
 
 - `WebTransportClientConfiguration` and `WebTransportServerConfiguration` for authority, path, origin, and subprotocol policy.
-- `WebTransportClient` and `WebTransportServer` actors for in-process Swift concurrency session establishment.
+- `WebTransportClient` and `WebTransportServer` actors for Swift concurrency session establishment.
+- `WebTransportSendStream`, `WebTransportReceiveStream`, and `WebTransportBidirectionalStream` with bounded async byte delivery.
 - `WebTransportClientSession` through the `WebTransportSession` protocol for datagram send/receive and close.
 - `WebTransportLogger` and `WebTransportLogEvent` for sanitized opt-in production events.
 - `WebTransportErrorSurface.publicDescription(for:)` for user-visible/logged error text that redacts peer-controlled detail.

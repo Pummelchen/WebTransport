@@ -11,26 +11,30 @@ struct WebTransportClientCLI {
         if arguments.contains("--connect") || arguments.contains(where: { $0.hasPrefix("--connect=") }) {
             do {
                 let options = try NetworkClientOptions.parse(arguments)
-                let result: WebTransportNetworkProbeResult
+                let result: WebTransportNetworkSessionResult
                 switch options.transport {
                 case .packet:
-                    result = try await WebTransportQUICInteroperablePacketProbeClient().run(
+                    result = try await WebTransportQUICClient(
+                        trustPolicy: .localDevelopmentSelfSigned
+                    ).run(
                         to: options.endpoint,
                         message: options.message,
                         timeoutMilliseconds: options.timeoutMilliseconds
                     )
                 case .frame:
-                    result = try await WebTransportQUICInteroperablePacketProbeClient().run(
+                    result = try await WebTransportQUICClient(
+                        trustPolicy: .localDevelopmentSelfSigned
+                    ).run(
                         to: options.endpoint,
                         message: options.message,
                         timeoutMilliseconds: options.timeoutMilliseconds
                     )
                 }
                 let session = result.sessionEstablished ? " session=established" : ""
-                print("network \(result.transport.rawValue) probe connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
+                print("network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
                 return
             } catch {
-                fputs("\(executable) network probe failed: \(error)\n", stderr)
+                fputs("\(executable) network session failed: \(error)\n", stderr)
                 Foundation.exit(1)
             }
         }
@@ -91,13 +95,13 @@ private struct NetworkClientOptions {
     var endpoint: WebTransportNetworkEndpoint
     var message: String
     var timeoutMilliseconds: Int32
-    var transport: WebTransportNetworkProbeTransport
+    var transport: WebTransportNetworkTransport
 
     static func parse(_ arguments: [String]) throws -> NetworkClientOptions {
         var endpoint: WebTransportNetworkEndpoint?
-        var message = "webtransport-network-probe"
+        var message = "webtransport-network-session"
         var timeoutMilliseconds: Int32 = 1_000
-        var transport = WebTransportNetworkProbeTransport.packet
+        var transport = WebTransportNetworkTransport.packet
         var index = 0
 
         while index < arguments.count {
@@ -112,13 +116,13 @@ private struct NetworkClientOptions {
             case "--message":
                 index += 1
                 guard index < arguments.count else {
-                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                    throw WebTransportNetworkRuntimeError.invalidPayload
                 }
                 message = arguments[index]
             case "--timeout-ms":
                 index += 1
                 guard index < arguments.count, let value = Int32(arguments[index]) else {
-                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                    throw WebTransportNetworkRuntimeError.invalidPayload
                 }
                 timeoutMilliseconds = value
             case "--transport":
@@ -126,7 +130,7 @@ private struct NetworkClientOptions {
                 guard index < arguments.count else {
                     throw WebTransportNetworkRuntimeError.invalidTransport("--transport requires packet or frame")
                 }
-                transport = try WebTransportNetworkProbeTransport.parse(arguments[index])
+                transport = try WebTransportNetworkTransport.parse(arguments[index])
             default:
                 if argument.hasPrefix("--connect=") {
                     endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--connect=".count)))
@@ -136,9 +140,9 @@ private struct NetworkClientOptions {
                           let value = Int32(argument.dropFirst("--timeout-ms=".count)) {
                     timeoutMilliseconds = value
                 } else if argument.hasPrefix("--transport=") {
-                    transport = try WebTransportNetworkProbeTransport.parse(String(argument.dropFirst("--transport=".count)))
+                    transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))
                 } else {
-                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                    throw WebTransportNetworkRuntimeError.invalidPayload
                 }
             }
             index += 1

@@ -2,10 +2,7 @@ import Foundation
 import WebTransportHTTP3Core
 import WebTransportQUICCore
 
-/// Client-side options for the in-process Swift concurrency WebTransport facade.
-///
-/// This facade is intentionally small: it exercises the package's HTTP/3
-/// WebTransport session machinery without exposing low-level QUIC/TLS state.
+/// Client-side options for Swift concurrency WebTransport session establishment.
 public struct WebTransportClientConfiguration: Equatable, Sendable {
     /// The expected `:authority` value on the extended CONNECT request.
     public var authority: String
@@ -29,7 +26,7 @@ public struct WebTransportClientConfiguration: Equatable, Sendable {
     }
 }
 
-/// Server-side options for the in-process Swift concurrency WebTransport facade.
+/// Server-side options for Swift concurrency WebTransport session establishment.
 public struct WebTransportServerConfiguration: Equatable, Sendable {
     /// Allowed CONNECT authority.
     public var authority: String
@@ -53,7 +50,7 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
     }
 }
 
-/// Sanitized production log event emitted by the high-level WebTransport facade.
+/// Sanitized production log event emitted by the high-level WebTransport API.
 ///
 /// Events intentionally avoid TLS secrets, certificate material, QUIC connection
 /// IDs, raw session IDs, packet bytes, datagram payloads, and close reason text.
@@ -146,22 +143,70 @@ public protocol WebTransportSession: Sendable {
     func close(code: UInt32, reason: String?) async throws
 }
 
-/// Placeholder value type for future bidirectional stream facade APIs.
-public struct WebTransportBidirectionalStream: Equatable, Sendable {
-    public var id: UInt64
+/// Send half of a WebTransport stream with bounded buffering.
+public struct WebTransportSendStream: Sendable {
+    public let id: UInt64
+    private let channel: WebTransportStreamChannel
+
+    public init(id: UInt64, maxBufferedBytes: Int = 1_048_576) {
+        self.id = id
+        self.channel = WebTransportStreamChannel(maxBufferedBytes: maxBufferedBytes)
+    }
+
+    fileprivate init(id: UInt64, channel: WebTransportStreamChannel) {
+        self.id = id
+        self.channel = channel
+    }
+
+    public func send(_ data: Data) async throws {
+        try await channel.send(data)
+    }
+
+    public func finish() async {
+        await channel.finish()
+    }
 }
 
-/// Placeholder value type for future send stream facade APIs.
-public struct WebTransportSendStream: Equatable, Sendable {
-    public var id: UInt64
+/// Receive half of a WebTransport stream with async byte delivery.
+public struct WebTransportReceiveStream: Sendable {
+    public let id: UInt64
+    let channel: WebTransportStreamChannel
+
+    public init(id: UInt64, maxBufferedBytes: Int = 1_048_576) {
+        self.id = id
+        self.channel = WebTransportStreamChannel(maxBufferedBytes: maxBufferedBytes)
+    }
+
+    fileprivate init(id: UInt64, channel: WebTransportStreamChannel) {
+        self.id = id
+        self.channel = channel
+    }
+
+    public func receiveBytes() -> AsyncThrowingStream<Data, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                await channel.attach(continuation)
+            }
+        }
+    }
 }
 
-/// Placeholder value type for future receive stream facade APIs.
-public struct WebTransportReceiveStream: Equatable, Sendable {
-    public var id: UInt64
+/// Bidirectional WebTransport stream represented as paired send and receive halves.
+public struct WebTransportBidirectionalStream: Sendable {
+    public let id: UInt64
+    public let outbound: WebTransportSendStream
+    public let inbound: WebTransportReceiveStream
+
+    public init(id: UInt64, maxBufferedBytes: Int = 1_048_576) {
+        let outboundChannel = WebTransportStreamChannel(maxBufferedBytes: maxBufferedBytes)
+        let inboundChannel = WebTransportStreamChannel(maxBufferedBytes: maxBufferedBytes)
+        self.id = id
+        self.outbound = WebTransportSendStream(id: id, channel: outboundChannel)
+        self.inbound = WebTransportReceiveStream(id: id, channel: inboundChannel)
+    }
 }
 
-/// In-process client facade backed by the package's HTTP/3 WebTransport core.
+/// Client API backed by the package's HTTP/3 WebTransport core.
 public actor WebTransportClient {
     public let configuration: WebTransportClientConfiguration
     private let logger: WebTransportLogger
@@ -177,7 +222,7 @@ public actor WebTransportClient {
         self.nextRequestStreamID = 0
     }
 
-    /// Establishes a WebTransport session against the paired in-process server.
+    /// Establishes a WebTransport session against a paired server instance.
     public func connect(to server: WebTransportServer) async throws -> WebTransportClientSession {
         let serverControl = try await server.receiveClientControl(http3.localControlStreamBytes())
         _ = try http3.receivePeerControlStream(serverControl)
@@ -236,7 +281,7 @@ public actor WebTransportClient {
     }
 }
 
-/// In-process server facade backed by the package's HTTP/3 WebTransport core.
+/// Server API backed by the package's HTTP/3 WebTransport core.
 public actor WebTransportServer {
     public let configuration: WebTransportServerConfiguration
     private let logger: WebTransportLogger
@@ -359,7 +404,7 @@ public struct WebTransportClientSession: WebTransportSession {
     }
 }
 
-/// Async in-memory datagram fan-out used by the high-level facade.
+/// Async in-memory datagram fan-out used by the high-level API.
 public actor WebTransportDatagramChannel {
     private var continuations: [UUID: AsyncThrowingStream<Data, Error>.Continuation] = [:]
     private var pending: [Data] = []
@@ -391,6 +436,65 @@ public actor WebTransportDatagramChannel {
             continuation.finish()
         }
         continuations.removeAll()
+    }
+
+    private func remove(_ id: UUID) {
+        continuations.removeValue(forKey: id)
+    }
+}
+
+public actor WebTransportStreamChannel {
+    private let maxBufferedBytes: Int
+    private var bufferedBytes = 0
+    private var continuations: [UUID: AsyncThrowingStream<Data, Error>.Continuation] = [:]
+    private var pending: [Data] = []
+    private var finished = false
+
+    public init(maxBufferedBytes: Int = 1_048_576) {
+        self.maxBufferedBytes = max(0, maxBufferedBytes)
+    }
+
+    func attach(_ continuation: AsyncThrowingStream<Data, Error>.Continuation) {
+        let id = UUID()
+        continuations[id] = continuation
+        for item in pending {
+            continuation.yield(item)
+        }
+        pending.removeAll()
+        bufferedBytes = 0
+        if finished {
+            continuation.finish()
+        }
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.remove(id) }
+        }
+    }
+
+    func send(_ data: Data) throws {
+        guard !finished else {
+            throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport stream is closed")
+        }
+        guard bufferedBytes + data.count <= maxBufferedBytes else {
+            throw WebTransportDraft15Error(kind: .flowControl, message: "WebTransport stream buffer limit exceeded")
+        }
+        guard !continuations.isEmpty else {
+            pending.append(data)
+            bufferedBytes += data.count
+            return
+        }
+        for continuation in continuations.values {
+            continuation.yield(data)
+        }
+    }
+
+    func finish() {
+        finished = true
+        for continuation in continuations.values {
+            continuation.finish()
+        }
+        continuations.removeAll()
+        pending.removeAll()
+        bufferedBytes = 0
     }
 
     private func remove(_ id: UUID) {

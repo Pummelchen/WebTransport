@@ -229,8 +229,8 @@ private struct CLIConformanceScenario: Sendable {
 
 private func scenarioCatalog() -> [CLIConformanceScenario] {
     [
-        scenario("Smoke", "demo", "async client/server facade connect, datagram, and close") {
-            try await runFacadeDemo()
+        scenario("Smoke", "demo", "async client/server API connect, datagram, and close") {
+            try await runClientServerAPIDemo()
         },
         scenario("Smoke", "library-smoke-matrix", "library smoke matrix passes close, rejection, backpressure, ordering, and multi-session") {
             let results = WebTransportLibrarySmokeMatrix.runAll()
@@ -922,7 +922,7 @@ private func runMalformedFlowInteropMatrix() throws {
     ), "flow-control violation closed session")
 }
 
-private func runFacadeDemo() async throws {
+private func runClientServerAPIDemo() async throws {
     let server = WebTransportServer(configuration: WebTransportServerConfiguration(
         authority: "localhost",
         path: "/wt",
@@ -940,7 +940,7 @@ private func runFacadeDemo() async throws {
     try await session.sendDatagram(Data("hello from WebTransportClient".utf8))
     var iterator = stream.makeAsyncIterator()
     guard try await iterator.next() == Data("hello from WebTransportClient".utf8) else {
-        throw QUICCodecError.malformed("facade datagram was not delivered")
+        throw QUICCodecError.malformed("WebTransport datagram was not delivered")
     }
     try await session.close(code: 0, reason: "client demo complete")
 }

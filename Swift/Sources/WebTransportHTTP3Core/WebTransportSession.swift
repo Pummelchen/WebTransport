@@ -256,7 +256,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard !isZeroRTT else {
             throw WebTransportDraft15Error(
                 kind: .requirementsNotMet,
-                message: "WebTransport CONNECT requests are not allowed on 0-RTT in this deterministic core"
+                message: "WebTransport CONNECT requests are not allowed on 0-RTT"
             )
         }
         try validateRequestAllowedByGoaway(streamID)

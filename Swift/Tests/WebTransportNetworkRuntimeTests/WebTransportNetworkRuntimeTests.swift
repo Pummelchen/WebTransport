@@ -361,10 +361,10 @@ func networkEndpointParserRejectsMalformedValues() throws {
     #expect(throws: Error.self) {
         _ = try WebTransportNetworkEndpoint.parse("[::1]")
     }
-    #expect(try WebTransportNetworkProbeTransport.parse("packet") == .packet)
-    #expect(try WebTransportNetworkProbeTransport.parse("frame") == .frame)
+    #expect(try WebTransportNetworkTransport.parse("packet") == .packet)
+    #expect(try WebTransportNetworkTransport.parse("frame") == .frame)
     #expect(throws: Error.self) {
-        _ = try WebTransportNetworkProbeTransport.parse("unknown")
+        _ = try WebTransportNetworkTransport.parse("unknown")
     }
 }
 
