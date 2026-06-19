@@ -165,7 +165,7 @@ public struct WebTransportQUICClient: Sendable {
             requestFrame: requestFrame
         )
         try await runWithTimeout {
-            try await requestStream.send(connectPayload, endOfStream: true)
+            try await requestStream.send(connectPayload, endOfStream: false)
         }
         InteroperableQUICDebug.log("client sent connect payload")
 
@@ -486,7 +486,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         )
         let responsePayload = try decision.responseFrame.encode()
         try await runWithTimeout {
-            try await requestStream.send(responsePayload, endOfStream: true)
+            try await requestStream.send(responsePayload, endOfStream: false)
         }
 
         if useDatagrams {
