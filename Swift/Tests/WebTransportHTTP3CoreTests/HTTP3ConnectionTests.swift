@@ -43,6 +43,55 @@ func http3SettingsValidationRejectsMissingWebTransportRequirements() throws {
 }
 
 @Test
+func http3ZeroRTTSettingsCompatibilityRejectsReducedOrChangedWebTransportSettings() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    var remembered = HTTP3Settings.webTransportDraft15Defaults
+    try remembered.set(4, for: constants.settingsWTInitialMaxStreamsBidi)
+    try remembered.set(8, for: constants.settingsWTInitialMaxData)
+
+    var compatible = remembered
+    try compatible.set(6, for: constants.settingsWTInitialMaxStreamsBidi)
+    try compatible.set(16, for: constants.settingsWTInitialMaxData)
+    try compatible.validateWebTransportZeroRTTCompatibility(remembered: remembered)
+
+    var reduced = compatible
+    try reduced.set(2, for: constants.settingsWTInitialMaxStreamsBidi)
+    do {
+        try reduced.validateWebTransportZeroRTTCompatibility(remembered: remembered)
+        Issue.record("reduced remembered 0-RTT limit should throw")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .requirementsNotMet)
+        #expect(error.code == constants.wtRequirementsNotMetError)
+    }
+
+    var changedDatagram = compatible
+    try changedDatagram.set(0, for: constants.settingsH3Datagram)
+    #expect(throws: Error.self) {
+        try changedDatagram.validateWebTransportZeroRTTCompatibility(remembered: remembered)
+    }
+}
+
+@Test
+func http3ControlStreamCanValidateRememberedZeroRTTSettings() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    var remembered = HTTP3Settings.webTransportDraft15Defaults
+    try remembered.set(8, for: constants.settingsWTInitialMaxData)
+
+    var current = HTTP3Settings.webTransportDraft15Defaults
+    try current.set(1, for: constants.settingsWTInitialMaxData)
+    let controlBytes = try HTTP3StreamTypeParser.encodePrefix(
+        type: HTTP3StreamType.control,
+        payload: current.frame().encode()
+    )
+
+    var connection = HTTP3ConnectionState(role: .client)
+    #expect(throws: WebTransportDraft15Error.self) {
+        _ = try connection.receivePeerControlStream(controlBytes, zeroRTTRememberedSettings: remembered)
+    }
+    #expect(connection.remoteSettings == nil)
+}
+
+@Test
 func http3ControlStreamRejectsRequestFramesAndProcessesGoaway() throws {
     var connection = HTTP3ConnectionState(role: .client)
     let goaway = try HTTP3Frame(type: HTTP3FrameType.goaway, varIntValue: 4)

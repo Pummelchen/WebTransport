@@ -88,9 +88,11 @@ draft-15 compliance closure is in progress.
   data reset with `H3_MESSAGE_ERROR` after received close, bounded close-message
   validation, client and server buffered stream/datagram ingress before session
   acceptance, per-session and connection-level buffered ingress exhaustion,
-  rejected-session buffer cleanup, explicit draft error mapping, 0-RTT CONNECT
-  rejection, GOAWAY-driven draining, and monotonic WebTransport flow-control
-  limit updates.
+  rejected-session buffer cleanup, explicit draft error mapping and QUIC frame
+  helpers, 0-RTT CONNECT rejection, remembered-settings compatibility checks for
+  future accepted 0-RTT paths, malformed CONNECT data-ordering rejection,
+  protocol-policy rejection metadata, GOAWAY-driven draining, and monotonic
+  WebTransport flow-control limit updates.
 
 Commands:
 

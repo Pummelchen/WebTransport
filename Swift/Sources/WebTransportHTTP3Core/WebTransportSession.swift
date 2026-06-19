@@ -123,11 +123,22 @@ public struct WebTransportServerSessionPolicy: Equatable, Sendable {
 public struct WebTransportServerSessionDecision: Equatable, Sendable {
     public var session: WebTransportSession
     public var responseFrame: HTTP3Frame
+    public var rejectionError: WebTransportDraft15Error?
 
-    public init(session: WebTransportSession, responseFrame: HTTP3Frame) {
+    public init(
+        session: WebTransportSession,
+        responseFrame: HTTP3Frame,
+        rejectionError: WebTransportDraft15Error? = nil
+    ) {
         self.session = session
         self.responseFrame = responseFrame
+        self.rejectionError = rejectionError
     }
+}
+
+private struct WebTransportSessionRejection: Equatable, Sendable {
+    var status: UInt16
+    var error: WebTransportDraft15Error
 }
 
 public struct WebTransportSessionTerminationActions: Equatable, Sendable {
@@ -321,6 +332,12 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard sessionsByID[sessionID] == nil else {
             throw QUICCodecError.malformed("WebTransport session already exists")
         }
+        guard frame.type == HTTP3FrameType.headers else {
+            throw WebTransportDraft15Error(
+                kind: .requirementsNotMet,
+                message: "WebTransport CONNECT stream must start with HEADERS"
+            )
+        }
 
         var requestStream = try http3.acceptRequestStream(streamID: streamID)
         try requestStream.receive(frame: frame)
@@ -333,12 +350,12 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             policy: policy
         )
 
-        let rejectionStatus = rejectionStatus(for: request, selectedProtocol: selectedProtocol, policy: policy)
+        let rejection = rejection(for: request, selectedProtocol: selectedProtocol, policy: policy)
         let state: WebTransportSessionState
         let responseFrame: HTTP3Frame
-        if let rejectionStatus {
-            state = .rejected(status: rejectionStatus)
-            responseFrame = try WebTransportSessionHeaders.responseFrame(status: rejectionStatus)
+        if let rejection {
+            state = .rejected(status: rejection.status)
+            responseFrame = try WebTransportSessionHeaders.responseFrame(status: rejection.status)
         } else {
             state = .accepted
             responseFrame = try WebTransportSessionHeaders.responseFrame(
@@ -363,7 +380,11 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         } else {
             discardBufferedIngress(for: session.id, tombstoneStreams: true)
         }
-        return WebTransportServerSessionDecision(session: session, responseFrame: responseFrame)
+        return WebTransportServerSessionDecision(
+            session: session,
+            responseFrame: responseFrame,
+            rejectionError: rejection?.error
+        )
     }
 
     public mutating func makeDatagramFrame(
@@ -1128,24 +1149,36 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
     }
 
-    private func rejectionStatus(
+    private func rejection(
         for request: WebTransportSessionRequest,
         selectedProtocol: String?,
         policy: WebTransportServerSessionPolicy
-    ) -> UInt16? {
+    ) -> WebTransportSessionRejection? {
         if let allowedAuthorities = policy.allowedAuthorities, !allowedAuthorities.contains(request.authority) {
-            return 404
+            return WebTransportSessionRejection(
+                status: 404,
+                error: WebTransportDraft15Error(kind: .requirementsNotMet, message: "WebTransport authority is not allowed")
+            )
         }
         if let allowedPaths = policy.allowedPaths, !allowedPaths.contains(request.path) {
-            return 404
+            return WebTransportSessionRejection(
+                status: 404,
+                error: WebTransportDraft15Error(kind: .requirementsNotMet, message: "WebTransport path is not allowed")
+            )
         }
         if let allowedOrigins = policy.allowedOrigins {
             guard let origin = request.origin, allowedOrigins.contains(origin) else {
-                return 403
+                return WebTransportSessionRejection(
+                    status: 403,
+                    error: WebTransportDraft15Error(kind: .requirementsNotMet, message: "WebTransport origin is not allowed")
+                )
             }
         }
         if policy.requireProtocolSelection && selectedProtocol == nil {
-            return 400
+            return WebTransportSessionRejection(
+                status: 400,
+                error: WebTransportDraft15Error(kind: .requirementsNotMet, message: "WebTransport protocol selection is required")
+            )
         }
         return nil
     }

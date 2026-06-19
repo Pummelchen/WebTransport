@@ -168,7 +168,10 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
         )
     }
 
-    public mutating func receivePeerControlStream(_ bytes: Data) throws -> [HTTP3Frame] {
+    public mutating func receivePeerControlStream(
+        _ bytes: Data,
+        zeroRTTRememberedSettings: HTTP3Settings? = nil
+    ) throws -> [HTTP3Frame] {
         guard !receivedPeerControlStream else {
             throw QUICCodecError.malformed("duplicate HTTP/3 control stream")
         }
@@ -183,6 +186,11 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
 
         let decodedSettings = try HTTP3Settings.decodeFrame(firstFrame)
         try decodedSettings.validateWebTransportDraft15Requirements()
+        if let zeroRTTRememberedSettings {
+            try decodedSettings.validateWebTransportZeroRTTCompatibility(
+                remembered: zeroRTTRememberedSettings
+            )
+        }
 
         var receivedGoawayID = self.receivedGoawayID
         for frame in frames.dropFirst() {
@@ -281,6 +289,56 @@ extension HTTP3Settings {
         }
         guard self[constants.settingsWTEnabled] == 1 else {
             throw QUICCodecError.malformed("WebTransport over HTTP/3 requires SETTINGS_WT_ENABLE_WEBTRANSPORT = 1")
+        }
+    }
+
+    public func validateWebTransportZeroRTTCompatibility(remembered: HTTP3Settings) throws {
+        try remembered.validateWebTransportDraft15Requirements()
+        try validateWebTransportDraft15Requirements()
+
+        let constants = WebTransportHTTP3DraftConstants.current
+        try requireUnchanged(constants.settingsEnableConnectProtocol, remembered: remembered, label: "SETTINGS_ENABLE_CONNECT_PROTOCOL")
+        try requireUnchanged(constants.settingsH3Datagram, remembered: remembered, label: "SETTINGS_H3_DATAGRAM")
+        try requireUnchanged(constants.settingsWTEnabled, remembered: remembered, label: "SETTINGS_WT_ENABLED")
+        try requireNotReduced(constants.settingsWTInitialMaxStreamsUni, remembered: remembered, label: "SETTINGS_WT_INITIAL_MAX_STREAMS_UNI")
+        try requireNotReduced(constants.settingsWTInitialMaxStreamsBidi, remembered: remembered, label: "SETTINGS_WT_INITIAL_MAX_STREAMS_BIDI")
+        try requireNotReduced(constants.settingsWTInitialMaxData, remembered: remembered, label: "SETTINGS_WT_INITIAL_MAX_DATA")
+    }
+
+    private func effectiveValue(_ identifier: UInt64) -> UInt64 {
+        self[identifier] ?? 0
+    }
+
+    private func requireUnchanged(
+        _ identifier: UInt64,
+        remembered: HTTP3Settings,
+        label: String
+    ) throws {
+        guard effectiveValue(identifier) == remembered.effectiveValue(identifier) else {
+            throw WebTransportDraft15Error(
+                kind: .requirementsNotMet,
+                message: "\(label) is not compatible with accepted 0-RTT WebTransport data"
+            )
+        }
+    }
+
+    private func requireNotReduced(
+        _ identifier: UInt64,
+        remembered: HTTP3Settings,
+        label: String
+    ) throws {
+        let rememberedValue = remembered.effectiveValue(identifier)
+        if rememberedValue != 0, entries[identifier] == nil {
+            throw WebTransportDraft15Error(
+                kind: .requirementsNotMet,
+                message: "\(label) was previously non-default and is missing from accepted 0-RTT settings"
+            )
+        }
+        guard effectiveValue(identifier) >= rememberedValue else {
+            throw WebTransportDraft15Error(
+                kind: .requirementsNotMet,
+                message: "\(label) reduces a remembered limit for accepted 0-RTT WebTransport data"
+            )
         }
     }
 }

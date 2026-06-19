@@ -333,6 +333,78 @@ func webTransportServerBufferedSessionExhaustionMapsToBufferedStreamRejected() t
 }
 
 @Test
+func webTransportDraft15ErrorMapperCoversRequiredOutcomes() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    let cases: [(WebTransportDraft15ErrorKind, UInt64)] = [
+        (.bufferedStreamRejected, constants.wtBufferedStreamRejectedError),
+        (.sessionGone, constants.wtSessionGoneError),
+        (.flowControl, constants.wtFlowControlError),
+        (.alpn, constants.wtALPNError),
+        (.requirementsNotMet, constants.wtRequirementsNotMetError),
+        (.h3ID, HTTP3ApplicationErrorCode.idError.rawValue)
+    ]
+
+    for (kind, code) in cases {
+        #expect(WebTransportDraft15ErrorMapper.code(for: kind) == code)
+        #expect(WebTransportDraft15ErrorMapper.connectionCloseFrame(
+            for: kind,
+            reason: "reason"
+        ) == .connectionClose(errorCode: code, frameType: nil, reason: Data("reason".utf8)))
+        #expect(WebTransportDraft15ErrorMapper.streamFrame(
+            for: kind,
+            signal: .resetStream(streamID: 4, finalSize: 9)
+        ) == .resetStream(id: 4, applicationErrorCode: code, finalSize: 9))
+        #expect(WebTransportDraft15ErrorMapper.streamFrame(
+            for: kind,
+            signal: .stopSending(streamID: 4)
+        ) == .stopSending(id: 4, applicationErrorCode: code))
+    }
+
+    let close = try WebTransportDraft15ErrorMapper.closeSessionCapsule(
+        for: .requirementsNotMet,
+        message: "policy"
+    )
+    #expect(try WebTransportFlowCapsuleCodec.parse(close).capsule == .closeSession(
+        applicationErrorCode: UInt32(constants.wtRequirementsNotMetError),
+        message: "policy"
+    ))
+}
+
+@Test
+func webTransportRejectsMalformedConnectDataOrderingWithRequirementsNotMet() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    do {
+        _ = try pair.server.receiveClientSessionRequest(
+            streamID: 0,
+            frame: try HTTP3Frame(type: HTTP3FrameType.data, payload: Data("data-first".utf8)),
+            policy: try WebTransportServerSessionPolicy()
+        )
+        Issue.record("CONNECT stream DATA before HEADERS should throw")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .requirementsNotMet)
+        #expect(error.code == WebTransportHTTP3DraftConstants.current.wtRequirementsNotMetError)
+    }
+}
+
+@Test
+func webTransportProtocolPolicyRejectionsCarryRequirementsNotMetError() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    let requestFrame = try pair.client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(authority: "example.com", path: "/blocked")
+    )
+    let decision = try pair.server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: requestFrame,
+        policy: try WebTransportServerSessionPolicy(allowedPaths: ["/wt"])
+    )
+
+    #expect(decision.session.state == .rejected(status: 404))
+    #expect(decision.rejectionError?.kind == .requirementsNotMet)
+    #expect(decision.rejectionError?.code == WebTransportHTTP3DraftConstants.current.wtRequirementsNotMetError)
+}
+
+@Test
 func webTransportMapsUnknownSessionIDsToH3IDError() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
     do {

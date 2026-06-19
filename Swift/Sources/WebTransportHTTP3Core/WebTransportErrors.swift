@@ -24,6 +24,11 @@ public struct WebTransportDraft15Error: Error, Equatable, Sendable {
     }
 }
 
+public enum WebTransportDraft15StreamSignal: Equatable, Sendable {
+    case resetStream(streamID: UInt64, finalSize: UInt64)
+    case stopSending(streamID: UInt64)
+}
+
 public enum WebTransportDraft15ErrorMapper {
     public static func code(
         for kind: WebTransportDraft15ErrorKind,
@@ -54,5 +59,31 @@ public enum WebTransportDraft15ErrorMapper {
             frameType: nil,
             reason: Data(reason.utf8)
         )
+    }
+
+    public static func streamFrame(
+        for kind: WebTransportDraft15ErrorKind,
+        signal: WebTransportDraft15StreamSignal
+    ) -> QUICFrame {
+        switch signal {
+        case .resetStream(let streamID, let finalSize):
+            return .resetStream(id: streamID, applicationErrorCode: code(for: kind), finalSize: finalSize)
+        case .stopSending(let streamID):
+            return .stopSending(id: streamID, applicationErrorCode: code(for: kind))
+        }
+    }
+
+    public static func closeSessionCapsule(
+        for kind: WebTransportDraft15ErrorKind,
+        message: String
+    ) throws -> Data {
+        let errorCode = code(for: kind)
+        guard errorCode <= UInt64(UInt32.max) else {
+            throw QUICCodecError.valueOutOfRange("WebTransport close-session error code exceeds UInt32")
+        }
+        return try WebTransportFlowCapsuleCodec.serialize(.closeSession(
+            applicationErrorCode: UInt32(errorCode),
+            message: message
+        ))
     }
 }
