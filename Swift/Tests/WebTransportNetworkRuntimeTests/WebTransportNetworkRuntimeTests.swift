@@ -70,7 +70,63 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         message: decodedRequest.message
     )
     #expect(serverPacket.range(of: Data("WT-QUIC-SERVER-FLIGHT".utf8)) == nil)
-    #expect(try WebTransportQUICPacketProbeCodec.decodeServerInitial(serverPacket) == "hello")
+    #expect(try WebTransportQUICPacketProbeCodec.decodeServerInitial(
+        serverPacket,
+        request: decodedRequest
+    ) == "hello")
+    let decodedServerPacket = try QUICInitialPacketProtection.open(
+        serverPacket,
+        keyPhase: .server,
+        initialSecretConnectionID: decodedRequest.destinationConnectionID,
+        parsedHeader: try QUICInitialPacketProtection.parseProtectedLongHeader(serverPacket)
+    )
+    let serverCryptoFrames = try QUICFrame.decodeFrames(decodedServerPacket.payload).compactMap { frame -> QUICFrame? in
+        guard case .crypto = frame else {
+            return nil
+        }
+        return frame
+    }
+    var serverFlightDecoder = TLSHandshakeFlightDecoder()
+    let serverMessages = try serverFlightDecoder.receive(frames: serverCryptoFrames)
+    #expect(serverMessages.map(\.type) == [
+        .serverHello,
+        .encryptedExtensions,
+        .certificate,
+        .certificateVerify,
+        .finished
+    ])
+    #expect(try TLSCertificate.decode(serverMessages[2].body).entries.count == 1)
+    #expect(try TLSCertificateVerify.decode(serverMessages[3].body).signature.count == 64)
+    #expect(TLSFinished.decode(serverMessages[4].body).verifyData.count == 32)
+
+    var invalidCertificateVerifyMessages = serverMessages
+    invalidCertificateVerifyMessages[3] = try TLSCertificateVerify(
+        algorithm: TLSSignatureScheme.ed25519,
+        signature: Data(repeating: 0xaa, count: 64)
+    ).handshakeMessage()
+    let invalidCertificateVerifyPacket = try protectedServerInitial(
+        request: decodedRequest,
+        messages: invalidCertificateVerifyMessages
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
+            invalidCertificateVerifyPacket,
+            request: decodedRequest
+        )
+    }
+
+    var invalidFinishedMessages = serverMessages
+    invalidFinishedMessages[4] = TLSFinished(verifyData: Data(repeating: 0xbb, count: 32)).handshakeMessage()
+    let invalidFinishedPacket = try protectedServerInitial(
+        request: decodedRequest,
+        messages: invalidFinishedMessages
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
+            invalidFinishedPacket,
+            request: decodedRequest
+        )
+    }
 
     let applicationRequestPacket = try WebTransportQUICPacketProbeCodec.encodeClientApplicationRequest(
         request: decodedRequest,
@@ -168,7 +224,10 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         initialSecretConnectionID: decodedRequest.destinationConnectionID
     )
     #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(mismatchedServerInitial)
+        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
+            mismatchedServerInitial,
+            request: decodedRequest
+        )
     }
 
     var tamperedApplication = applicationRequestPacket
@@ -305,6 +364,26 @@ private func protectedClientInitial(
         )
     }
     return encoded
+}
+
+private func protectedServerInitial(
+    request: WebTransportQUICPacketProbeRequest,
+    messages: [TLSHandshakeMessage]
+) throws -> Data {
+    let frames = [.ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: [])]
+        + (try TLSHandshakeFlight(messages: messages).cryptoFrames(maxFramePayloadBytes: 9))
+    return try QUICInitialPacketProtection.seal(
+        packetType: .initial,
+        version: WebTransportQUICPacketProbeCodec.quicVersion,
+        destinationConnectionID: request.sourceConnectionID,
+        sourceConnectionID: request.destinationConnectionID,
+        token: Data(),
+        packetNumber: 0,
+        packetNumberLength: 2,
+        plaintextPayload: try QUICFrame.encodeFrames(frames),
+        keyPhase: .server,
+        initialSecretConnectionID: request.destinationConnectionID
+    )
 }
 
 private func clientHelloForValidationTest(

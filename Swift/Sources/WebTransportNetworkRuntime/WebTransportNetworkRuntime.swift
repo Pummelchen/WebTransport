@@ -150,17 +150,17 @@ public struct WebTransportQUICPacketProbeClient: Sendable {
     ) throws -> WebTransportNetworkProbeResult {
         let port = try QUICUDPPort(bindPort: localPort)
         let packet = try WebTransportQUICPacketProbeCodec.encodeClientInitial(message: message)
+        let request = try WebTransportQUICPacketProbeCodec.decodeClientInitial(packet)
         try port.send(packet, to: endpoint.udpEndpoint)
         let (bytes, remote) = try port.receive(timeoutMilliseconds: timeoutMilliseconds)
         let remoteEndpoint = WebTransportNetworkEndpoint(host: remote.host, port: remote.port)
         guard remoteEndpoint == endpoint else {
             throw WebTransportNetworkRuntimeError.unexpectedPacket
         }
-        let responseMessage = try WebTransportQUICPacketProbeCodec.decodeServerInitial(bytes)
+        let responseMessage = try WebTransportQUICPacketProbeCodec.decodeServerInitial(bytes, request: request)
         guard responseMessage == message else {
             throw WebTransportNetworkRuntimeError.invalidProbePayload
         }
-        let request = try WebTransportQUICPacketProbeCodec.decodeClientInitial(packet)
         let applicationRequest = try WebTransportQUICPacketProbeCodec.encodeClientApplicationRequest(
             request: request,
             message: message
@@ -291,6 +291,8 @@ public enum WebTransportQUICPacketProbeCodec {
     private static let sessionProtocol = "demo.v1"
     private static let sessionStreamID: UInt64 = 0
     private static let applicationPacketNumber: UInt64 = 1
+    private static let deterministicServerCertificateDER = Data([0x30, 0x03, 0x02, 0x01, 0x05])
+    private static let deterministicSharedSecret = Data(repeating: 0x5a, count: TLS13KeySchedule.sha256Length)
     private static let clientCryptoFramePayloadBytes = 7
     private static let serverCryptoFramePayloadBytes = 9
 
@@ -317,10 +319,7 @@ public enum WebTransportQUICPacketProbeCodec {
         message: String,
         packetNumber: UInt64 = 0
     ) throws -> Data {
-        let flight = TLSHandshakeFlight(messages: [
-            try makeServerHelloHandshakeMessage(message: message),
-            try makeEncryptedExtensionsHandshakeMessage(request: request)
-        ])
+        let flight = TLSHandshakeFlight(messages: try makeServerHandshakeMessages(request: request, message: message))
         return try encodeProtectedInitial(
             destinationConnectionID: request.sourceConnectionID,
             sourceConnectionID: request.destinationConnectionID,
@@ -354,7 +353,10 @@ public enum WebTransportQUICPacketProbeCodec {
         )
     }
 
-    public static func decodeServerInitial(_ data: Data) throws -> String {
+    public static func decodeServerInitial(
+        _ data: Data,
+        request: WebTransportQUICPacketProbeRequest
+    ) throws -> String {
         let packet = try decodeProtectedInitial(
             data,
             keyPhase: .server,
@@ -367,9 +369,10 @@ public enum WebTransportQUICPacketProbeCodec {
         let frames = try QUICFrame.decodeFrames(packet.payload)
         return try decodeHandshakeFlight(
             from: frames,
-            expectedTypes: [.serverHello, .encryptedExtensions],
+            expectedTypes: [.serverHello, .encryptedExtensions, .certificate, .certificateVerify, .finished],
             requiresPing: false,
-            requiresAck: true
+            requiresAck: true,
+            peerHandshakeMessages: request.handshakeMessages
         ).message
     }
 
@@ -515,6 +518,49 @@ public enum WebTransportQUICPacketProbeCodec {
             try TLSALPNExtension.make(protocols: [h3ALPN]),
             try TLSQUICTransportParametersExtension.make(serverTransportParameters(originalDestinationConnectionID: request.destinationConnectionID))
         ]).handshakeMessage()
+    }
+
+    private static func makeServerHandshakeMessages(
+        request: WebTransportQUICPacketProbeRequest,
+        message: String
+    ) throws -> [TLSHandshakeMessage] {
+        var transcript = TLS13Transcript()
+        for clientMessage in request.handshakeMessages {
+            try transcript.append(clientMessage)
+        }
+
+        let serverHello = try makeServerHelloHandshakeMessage(message: message)
+        try transcript.append(serverHello)
+
+        let encryptedExtensions = try makeEncryptedExtensionsHandshakeMessage(request: request)
+        try transcript.append(encryptedExtensions)
+
+        let certificate = try TLSCertificate(entries: [
+            try TLSCertificateEntry(certificateData: deterministicServerCertificateDER)
+        ]).handshakeMessage()
+        try transcript.append(certificate)
+
+        let certificateVerify = try makeCertificateVerifyHandshakeMessage(transcriptHash: transcript.hash)
+        try transcript.append(certificateVerify)
+
+        let finished = try makeFinishedHandshakeMessage(transcriptHash: transcript.hash)
+        return [serverHello, encryptedExtensions, certificate, certificateVerify, finished]
+    }
+
+    private static func makeCertificateVerifyHandshakeMessage(transcriptHash: Data) throws -> TLSHandshakeMessage {
+        try TLSCertificateVerify(
+            algorithm: TLSSignatureScheme.ed25519,
+            signature: deterministicCertificateVerifySignature(transcriptHash: transcriptHash)
+        ).handshakeMessage()
+    }
+
+    private static func makeFinishedHandshakeMessage(transcriptHash: Data) throws -> TLSHandshakeMessage {
+        TLSFinished(
+            verifyData: try TLS13KeySchedule.finishedVerifyData(
+                baseKey: deterministicServerHandshakeTrafficSecret(),
+                transcriptHash: transcriptHash
+            )
+        ).handshakeMessage()
     }
 
     private static func clientTransportParameters() throws -> QUICTransportParameters {
@@ -680,7 +726,8 @@ public enum WebTransportQUICPacketProbeCodec {
         from frames: [QUICFrame],
         expectedTypes: [TLSHandshakeType],
         requiresPing: Bool,
-        requiresAck: Bool
+        requiresAck: Bool,
+        peerHandshakeMessages: [TLSHandshakeMessage] = []
     ) throws -> (message: String, messages: [TLSHandshakeMessage]) {
         var hasPing = false
         var hasAck = false
@@ -724,11 +771,16 @@ public enum WebTransportQUICPacketProbeCodec {
         case .serverHello:
             let hello = try TLSServerHello.decode(first.body)
             try validateServerHello(hello)
-            guard messages.count == 2, messages[1].type == .encryptedExtensions else {
+            guard messages.count == 5,
+                  messages[1].type == .encryptedExtensions,
+                  messages[2].type == .certificate,
+                  messages[3].type == .certificateVerify,
+                  messages[4].type == .finished else {
                 throw WebTransportNetworkRuntimeError.invalidProbePayload
             }
             let encryptedExtensions = try TLSEncryptedExtensions.decode(messages[1].body)
             try validateEncryptedExtensions(encryptedExtensions)
+            try validateServerAuthentication(messages, peerHandshakeMessages: peerHandshakeMessages)
             guard let message = String(data: hello.legacySessionIDEcho, encoding: .utf8) else {
                 throw WebTransportNetworkRuntimeError.invalidProbePayload
             }
@@ -771,6 +823,41 @@ public enum WebTransportQUICPacketProbeCodec {
             encryptedExtensions.extensions,
             requiresOriginalDestinationConnectionID: true
         )
+    }
+
+    private static func validateServerAuthentication(
+        _ messages: [TLSHandshakeMessage],
+        peerHandshakeMessages: [TLSHandshakeMessage]
+    ) throws {
+        let certificate = try TLSCertificate.decode(messages[2].body)
+        guard certificate.requestContext.isEmpty,
+              certificate.entries.count == 1,
+              certificate.entries[0].certificateData == deterministicServerCertificateDER else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+
+        var transcript = TLS13Transcript()
+        for message in peerHandshakeMessages {
+            try transcript.append(message)
+        }
+        for message in messages.prefix(3) {
+            try transcript.append(message)
+        }
+        let certificateVerify = try TLSCertificateVerify.decode(messages[3].body)
+        guard certificateVerify.algorithm == TLSSignatureScheme.ed25519,
+              certificateVerify.signature == deterministicCertificateVerifySignature(transcriptHash: transcript.hash) else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+
+        try transcript.append(messages[3])
+        let finished = TLSFinished.decode(messages[4].body)
+        let expectedVerifyData = try TLS13KeySchedule.finishedVerifyData(
+            baseKey: deterministicServerHandshakeTrafficSecret(),
+            transcriptHash: transcript.hash
+        )
+        guard finished.verifyData == expectedVerifyData else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
     }
 
     private static func validateALPN(_ extensions: [TLSExtension]) throws {
@@ -881,6 +968,21 @@ public enum WebTransportQUICPacketProbeCodec {
         seed.append(clientSourceConnectionID)
         seed.append(keyPhase == .client ? 0x01 : 0x02)
         return try QUICPacketProtection.deriveKeys(trafficSecret: TLS13KeySchedule.transcriptHash(seed))
+    }
+
+    private static func deterministicCertificateVerifySignature(transcriptHash: Data) -> Data {
+        let signedContent = TLSCertificateVerifier.signedContent(role: .server, transcriptHash: transcriptHash)
+        let first = TLS13KeySchedule.transcriptHash(signedContent)
+        let second = TLS13KeySchedule.transcriptHash(Data(signedContent.reversed()))
+        return first + second
+    }
+
+    private static func deterministicServerHandshakeTrafficSecret() throws -> Data {
+        let handshakeSecret = try TLS13KeyAgreement.handshakeSecret(sharedSecret: deterministicSharedSecret)
+        return try TLS13KeyAgreement.handshakeTrafficSecrets(
+            handshakeSecret: handshakeSecret,
+            transcriptHash: TLS13KeySchedule.transcriptHash(Data("WebTransportNetworkRuntime server handshake".utf8))
+        ).serverHandshakeTrafficSecret
     }
 }
 
