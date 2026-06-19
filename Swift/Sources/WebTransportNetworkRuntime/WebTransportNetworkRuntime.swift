@@ -1,6 +1,7 @@
 import Foundation
 import WebTransportCryptoApple
 import WebTransportQUICCore
+import WebTransportTLSCore
 import WebTransportUDPApple
 
 public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConvertible, Sendable {
@@ -221,17 +222,20 @@ public struct WebTransportQUICPacketProbeRequest: Equatable, Sendable {
     public var packetNumber: UInt64
     public var destinationConnectionID: Data
     public var sourceConnectionID: Data
+    public var handshakeMessages: [TLSHandshakeMessage]
 
     public init(
         message: String,
         packetNumber: UInt64,
         destinationConnectionID: Data,
-        sourceConnectionID: Data
+        sourceConnectionID: Data,
+        handshakeMessages: [TLSHandshakeMessage] = []
     ) {
         self.message = message
         self.packetNumber = packetNumber
         self.destinationConnectionID = destinationConnectionID
         self.sourceConnectionID = sourceConnectionID
+        self.handshakeMessages = handshakeMessages
     }
 }
 
@@ -241,23 +245,26 @@ public enum WebTransportQUICPacketProbeCodec {
 
     private static let clientDestinationConnectionID = Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65])
     private static let clientSourceConnectionID = Data([0x77, 0x74, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e])
-    private static let probePrefix = Data("WT-QUIC-PROBE\0".utf8)
-    private static let ackPrefix = Data("WT-QUIC-ACK\0".utf8)
+    private static let probePrefix = Data("WT-QUIC-CLIENT-FLIGHT\0".utf8)
+    private static let ackPrefix = Data("WT-QUIC-SERVER-FLIGHT\0".utf8)
+    private static let readyBody = Data("WT-QUIC-HANDSHAKE-READY".utf8)
+    private static let clientCryptoFramePayloadBytes = 7
+    private static let serverCryptoFramePayloadBytes = 9
 
     public static func encodeClientInitial(
         message: String,
         packetNumber: UInt64 = 0
     ) throws -> Data {
-        try encodeProtectedInitial(
+        let flight = TLSHandshakeFlight(messages: [
+            TLSHandshakeMessage(type: .clientHello, body: probePrefix + Data(message.utf8))
+        ])
+        return try encodeProtectedInitial(
             destinationConnectionID: clientDestinationConnectionID,
             sourceConnectionID: clientSourceConnectionID,
             packetNumber: packetNumber,
             keyPhase: .client,
             initialSecretConnectionID: clientDestinationConnectionID,
-            frames: [
-                .crypto(offset: 0, data: probePrefix + Data(message.utf8)),
-                .ping
-            ],
+            frames: try flight.cryptoFrames(maxFramePayloadBytes: clientCryptoFramePayloadBytes) + [.ping],
             minimumDatagramBytes: minimumInitialDatagramBytes
         )
     }
@@ -267,16 +274,18 @@ public enum WebTransportQUICPacketProbeCodec {
         message: String,
         packetNumber: UInt64 = 0
     ) throws -> Data {
-        try encodeProtectedInitial(
+        let flight = TLSHandshakeFlight(messages: [
+            TLSHandshakeMessage(type: .serverHello, body: ackPrefix + Data(message.utf8)),
+            TLSHandshakeMessage(type: .encryptedExtensions, body: readyBody)
+        ])
+        return try encodeProtectedInitial(
             destinationConnectionID: request.sourceConnectionID,
             sourceConnectionID: request.destinationConnectionID,
             packetNumber: packetNumber,
             keyPhase: .server,
             initialSecretConnectionID: request.destinationConnectionID,
-            frames: [
-                .ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
-                .crypto(offset: 0, data: ackPrefix + Data(message.utf8))
-            ],
+            frames: [.ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: [])]
+                + (try flight.cryptoFrames(maxFramePayloadBytes: serverCryptoFramePayloadBytes)),
             minimumDatagramBytes: 0
         )
     }
@@ -287,12 +296,19 @@ public enum WebTransportQUICPacketProbeCodec {
         }
         let packet = try decodeProtectedInitial(data, keyPhase: .client)
         let frames = try QUICFrame.decodeFrames(packet.payload)
-        let message = try decodeMessage(from: frames, expectedPrefix: probePrefix, requiresPing: true, requiresAck: false)
+        let decoded = try decodeHandshakeFlight(
+            from: frames,
+            expectedPrefix: probePrefix,
+            expectedTypes: [.clientHello],
+            requiresPing: true,
+            requiresAck: false
+        )
         return WebTransportQUICPacketProbeRequest(
-            message: message,
+            message: decoded.message,
             packetNumber: packet.packetNumber,
             destinationConnectionID: packet.destinationConnectionID,
-            sourceConnectionID: packet.sourceConnectionID
+            sourceConnectionID: packet.sourceConnectionID,
+            handshakeMessages: decoded.messages
         )
     }
 
@@ -307,7 +323,13 @@ public enum WebTransportQUICPacketProbeCodec {
             throw WebTransportNetworkRuntimeError.unexpectedPacket
         }
         let frames = try QUICFrame.decodeFrames(packet.payload)
-        return try decodeMessage(from: frames, expectedPrefix: ackPrefix, requiresPing: false, requiresAck: true)
+        return try decodeHandshakeFlight(
+            from: frames,
+            expectedPrefix: ackPrefix,
+            expectedTypes: [.serverHello, .encryptedExtensions],
+            requiresPing: false,
+            requiresAck: true
+        ).message
     }
 
     private static func encodeProtectedInitial(
@@ -370,15 +392,16 @@ public enum WebTransportQUICPacketProbeCodec {
         return packet
     }
 
-    private static func decodeMessage(
+    private static func decodeHandshakeFlight(
         from frames: [QUICFrame],
         expectedPrefix: Data,
+        expectedTypes: [TLSHandshakeType],
         requiresPing: Bool,
         requiresAck: Bool
-    ) throws -> String {
+    ) throws -> (message: String, messages: [TLSHandshakeMessage]) {
         var hasPing = false
         var hasAck = false
-        var message: String?
+        var cryptoFrames: [QUICFrame] = []
 
         for frame in frames {
             switch frame {
@@ -388,26 +411,35 @@ public enum WebTransportQUICPacketProbeCodec {
                 hasPing = true
             case .ack:
                 hasAck = true
-            case .crypto(let offset, let data):
-                guard message == nil, offset == 0, data.starts(with: expectedPrefix) else {
-                    throw WebTransportNetworkRuntimeError.invalidProbePayload
-                }
-                let messageBytes = data.dropFirst(expectedPrefix.count)
-                guard let decoded = String(data: Data(messageBytes), encoding: .utf8) else {
-                    throw WebTransportNetworkRuntimeError.invalidProbePayload
-                }
-                message = decoded
+            case .crypto:
+                cryptoFrames.append(frame)
             default:
                 throw WebTransportNetworkRuntimeError.unexpectedFrame
             }
         }
 
-        guard let message,
-              (!requiresPing || hasPing),
+        guard (!requiresPing || hasPing),
               (!requiresAck || hasAck) else {
             throw WebTransportNetworkRuntimeError.invalidProbePayload
         }
-        return message
+
+        var decoder = TLSHandshakeFlightDecoder()
+        let messages = try decoder.receive(frames: cryptoFrames)
+        guard messages.map(\.type) == expectedTypes,
+              let first = messages.first,
+              first.body.starts(with: expectedPrefix) else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        if expectedTypes.contains(.encryptedExtensions) {
+            guard messages.last?.body == readyBody else {
+                throw WebTransportNetworkRuntimeError.invalidProbePayload
+            }
+        }
+        let messageBytes = first.body.dropFirst(expectedPrefix.count)
+        guard let message = String(data: Data(messageBytes), encoding: .utf8) else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        return (message, messages)
     }
 }
 

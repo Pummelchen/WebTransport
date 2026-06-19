@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import WebTransportNetworkRuntime
 import WebTransportQUICCore
+import WebTransportTLSCore
 
 @Test
 func networkProbeCodecRoundTripsAndRejectsMalformedPackets() throws {
@@ -46,17 +47,18 @@ func networkProbeClientServerExchangeOverUDP() async throws {
 func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets() throws {
     let clientPacket = try WebTransportQUICPacketProbeCodec.encodeClientInitial(message: "hello")
     #expect(clientPacket.count >= WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes)
-    #expect(clientPacket.range(of: Data("WT-QUIC-PROBE".utf8)) == nil)
+    #expect(clientPacket.range(of: Data("WT-QUIC-CLIENT-FLIGHT".utf8)) == nil)
 
     let decodedRequest = try WebTransportQUICPacketProbeCodec.decodeClientInitial(clientPacket)
     #expect(decodedRequest.message == "hello")
     #expect(decodedRequest.packetNumber == 0)
+    #expect(decodedRequest.handshakeMessages.map(\.type) == [.clientHello])
 
     let serverPacket = try WebTransportQUICPacketProbeCodec.encodeServerInitial(
         request: decodedRequest,
         message: decodedRequest.message
     )
-    #expect(serverPacket.range(of: Data("WT-QUIC-ACK".utf8)) == nil)
+    #expect(serverPacket.range(of: Data("WT-QUIC-SERVER-FLIGHT".utf8)) == nil)
     #expect(try WebTransportQUICPacketProbeCodec.decodeServerInitial(serverPacket) == "hello")
 
     var truncated = clientPacket
@@ -91,7 +93,7 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         destinationConnectionID: decodedRequest.destinationConnectionID,
         sourceConnectionID: decodedRequest.sourceConnectionID,
         frames: [
-            .crypto(offset: 0, data: Data("WT-QUIC-PROBE\0short".utf8)),
+            .crypto(offset: 0, data: Data("WT-QUIC-CLIENT-FLIGHT\0short".utf8)),
             .ping
         ],
         padToMinimumInitialSize: false
@@ -104,8 +106,14 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         destinationConnectionID: decodedRequest.destinationConnectionID,
         sourceConnectionID: decodedRequest.sourceConnectionID,
         frames: [
-            .crypto(offset: 0, data: Data("WT-QUIC-PROBE\0one".utf8)),
-            .crypto(offset: 0, data: Data("WT-QUIC-PROBE\0two".utf8)),
+            .crypto(offset: 0, data: try TLSHandshakeMessage(
+                type: .clientHello,
+                body: Data("WT-QUIC-CLIENT-FLIGHT\0one".utf8)
+            ).encode()),
+            .crypto(offset: 0, data: try TLSHandshakeMessage(
+                type: .clientHello,
+                body: Data("WT-QUIC-CLIENT-FLIGHT\0two".utf8)
+            ).encode()),
             .ping
         ],
         padToMinimumInitialSize: true
@@ -124,7 +132,7 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         packetNumberLength: 2,
         plaintextPayload: try QUICFrame.encodeFrames([
             .ack(largestAcknowledged: decodedRequest.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
-            .crypto(offset: 0, data: Data("WT-QUIC-ACK\0hello".utf8))
+            .crypto(offset: 0, data: Data("WT-QUIC-SERVER-FLIGHT\0hello".utf8))
         ]),
         keyPhase: .server,
         initialSecretConnectionID: decodedRequest.destinationConnectionID
@@ -132,6 +140,27 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(mismatchedServerInitial)
     }
+}
+
+@Test
+func quicPacketProbeReassemblesOutOfOrderCryptoFragments() throws {
+    let handshake = TLSHandshakeMessage(
+        type: .clientHello,
+        body: Data("WT-QUIC-CLIENT-FLIGHT\0fragmented".utf8)
+    )
+    let frames = try TLSHandshakeFlight(messages: [handshake])
+        .cryptoFrames(maxFramePayloadBytes: 6)
+        .reversed()
+    let packet = try protectedClientInitial(
+        destinationConnectionID: Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65]),
+        sourceConnectionID: Data([0x77, 0x74, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e]),
+        frames: Array(frames) + [.ping],
+        padToMinimumInitialSize: true
+    )
+
+    let decoded = try WebTransportQUICPacketProbeCodec.decodeClientInitial(packet)
+    #expect(decoded.message == "fragmented")
+    #expect(decoded.handshakeMessages == [handshake])
 }
 
 @Test

@@ -68,6 +68,7 @@ let package = Package(
             dependencies: [
                 "WebTransportCryptoApple",
                 "WebTransportQUICCore",
+                "WebTransportTLSCore",
                 "WebTransportUDPApple"
             ]
         ),
