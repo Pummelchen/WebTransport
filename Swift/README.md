@@ -19,7 +19,7 @@ Implemented:
 - QPACK static, literal, Huffman, dynamic table, Base, and post-Base behavior covered by tests.
 - WebTransport streams, datagrams, buffering, rejection, close, drain, reset, stop-sending, and flow-control behavior.
 - TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; QUIC packet protection helpers, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, transcript-derived 1-RTT packet keys for protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing over UDP, UDP loopback support, and prompt-free identity/trust test paths.
-- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, deterministic Certificate/CertificateVerify/Finished validation, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame probe compatibility mode.
+- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, validated Certificate/CertificateVerify/Finished handling, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame compatibility mode.
 - CLI conformance harness with 40 scenarios shared by `WebTransportClient` and `WebTransportServer`, including positive/negative interop matrices for CONNECT, streams, datagrams, GOAWAY, close/drain, malformed input, and flow-control errors.
 - Deterministic parser/property hardening tests for QPACK, HTTP/3 frames, capsules, QUIC varints, QUIC transport parameters, WebTransport stream prefixes, resource limits, malformed peers, ordering, replay, exhaustion, and close/reset races.
 - Process-level CLI tests for help/list/error/scenario exit codes and frame/packet loopback.
@@ -30,9 +30,9 @@ Implemented:
 - Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
 - Apple Silicon release script for reproducibility-checked production CLI binaries with `SHA256SUMS`.
 
-Known limitation:
+Recent status:
 
-- The separate-process network mode is still a deterministic runtime probe rather than a complete external QUIC/TLS/HTTP/3 network stack.
+- The separate-process `--transport packet` and `--transport frame` paths are now wired to the interoperable Network.framework QUIC/TLS/HTTP/3 runtime.
 
 ## Public API Surface
 

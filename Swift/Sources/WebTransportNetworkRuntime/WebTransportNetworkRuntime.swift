@@ -11,6 +11,7 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
     case invalidTransport(String)
     case unexpectedPacket
     case unexpectedFrame
+    case timeout(Int32)
 
     public var description: String {
         switch self {
@@ -24,6 +25,8 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
             return "unexpected packet in WebTransport network probe"
         case .unexpectedFrame:
             return "unexpected frame in WebTransport network probe packet"
+        case .timeout(let value):
+            return "network runtime operation timed out after \(value)ms"
         }
     }
 }

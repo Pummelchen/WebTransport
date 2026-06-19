@@ -9,7 +9,7 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 | Implementation | Status | Draft-15 Score |
 | --- | --- | ---: |
-| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, packet-protected QUIC Initial CRYPTO flight with Certificate/CertificateVerify/Finished validation, transcript-derived 1-RTT packet keys, protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, explicit TLS/QUIC application-key readiness gating, expanded positive/negative interop conformance scenarios, parser/resource hardening tests, process/stress/artifact/API compatibility tests, macOS Swift CI matrix, sanitized production logging/error surfaces, and reproducibility-checked release packaging are present. | 96% |
+| Swift | Active implementation. Protocol core, package product, separate-process CLI facade, packet-protected QUIC Initial CRYPTO flight with Certificate/CertificateVerify/Finished validation, transcript-derived 1-RTT packet keys, protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, explicit TLS/QUIC application-key readiness gating, expanded positive/negative interop conformance scenarios, parser/resource hardening tests, process/stress/artifact/API compatibility tests, macOS Swift CI matrix, sanitized production logging/error surfaces, and reproducibility-checked release packaging are present. | 96% |
 | C99 | Placeholder only. No protocol implementation is present. | 0% |
 | C++ (`CPP`) | Placeholder only. No protocol implementation is present. | 0% |
 
@@ -39,7 +39,7 @@ Current Swift coverage includes:
 - Network runtime package product: `WebTransportNetworkRuntime`.
 - CLI products: `WebTransportClient` and `WebTransportServer`.
 
-Important limitation: the Swift client/server CLI now validates a packet-protected QUIC Initial CRYPTO flight with deterministic server-authentication messages and uses the validated handshake transcript to derive protected 1-RTT HTTP/3 WebTransport CONNECT/DATAGRAM packets over UDP, but it is still a deterministic runtime probe rather than a complete external QUIC/TLS/HTTP/3 network stack.
+Important note: the Swift client/server CLI now routes `--listen/--connect` runtime probes through the interoperable Network.framework QUIC/TLS/HTTP/3 transport for real-network handshake and session signaling.
 
 Useful Swift commands:
 

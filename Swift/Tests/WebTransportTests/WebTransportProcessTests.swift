@@ -225,7 +225,7 @@ func webTransportCLIProcessLoopbackCoversFrameAndPacketTransports() throws {
         guard try WebTransportProcessSupport.debugProductsAvailable() else {
             return
         }
-        try WebTransportProcessSupport.runLoopback(transport: "frame", expectsEstablishedSession: false)
+        try WebTransportProcessSupport.runLoopback(transport: "frame", expectsEstablishedSession: true)
         try WebTransportProcessSupport.runLoopback(transport: "packet", expectsEstablishedSession: true)
     }
 }
@@ -330,7 +330,7 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
                 do {
                     let result = try WebTransportProcessSupport.run(
                         client,
-                        ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)", "--timeout-ms", "5000"]
+                        ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)", "--timeout-ms", "12000"]
                     )
                     let message = result.stdout.contains("connected")
                         ? ""

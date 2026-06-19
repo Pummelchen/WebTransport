@@ -15,20 +15,46 @@ struct WebTransportServerCLI {
                 let local: WebTransportNetworkEndpoint
                 switch options.transport {
                 case .packet:
-                    let server = try WebTransportQUICPacketProbeServer(bindPort: options.endpoint.port)
-                    local = server.localEndpoint
+                    let server = try WebTransportQUICInteroperablePacketProbeServer(
+                        bindPort: options.endpoint.port,
+                        maxConcurrentConnections: options.maxSessions
+                    )
+                    local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
                     print("network packet probe listening: \(local.host):\(local.port)")
                     fflush(stdout)
-                    for _ in 0..<options.maxSessions {
-                        results.append(try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds))
+                    let tasks: [Task<WebTransportNetworkProbeResult, Error>] = (0..<options.maxSessions).map { _ in
+                        Task {
+                            try await server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
+                        }
+                    }
+                    for task in tasks {
+                        do {
+                            let result = try await task.value
+                            results.append(result)
+                        } catch {
+                            fputs("network packet probe serve error: \(error)\n", stderr)
+                        }
                     }
                 case .frame:
-                    let server = try WebTransportNetworkProbeServer(bindPort: options.endpoint.port)
-                    local = server.localEndpoint
+                    let server = try WebTransportQUICInteroperablePacketProbeServer(
+                        bindPort: options.endpoint.port,
+                        maxConcurrentConnections: options.maxSessions
+                    )
+                    local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
                     print("network frame probe listening: \(local.host):\(local.port)")
                     fflush(stdout)
-                    for _ in 0..<options.maxSessions {
-                        results.append(try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds))
+                    let tasks: [Task<WebTransportNetworkProbeResult, Error>] = (0..<options.maxSessions).map { _ in
+                        Task {
+                            try await server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
+                        }
+                    }
+                    for task in tasks {
+                        do {
+                            let result = try await task.value
+                            results.append(result)
+                        } catch {
+                            fputs("network frame probe serve error: \(error)\n", stderr)
+                        }
                     }
                 }
                 for result in results {

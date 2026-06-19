@@ -14,13 +14,13 @@ struct WebTransportClientCLI {
                 let result: WebTransportNetworkProbeResult
                 switch options.transport {
                 case .packet:
-                    result = try WebTransportQUICPacketProbeClient().run(
+                    result = try await WebTransportQUICInteroperablePacketProbeClient().run(
                         to: options.endpoint,
                         message: options.message,
                         timeoutMilliseconds: options.timeoutMilliseconds
                     )
                 case .frame:
-                    result = try WebTransportNetworkProbeClient().run(
+                    result = try await WebTransportQUICInteroperablePacketProbeClient().run(
                         to: options.endpoint,
                         message: options.message,
                         timeoutMilliseconds: options.timeoutMilliseconds
