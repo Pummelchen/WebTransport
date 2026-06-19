@@ -1,4 +1,4 @@
-# ``WebTransport``
+# WebTransport
 
 Native Swift WebTransport over HTTP/3 client and server APIs.
 
