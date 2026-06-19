@@ -83,10 +83,12 @@ draft-15 compliance closure is in progress.
   rejection, and QPACK HEADERS frame helpers.
 - `WebTransportHTTP3Core` now includes Phase 13 draft-15 session and shutdown
   behavior for deterministic tests: `WT_DRAIN_SESSION`, `WT_CLOSE_SESSION`,
-  CONNECT stream finish-as-close, `WT_SESSION_GONE` post-close gating, buffered
-  stream/datagram ingress before session acceptance, explicit draft error mapping,
-  0-RTT CONNECT rejection, GOAWAY-driven draining, and monotonic WebTransport
-  flow-control limit updates.
+  CONNECT stream finish-as-close, close-result FIN/STOP_SENDING actions,
+  `WT_SESSION_GONE` post-close stream/datagram cleanup, additional CONNECT stream
+  data reset with `H3_MESSAGE_ERROR` after received close, bounded close-message
+  validation, buffered stream/datagram ingress before session acceptance, explicit
+  draft error mapping, 0-RTT CONNECT rejection, GOAWAY-driven draining, and
+  monotonic WebTransport flow-control limit updates.
 
 Commands:
 

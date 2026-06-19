@@ -115,12 +115,16 @@ public enum WebTransportFlowCapsuleCodec {
         case .drainSession:
             return (WebTransportHTTP3DraftConstants.current.wtDrainSessionCapsule, Data())
         case .closeSession(let applicationErrorCode, let message):
+            let messageBytes = Data(message.utf8)
+            guard messageBytes.count <= WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes else {
+                throw QUICCodecError.valueOutOfRange("WT_CLOSE_SESSION message exceeds 1024 bytes")
+            }
             var payload = Data()
             payload.append(UInt8((applicationErrorCode >> 24) & 0xff))
             payload.append(UInt8((applicationErrorCode >> 16) & 0xff))
             payload.append(UInt8((applicationErrorCode >> 8) & 0xff))
             payload.append(UInt8(applicationErrorCode & 0xff))
-            payload.append(Data(message.utf8))
+            payload.append(messageBytes)
             return (WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule, payload)
         case .maxData(let limit):
             return (WebTransportHTTP3DraftConstants.current.wtMaxDataCapsule, try encodePayload(limit: limit))
@@ -155,6 +159,9 @@ public enum WebTransportFlowCapsuleCodec {
             | UInt32(bytes[2]) << 8
             | UInt32(bytes[3])
         let messageBytes = payload.dropFirst(4)
+        guard messageBytes.count <= WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes else {
+            throw QUICCodecError.valueOutOfRange("WT_CLOSE_SESSION message exceeds 1024 bytes")
+        }
         guard let message = String(data: Data(messageBytes), encoding: .utf8) else {
             throw QUICCodecError.malformed("WT_CLOSE_SESSION message must be UTF-8")
         }

@@ -11,9 +11,8 @@ func webTransportCloseAndDrainCapsulesDriveSessionStateAndGating() throws {
     let drain = try pair.client.makeDrainSessionCapsule(sessionID: sessionID)
     #expect(try WebTransportFlowCapsuleCodec.parse(drain).capsule == .drainSession)
     #expect(pair.client.sessionsByID[sessionID]?.state == .draining)
-    #expect(throws: WebTransportDraft15Error.self) {
-        _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("x".utf8))
-    }
+    _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("x".utf8))
+    _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
 
     let close = try pair.client.makeCloseSessionCapsule(
         sessionID: sessionID,
@@ -25,6 +24,52 @@ func webTransportCloseAndDrainCapsulesDriveSessionStateAndGating() throws {
         message: "done"
     ))
     #expect(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 7, message: "done"))
+    #expect(throws: WebTransportDraft15Error.self) {
+        _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("x".utf8))
+    }
+}
+
+@Test
+func webTransportCloseSessionResultCarriesFINStopSendingAndStreamCleanupActions() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    let sessionID = try WebTransportPhase13Support.establishSession(client: &pair.client, server: &pair.server)
+    let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+    _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
+
+    let result = try pair.client.makeCloseSessionCapsuleResult(
+        sessionID: sessionID,
+        applicationErrorCode: 7,
+        message: "done"
+    )
+
+    #expect(try WebTransportFlowCapsuleCodec.parse(result.capsuleBytes).capsule == .closeSession(
+        applicationErrorCode: 7,
+        message: "done"
+    ))
+    #expect(result.terminationActions.connectFINFrame == .stream(
+        id: sessionID.rawValue,
+        offset: nil,
+        fin: true,
+        data: Data()
+    ))
+    #expect(result.terminationActions.connectStopSendingFrame == .stopSending(
+        id: sessionID.rawValue,
+        applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+    ))
+    #expect(result.terminationActions.streamResetFrames == [
+        .resetStream(
+            id: 4,
+            applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError,
+            finalSize: 0
+        )
+    ])
+    #expect(result.terminationActions.streamStopSendingFrames == [
+        .stopSending(
+            id: 4,
+            applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+        )
+    ])
+    #expect(pair.client.stream(for: 4) == nil)
 }
 
 @Test
@@ -36,15 +81,63 @@ func webTransportReceivedCloseCleansStreamsAndDatagrams() throws {
     let datagram = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("d".utf8))
     _ = try pair.server.receiveDatagramFrame(datagram)
 
-    _ = try pair.server.receiveFlowControlCapsule(
+    let received = try pair.server.receiveFlowControlCapsuleWithActions(
         sessionID: sessionID,
         bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 9, message: "bye"))
     )
 
+    #expect(received.terminationActions?.connectFINFrame == .stream(
+        id: sessionID.rawValue,
+        offset: nil,
+        fin: true,
+        data: Data()
+    ))
     #expect(pair.server.stream(for: 4) == nil)
     #expect(pair.server.popDatagramPayload(sessionID: sessionID) == nil)
     #expect(throws: WebTransportDraft15Error.self) {
         try pair.server.receiveStreamPayload(streamID: 4, payload: Data("x".utf8))
+    }
+}
+
+@Test
+func webTransportReceivedCloseResetsAdditionalConnectStreamDataWithH3MessageError() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    let sessionID = try WebTransportPhase13Support.establishSession(client: &pair.client, server: &pair.server)
+
+    _ = try pair.server.receiveFlowControlCapsuleWithActions(
+        sessionID: sessionID,
+        bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: "closed"))
+    )
+
+    #expect(try pair.server.receiveConnectStreamData(
+        streamID: sessionID.rawValue,
+        data: Data("late".utf8)
+    ) == .resetStream(
+        id: sessionID.rawValue,
+        applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
+        finalSize: 0
+    ))
+}
+
+@Test
+func webTransportCloseSessionRejectsOversizedMessages() throws {
+    let oversized = String(repeating: "x", count: WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes + 1)
+
+    #expect(throws: Error.self) {
+        _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(
+            applicationErrorCode: 1,
+            message: oversized
+        ))
+    }
+
+    var payload = Data([0, 0, 0, 1])
+    payload.append(Data(oversized.utf8))
+    var capsule = Data()
+    capsule.append(try QUICVarInt.encode(WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule))
+    capsule.append(try QUICVarInt.encode(UInt64(payload.count)))
+    capsule.append(payload)
+    #expect(throws: Error.self) {
+        _ = try WebTransportFlowCapsuleCodec.parse(capsule)
     }
 }
 
@@ -160,15 +253,14 @@ func webTransportRejectsZeroRTTConnectAndLateSessionsAfterGoaway() throws {
 }
 
 @Test
-func webTransportGoawayDrainsExistingSessionsAndBlocksNewWork() throws {
+func webTransportGoawayDrainsExistingSessionsAndAllowsExistingSessionWork() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
     let sessionID = try WebTransportPhase13Support.establishSession(client: &pair.client, server: &pair.server)
 
     try pair.client.receiveControlFrame(try HTTP3Frame(type: HTTP3FrameType.goaway, varIntValue: 4))
     #expect(pair.client.sessionsByID[sessionID]?.state == .draining)
-    #expect(throws: WebTransportDraft15Error.self) {
-        _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
-    }
+    _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+    _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("after-goaway".utf8))
 }
 
 private enum WebTransportPhase13Support {

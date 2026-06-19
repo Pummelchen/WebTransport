@@ -64,6 +64,7 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
     public var wtALPNError: UInt64
     public var wtRequirementsNotMetError: UInt64
     public var wtApplicationErrorRange: ClosedRange<UInt64>
+    public var wtCloseSessionMaxMessageBytes: Int
 
     public static let draft15 = WebTransportHTTP3DraftConstants(
         name: "draft-ietf-webtrans-http3-15",
@@ -91,7 +92,8 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
         wtFlowControlError: 0x045d_4487,
         wtALPNError: 0x0817_b3dd,
         wtRequirementsNotMetError: 0x212c_0d48,
-        wtApplicationErrorRange: 0x52e4_a40f_a8db...0x52e5_ac98_3162
+        wtApplicationErrorRange: 0x52e4_a40f_a8db...0x52e5_ac98_3162,
+        wtCloseSessionMaxMessageBytes: 1_024
     )
 
     public static let current = draft15

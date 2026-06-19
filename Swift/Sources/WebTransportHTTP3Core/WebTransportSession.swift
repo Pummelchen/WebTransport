@@ -130,6 +130,48 @@ public struct WebTransportServerSessionDecision: Equatable, Sendable {
     }
 }
 
+public struct WebTransportSessionTerminationActions: Equatable, Sendable {
+    public var connectFINFrame: QUICFrame
+    public var connectStopSendingFrame: QUICFrame?
+    public var streamResetFrames: [QUICFrame]
+    public var streamStopSendingFrames: [QUICFrame]
+
+    public init(
+        connectFINFrame: QUICFrame,
+        connectStopSendingFrame: QUICFrame?,
+        streamResetFrames: [QUICFrame],
+        streamStopSendingFrames: [QUICFrame]
+    ) {
+        self.connectFINFrame = connectFINFrame
+        self.connectStopSendingFrame = connectStopSendingFrame
+        self.streamResetFrames = streamResetFrames
+        self.streamStopSendingFrames = streamStopSendingFrames
+    }
+}
+
+public struct WebTransportCloseSessionCapsuleResult: Equatable, Sendable {
+    public var capsuleBytes: Data
+    public var terminationActions: WebTransportSessionTerminationActions
+
+    public init(capsuleBytes: Data, terminationActions: WebTransportSessionTerminationActions) {
+        self.capsuleBytes = capsuleBytes
+        self.terminationActions = terminationActions
+    }
+}
+
+public struct WebTransportReceivedFlowControlCapsule: Equatable, Sendable {
+    public var capsule: WebTransportFlowCapsule
+    public var terminationActions: WebTransportSessionTerminationActions?
+
+    public init(
+        capsule: WebTransportFlowCapsule,
+        terminationActions: WebTransportSessionTerminationActions?
+    ) {
+        self.capsule = capsule
+        self.terminationActions = terminationActions
+    }
+}
+
 public struct WebTransportSessionManager: Equatable, Sendable {
     public private(set) var http3: HTTP3ConnectionState
     public private(set) var sessionsByID: [WebTransportSessionID: WebTransportSession]
@@ -146,6 +188,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public let maxStreamReceiveBufferBytes: Int
     private var datagramPayloadBytesBySessionID: [WebTransportSessionID: Int]
     private var closedStreamSessionIDsByStreamID: [UInt64: WebTransportSessionID]
+    private var requestStreamIDsClosedByReceivedCloseCapsule: Set<UInt64>
 
     public init(
         http3: HTTP3ConnectionState,
@@ -168,6 +211,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.maxStreamReceiveBufferBytes = maxStreamReceiveBufferBytes
         self.datagramPayloadBytesBySessionID = [:]
         self.closedStreamSessionIDsByStreamID = [:]
+        self.requestStreamIDsClosedByReceivedCloseCapsule = []
     }
 
     public mutating func makeClientSessionRequest(
@@ -411,15 +455,28 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         sessionID: WebTransportSessionID,
         bytes: Data
     ) throws -> WebTransportFlowCapsule {
+        try receiveFlowControlCapsuleWithActions(sessionID: sessionID, bytes: bytes).capsule
+    }
+
+    public mutating func receiveFlowControlCapsuleWithActions(
+        sessionID: WebTransportSessionID,
+        bytes: Data
+    ) throws -> WebTransportReceivedFlowControlCapsule {
         try validateSettingsReady()
         _ = try sessionForIngress(sessionID)
         let parsed = try WebTransportFlowCapsuleCodec.parse(bytes)
+        var terminationActions: WebTransportSessionTerminationActions?
 
         switch parsed.capsule {
         case .drainSession:
             try markSessionDraining(sessionID)
         case .closeSession(let applicationErrorCode, let message):
-            try markSessionClosed(sessionID, applicationErrorCode: applicationErrorCode, message: message)
+            terminationActions = try markSessionClosed(
+                sessionID,
+                applicationErrorCode: applicationErrorCode,
+                message: message,
+                closeCapsuleReceived: true
+            )
         default:
             break
         }
@@ -427,7 +484,10 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         var state = flowControlStateBySessionID[sessionID] ?? .init()
         try state.apply(parsed.capsule)
         flowControlStateBySessionID[sessionID] = state
-        return parsed.capsule
+        return WebTransportReceivedFlowControlCapsule(
+            capsule: parsed.capsule,
+            terminationActions: terminationActions
+        )
     }
 
     public mutating func makeDrainSessionCapsule(sessionID: WebTransportSessionID) throws -> Data {
@@ -442,20 +502,64 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         applicationErrorCode: UInt32,
         message: String
     ) throws -> Data {
+        try makeCloseSessionCapsuleResult(
+            sessionID: sessionID,
+            applicationErrorCode: applicationErrorCode,
+            message: message
+        ).capsuleBytes
+    }
+
+    public mutating func makeCloseSessionCapsuleResult(
+        sessionID: WebTransportSessionID,
+        applicationErrorCode: UInt32,
+        message: String
+    ) throws -> WebTransportCloseSessionCapsuleResult {
         try validateSettingsReady()
         _ = try sessionForIngress(sessionID)
-        try markSessionClosed(sessionID, applicationErrorCode: applicationErrorCode, message: message)
-        return try WebTransportFlowCapsuleCodec.serialize(.closeSession(
+        let capsuleBytes = try WebTransportFlowCapsuleCodec.serialize(.closeSession(
             applicationErrorCode: applicationErrorCode,
             message: message
         ))
+        let terminationActions = try markSessionClosed(
+            sessionID,
+            applicationErrorCode: applicationErrorCode,
+            message: message,
+            closeCapsuleReceived: false
+        )
+        return WebTransportCloseSessionCapsuleResult(
+            capsuleBytes: capsuleBytes,
+            terminationActions: terminationActions
+        )
     }
 
-    public mutating func finishConnectStream(streamID: UInt64) throws {
+    @discardableResult
+    public mutating func finishConnectStream(streamID: UInt64) throws -> WebTransportSessionTerminationActions {
         guard let sessionID = sessionIDsByRequestStreamID[streamID] else {
             throw WebTransportDraft15Error(kind: .h3ID, message: "unknown WebTransport CONNECT stream")
         }
-        try markSessionClosed(sessionID, applicationErrorCode: 0, message: "")
+        return try markSessionClosed(
+            sessionID,
+            applicationErrorCode: 0,
+            message: "",
+            closeCapsuleReceived: false
+        )
+    }
+
+    public mutating func receiveConnectStreamData(streamID: UInt64, data: Data) throws -> QUICFrame? {
+        guard !data.isEmpty else {
+            return nil
+        }
+        guard sessionIDsByRequestStreamID[streamID] != nil else {
+            throw WebTransportDraft15Error(kind: .h3ID, message: "unknown WebTransport CONNECT stream")
+        }
+        guard requestStreamIDsClosedByReceivedCloseCapsule.contains(streamID) else {
+            throw QUICCodecError.malformed("DATA frames are not accepted on WebTransport CONNECT request streams")
+        }
+        return .resetStream(
+            id: streamID,
+            applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
+            finalSize: 0
+        )
     }
 
     public mutating func popFlowControlCapsule(sessionID: WebTransportSessionID) throws -> Data? {
@@ -545,7 +649,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             throw QUICCodecError.malformed("invalid form for bidirectional stream accept")
         }
         let session = try sessionForIngress(prefix.sessionID)
-        if session.state == .accepted {
+        if session.state == .accepted || session.state == .draining {
             try reserveStream(session.id, form: .bidirectional)
         }
 
@@ -559,7 +663,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             maxBufferedBytes: maxStreamReceiveBufferBytes
         )
         try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, session: session)
-        if session.state == .accepted {
+        if session.state == .accepted || session.state == .draining {
             register(stream)
         } else {
             try buffer(stream)
@@ -584,7 +688,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             throw QUICCodecError.malformed("invalid form for unidirectional stream accept")
         }
         let session = try sessionForIngress(prefix.sessionID)
-        if session.state == .accepted {
+        if session.state == .accepted || session.state == .draining {
             try reserveStream(session.id, form: .unidirectional)
         }
 
@@ -598,7 +702,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             maxBufferedBytes: maxStreamReceiveBufferBytes
         )
         try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, session: session)
-        if session.state == .accepted {
+        if session.state == .accepted || session.state == .draining {
             register(stream)
         } else {
             try buffer(stream)
@@ -804,29 +908,15 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard let session = sessionsByID[sessionID] else {
             throw WebTransportDraft15Error(kind: .h3ID, message: "unknown WebTransport session")
         }
-        guard session.state == .accepted else {
-            if case .closed = session.state {
-                throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session is closed")
-            }
-            if session.state == .draining {
-                throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session is draining")
-            }
-            throw QUICCodecError.malformed("WebTransport session is not accepted")
-        }
-        return session
-    }
-
-    private func sessionForIngress(_ sessionID: WebTransportSessionID) throws -> WebTransportSession {
-        guard let session = sessionsByID[sessionID] else {
-            throw WebTransportDraft15Error(kind: .h3ID, message: "unknown WebTransport session")
-        }
         switch session.state {
-        case .requested, .accepted, .draining:
+        case .accepted, .draining:
             return session
         case .closed:
             throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session is closed")
         case .rejected:
             throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session was rejected")
+        case .requested:
+            throw QUICCodecError.malformed("WebTransport session is not accepted")
         }
     }
 
@@ -844,28 +934,75 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     private mutating func markSessionClosed(
         _ sessionID: WebTransportSessionID,
         applicationErrorCode: UInt32,
-        message: String
-    ) throws {
+        message: String,
+        closeCapsuleReceived: Bool
+    ) throws -> WebTransportSessionTerminationActions {
         var session = try sessionForIngress(sessionID)
         session.state = .closed(applicationErrorCode: applicationErrorCode, message: message)
         sessionsByID[sessionID] = session
+        if closeCapsuleReceived {
+            requestStreamIDsClosedByReceivedCloseCapsule.insert(session.requestStreamID)
+        }
 
-        if let streamIDs = streamIDsBySessionID[sessionID] {
-            for streamID in streamIDs {
-                closedStreamSessionIDsByStreamID[streamID] = sessionID
-                streamsByID.removeValue(forKey: streamID)
-            }
-        }
-        if let streamIDs = bufferedStreamIDsBySessionID[sessionID] {
-            for streamID in streamIDs {
-                closedStreamSessionIDsByStreamID[streamID] = sessionID
-                bufferedStreamsByID.removeValue(forKey: streamID)
-            }
-        }
-        streamIDsBySessionID[sessionID] = []
-        bufferedStreamIDsBySessionID[sessionID] = []
+        let terminationActions = terminateAssociatedStreams(for: sessionID, requestStreamID: session.requestStreamID)
         datagramsBySessionID[sessionID] = []
         datagramPayloadBytesBySessionID[sessionID] = 0
+        return terminationActions
+    }
+
+    private mutating func terminateAssociatedStreams(
+        for sessionID: WebTransportSessionID,
+        requestStreamID: UInt64
+    ) -> WebTransportSessionTerminationActions {
+        let wtSessionGone = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+        var streamResetFrames: [QUICFrame] = []
+        var streamStopSendingFrames: [QUICFrame] = []
+
+        let activeStreamIDs = (streamIDsBySessionID[sessionID] ?? []).sorted()
+        for streamID in activeStreamIDs {
+            guard var stream = streamsByID[streamID] else {
+                continue
+            }
+            streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
+            streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            closedStreamSessionIDsByStreamID[streamID] = sessionID
+            streamsByID.removeValue(forKey: streamID)
+        }
+
+        let bufferedStreamIDs = (bufferedStreamIDsBySessionID[sessionID] ?? []).sorted()
+        for streamID in bufferedStreamIDs {
+            guard var stream = bufferedStreamsByID[streamID] else {
+                continue
+            }
+            streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
+            streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            closedStreamSessionIDsByStreamID[streamID] = sessionID
+            bufferedStreamsByID.removeValue(forKey: streamID)
+        }
+
+        streamIDsBySessionID[sessionID] = []
+        bufferedStreamIDsBySessionID[sessionID] = []
+
+        return WebTransportSessionTerminationActions(
+            connectFINFrame: .stream(id: requestStreamID, offset: nil, fin: true, data: Data()),
+            connectStopSendingFrame: .stopSending(id: requestStreamID, applicationErrorCode: wtSessionGone),
+            streamResetFrames: streamResetFrames,
+            streamStopSendingFrames: streamStopSendingFrames
+        )
+    }
+
+    private func sessionForIngress(_ sessionID: WebTransportSessionID) throws -> WebTransportSession {
+        guard let session = sessionsByID[sessionID] else {
+            throw WebTransportDraft15Error(kind: .h3ID, message: "unknown WebTransport session")
+        }
+        switch session.state {
+        case .requested, .accepted, .draining:
+            return session
+        case .closed:
+            throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session is closed")
+        case .rejected:
+            throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session was rejected")
+        }
     }
 
     private func validateSettingsReady() throws {
