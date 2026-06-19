@@ -51,6 +51,7 @@ enum NativeQUICCoreSpike {
             try proveTLSForQUICScaffold()
             try proveHTTP3ByteCodecs()
             try proveHTTP3ConnectionLayer()
+            try proveWebTransportSessionEstablishment()
             print("phase1b: native QUIC core frame exchange over Apple UDP passed without security prompts")
         } catch {
             fputs("NativeQUICCoreSpike failed: \(error)\n", stderr)
@@ -387,6 +388,57 @@ enum NativeQUICCoreSpike {
         ), "HTTP/3 error maps to QUIC application close")
 
         print("http3-layer: control streams, SETTINGS, request HEADERS, DATA policy, GOAWAY, and error mapping passed")
+    }
+
+    private static func proveWebTransportSessionEstablishment() throws {
+        var clientHTTP3 = HTTP3ConnectionState(role: .client)
+        var serverHTTP3 = HTTP3ConnectionState(role: .server)
+        _ = try serverHTTP3.receivePeerControlStream(clientHTTP3.localControlStreamBytes())
+        _ = try clientHTTP3.receivePeerControlStream(serverHTTP3.localControlStreamBytes())
+
+        var client = WebTransportSessionManager(http3: clientHTTP3)
+        var server = WebTransportSessionManager(http3: serverHTTP3)
+        let request = try WebTransportSessionRequest(
+            authority: "example.com",
+            path: "/wt",
+            origin: "https://example.com",
+            availableProtocols: ["chat.v1", "chat.v2"]
+        )
+        let requestFrame = try client.makeClientSessionRequest(streamID: 0, request: request)
+        let decision = try server.receiveClientSessionRequest(
+            streamID: 0,
+            frame: requestFrame,
+            policy: try WebTransportServerSessionPolicy(
+                allowedAuthorities: ["example.com"],
+                allowedPaths: ["/wt"],
+                allowedOrigins: ["https://example.com"],
+                supportedProtocols: ["chat.v2"],
+                requireProtocolSelection: true
+            )
+        )
+        let clientSession = try client.receiveServerSessionResponse(
+            streamID: 0,
+            frame: decision.responseFrame
+        )
+        try assert(clientSession.state == .accepted, "client accepted WebTransport session")
+        try assert(decision.session.id.rawValue == 0, "session ID maps to request stream ID")
+        try assert(client.session(forRequestStreamID: 0)?.selectedProtocol == "chat.v2", "client session mapped by stream")
+        try assert(server.session(forRequestStreamID: 0)?.selectedProtocol == "chat.v2", "server session mapped by stream")
+
+        let rejectionRequest = try WebTransportSessionRequest(authority: "example.com", path: "/missing")
+        let rejectionFrame = try client.makeClientSessionRequest(streamID: 4, request: rejectionRequest)
+        let rejection = try server.receiveClientSessionRequest(
+            streamID: 4,
+            frame: rejectionFrame,
+            policy: try WebTransportServerSessionPolicy(allowedPaths: ["/wt"])
+        )
+        let rejectedSession = try client.receiveServerSessionResponse(
+            streamID: 4,
+            frame: rejection.responseFrame
+        )
+        try assert(rejectedSession.state == .rejected(status: 404), "client rejected WebTransport session")
+
+        print("webtransport-session: extended CONNECT, pseudo-headers, accept/reject, session IDs, settings, version, and mapping passed")
     }
 }
 
