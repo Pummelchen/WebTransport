@@ -134,15 +134,28 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public private(set) var sessionIDsByRequestStreamID: [UInt64: WebTransportSessionID]
     public private(set) var streamsByID: [UInt64: WebTransportStreamState]
     public private(set) var streamIDsBySessionID: [WebTransportSessionID: Set<UInt64>]
+    public private(set) var datagramsBySessionID: [WebTransportSessionID: [Data]]
+    public let maxDatagramFrameSize: Int
+    public let maxDatagramReceiveBufferBytes: Int
     public let maxStreamReceiveBufferBytes: Int
+    private var datagramPayloadBytesBySessionID: [WebTransportSessionID: Int]
 
-    public init(http3: HTTP3ConnectionState, maxStreamReceiveBufferBytes: Int = 64 * 1024) {
+    public init(
+        http3: HTTP3ConnectionState,
+        maxStreamReceiveBufferBytes: Int = 64 * 1024,
+        maxDatagramFrameSize: Int = 1_200,
+        maxDatagramReceiveBufferBytes: Int = 64 * 1024
+    ) {
         self.http3 = http3
         self.sessionsByID = [:]
         self.sessionIDsByRequestStreamID = [:]
         self.streamsByID = [:]
         self.streamIDsBySessionID = [:]
+        self.datagramsBySessionID = [:]
+        self.maxDatagramFrameSize = maxDatagramFrameSize
+        self.maxDatagramReceiveBufferBytes = maxDatagramReceiveBufferBytes
         self.maxStreamReceiveBufferBytes = maxStreamReceiveBufferBytes
+        self.datagramPayloadBytesBySessionID = [:]
     }
 
     public mutating func makeClientSessionRequest(
@@ -264,6 +277,70 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         )
         store(session)
         return WebTransportServerSessionDecision(session: session, responseFrame: responseFrame)
+    }
+
+    public mutating func makeDatagramFrame(
+        sessionID: WebTransportSessionID,
+        payload: Data
+    ) throws -> QUICFrame {
+        try validateSettingsReady()
+        _ = try acceptedSession(for: sessionID)
+
+        let datagramPayload = try WebTransportDatagramSignaling.serialize(
+            sessionID: sessionID.rawValue,
+            payload: payload
+        )
+        guard datagramPayload.count <= maxDatagramFrameSize else {
+            throw QUICCodecError.valueOutOfRange(
+                "WebTransport datagram payload exceeds maximum frame size of \(maxDatagramFrameSize)"
+            )
+        }
+        return .datagram(datagramPayload)
+    }
+
+    public mutating func receiveDatagramFrame(_ frame: QUICFrame) throws -> WebTransportSessionID {
+        try validateSettingsReady()
+        guard case .datagram(let payload) = frame else {
+            throw QUICCodecError.malformed("expected DATAGRAM frame")
+        }
+        guard payload.count <= maxDatagramFrameSize else {
+            throw QUICCodecError.valueOutOfRange(
+                "WebTransport datagram payload exceeds maximum frame size of \(maxDatagramFrameSize)"
+            )
+        }
+        let parsed = try WebTransportDatagramSignaling.parse(payload)
+        _ = try acceptedSession(for: parsed.sessionID)
+
+        let currentBytes = datagramPayloadBytesBySessionID[parsed.sessionID] ?? 0
+        let updatedBytes = currentBytes + parsed.payload.count
+        guard updatedBytes <= maxDatagramReceiveBufferBytes else {
+            throw QUICCodecError.valueOutOfRange("WebTransport datagram receive buffer limit exceeded")
+        }
+
+        var queue = datagramsBySessionID[parsed.sessionID] ?? []
+        queue.append(parsed.payload)
+        datagramsBySessionID[parsed.sessionID] = queue
+        datagramPayloadBytesBySessionID[parsed.sessionID] = updatedBytes
+        return parsed.sessionID
+    }
+
+    public mutating func popDatagramPayload(sessionID: WebTransportSessionID) -> Data? {
+        guard var queue = datagramsBySessionID[sessionID] else {
+            return nil
+        }
+        guard let payload = queue.first else {
+            return nil
+        }
+        queue.removeFirst()
+        datagramsBySessionID[sessionID] = queue.isEmpty ? [] : queue
+
+        let currentBytes = datagramPayloadBytesBySessionID[sessionID] ?? 0
+        datagramPayloadBytesBySessionID[sessionID] = max(0, currentBytes - payload.count)
+        return payload
+    }
+
+    public func datagramQueue(sessionID: WebTransportSessionID) -> [Data]? {
+        datagramsBySessionID[sessionID]
     }
 
     public mutating func openBidirectionalStream(
@@ -451,6 +528,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     private mutating func store(_ session: WebTransportSession) {
         sessionsByID[session.id] = session
         sessionIDsByRequestStreamID[session.requestStreamID] = session.id
+        datagramsBySessionID[session.id] = []
+        datagramPayloadBytesBySessionID[session.id] = 0
     }
 
     private mutating func register(_ stream: WebTransportStreamState) {
