@@ -13,9 +13,9 @@ concurrency:
 
 jobs:
   macos-swift:
-    name: macOS hosted SwiftPM
+    name: macOS 26 hosted SwiftPM
 
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
