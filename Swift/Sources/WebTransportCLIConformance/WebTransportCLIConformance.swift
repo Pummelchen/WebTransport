@@ -100,7 +100,7 @@ public enum WebTransportCLIConformance {
         Usage: \(executableName) [--scenario NAME|all] [--json] [--verbose] [--log-dir PATH]
 
         Scenarios:
-        \(scenarioCatalog().map { "  \($0.name) - \($0.description)" }.joined(separator: "\n"))
+        \(groupedScenarioHelpText())
 
         Examples:
           \(executableName) --scenario all --verbose
@@ -128,6 +128,7 @@ public enum WebTransportCLIConformance {
 
         var results: [WebTransportCLIConformanceResult] = []
         var failures: [String] = []
+        var verboseGroup: String?
         let logURL = URL(fileURLWithPath: options.logDirectory, isDirectory: true)
         try? FileManager.default.createDirectory(at: logURL, withIntermediateDirectories: true)
 
@@ -142,7 +143,8 @@ public enum WebTransportCLIConformance {
             }
 
             if options.verbose, !options.json {
-                print("RUN \(scenario.name): \(scenario.description)")
+                printScenarioGroupHeading(scenario.group, current: &verboseGroup)
+                print("  RUN \(scenario.name): \(scenario.description)")
             }
             let started = Date()
             do {
@@ -155,7 +157,7 @@ public enum WebTransportCLIConformance {
                     detail: "passed"
                 ))
                 if options.verbose, !options.json {
-                    print("PASS \(scenario.name) \(format(duration))s")
+                    print("  PASS \(scenario.name) \(format(duration))s")
                 }
             } catch {
                 let duration = Date().timeIntervalSince(started)
@@ -170,18 +172,56 @@ public enum WebTransportCLIConformance {
                 failures.append("\(scenario.name): \(detail)")
                 writeFailureLog(result: result, executableName: options.executableName, directory: logURL)
                 if options.verbose, !options.json {
-                    print("FAIL \(scenario.name) \(format(duration))s \(detail)")
+                    print("  FAIL \(scenario.name) \(format(duration))s \(detail)")
                 }
             }
         }
 
         writeSummaryLog(results: results, executableName: options.executableName, directory: logURL)
-        emit(results: results, executableName: options.executableName, json: options.json)
+        emit(
+            results: results,
+            executableName: options.executableName,
+            json: options.json,
+            includeDetails: !options.verbose || !failures.isEmpty,
+            scenarioGroupsByName: Dictionary(uniqueKeysWithValues: catalog.map { ($0.name, $0.group) })
+        )
         return failures.isEmpty ? 0 : 1
     }
 }
 
+private func groupedScenarioHelpText() -> String {
+    let catalog = scenarioCatalog()
+    var groupOrder: [String] = []
+    var scenariosByGroup: [String: [CLIConformanceScenario]] = [:]
+
+    for scenario in catalog {
+        if scenariosByGroup[scenario.group] == nil {
+            groupOrder.append(scenario.group)
+        }
+        scenariosByGroup[scenario.group, default: []].append(scenario)
+    }
+
+    return groupOrder.map { group in
+        let scenarios = scenariosByGroup[group, default: []]
+            .map { "    \($0.name) - \($0.description)" }
+            .joined(separator: "\n")
+        return "  \(group):\n\(scenarios)"
+    }.joined(separator: "\n\n")
+}
+
+private func printScenarioGroupHeading(_ group: String, current: inout String?) {
+    guard current != group else {
+        return
+    }
+    if current != nil {
+        print("")
+    }
+    print("\(group):")
+    current = group
+}
+
 private struct CLIConformanceScenario: Sendable {
+    var group: String
     var name: String
     var description: String
     var run: @Sendable () async throws -> Void
@@ -189,10 +229,15 @@ private struct CLIConformanceScenario: Sendable {
 
 private func scenarioCatalog() -> [CLIConformanceScenario] {
     [
-        scenario("demo", "async client/server facade connect, datagram, and close") {
+        scenario("Smoke", "demo", "async client/server facade connect, datagram, and close") {
             try await runFacadeDemo()
         },
-        scenario("session-accept", "extended CONNECT accepts and selects a protocol") {
+        scenario("Smoke", "library-smoke-matrix", "library smoke matrix passes close, rejection, backpressure, ordering, and multi-session") {
+            let results = WebTransportLibrarySmokeMatrix.runAll()
+            let failures = results.filter { !$0.passed }
+            try require(failures.isEmpty, "library smoke failures: \(failures)")
+        },
+        scenario("Session Establishment", "session-accept", "extended CONNECT accepts and selects a protocol") {
             var pair = try makeReadyPair()
             let request = try WebTransportSessionRequest(
                 authority: "example.com",
@@ -212,7 +257,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(pair.client.session(forRequestStreamID: 0)?.selectedProtocol == "chat.v2", "client selected protocol")
             try require(pair.server.session(forRequestStreamID: 0)?.selectedProtocol == "chat.v2", "server selected protocol")
         },
-        scenario("session-reject-policy", "path, origin, and protocol policy rejections are deterministic") {
+        scenario("Session Establishment", "session-reject-policy", "path, origin, and protocol policy rejections are deterministic") {
             var pair = try makeReadyPair()
             let pathDecision = try rejectSession(
                 pair: &pair,
@@ -240,7 +285,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             )
             try require(protocolDecision.session.state == .rejected(status: 400), "protocol mismatch rejected with 400")
         },
-        scenario("session-invalid-id", "invalid WebTransport session IDs map to H3_ID_ERROR paths") {
+        scenario("Session Establishment", "session-invalid-id", "invalid WebTransport session IDs map to H3_ID_ERROR paths") {
             try expectThrows { _ = try WebTransportSessionID.fromRequestStreamID(1) }
             try expectThrows { _ = try WebTransportSessionID.fromRequestStreamID(2) }
             let prefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 2)
@@ -248,7 +293,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try WebTransportStreamSignaling.parsePrefix(prefix)
             }
         },
-        scenario("settings-required", "HTTP/3 WebTransport settings requirements are enforced") {
+        scenario("HTTP/3 Control", "settings-required", "HTTP/3 WebTransport settings requirements are enforced") {
             let constants = WebTransportHTTP3DraftConstants.current
             try HTTP3Settings.webTransportDraft15Defaults.validateWebTransportDraft15Requirements(peerRole: .server)
             var missingDatagram = HTTP3Settings.webTransportDraft15Defaults
@@ -260,7 +305,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try serverPeerSettings.set(0, for: constants.settingsEnableConnectProtocol)
             try serverPeerSettings.validateWebTransportDraft15Requirements(peerRole: .client)
         },
-        scenario("settings-control-stream-errors", "control stream duplicate and request-frame errors are rejected") {
+        scenario("HTTP/3 Control", "settings-control-stream-errors", "control stream duplicate and request-frame errors are rejected") {
             let connection = HTTP3ConnectionState(role: .client)
             let control = try connection.localControlStreamBytes()
             var peer = HTTP3ConnectionState(role: .server)
@@ -270,7 +315,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 try peer.receiveControlFrame(try QPACK.headersFrame(fields: [HTTPFieldLine(name: ":status", value: "200")]))
             }
         },
-        scenario("zero-rtt-settings", "remembered 0-RTT settings reject reduced WebTransport capacity") {
+        scenario("HTTP/3 Control", "zero-rtt-settings", "remembered 0-RTT settings reject reduced WebTransport capacity") {
             let constants = WebTransportHTTP3DraftConstants.current
             var remembered = HTTP3Settings.webTransportDraft15Defaults
             var current = HTTP3Settings.webTransportDraft15Defaults
@@ -280,7 +325,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 try current.validateWebTransportZeroRTTCompatibility(remembered: remembered)
             }
         },
-        scenario("protocol-structured-fields", "WT protocol negotiation uses Structured Fields strings and lists") {
+        scenario("Headers and QPACK", "protocol-structured-fields", "WT protocol negotiation uses Structured Fields strings and lists") {
             let encoded = try WebTransportProtocolNegotiation.encodeList(["chat.v1", "demo-v2"])
             try require(try WebTransportProtocolNegotiation.decodeList(encoded) == ["chat.v1", "demo-v2"], "structured list round trip")
             let item = WebTransportProtocolNegotiation.encodeItem("chat.v2")
@@ -289,7 +334,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try WebTransportProtocolNegotiation.decodeList("\"bad\\n\"")
             }
         },
-        scenario("headers-connect-round-trip", "CONNECT request and response HEADERS round-trip through QPACK") {
+        scenario("Headers and QPACK", "headers-connect-round-trip", "CONNECT request and response HEADERS round-trip through QPACK") {
             let request = try WebTransportSessionRequest(
                 authority: "example.com",
                 path: "/wt",
@@ -305,7 +350,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             ])
             try WebTransportHTTP3Headers.validateSuccessfulResponse(try QPACK.decodeHeadersFrame(response))
         },
-        scenario("qpack-static-literal-huffman", "QPACK static, literal, and Huffman field sections round-trip") {
+        scenario("Headers and QPACK", "qpack-static-literal-huffman", "QPACK static, literal, and Huffman field sections round-trip") {
             let fields = try [
                 HTTPFieldLine(name: ":status", value: "200"),
                 HTTPFieldLine(name: "x-webtransport", value: "demo")
@@ -315,7 +360,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             let huffman = try QPACK.decodeFieldSection(QPACK.encodeFieldSection(fields, huffman: true))
             try require(huffman == fields, "Huffman QPACK round trip")
         },
-        scenario("qpack-dynamic-base-postbase", "QPACK dynamic Base and post-Base references decode correctly") {
+        scenario("Headers and QPACK", "qpack-dynamic-base-postbase", "QPACK dynamic Base and post-Base references decode correctly") {
             var table = try QPACKDynamicTable(capacity: 256)
             let first = try HTTPFieldLine(name: "origin", value: "https://one.example")
             let second = try HTTPFieldLine(name: "x-demo", value: "two")
@@ -331,7 +376,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try QPACK.decodeFieldSection(Data([0x01, 0x81]), dynamicTable: table)
             }
         },
-        scenario("qpack-limits", "QPACK malformed input and decoder limits fail") {
+        scenario("Headers and QPACK", "qpack-limits", "QPACK malformed input and decoder limits fail") {
             try expectThrows { _ = try QPACK.decodeFieldSection(Data([0x01, 0x00])) }
             let field = try HTTPFieldLine(name: "x-too-large", value: String(repeating: "x", count: 16))
             let data = try QPACK.encodeFieldSection([field])
@@ -339,7 +384,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try QPACK.decodeFieldSection(data, limits: QPACKDecoderLimits(maxFieldSectionBytes: 512, maxFieldLineBytes: 4, maxFieldLineCount: 4))
             }
         },
-        scenario("datagram-round-trip", "session datagrams route by quarter stream ID and preserve payload") {
+        scenario("Datagrams", "datagram-round-trip", "session datagrams route by quarter stream ID and preserve payload") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             let frame = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("hello".utf8))
@@ -349,7 +394,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             let parsed = try WebTransportDatagramSignaling.parse(try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8)))
             try require(parsed.quarterStreamID == 0, "quarter stream ID encoded")
         },
-        scenario("datagram-unknown-session", "unknown datagram session ID is rejected") {
+        scenario("Datagrams", "datagram-unknown-session", "unknown datagram session ID is rejected") {
             var pair = try makeReadyPair()
             try expectThrows {
                 _ = try pair.client.receiveDatagramFrame(.datagram(
@@ -357,7 +402,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 ))
             }
         },
-        scenario("datagram-buffering", "early datagrams buffer before accept and excess early datagrams drop") {
+        scenario("Datagrams", "datagram-buffering", "early datagrams buffer before accept and excess early datagrams drop") {
             var pair = try makeReadyPair(maxBufferedDatagramsPerSession: 1)
             _ = try pair.server.receiveDatagramFrame(.datagram(
                 try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("one".utf8))
@@ -369,7 +414,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(pair.server.popDatagramPayload(sessionID: sessionID) == Data("one".utf8), "first early datagram promoted")
             try require(pair.server.popDatagramPayload(sessionID: sessionID) == nil, "excess early datagram dropped")
         },
-        scenario("datagram-after-close", "datagram send after close fails with session gone") {
+        scenario("Datagrams", "datagram-after-close", "datagram send after close fails with session gone") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             _ = try pair.client.makeCloseSessionCapsule(sessionID: sessionID, applicationErrorCode: 0, message: "")
@@ -377,7 +422,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("late".utf8))
             }
         },
-        scenario("stream-bidi-uni-round-trip", "bidirectional and unidirectional stream prefixes register by session") {
+        scenario("Streams", "stream-bidi-uni-round-trip", "bidirectional and unidirectional stream prefixes register by session") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             let bidiPrefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
@@ -387,7 +432,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             _ = try pair.server.acceptUnidirectionalStream(streamID: 2, firstBytes: uniPrefix + Data("uni".utf8))
             try require(pair.server.popStreamPayload(streamID: 2) == Data("uni".utf8), "uni payload preserved")
         },
-        scenario("stream-buffering", "early streams buffer before accept and promote in order") {
+        scenario("Streams", "stream-buffering", "early streams buffer before accept and promote in order") {
             var pair = try makeReadyPair()
             let early = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0) + Data("early".utf8)
             _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: early)
@@ -397,7 +442,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(pair.server.popStreamPayload(streamID: 4) == Data("early".utf8), "early payload promoted")
             try require(sessionID.rawValue == 0, "session ID expected")
         },
-        scenario("stream-buffer-overflow-reset", "excess buffered stream emits WT_BUFFERED_STREAM_REJECTED reset action") {
+        scenario("Streams", "stream-buffer-overflow-reset", "excess buffered stream emits WT_BUFFERED_STREAM_REJECTED reset action") {
             var pair = try makeReadyPair(maxBufferedStreamsPerSession: 0)
             let early = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
             let result = try pair.server.acceptBidirectionalStreamWithActions(streamID: 4, firstBytes: early)
@@ -409,7 +454,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 reliableSize: 0
             ), "overflow stream reset action")
         },
-        scenario("stream-reset-stop-sending", "stream reset and stop-sending use mapped WebTransport app errors") {
+        scenario("Streams", "stream-reset-stop-sending", "stream reset and stop-sending use mapped WebTransport app errors") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
@@ -425,7 +470,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 applicationErrorCode: WebTransportDraft15ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
             ), "STOP_SENDING mapped")
         },
-        scenario("close-drain", "WT_DRAIN_SESSION and WT_CLOSE_SESSION drive state and cleanup") {
+        scenario("Close and Drain", "close-drain", "WT_DRAIN_SESSION and WT_CLOSE_SESSION drive state and cleanup") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
@@ -439,21 +484,21 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(received.terminationActions?.streamResetFrames.count == 1, "close reset stream")
             try require(pair.server.stream(for: 4) == nil, "close cleaned stream")
         },
-        scenario("close-message-bounds", "WT_CLOSE_SESSION accepts 8192-byte UTF-8 and rejects larger messages") {
+        scenario("Close and Drain", "close-message-bounds", "WT_CLOSE_SESSION accepts 8192-byte UTF-8 and rejects larger messages") {
             let max = WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes
             _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: String(repeating: "x", count: max)))
             try expectThrows {
                 _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: String(repeating: "x", count: max + 1)))
             }
         },
-        scenario("connect-finish-close", "CONNECT stream FIN closes the session and gates follow-on work") {
+        scenario("Close and Drain", "connect-finish-close", "CONNECT stream FIN closes the session and gates follow-on work") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             _ = try pair.client.finishConnectStream(streamID: sessionID.rawValue)
             try require(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 0, message: ""), "FIN closed session")
             try expectThrows { _ = try pair.client.openUnidirectionalStream(streamID: 2, sessionID: sessionID) }
         },
-        scenario("connect-data-after-close", "CONNECT data after received close resets with H3_MESSAGE_ERROR") {
+        scenario("Close and Drain", "connect-data-after-close", "CONNECT data after received close resets with H3_MESSAGE_ERROR") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             _ = try pair.server.receiveFlowControlCapsuleWithActions(
@@ -466,7 +511,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 finalSize: 0
             ), "late CONNECT data reset")
         },
-        scenario("flow-disabled-multi-session", "disabled WebTransport flow control rejects simultaneous sessions") {
+        scenario("Flow Control", "flow-disabled-multi-session", "disabled WebTransport flow control rejects simultaneous sessions") {
             var pair = try makeReadyPair()
             _ = try establishDefaultSession(pair: &pair, streamID: 0)
             try expectThrows {
@@ -476,7 +521,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 )
             }
         },
-        scenario("flow-explicit-zero", "explicit zero stream limit is enforced distinctly from disabled flow control") {
+        scenario("Flow Control", "flow-explicit-zero", "explicit zero stream limit is enforced distinctly from disabled flow control") {
             let constants = WebTransportHTTP3DraftConstants.current
             var clientSettings = HTTP3Settings.webTransportDraft15Defaults
             var serverSettings = HTTP3Settings.webTransportDraft15Defaults
@@ -488,7 +533,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(pair.client.flowState(for: sessionID)?.maxStreamsBidi == 0, "explicit zero preserved")
             try expectThrows { _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID) }
         },
-        scenario("flow-monotonic", "WT_MAX_DATA and WT_MAX_STREAMS updates are monotonic") {
+        scenario("Flow Control", "flow-monotonic", "WT_MAX_DATA and WT_MAX_STREAMS updates are monotonic") {
             var state = WebTransportFlowControlState(maxData: 4, maxStreamsBidi: 1, maxStreamsUni: 1)
             try state.apply(.maxData(limit: 8))
             try state.apply(.maxStreamsBidi(limit: 2))
@@ -498,7 +543,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try expectThrows { try state.apply(.maxStreamsUni(limit: 1)) }
             try expectThrows { try state.apply(.maxStreamsBidi(limit: WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue + 1)) }
         },
-        scenario("flow-receive-violation-close", "receive-side advertised-limit violation closes with WT_FLOW_CONTROL_ERROR") {
+        scenario("Flow Control", "flow-receive-violation-close", "receive-side advertised-limit violation closes with WT_FLOW_CONTROL_ERROR") {
             let constants = WebTransportHTTP3DraftConstants.current
             var clientSettings = HTTP3Settings.webTransportDraft15Defaults
             var serverSettings = HTTP3Settings.webTransportDraft15Defaults
@@ -514,7 +559,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 message: "WebTransport flow-control violation"
             ), "receive-side violation closed session")
         },
-        scenario("error-mapping", "WebTransport app error mapping is reversible and rejects reserved/out-of-range codes") {
+        scenario("Errors and Shutdown", "error-mapping", "WebTransport app error mapping is reversible and rejects reserved/out-of-range codes") {
             let code = WebTransportDraft15ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x1234)
             try require(try WebTransportDraft15ErrorMapper.applicationErrorCode(forHTTPErrorCode: code) == 0x1234, "app error mapping reversible")
             try expectThrows {
@@ -524,7 +569,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try WebTransportDraft15ErrorMapper.applicationErrorCode(forHTTPErrorCode: WebTransportHTTP3DraftConstants.current.wtApplicationErrorRange.upperBound + 1)
             }
         },
-        scenario("goaway", "GOAWAY drains existing sessions and blocks late sessions") {
+        scenario("Errors and Shutdown", "goaway", "GOAWAY drains existing sessions and blocks late sessions") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             try pair.client.receiveControlFrame(try HTTP3Frame(type: HTTP3FrameType.goaway, varIntValue: 0))
@@ -536,7 +581,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 )
             }
         },
-        scenario("multi-session-isolation", "flow-control-enabled sessions isolate streams, datagrams, and close") {
+        scenario("Errors and Shutdown", "multi-session-isolation", "flow-control-enabled sessions isolate streams, datagrams, and close") {
             var pair = try WebTransportLibrarySmokePair.connectedWithFlowControl()
             let first = try pair.establishSession(streamID: 0, request: WebTransportSessionRequest(authority: "example.com", path: "/one"))
             let second = try pair.establishSession(streamID: 4, request: WebTransportSessionRequest(authority: "example.com", path: "/two"))
@@ -549,22 +594,22 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(pair.server.manager.sessionsByID[first]?.state == .closed(applicationErrorCode: 1, message: "done"), "first closed")
             try require(pair.server.manager.sessionsByID[second]?.state == .accepted, "second remains accepted")
         },
-        scenario("interop-connect-matrix", "CONNECT interop accepts valid peers and rejects malformed or policy-invalid peers") {
+        scenario("Interop Matrices", "interop-connect-matrix", "CONNECT interop accepts valid peers and rejects malformed or policy-invalid peers") {
             try runConnectInteropMatrix()
         },
-        scenario("interop-stream-matrix", "stream interop covers bidirectional/unidirectional success and invalid stream inputs") {
+        scenario("Interop Matrices", "interop-stream-matrix", "stream interop covers bidirectional/unidirectional success and invalid stream inputs") {
             try runStreamInteropMatrix()
         },
-        scenario("interop-datagram-matrix", "datagram interop covers routed payloads and invalid session, size, and prefix errors") {
+        scenario("Interop Matrices", "interop-datagram-matrix", "datagram interop covers routed payloads and invalid session, size, and prefix errors") {
             try runDatagramInteropMatrix()
         },
-        scenario("interop-goaway-close-drain-matrix", "GOAWAY, drain, and close interop gates late peer activity") {
+        scenario("Interop Matrices", "interop-goaway-close-drain-matrix", "GOAWAY, drain, and close interop gates late peer activity") {
             try runGoawayCloseDrainInteropMatrix()
         },
-        scenario("interop-malformed-flow-matrix", "malformed input and flow-control interop close or reject with deterministic errors") {
+        scenario("Interop Matrices", "interop-malformed-flow-matrix", "malformed input and flow-control interop close or reject with deterministic errors") {
             try runMalformedFlowInteropMatrix()
         },
-        scenario("security-prompt-free-negatives", "wrong ALPN, bad origin, bad settings, and trust failure are deterministic") {
+        scenario("Security", "security-prompt-free-negatives", "wrong ALPN, bad origin, bad settings, and trust failure are deterministic") {
             try expectThrows { try WebTransportALPNPolicy.validateNegotiatedProtocol("h2") }
             var pair = try makeReadyPair()
             let decision = try rejectSession(
@@ -581,12 +626,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             let policy = try TLSPinnedCertificateTrustPolicy(allowedLeafCertificateSHA256Fingerprints: [wrongPin])
             try expectThrows { try policy.evaluate(certificateChainDER: [Data("not a certificate".utf8)]) }
         },
-        scenario("library-smoke-matrix", "library smoke matrix passes close, rejection, backpressure, ordering, and multi-session") {
-            let results = WebTransportLibrarySmokeMatrix.runAll()
-            let failures = results.filter { !$0.passed }
-            try require(failures.isEmpty, "library smoke failures: \(failures)")
-        },
-        scenario("release-products", "Package.swift exposes production CLI products and not spike products") {
+        scenario("Release", "release-products", "Package.swift exposes production CLI products and not spike products") {
             let packageURL = URL(fileURLWithPath: "Swift/Package.swift")
             let fallbackURL = URL(fileURLWithPath: "Package.swift")
             let url = FileManager.default.fileExists(atPath: packageURL.path) ? packageURL : fallbackURL
@@ -596,7 +636,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(!text.contains(".executable(\n            name: \"AppleQUICSpike\""), "AppleQUICSpike not a product")
             try require(!text.contains(".executable(\n            name: \"NativeQUICCoreSpike\""), "NativeQUICCoreSpike not a product")
         },
-        scenario("release-script-stale-spikes", "release script rejects stale spike binaries") {
+        scenario("Release", "release-script-stale-spikes", "release script rejects stale spike binaries") {
             let scriptURL = URL(fileURLWithPath: "Swift/build-release-apple-silicon.sh")
             let fallbackURL = URL(fileURLWithPath: "build-release-apple-silicon.sh")
             let url = FileManager.default.fileExists(atPath: scriptURL.path) ? scriptURL : fallbackURL
@@ -610,11 +650,12 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
 }
 
 private func scenario(
+    _ group: String,
     _ name: String,
     _ description: String,
     _ run: @escaping @Sendable () async throws -> Void
 ) -> CLIConformanceScenario {
-    CLIConformanceScenario(name: name, description: description, run: run)
+    CLIConformanceScenario(group: group, name: name, description: description, run: run)
 }
 
 private struct ManagerPair {
@@ -919,7 +960,13 @@ private func require(_ condition: Bool, _ message: String) throws {
     }
 }
 
-private func emit(results: [WebTransportCLIConformanceResult], executableName: String, json: Bool) {
+private func emit(
+    results: [WebTransportCLIConformanceResult],
+    executableName: String,
+    json: Bool,
+    includeDetails: Bool,
+    scenarioGroupsByName: [String: String]
+) {
     let passed = results.filter(\.passed).count
     let failed = results.count - passed
     if json {
@@ -941,8 +988,16 @@ private func emit(results: [WebTransportCLIConformanceResult], executableName: S
             print(text)
         }
     } else {
-        for result in results {
-            print("\(result.passed ? "PASS" : "FAIL") \(result.name) \(format(result.durationSeconds))s \(result.detail)")
+        if includeDetails {
+            var currentGroup: String?
+            for result in results {
+                if let group = scenarioGroupsByName[result.name] {
+                    printScenarioGroupHeading(group, current: &currentGroup)
+                    print("  \(result.passed ? "PASS" : "FAIL") \(result.name) \(format(result.durationSeconds))s \(result.detail)")
+                } else {
+                    print("\(result.passed ? "PASS" : "FAIL") \(result.name) \(format(result.durationSeconds))s \(result.detail)")
+                }
+            }
         }
         print("SUMMARY \(executableName): passed=\(passed) failed=\(failed) total=\(results.count)")
     }
