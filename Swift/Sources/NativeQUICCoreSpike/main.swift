@@ -49,6 +49,7 @@ enum NativeQUICCoreSpike {
             try proveQUICCoreStateMachines()
             try provePacketProtection()
             try proveTLSForQUICScaffold()
+            try proveTLSQUICConnectionState()
             try proveHTTP3ByteCodecs()
             try proveHTTP3ConnectionLayer()
             try proveWebTransportSessionEstablishment()
@@ -313,6 +314,45 @@ enum NativeQUICCoreSpike {
         )
         try assert(openedPayload == Data("1rtt webtransport payload".utf8), "1-RTT QUIC packet protection")
         print("tls: CRYPTO flights, X25519, ALPN h3, QUIC transport parameters, Finished verify data, and QUIC handshake/1-RTT keys passed")
+    }
+
+    private static func proveTLSQUICConnectionState() throws {
+        let clientHello = TLSHandshakeMessage(type: .clientHello, body: Data([0x01, 0x02, 0x03]))
+        let serverHello = TLSHandshakeMessage(type: .serverHello, body: Data([0x04, 0x05]))
+        var connection = TLSQUICConnectionState(role: .client)
+        _ = try connection.sendHandshakeFlight(messages: [clientHello], maxFramePayloadBytes: 4)
+        let serverFrames = try TLSHandshakeFlight(messages: [serverHello]).cryptoFrames(maxFramePayloadBytes: 4)
+        try assert(try connection.receiveHandshakeFrames(serverFrames) == [serverHello], "TLS/QUIC state decoded peer flight")
+        _ = try connection.deriveHandshakeTrafficSecrets(sharedSecret: Data(repeating: 0x44, count: 32))
+        let firstApplicationSecrets = try connection.deriveApplicationTrafficSecrets()
+        let updatedApplicationSecrets = try connection.updateApplicationTrafficSecrets()
+        try assert(connection.keyUpdateGeneration == 1, "TLS/QUIC key update generation advanced")
+        try assert(
+            updatedApplicationSecrets.clientApplicationTrafficSecret != firstApplicationSecrets.clientApplicationTrafficSecret,
+            "TLS/QUIC key update changed client secret"
+        )
+
+        var closeConnection = TLSQUICConnectionState(role: .server)
+        try closeConnection.openStream(id: 0, maxSendOffset: 1_024, maxReceiveOffset: 1_024)
+        _ = try closeConnection.receiveStreamFrame(.stream(id: 0, offset: 0, fin: true, data: Data([0x01, 0x02])))
+        do {
+            _ = try closeConnection.receiveStreamFrame(.stream(id: 0, offset: 2, fin: false, data: Data([0x03])))
+            throw SpikeError.assertionFailed("TLS/QUIC final size violation rejected")
+        } catch QUICStateError.streamStateViolation(_) {
+            try assert(closeConnection.closeState.closeFrame == .connectionClose(
+                errorCode: QUICTransportErrorCode.finalSizeError.rawValue,
+                frameType: nil,
+                reason: Data("stream state violation: STREAM data exceeds final size".utf8)
+            ), "TLS/QUIC final size violation maps to CONNECTION_CLOSE")
+        }
+
+        let applicationClose = connection.closeApplication(errorCode: 0x52e4a40fa8db, reason: "WT_CLOSE_SESSION")
+        try assert(applicationClose == .connectionClose(
+            errorCode: 0x52e4a40fa8db,
+            frameType: nil,
+            reason: Data("WT_CLOSE_SESSION".utf8)
+        ), "TLS/QUIC WebTransport close maps to application CONNECTION_CLOSE")
+        print("tls-quic-state: handshake lifecycle, key update, WT close, and final-size close paths passed")
     }
 
     private static func proveHTTP3ByteCodecs() throws {

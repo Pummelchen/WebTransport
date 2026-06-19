@@ -498,6 +498,83 @@ func typedExtensionDecodersRejectMalformedVectors() throws {
     }
 }
 
+@Test
+func tlsQUICConnectionStateRunsHandshakeKeysAndKeyUpdateLifecycle() throws {
+    let clientHello = TLSHandshakeMessage(type: .clientHello, body: Data([0x01, 0x02, 0x03]))
+    let serverHello = TLSHandshakeMessage(type: .serverHello, body: Data([0x04, 0x05]))
+    var state = TLSQUICConnectionState(role: .client)
+
+    let outbound = try state.sendHandshakeFlight(messages: [clientHello], maxFramePayloadBytes: 4)
+    #expect(!outbound.isEmpty)
+    #expect(state.phase == .handshakeInProgress)
+
+    let inbound = try TLSHandshakeFlight(messages: [serverHello]).cryptoFrames(maxFramePayloadBytes: 4)
+    #expect(try state.receiveHandshakeFrames(inbound) == [serverHello])
+    var expectedTranscript = Data()
+    expectedTranscript.append(try clientHello.encode())
+    expectedTranscript.append(try serverHello.encode())
+    #expect(state.transcript.encodedMessages == expectedTranscript)
+
+    let handshakeSecrets = try state.deriveHandshakeTrafficSecrets(sharedSecret: Data(repeating: 0x33, count: 32))
+    #expect(state.phase == .handshakeKeysReady)
+    #expect(handshakeSecrets.clientHandshakeTrafficSecret != handshakeSecrets.serverHandshakeTrafficSecret)
+
+    let applicationSecrets = try state.deriveApplicationTrafficSecrets()
+    #expect(state.phase == .applicationKeysReady)
+    #expect(state.keyUpdateGeneration == 0)
+
+    let updatedSecrets = try state.updateApplicationTrafficSecrets()
+    #expect(state.keyUpdateGeneration == 1)
+    #expect(updatedSecrets.clientApplicationTrafficSecret != applicationSecrets.clientApplicationTrafficSecret)
+    #expect(updatedSecrets.serverApplicationTrafficSecret != applicationSecrets.serverApplicationTrafficSecret)
+}
+
+@Test
+func tlsQUICConnectionStateClosesOnPrematureKeyUpdate() throws {
+    var state = TLSQUICConnectionState(role: .server)
+
+    try expectThrowing {
+        _ = try state.updateApplicationTrafficSecrets()
+    }
+
+    #expect(state.phase == .closed)
+    #expect(state.closeState.closeFrame == .connectionClose(
+        errorCode: QUICTransportErrorCode.keyUpdateError.rawValue,
+        frameType: nil,
+        reason: Data("key update before application traffic secrets".utf8)
+    ))
+}
+
+@Test
+func tlsQUICConnectionStateMapsApplicationCloseAndFinalSizeErrors() throws {
+    var applicationClose = TLSQUICConnectionState(role: .client)
+    let closeFrame = applicationClose.closeApplication(errorCode: 0x52e4a40fa8db, reason: "WT_CLOSE_SESSION")
+    #expect(applicationClose.phase == .closed)
+    #expect(closeFrame == .connectionClose(
+        errorCode: 0x52e4a40fa8db,
+        frameType: nil,
+        reason: Data("WT_CLOSE_SESSION".utf8)
+    ))
+    #expect(applicationClose.closeApplication(errorCode: 0x01, reason: "late close") == closeFrame)
+    try expectThrowing {
+        try applicationClose.openStream(id: 4, maxSendOffset: 1, maxReceiveOffset: 1)
+    }
+
+    var finalSizeClose = TLSQUICConnectionState(role: .server)
+    try finalSizeClose.openStream(id: 0, maxSendOffset: 1_024, maxReceiveOffset: 1_024)
+    _ = try finalSizeClose.receiveStreamFrame(.stream(id: 0, offset: 0, fin: true, data: Data([0x01, 0x02])))
+    try expectThrowing {
+        _ = try finalSizeClose.receiveStreamFrame(.stream(id: 0, offset: 2, fin: false, data: Data([0x03])))
+    }
+
+    #expect(finalSizeClose.phase == .closed)
+    #expect(finalSizeClose.closeState.closeFrame == .connectionClose(
+        errorCode: QUICTransportErrorCode.finalSizeError.rawValue,
+        frameType: nil,
+        reason: Data("stream state violation: STREAM data exceeds final size".utf8)
+    ))
+}
+
 private func expectThrowing(_ operation: () throws -> Void) throws {
     do {
         try operation()

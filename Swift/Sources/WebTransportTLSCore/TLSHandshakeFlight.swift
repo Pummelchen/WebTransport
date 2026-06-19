@@ -106,6 +106,10 @@ public struct TLSHandshakeFlightDecoder: Equatable, Sendable {
         return output
     }
 
+    public mutating func appendTranscript(_ message: TLSHandshakeMessage) throws {
+        try transcript.append(message)
+    }
+
     private mutating func decodeAvailableMessages() throws -> [TLSHandshakeMessage] {
         let data = reassembler.contiguousBytes(from: consumedByteCount)
         var localOffset = data.startIndex
