@@ -66,7 +66,10 @@ swift run WebTransportServer
 ./run-pywebtransport-interop.sh
 ./run-third-party-interop.sh
 swift run LibrarySmokeServer --port 45500
+swift run LibrarySmokeServer --port 45500 --suite
 swift run LibrarySmokeClient --host 127.0.0.1 --port 45500
+swift run LibrarySmokeClient --host 127.0.0.1 --port 45500 --quick
+swift run LibrarySmokeClient --host 127.0.0.1 --port 45500 --suite --iterations 12 --max-datagram-frame-size 1200 --max-datagram-buffer 65536
 ./build-release-apple-silicon.sh
 ./check-api-compatibility.sh
 ```

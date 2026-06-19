@@ -37,6 +37,9 @@ enum LibrarySmokeServer {
                 }
                 config.port = value
                 index += 2
+            case "--suite":
+                config.suiteMode = true
+                index += 1
             case "--help":
                 printUsage()
                 exit(0)
@@ -48,12 +51,15 @@ enum LibrarySmokeServer {
     }
 
     private static func printUsage() {
-        print("Usage: swift run LibrarySmokeServer --port <port>")
+        print("Usage: swift run LibrarySmokeServer --port <port> [--suite]")
+        print("  --port <port>   UDP port (default 45500)")
+        print("  --suite         Keep connection open for multi-scenario suites")
     }
 
     struct Runner {
         struct Config {
             var port: UInt16 = 45500
+            var suiteMode: Bool = false
         }
 
         enum Error: Swift.Error, CustomStringConvertible {
@@ -78,27 +84,29 @@ enum LibrarySmokeServer {
         init(config: Config) throws {
             self.config = config
             self.server = try QUICUDPPort(bindPort: config.port)
-
             self.policy = try WebTransportServerSessionPolicy(
                 allowedAuthorities: ["example.com"],
                 allowedPaths: ["/wt"],
                 supportedProtocols: ["wt-echo"],
                 requireProtocolSelection: false
             )
-
             let http3 = HTTP3ConnectionState(role: .server)
             self.manager = WebTransportSessionManager(http3: http3)
 
             print("LibrarySmokeServer listening on 127.0.0.1:\(server.localEndpoint.port)")
             print("LibrarySmokeServer ready for stream + datagram smoke checks")
+            if config.suiteMode {
+                print("LibrarySmokeServer running in suite mode")
+            }
         }
 
         mutating func run() throws {
             var peer: QUICUDPEndpoint?
             var completed = false
             var steps = 0
+            let stepLimit = config.suiteMode ? 2_000 : 20
 
-            while !completed && steps < 20 {
+            while !completed && steps < stepLimit {
                 let (bytes, sender) = try server.receive(timeoutMilliseconds: 10_000)
                 if let activePeer = peer, activePeer != sender {
                     continue
@@ -106,19 +114,35 @@ enum LibrarySmokeServer {
                 peer = sender
 
                 let request = try Phase11Protocol.decode(bytes)
-                let response = try handle(request)
-                steps += 1
+                let response: Phase11Envelope?
+                do {
+                    response = try handle(request)
+                } catch {
+                    response = Phase11Envelope(
+                        scenario: request.scenario,
+                        kind: .error,
+                        success: false,
+                        message: "runtime: \(error)"
+                    )
+                }
+                guard let response else { continue }
+                try send(response, to: sender)
 
-                if let response {
-                    try send(response, to: sender)
-                    if response.kind == .result {
-                        completed = true
+                if response.kind == .result {
+                    if config.suiteMode {
+                        completed = response.success == true && response.message == "suite complete"
+                    } else {
+                        completed = response.success ?? false
                     }
                 }
+
+                steps += 1
             }
 
             if !completed {
-                throw Error.runtime("smoke test did not reach completion")
+                throw Error.runtime(
+                    "smoke test did not reach completion" + (config.suiteMode ? " (suite mode)" : "")
+                )
             }
         }
 
@@ -226,20 +250,27 @@ enum LibrarySmokeServer {
                     )
                 }
             case .streamReset:
+                guard let streamID = envelope.streamID else {
+                    throw Error.runtime("missing stream id for reset")
+                }
+                let errorCode = envelope.errorCode ?? 0
+                let resetFrame = try manager.resetStream(streamID: streamID, applicationErrorCode: errorCode)
+                let payload = try Phase11FramePacket.encodeQUICFrame(resetFrame)
                 return Phase11Envelope(
                     scenario: envelope.scenario,
                     kind: .streamResetAck,
-                    streamID: envelope.streamID,
-                    errorCode: envelope.errorCode,
+                    streamID: streamID,
+                    errorCode: errorCode,
                     success: true,
+                    payload: payload,
                     message: "stream reset"
                 )
             case .result:
                 return Phase11Envelope(
                     scenario: envelope.scenario,
                     kind: .result,
-                    success: true,
-                    message: "complete"
+                    success: envelope.success ?? true,
+                    message: envelope.message ?? (config.suiteMode ? "running" : "complete")
                 )
             case .helloAck, .controlAck, .sessionResponse, .streamOpenAck, .streamEcho, .streamResetAck, .datagramEcho, .resetReceived, .scenarioDone, .error:
                 return nil
