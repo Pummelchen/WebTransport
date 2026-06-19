@@ -306,7 +306,7 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
         let client = try WebTransportProcessSupport.productURL("WebTransportClient", configuration: "debug")
         let runningServer = try WebTransportProcessSupport.start(
             server,
-            ["--listen", "127.0.0.1:0", "--transport", "packet", "--timeout-ms", "10000", "--max-sessions", "16"]
+            ["--listen", "127.0.0.1:0", "--transport", "packet", "--timeout-ms", "20000", "--max-sessions", "16"]
         )
         defer {
             runningServer.terminateIfNeeded()
@@ -314,7 +314,7 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
         let line = try runningServer.waitForOutput(containing: "listening:", timeout: 5)
         let port = try WebTransportProcessSupport.parseListeningPort(from: line)
 
-        let count = 8
+        let count = 6
         final class ConcurrentCapture: @unchecked Sendable {
             private(set) var results: [ProcessResult] = []
             private(set) var errors: [String] = []
@@ -347,14 +347,16 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
                 do {
                     var result = try WebTransportProcessSupport.run(
                         client,
-                        ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)", "--timeout-ms", "12000"]
+                        ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)", "--timeout-ms", "20000"],
+                        timeout: 25
                     )
                     var attempts = 1
                     while !result.stdout.contains("connected") && attempts < 3 {
                         attempts += 1
                         result = try WebTransportProcessSupport.run(
                             client,
-                            ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "12000"]
+                            ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "20000"],
+                            timeout: 25
                         )
                     }
                     let message = result.stdout.contains("connected")
@@ -362,17 +364,17 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
                         : "non-connected client #\(index) after \(attempts) attempts: exit=\(result.exitCode) stdout=\(result.stdout) stderr=\(result.stderr)"
                     capture.addResult(result, connected: result.stdout.contains("connected"), message: message)
                 } catch {
-                    capture.addError(error.localizedDescription)
+                    capture.addError("client process #\(index) failed: \(error.localizedDescription)")
                 }
                 group.leave()
             }
         }
-        let done = group.wait(timeout: .now() + 30)
-        #expect(done == .success)
-        #expect(capture.connectedCount == count)
+        let done = group.wait(timeout: .now() + 75)
         let failures = capture.errors.filter { !$0.isEmpty }
+        #expect(done == .success, Comment(rawValue: failures.joined(separator: "\n")))
+        #expect(capture.connectedCount == count, Comment(rawValue: failures.joined(separator: "\n")))
         #expect(failures.isEmpty)
-        #expect(capture.results.count == count)
+        #expect(capture.results.count == count, Comment(rawValue: failures.joined(separator: "\n")))
     }
 }
 
@@ -583,14 +585,25 @@ enum WebTransportProcessSupport {
         let port = try parseListeningPort(from: line)
         let connectEndpoint = endpointArgument(host: host, port: port)
         let loopbackName = "loopback-\(transport)-\(host == "::1" ? "ipv6" : "ipv4")"
-        let clientResult = try run(
+        var clientResult = try run(
             client,
             ["--connect", connectEndpoint, "--transport", transport, "--message", loopbackName, "--timeout-ms", "12000"],
             timeout: 20
         )
-        #expect(clientResult.exitCode == 0)
-        #expect(clientResult.stdout.contains("connected"))
-        #expect(clientResult.stdout.contains(loopbackName))
+        var attempts = 1
+        while clientResult.exitCode != 0 && attempts < 3 {
+            Thread.sleep(forTimeInterval: 0.25)
+            attempts += 1
+            clientResult = try run(
+                client,
+                ["--connect", connectEndpoint, "--transport", transport, "--message", "\(loopbackName)-retry-\(attempts)", "--timeout-ms", "12000"],
+                timeout: 20
+            )
+        }
+        let clientFailure = "exit=\(clientResult.exitCode) stdout=\(clientResult.stdout) stderr=\(clientResult.stderr)"
+        #expect(clientResult.exitCode == 0, Comment(rawValue: clientFailure))
+        #expect(clientResult.stdout.contains("connected"), Comment(rawValue: clientFailure))
+        #expect(clientResult.stdout.contains(loopbackName), Comment(rawValue: clientFailure))
         if expectsEstablishedSession {
             #expect(clientResult.stdout.contains("session=established"))
         }

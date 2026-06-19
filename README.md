@@ -23,7 +23,7 @@ License: MIT.
 The Swift implementation is the active implementation and is exposed as a normal Swift package from the repository root:
 
 ```swift
-.package(url: "https://github.com/Pummelchen/WebTransport.git", branch: "main")
+.package(url: "https://github.com/Pummelchen/WebTransport.git", exact: "1.0.0")
 ```
 
 Products:
@@ -86,25 +86,6 @@ Release checks:
 cd Swift && ./check-api-compatibility.sh
 cd Swift && ./build-release-apple-silicon.sh
 ```
-
-## Public Launch Checklist
-
-Done:
-
-- MIT `LICENSE` file.
-- Root SwiftPM package.
-- Short API usage example.
-- `SECURITY.md` vulnerability reporting policy.
-- `CHANGELOG.md`.
-- Local build/test/release validation.
-- External interop validation against independent WebTransport implementations.
-
-Remaining before a polished public release:
-
-- Create a semantic version tag, for example `1.0.0`, so SwiftPM users do not need `branch: "main"`.
-- Add a GitHub Release with release artifacts and checksums.
-- Confirm GitHub Actions is green on the remote.
-- Optionally add DocC or expand public API comments for generated documentation.
 
 ## C99
 
