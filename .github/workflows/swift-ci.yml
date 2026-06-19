@@ -43,7 +43,18 @@ jobs:
       - name: Build package
         run: swift build --package-path Swift
 
+      - name: Build public API compatibility sample
+        run: ./check-api-compatibility.sh
+        working-directory: Swift
+
+      - name: Verify release artifacts
+        run: ./build-release-apple-silicon.sh
+        working-directory: Swift
+
       - name: Run package tests
+        env:
+          WEBTRANSPORT_REQUIRE_CLI_BINARIES: "1"
+          WEBTRANSPORT_REQUIRE_RELEASE_ARTIFACTS: "1"
         run: swift test --package-path Swift
 
       - name: Run client CLI conformance
@@ -51,7 +62,3 @@ jobs:
 
       - name: Run server CLI conformance
         run: swift run --package-path Swift WebTransportServer --scenario all
-
-      - name: Verify release artifacts
-        run: ./build-release-apple-silicon.sh
-        working-directory: Swift

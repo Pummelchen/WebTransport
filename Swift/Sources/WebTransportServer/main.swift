@@ -18,11 +18,13 @@ struct WebTransportServerCLI {
                     let server = try WebTransportQUICPacketProbeServer(bindPort: options.endpoint.port)
                     local = server.localEndpoint
                     print("network packet probe listening: \(local.host):\(local.port)")
+                    fflush(stdout)
                     result = try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
                 case .frame:
                     let server = try WebTransportNetworkProbeServer(bindPort: options.endpoint.port)
                     local = server.localEndpoint
                     print("network frame probe listening: \(local.host):\(local.port)")
+                    fflush(stdout)
                     result = try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
                 }
                 let session = result.sessionEstablished ? " session=established" : ""

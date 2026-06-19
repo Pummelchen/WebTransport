@@ -1,0 +1,62 @@
+#!/bin/sh
+set -eu
+
+cd "$(dirname "$0")"
+
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/webtransport-api-compat.XXXXXX")"
+trap 'rm -rf "$tmpdir"' EXIT
+
+mkdir -p "$tmpdir/Sources/APICompat"
+
+cat > "$tmpdir/Package.swift" <<EOF
+// swift-tools-version: 6.3
+import PackageDescription
+
+let package = Package(
+    name: "APICompat",
+    platforms: [.macOS(.v26)],
+    dependencies: [
+        .package(path: "$PWD")
+    ],
+    targets: [
+        .executableTarget(
+            name: "APICompat",
+            dependencies: [
+                .product(name: "WebTransport", package: "Swift"),
+                .product(name: "WebTransportNetworkRuntime", package: "Swift")
+            ]
+        )
+    ],
+    swiftLanguageModes: [.v6]
+)
+EOF
+
+cat > "$tmpdir/Sources/APICompat/main.swift" <<'EOF'
+import Foundation
+import WebTransport
+import WebTransportNetworkRuntime
+
+let clientConfig = WebTransportClientConfiguration(
+    authority: "localhost",
+    path: "/wt",
+    origin: "https://localhost",
+    availableProtocols: ["demo.v1"]
+)
+let serverConfig = WebTransportServerConfiguration(
+    authority: "localhost",
+    path: "/wt",
+    origin: "https://localhost",
+    supportedProtocols: ["demo.v1"]
+)
+let logger = WebTransportLogger { event in
+    _ = event.description
+}
+_ = WebTransportClient(configuration: clientConfig, logger: logger)
+_ = WebTransportServer(configuration: serverConfig, logger: logger)
+_ = WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433)
+_ = WebTransportErrorSurface.publicDescription(for: WebTransportSampleError())
+
+struct WebTransportSampleError: Error {}
+EOF
+
+swift build --package-path "$tmpdir"
