@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import WebTransportCryptoApple
+import WebTransportTLSCore
 
 @Test
 func derivesRFC9001InitialSecretVector() throws {
@@ -60,6 +61,77 @@ func packetProtectionSealsAndOpensHandshakeStylePayload() throws {
     )
     #expect(sealed != plaintext)
     #expect(opened == plaintext)
+}
+
+@Test
+func packetProtectionAcceptsTLSHandshakeTrafficSecret() throws {
+    let clientPrivateKey = TLS13KeyAgreement.makeX25519PrivateKey()
+    let serverPrivateKey = TLS13KeyAgreement.makeX25519PrivateKey()
+    let clientShare = try TLS13KeyAgreement.x25519KeyShare(publicKey: clientPrivateKey.publicKey)
+    let serverShare = try TLS13KeyAgreement.x25519KeyShare(publicKey: serverPrivateKey.publicKey)
+    let sharedSecret = try TLS13KeyAgreement.x25519SharedSecret(
+        privateKey: clientPrivateKey,
+        peerShare: serverShare
+    )
+    let peerSharedSecret = try TLS13KeyAgreement.x25519SharedSecret(
+        privateKey: serverPrivateKey,
+        peerShare: clientShare
+    )
+    #expect(sharedSecret == peerSharedSecret)
+
+    let handshakeSecret = try TLS13KeyAgreement.handshakeSecret(sharedSecret: sharedSecret)
+    let trafficSecrets = try TLS13KeyAgreement.handshakeTrafficSecrets(
+        handshakeSecret: handshakeSecret,
+        transcriptHash: TLS13KeySchedule.transcriptHash(Data("client-server-hello".utf8))
+    )
+    let keys = try QUICPacketProtection.deriveKeys(
+        trafficSecret: trafficSecrets.serverHandshakeTrafficSecret
+    )
+    let associatedData = Data("server-handshake-header".utf8)
+    let plaintext = Data("server encrypted handshake bytes".utf8)
+    let sealed = try QUICPacketProtection.seal(
+        plaintext: plaintext,
+        packetNumber: 7,
+        associatedData: associatedData,
+        keys: keys
+    )
+
+    #expect(try QUICPacketProtection.open(
+        ciphertextAndTag: sealed,
+        packetNumber: 7,
+        associatedData: associatedData,
+        keys: keys
+    ) == plaintext)
+}
+
+@Test
+func packetProtectionAcceptsTLSApplicationTrafficSecret() throws {
+    let handshakeSecret = try TLS13KeyAgreement.handshakeSecret(
+        sharedSecret: Data(repeating: 0x44, count: TLS13KeySchedule.sha256Length)
+    )
+    let masterSecret = try TLS13KeyAgreement.masterSecret(handshakeSecret: handshakeSecret)
+    let applicationSecrets = try TLS13KeyAgreement.applicationTrafficSecrets(
+        masterSecret: masterSecret,
+        transcriptHash: TLS13KeySchedule.transcriptHash(Data("finished-handshake-transcript".utf8))
+    )
+    let keys = try QUICPacketProtection.deriveKeys(
+        trafficSecret: applicationSecrets.clientApplicationTrafficSecret
+    )
+    let associatedData = Data("short-header".utf8)
+    let plaintext = Data("1rtt application payload".utf8)
+    let sealed = try QUICPacketProtection.seal(
+        plaintext: plaintext,
+        packetNumber: 11,
+        associatedData: associatedData,
+        keys: keys
+    )
+
+    #expect(try QUICPacketProtection.open(
+        ciphertextAndTag: sealed,
+        packetNumber: 11,
+        associatedData: associatedData,
+        keys: keys
+    ) == plaintext)
 }
 
 @Test

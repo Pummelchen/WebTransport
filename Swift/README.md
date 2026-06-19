@@ -33,8 +33,11 @@ Current Phase 1 status: closed.
 - `WebTransportTLSCore` now contains TLS 1.3 transcript hashing, HKDF label/key
   schedule helpers, Finished verify-data generation, ALPN `h3` extension encoding,
   QUIC transport-parameter extension encoding, typed ClientHello/ServerHello/
-  EncryptedExtensions/Finished bodies, and TLS 1.3 supported_versions, key_share,
-  and signature_algorithms extension helpers.
+  EncryptedExtensions/Certificate/CertificateVerify/Finished bodies, TLS 1.3
+  supported_versions, key_share, and signature_algorithms extension helpers,
+  X25519 handshake secret derivation, application traffic secret progression,
+  prompt-free identity/trust input models, and CertificateVerify verification
+  primitives.
 
 Commands:
 

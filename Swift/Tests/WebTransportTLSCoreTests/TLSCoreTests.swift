@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 import Testing
 import WebTransportQUICCore
 @testable import WebTransportTLSCore
@@ -155,6 +156,267 @@ func typedHandshakeTranscriptProducesFinishedMessage() throws {
     )
     let finished = TLSFinished(verifyData: verifyData)
     #expect(TLSFinished.decode(finished.handshakeMessage().body) == finished)
+}
+
+@Test
+func x25519KeyAgreementDerivesHandshakeTrafficSecrets() throws {
+    let clientPrivateKey = TLS13KeyAgreement.makeX25519PrivateKey()
+    let serverPrivateKey = TLS13KeyAgreement.makeX25519PrivateKey()
+    let clientShare = try TLS13KeyAgreement.x25519KeyShare(publicKey: clientPrivateKey.publicKey)
+    let serverShare = try TLS13KeyAgreement.x25519KeyShare(publicKey: serverPrivateKey.publicKey)
+
+    let clientSharedSecret = try TLS13KeyAgreement.x25519SharedSecret(
+        privateKey: clientPrivateKey,
+        peerShare: serverShare
+    )
+    let serverSharedSecret = try TLS13KeyAgreement.x25519SharedSecret(
+        privateKey: serverPrivateKey,
+        peerShare: clientShare
+    )
+    #expect(clientSharedSecret == serverSharedSecret)
+    #expect(clientSharedSecret != TLS13KeyAgreement.zeroSecret)
+
+    let clientHello = try TLSClientHello(
+        random: Data(repeating: 0x05, count: 32),
+        extensions: [
+            try TLSSupportedVersionsExtension.client(),
+            try TLSKeyShareExtension.client([clientShare]),
+            try TLSALPNExtension.make(protocols: ["h3"])
+        ]
+    )
+    let serverHello = try TLSServerHello(
+        random: Data(repeating: 0x06, count: 32),
+        extensions: [
+            TLSSupportedVersionsExtension.server(),
+            try TLSKeyShareExtension.server(serverShare)
+        ]
+    )
+
+    var transcript = TLS13Transcript()
+    try transcript.append(clientHello.handshakeMessage())
+    try transcript.append(serverHello.handshakeMessage())
+
+    let handshakeSecret = try TLS13KeyAgreement.handshakeSecret(sharedSecret: clientSharedSecret)
+    let trafficSecrets = try TLS13KeyAgreement.handshakeTrafficSecrets(
+        handshakeSecret: handshakeSecret,
+        transcriptHash: transcript.hash
+    )
+    let clientKeys = try TLS13KeySchedule.trafficKeys(trafficSecret: trafficSecrets.clientHandshakeTrafficSecret)
+    let serverKeys = try TLS13KeySchedule.trafficKeys(trafficSecret: trafficSecrets.serverHandshakeTrafficSecret)
+
+    #expect(handshakeSecret.count == TLS13KeySchedule.sha256Length)
+    #expect(trafficSecrets.clientHandshakeTrafficSecret != trafficSecrets.serverHandshakeTrafficSecret)
+    #expect(clientKeys.key.count == 16 && clientKeys.iv.count == 12)
+    #expect(serverKeys.key.count == 16 && serverKeys.iv.count == 12)
+}
+
+@Test
+func tls13NoPSKHandshakeSecretUsesExtractedEarlySecret() throws {
+    let sharedSecret = Data(repeating: 0x42, count: TLS13KeySchedule.sha256Length)
+    let derived = try TLS13KeySchedule.deriveSecret(
+        secret: TLS13KeyAgreement.noPSKEarlySecret,
+        label: "derived",
+        transcriptHash: TLS13KeySchedule.transcriptHash(Data())
+    )
+    let expected = TLS13KeySchedule.hkdfExtract(inputKeyMaterial: sharedSecret, salt: derived)
+
+    #expect(TLS13KeyAgreement.noPSKEarlySecret != TLS13KeyAgreement.zeroSecret)
+    #expect(try TLS13KeyAgreement.handshakeSecret(sharedSecret: sharedSecret) == expected)
+}
+
+@Test
+func tls13ApplicationTrafficSecretsDeriveFromMasterSecret() throws {
+    let handshakeSecret = Data(repeating: 0x77, count: TLS13KeySchedule.sha256Length)
+    let masterSecret = try TLS13KeyAgreement.masterSecret(handshakeSecret: handshakeSecret)
+    let transcriptHash = TLS13KeySchedule.transcriptHash(Data("complete-handshake-transcript".utf8))
+    let applicationSecrets = try TLS13KeyAgreement.applicationTrafficSecrets(
+        masterSecret: masterSecret,
+        transcriptHash: transcriptHash
+    )
+    let nextClientSecret = try TLS13KeyAgreement.nextApplicationTrafficSecret(
+        applicationSecrets.clientApplicationTrafficSecret
+    )
+
+    #expect(masterSecret.count == TLS13KeySchedule.sha256Length)
+    #expect(applicationSecrets.clientApplicationTrafficSecret.count == TLS13KeySchedule.sha256Length)
+    #expect(applicationSecrets.serverApplicationTrafficSecret.count == TLS13KeySchedule.sha256Length)
+    #expect(applicationSecrets.clientApplicationTrafficSecret != applicationSecrets.serverApplicationTrafficSecret)
+    #expect(nextClientSecret != applicationSecrets.clientApplicationTrafficSecret)
+    #expect(nextClientSecret.count == TLS13KeySchedule.sha256Length)
+}
+
+@Test
+func x25519KeyAgreementRejectsInvalidPeerShares() throws {
+    let privateKey = TLS13KeyAgreement.makeX25519PrivateKey()
+
+    try expectThrowing {
+        _ = try TLS13KeyAgreement.x25519SharedSecret(
+            privateKey: privateKey,
+            peerShare: TLSKeyShareEntry(group: TLSNamedGroup.secp256r1, keyExchange: Data(repeating: 0x01, count: 32))
+        )
+    }
+    try expectThrowing {
+        _ = try TLS13KeyAgreement.x25519SharedSecret(
+            privateKey: privateKey,
+            peerShare: TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x01, count: 31))
+        )
+    }
+}
+
+@Test
+func promptFreeServerIdentityImportsPrivateKeyWithoutKeychain() throws {
+    let attributes: [CFString: Any] = [
+        kSecAttrKeyType: kSecAttrKeyTypeRSA,
+        kSecAttrKeySizeInBits: 2_048,
+        kSecAttrIsPermanent: false
+    ]
+    var error: Unmanaged<CFError>?
+    guard let generatedKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
+        throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+    }
+    guard let privateKeyDER = SecKeyCopyExternalRepresentation(generatedKey, &error) as Data? else {
+        throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+    }
+
+    let identity = try TLSPromptFreeServerIdentity(
+        certificateChainDER: [Data([0x30, 0x00])],
+        privateKeyDER: privateKeyDER,
+        privateKeyType: kSecAttrKeyTypeRSA,
+        privateKeySizeInBits: 2_048
+    )
+    let importedKey = try identity.makePrivateKey()
+
+    #expect(SecKeyCopyPublicKey(importedKey) != nil)
+}
+
+@Test
+func promptFreeIdentityAndTrustRejectInvalidInputs() throws {
+    try expectThrowing {
+        _ = try TLSPromptFreeServerIdentity(
+            certificateChainDER: [],
+            privateKeyDER: Data([0x01]),
+            privateKeyType: kSecAttrKeyTypeRSA,
+            privateKeySizeInBits: 2_048
+        )
+    }
+
+    let identity = try TLSPromptFreeServerIdentity(
+        certificateChainDER: [Data([0x00, 0x01, 0x02])],
+        privateKeyDER: Data([0x00, 0x01, 0x02]),
+        privateKeyType: kSecAttrKeyTypeRSA,
+        privateKeySizeInBits: 2_048
+    )
+    try expectThrowing {
+        _ = try identity.makeCertificateChain()
+    }
+    try expectThrowing {
+        _ = try identity.makePrivateKey()
+    }
+    try expectThrowing {
+        _ = try TLSPinnedCertificateTrustPolicy(allowedLeafCertificateSHA256Fingerprints: [])
+    }
+    try expectThrowing {
+        _ = try TLSPinnedCertificateTrustPolicy(
+            allowedLeafCertificateSHA256Fingerprints: [Data(repeating: 0x01, count: 31)]
+        )
+    }
+
+    let policy = try TLSPinnedCertificateTrustPolicy(
+        allowedLeafCertificateSHA256Fingerprints: [Data(repeating: 0x02, count: 32)]
+    )
+    try expectThrowing {
+        try policy.evaluate(certificateChainDER: [])
+    }
+    try expectThrowing {
+        try policy.evaluate(certificateChainDER: [Data([0x00, 0x01, 0x02])])
+    }
+}
+
+@Test
+func certificateHandshakeMessagesRoundTrip() throws {
+    let entry = try TLSCertificateEntry(
+        certificateData: Data([0x30, 0x03, 0x02, 0x01, 0x05]),
+        extensions: [
+            TLSExtension(type: 0xfe00, data: Data([0x01, 0x02]))
+        ]
+    )
+    let certificate = try TLSCertificate(entries: [entry])
+    #expect(try TLSCertificate.decode(try certificate.body()) == certificate)
+    #expect(try certificate.handshakeMessage().type == .certificate)
+
+    let certificateVerify = try TLSCertificateVerify(
+        algorithm: TLSSignatureScheme.ed25519,
+        signature: Data(repeating: 0xaa, count: 64)
+    )
+    #expect(try TLSCertificateVerify.decode(certificateVerify.body()) == certificateVerify)
+    #expect(certificateVerify.handshakeMessage().type == .certificateVerify)
+}
+
+@Test
+func certificateHandshakeMessagesRejectMalformedVectors() throws {
+    try expectThrowing {
+        _ = try TLSCertificateEntry(certificateData: Data())
+    }
+    try expectThrowing {
+        _ = try TLSCertificate(entries: [])
+    }
+    try expectThrowing {
+        _ = try TLSCertificateVerify(algorithm: TLSSignatureScheme.ed25519, signature: Data())
+    }
+    try expectThrowing {
+        _ = try TLSCertificate.decode(Data([0x00, 0x00, 0x00, 0x01]))
+    }
+    try expectThrowing {
+        _ = try TLSCertificateVerify.decode(Data([0x08, 0x07, 0x00, 0x02, 0xaa]))
+    }
+}
+
+@Test
+func certificateVerifySignatureVerifiesWithInMemorySecKey() throws {
+    let attributes: [CFString: Any] = [
+        kSecAttrKeyType: kSecAttrKeyTypeRSA,
+        kSecAttrKeySizeInBits: 2_048,
+        kSecAttrIsPermanent: false
+    ]
+    var error: Unmanaged<CFError>?
+    guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
+        throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+    }
+    guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
+        throw ExpectedThrowError.missingThrow
+    }
+
+    let transcriptHash = TLS13KeySchedule.transcriptHash(Data("certificate-verify-transcript".utf8))
+    let algorithm = try TLSCertificateVerifier.secKeyAlgorithm(for: TLSSignatureScheme.rsaPSSRSAESHA256)
+    let signedContent = TLSCertificateVerifier.signedContent(role: .server, transcriptHash: transcriptHash)
+    guard let signature = SecKeyCreateSignature(
+        privateKey,
+        algorithm,
+        signedContent as CFData,
+        &error
+    ) as Data? else {
+        throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+    }
+
+    let certificateVerify = try TLSCertificateVerify(
+        algorithm: TLSSignatureScheme.rsaPSSRSAESHA256,
+        signature: signature
+    )
+    #expect(try TLSCertificateVerifier.verify(
+        certificateVerify,
+        role: .server,
+        transcriptHash: transcriptHash,
+        publicKey: publicKey
+    ))
+    #expect(try TLSCertificateVerifier.verify(
+        certificateVerify,
+        role: .server,
+        transcriptHash: TLS13KeySchedule.transcriptHash(Data("tampered".utf8)),
+        publicKey: publicKey
+    ) == false)
+    try expectThrowing {
+        _ = try TLSCertificateVerifier.secKeyAlgorithm(for: TLSSignatureScheme.ed25519)
+    }
 }
 
 @Test

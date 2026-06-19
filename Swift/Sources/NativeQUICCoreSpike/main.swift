@@ -99,15 +99,27 @@ enum NativeQUICCoreSpike {
         let decodedExtensions = try TLSExtension.decodeList(extensionList)
         try assert(decodedExtensions.count == 2, "decoded TLS extensions")
 
+        let clientPrivateKey = TLS13KeyAgreement.makeX25519PrivateKey()
+        let serverPrivateKey = TLS13KeyAgreement.makeX25519PrivateKey()
+        let clientShare = try TLS13KeyAgreement.x25519KeyShare(publicKey: clientPrivateKey.publicKey)
+        let serverShare = try TLS13KeyAgreement.x25519KeyShare(publicKey: serverPrivateKey.publicKey)
+        let clientSharedSecret = try TLS13KeyAgreement.x25519SharedSecret(
+            privateKey: clientPrivateKey,
+            peerShare: serverShare
+        )
+        let serverSharedSecret = try TLS13KeyAgreement.x25519SharedSecret(
+            privateKey: serverPrivateKey,
+            peerShare: clientShare
+        )
+        try assert(clientSharedSecret == serverSharedSecret, "X25519 shared secret agreement")
+
         let clientHello = try TLSClientHello(
             random: Data(repeating: 0x01, count: 32),
             extensions: [
                 try TLSSupportedVersionsExtension.client(),
                 try TLSALPNExtension.make(protocols: ["h3"]),
                 try TLSQUICTransportParametersExtension.make(parameters),
-                try TLSKeyShareExtension.client([
-                    TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x11, count: 32))
-                ]),
+                try TLSKeyShareExtension.client([clientShare]),
                 try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519])
             ]
         )
@@ -115,9 +127,7 @@ enum NativeQUICCoreSpike {
             random: Data(repeating: 0x02, count: 32),
             extensions: [
                 TLSSupportedVersionsExtension.server(),
-                try TLSKeyShareExtension.server(
-                    TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x22, count: 32))
-                )
+                try TLSKeyShareExtension.server(serverShare)
             ]
         )
         let encryptedExtensions = TLSEncryptedExtensions(extensions: decodedExtensions)
@@ -125,24 +135,54 @@ enum NativeQUICCoreSpike {
         var transcript = TLS13Transcript()
         try transcript.append(clientHello.handshakeMessage())
         try transcript.append(serverHello.handshakeMessage())
+
+        let handshakeSecret = try TLS13KeyAgreement.handshakeSecret(sharedSecret: clientSharedSecret)
+        let trafficSecrets = try TLS13KeyAgreement.handshakeTrafficSecrets(
+            handshakeSecret: handshakeSecret,
+            transcriptHash: transcript.hash
+        )
         try transcript.append(encryptedExtensions.handshakeMessage())
 
-        let baseSecret = Data(repeating: 0x33, count: 32)
-        let trafficSecret = try TLS13KeySchedule.deriveSecret(
-            secret: baseSecret,
-            label: "c hs traffic",
-            transcriptHash: transcript.hash
-        )
         let verifyData = try TLS13KeySchedule.finishedVerifyData(
-            baseKey: trafficSecret,
+            baseKey: trafficSecrets.serverHandshakeTrafficSecret,
             transcriptHash: transcript.hash
         )
-        let trafficKeys = try TLS13KeySchedule.trafficKeys(trafficSecret: trafficSecret)
+        let trafficKeys = try QUICPacketProtection.deriveKeys(
+            trafficSecret: trafficSecrets.serverHandshakeTrafficSecret
+        )
         let finished = TLSFinished(verifyData: verifyData)
         try assert(finished.handshakeMessage().type == .finished, "Finished handshake message type")
         try assert(verifyData.count == 32, "Finished verify data length")
-        try assert(trafficKeys.key.count == 16 && trafficKeys.iv.count == 12, "TLS traffic key lengths")
-        print("tls: ALPN h3, QUIC transport parameters, transcript hash, Finished verify data, and traffic keys passed")
+        try assert(
+            trafficKeys.key.count == 16 &&
+                trafficKeys.iv.count == 12 &&
+                trafficKeys.headerProtectionKey.count == 16,
+            "QUIC handshake traffic key lengths"
+        )
+
+        try transcript.append(finished.handshakeMessage())
+        let masterSecret = try TLS13KeyAgreement.masterSecret(handshakeSecret: handshakeSecret)
+        let applicationTrafficSecrets = try TLS13KeyAgreement.applicationTrafficSecrets(
+            masterSecret: masterSecret,
+            transcriptHash: transcript.hash
+        )
+        let applicationKeys = try QUICPacketProtection.deriveKeys(
+            trafficSecret: applicationTrafficSecrets.serverApplicationTrafficSecret
+        )
+        let protectedPayload = try QUICPacketProtection.seal(
+            plaintext: Data("1rtt webtransport payload".utf8),
+            packetNumber: 9,
+            associatedData: Data("short-header".utf8),
+            keys: applicationKeys
+        )
+        let openedPayload = try QUICPacketProtection.open(
+            ciphertextAndTag: protectedPayload,
+            packetNumber: 9,
+            associatedData: Data("short-header".utf8),
+            keys: applicationKeys
+        )
+        try assert(openedPayload == Data("1rtt webtransport payload".utf8), "1-RTT QUIC packet protection")
+        print("tls: X25519, ALPN h3, QUIC transport parameters, Finished verify data, and QUIC handshake/1-RTT keys passed")
     }
 }
 

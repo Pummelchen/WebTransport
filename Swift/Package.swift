@@ -74,7 +74,10 @@ let package = Package(
         ),
         .testTarget(
             name: "WebTransportCryptoAppleTests",
-            dependencies: ["WebTransportCryptoApple"]
+            dependencies: [
+                "WebTransportCryptoApple",
+                "WebTransportTLSCore"
+            ]
         ),
         .testTarget(
             name: "WebTransportTLSCoreTests",
