@@ -11,6 +11,10 @@ public struct HTTP3Settings: Equatable, Sendable {
         self.values = values
     }
 
+    private init(unchecked values: [UInt64: UInt64]) {
+        self.values = values
+    }
+
     public subscript(_ identifier: UInt64) -> UInt64? {
         values[identifier]
     }
@@ -73,4 +77,13 @@ public struct HTTP3Settings: Equatable, Sendable {
             throw QUICCodecError.malformed("reserved HTTP/2 SETTINGS identifier is invalid in HTTP/3")
         }
     }
+
+    public static let webTransportDraft15Defaults = HTTP3Settings(unchecked: [
+        WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
+        WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
+        WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1,
+        WebTransportHTTP3DraftConstants.current.settingsWTInitialMaxStreamsUni: 0,
+        WebTransportHTTP3DraftConstants.current.settingsWTInitialMaxStreamsBidi: 0,
+        WebTransportHTTP3DraftConstants.current.settingsWTInitialMaxData: 0
+    ])
 }

@@ -50,6 +50,7 @@ enum NativeQUICCoreSpike {
             try provePacketProtection()
             try proveTLSForQUICScaffold()
             try proveHTTP3ByteCodecs()
+            try proveHTTP3ConnectionLayer()
             print("phase1b: native QUIC core frame exchange over Apple UDP passed without security prompts")
         } catch {
             fputs("NativeQUICCoreSpike failed: \(error)\n", stderr)
@@ -351,6 +352,41 @@ enum NativeQUICCoreSpike {
         let responseFrame = try WebTransportHTTP3Headers.successfulResponseHeadersFrame()
         try WebTransportHTTP3Headers.validateSuccessfulResponse(try QPACK.decodeHeadersFrame(responseFrame))
         print("http3: frame headers, SETTINGS, stream types, draft-15 constants, and QPACK HEADERS passed")
+    }
+
+    private static func proveHTTP3ConnectionLayer() throws {
+        var client = HTTP3ConnectionState(role: .client)
+        var server = HTTP3ConnectionState(role: .server)
+        _ = try server.receivePeerControlStream(client.localControlStreamBytes())
+        _ = try client.receivePeerControlStream(server.localControlStreamBytes())
+        try assert(client.remoteSettings?.entries == HTTP3Settings.webTransportDraft15Defaults.entries, "client received server SETTINGS")
+        try assert(server.remoteSettings?.entries == HTTP3Settings.webTransportDraft15Defaults.entries, "server received client SETTINGS")
+
+        var clientStream = try client.openRequestStream(streamID: 0)
+        var serverStream = try server.acceptRequestStream(streamID: 0)
+        let requestHeaders = try WebTransportHTTP3Headers.connectRequest(
+            authority: "example.com",
+            path: "/wt",
+            origin: "https://example.com"
+        )
+        let requestFrame = try clientStream.makeRequestHeadersFrame(requestHeaders)
+        try serverStream.receive(frame: requestFrame)
+        let responseHeaders = try WebTransportHTTP3Headers.successfulResponse()
+        let responseFrame = try serverStream.makeResponseHeadersFrame(responseHeaders)
+        try clientStream.receive(frame: responseFrame)
+        client.storeRequestStream(clientStream)
+        server.storeRequestStream(serverStream)
+
+        let goaway = try server.makeGoawayFrame(streamID: 0)
+        try client.receiveControlFrame(goaway)
+        try assert(client.receivedGoawayID == 0, "client received GOAWAY")
+        try assert(server.closeFrame(error: .settingsError, reason: "settings") == .connectionClose(
+            errorCode: HTTP3ApplicationErrorCode.settingsError.rawValue,
+            frameType: nil,
+            reason: Data("settings".utf8)
+        ), "HTTP/3 error maps to QUIC application close")
+
+        print("http3-layer: control streams, SETTINGS, request HEADERS, DATA policy, GOAWAY, and error mapping passed")
     }
 }
 

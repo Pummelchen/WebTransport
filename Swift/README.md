@@ -2,7 +2,7 @@
 
 This directory will contain the native Swift implementation of HTTP/3 WebTransport.
 
-Current Phase 1 through Phase 5 status: audited and closed.
+Current Phase 1 through Phase 6 status: audited and closed.
 
 - `AppleQUICSpike` proves prompt-free localhost QUIC listener/client startup,
   HTTP/3 ALPN negotiation, client-initiated bidirectional streams,
@@ -54,6 +54,10 @@ Current Phase 1 through Phase 5 status: audited and closed.
   encoding/decoding, unidirectional stream type parsing, the draft-15
   `webtransport-h3` upgrade token, WebTransport-required SETTINGS constants, and
   a versioned WebTransport-over-HTTP/3 draft-15 constants table.
+- `WebTransportHTTP3Core` also contains the Phase 6 HTTP/3 base connection layer:
+  client/server control stream generation, SETTINGS receive validation, request
+  stream lifecycle, HEADERS handling through QPACK, DATA frame policy handling,
+  GOAWAY state, and HTTP/3 application-error mapping.
 - `WebTransportHTTP3Core` also contains the minimal QPACK support needed for
   WebTransport session establishment: static table lookup, literal field-line
   encoding/decoding, required extended CONNECT request and response
