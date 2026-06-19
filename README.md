@@ -9,7 +9,7 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 | Implementation | Status | Draft-15 Score |
 | --- | --- | ---: |
-| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, conformance scenarios, and release packaging are present. | 82% |
+| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, real UDP network probe mode, conformance scenarios, and release packaging are present. | 84% |
 | C99 | Placeholder only. No protocol implementation is present. | 0% |
 | C++ (`CPP`) | Placeholder only. No protocol implementation is present. | 0% |
 
@@ -27,9 +27,10 @@ Current Swift coverage includes:
 - WebTransport flow-control capsules, monotonic limit handling, disabled/zero/unlimited state distinction, and receive-side violation close behavior.
 - TLS/QUIC primitive state, packet protection, transport-parameter codecs, UDP loopback support, and prompt-free identity/trust test paths.
 - Public Swift package product: `WebTransport`.
+- Network runtime package product: `WebTransportNetworkRuntime`.
 - CLI products: `WebTransportClient` and `WebTransportServer`.
 
-Important limitation: the Swift client/server CLI is a deterministic in-process facade over the native protocol core. It is not yet a production external network daemon/client that interoperates with arbitrary remote WebTransport endpoints.
+Important limitation: the Swift client/server CLI now has a real UDP probe mode, but WebTransport sessions still do not run over a complete external QUIC/TLS/HTTP/3 network connection.
 
 Useful Swift commands:
 
@@ -37,6 +38,8 @@ Useful Swift commands:
 swift test --package-path Swift
 swift run --package-path Swift WebTransportClient --scenario all
 swift run --package-path Swift WebTransportServer --scenario all
+swift run --package-path Swift WebTransportServer --listen 127.0.0.1:4433
+swift run --package-path Swift WebTransportClient --connect 127.0.0.1:4433
 swift run --package-path Swift WebTransportClient
 swift run --package-path Swift WebTransportServer
 cd Swift && ./build-release-apple-silicon.sh

@@ -1,17 +1,35 @@
 import Foundation
 import WebTransport
 import WebTransportCLIConformance
+import WebTransportNetworkRuntime
 
 @main
 struct WebTransportClientCLI {
     static func main() async {
         let executable = "WebTransportClient"
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.contains("--connect") || arguments.contains(where: { $0.hasPrefix("--connect=") }) {
+            do {
+                let options = try NetworkClientOptions.parse(arguments)
+                let result = try WebTransportNetworkProbeClient().run(
+                    to: options.endpoint,
+                    message: options.message,
+                    timeoutMilliseconds: options.timeoutMilliseconds
+                )
+                print("network probe connected: local=\(result.localEndpoint.host):\(result.localEndpoint.port) remote=\(result.remoteEndpoint.host):\(result.remoteEndpoint.port) message=\"\(result.message)\"")
+                return
+            } catch {
+                fputs("\(executable) network probe failed: \(error)\n", stderr)
+                Foundation.exit(1)
+            }
+        }
+
         do {
             let options = try WebTransportCLIConformanceOptions.parse(
                 executableName: executable,
-                arguments: Array(CommandLine.arguments.dropFirst())
+                arguments: arguments
             )
-            if !CommandLine.arguments.dropFirst().isEmpty {
+            if !arguments.isEmpty {
                 Foundation.exit(await WebTransportCLIConformance.run(options: options))
             }
         } catch WebTransportCLIConformanceExit.requestedHelp {
@@ -55,5 +73,63 @@ struct WebTransportClientCLI {
             fputs("WebTransportClient failed: \(error)\n", stderr)
             Foundation.exit(1)
         }
+    }
+}
+
+private struct NetworkClientOptions {
+    var endpoint: WebTransportNetworkEndpoint
+    var message: String
+    var timeoutMilliseconds: Int32
+
+    static func parse(_ arguments: [String]) throws -> NetworkClientOptions {
+        var endpoint: WebTransportNetworkEndpoint?
+        var message = "webtransport-network-probe"
+        var timeoutMilliseconds: Int32 = 1_000
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--connect":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidEndpoint("--connect requires host:port")
+                }
+                endpoint = try WebTransportNetworkEndpoint.parse(arguments[index])
+            case "--message":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                }
+                message = arguments[index]
+            case "--timeout-ms":
+                index += 1
+                guard index < arguments.count, let value = Int32(arguments[index]) else {
+                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                }
+                timeoutMilliseconds = value
+            default:
+                if argument.hasPrefix("--connect=") {
+                    endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--connect=".count)))
+                } else if argument.hasPrefix("--message=") {
+                    message = String(argument.dropFirst("--message=".count))
+                } else if argument.hasPrefix("--timeout-ms="),
+                          let value = Int32(argument.dropFirst("--timeout-ms=".count)) {
+                    timeoutMilliseconds = value
+                } else {
+                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                }
+            }
+            index += 1
+        }
+
+        guard let endpoint else {
+            throw WebTransportNetworkRuntimeError.invalidEndpoint("--connect requires host:port")
+        }
+        return NetworkClientOptions(
+            endpoint: endpoint,
+            message: message,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
     }
 }

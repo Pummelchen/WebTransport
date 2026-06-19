@@ -1,17 +1,34 @@
 import Foundation
 import WebTransport
 import WebTransportCLIConformance
+import WebTransportNetworkRuntime
 
 @main
 struct WebTransportServerCLI {
     static func main() async {
         let executable = "WebTransportServer"
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.contains("--listen") || arguments.contains(where: { $0.hasPrefix("--listen=") }) {
+            do {
+                let options = try NetworkServerOptions.parse(arguments)
+                let server = try WebTransportNetworkProbeServer(bindPort: options.endpoint.port)
+                let local = server.localEndpoint
+                print("network probe listening: \(local.host):\(local.port)")
+                let result = try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
+                print("network probe served: remote=\(result.remoteEndpoint.host):\(result.remoteEndpoint.port) message=\"\(result.message)\"")
+                return
+            } catch {
+                fputs("\(executable) network probe failed: \(error)\n", stderr)
+                Foundation.exit(1)
+            }
+        }
+
         do {
             let options = try WebTransportCLIConformanceOptions.parse(
                 executableName: executable,
-                arguments: Array(CommandLine.arguments.dropFirst())
+                arguments: arguments
             )
-            if !CommandLine.arguments.dropFirst().isEmpty {
+            if !arguments.isEmpty {
                 Foundation.exit(await WebTransportCLIConformance.run(options: options))
             }
         } catch WebTransportCLIConformanceExit.requestedHelp {
@@ -38,5 +55,52 @@ struct WebTransportServerCLI {
         _ = WebTransportServer(configuration: configuration)
         print("WebTransportServer demo endpoint ready: authority=\(configuration.authority) path=\(configuration.path)")
         print("Use `swift run WebTransportClient` to run the deterministic client/server facade demo.")
+    }
+}
+
+private struct NetworkServerOptions {
+    var endpoint: WebTransportNetworkEndpoint
+    var timeoutMilliseconds: Int32
+
+    static func parse(_ arguments: [String]) throws -> NetworkServerOptions {
+        var endpoint: WebTransportNetworkEndpoint?
+        var timeoutMilliseconds: Int32 = 10_000
+        var index = 0
+
+        while index < arguments.count {
+            let argument = arguments[index]
+            switch argument {
+            case "--listen":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidEndpoint("--listen requires host:port")
+                }
+                endpoint = try WebTransportNetworkEndpoint.parse(arguments[index])
+            case "--timeout-ms":
+                index += 1
+                guard index < arguments.count, let value = Int32(arguments[index]) else {
+                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                }
+                timeoutMilliseconds = value
+            default:
+                if argument.hasPrefix("--listen=") {
+                    endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--listen=".count)))
+                } else if argument.hasPrefix("--timeout-ms="),
+                          let value = Int32(argument.dropFirst("--timeout-ms=".count)) {
+                    timeoutMilliseconds = value
+                } else {
+                    throw WebTransportNetworkRuntimeError.invalidProbePayload
+                }
+            }
+            index += 1
+        }
+
+        guard let endpoint else {
+            throw WebTransportNetworkRuntimeError.invalidEndpoint("--listen requires host:port")
+        }
+        return NetworkServerOptions(
+            endpoint: endpoint,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
     }
 }
