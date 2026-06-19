@@ -45,6 +45,7 @@ enum NativeQUICCoreSpike {
             let clientFrames = try QUICFrame.decodeFrames(clientBytes)
             try assert(clientFrames == responseFrames, "client decoded server frames")
             print("udp: server-to-client frame packet received")
+            try proveQUICCoreStateMachines()
             try provePacketProtection()
             try proveTLSForQUICScaffold()
             try proveHTTP3ByteCodecs()
@@ -59,6 +60,108 @@ enum NativeQUICCoreSpike {
         if !condition {
             throw SpikeError.assertionFailed(message)
         }
+    }
+
+    private static func proveQUICCoreStateMachines() throws {
+        let policy = QUICVersionPolicy()
+        try assert(policy.select(offeredVersion: QUICVersionPolicy.quicV1) == QUICVersionPolicy.quicV1, "QUIC v1 selected")
+        try assert(policy.shouldSendVersionNegotiation(for: 0xface_b00c), "unsupported version rejected")
+
+        let token = Data(repeating: 0x11, count: 16)
+        var connectionIDs = try QUICConnectionIDStore(initialConnectionID: Data([0x00]), activeConnectionIDLimit: 3)
+        _ = try connectionIDs.applyNewConnectionID(
+            sequence: 1,
+            retirePriorTo: 0,
+            connectionID: Data([0x01]),
+            statelessResetToken: token
+        )
+        let retired = try connectionIDs.applyNewConnectionID(
+            sequence: 2,
+            retirePriorTo: 1,
+            connectionID: Data([0x02]),
+            statelessResetToken: token
+        )
+        try assert(retired == [.retireConnectionID(sequence: 0)], "retire_prior_to generated RETIRE_CONNECTION_ID")
+
+        var ackTracker = QUICAckTracker(packetNumberSpace: .applicationData)
+        for packetNumber in [2, 6, 7, 9, 10] as [UInt64] {
+            _ = ackTracker.recordReceived(packetNumber: packetNumber, nowMicros: 1_000 + packetNumber)
+        }
+        let ackFrame = try require(ackTracker.makeAckFrame(nowMicros: 1_090), "ACK frame generated")
+        try assert(try QUICAckTracker.acknowledgedPacketNumbers(from: ackFrame) == Set([2, 6, 7, 9, 10]), "ACK ranges decode")
+
+        var recovery = QUICLossRecovery(packetThreshold: 3)
+        recovery.recordSent(QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 1,
+            sentTimeMicros: 100,
+            bytes: 32,
+            frames: [.stream(id: 0, offset: 0, fin: false, data: Data("lost".utf8))]
+        ))
+        recovery.recordSent(QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 4,
+            sentTimeMicros: 130,
+            bytes: 32,
+            frames: [.datagram(Data("acked".utf8))]
+        ))
+        let recoveryResult = try recovery.processAck(
+            .ack(largestAcknowledged: 4, ackDelay: 0, firstAckRange: 0, ranges: []),
+            in: .applicationData
+        )
+        try assert(recoveryResult.acknowledged.map(\.packetNumber) == [4], "ACK removes acknowledged packet")
+        try assert(recoveryResult.lost.map(\.packetNumber) == [1], "packet threshold loss detection")
+        try assert(!recoveryResult.retransmittableFrames.isEmpty, "lost STREAM is retransmittable")
+
+        var congestion = QUICCongestionController(maxDatagramSize: 1_200)
+        let initialWindow = congestion.congestionWindow
+        congestion.onPacketSent(bytes: 1_200)
+        congestion.onPacketAcknowledged(bytes: 1_200)
+        try assert(congestion.bytesInFlight == 0 && congestion.congestionWindow > initialWindow, "congestion ACK accounting")
+
+        var connectionFlow = QUICFlowController(maximumData: 64)
+        try connectionFlow.reserveSendBytes(32)
+        try connectionFlow.receiveBytes(16)
+        try assert(connectionFlow.availableSendBytes == 32, "connection flow-control accounting")
+
+        var stream = QUICStreamState(
+            id: QUICStreamID.make(index: 0, direction: .bidirectional, initiator: .client),
+            localRole: .client,
+            maxSendOffset: 64,
+            maxReceiveOffset: 64
+        )
+        let streamFrame = try stream.send(data: Data("state".utf8), fin: true)
+        try assert(streamFrame == .stream(id: 0, offset: 0, fin: true, data: Data("state".utf8)), "STREAM send state")
+        var peerStream = QUICStreamState(
+            id: 0,
+            localRole: .server,
+            maxSendOffset: 64,
+            maxReceiveOffset: 64
+        )
+        try assert(try peerStream.receive(streamFrame) == Data("state".utf8), "STREAM receive state")
+
+        var datagrams = QUICDatagramQueue(maximumPayloadSize: 64)
+        let datagramFrame = try datagrams.makeDatagramFrame(Data("dgram".utf8))
+        try datagrams.receive(datagramFrame)
+        try assert(datagrams.popReceived() == Data("dgram".utf8), "DATAGRAM queue")
+
+        var close = QUICConnectionCloseState(idleTimeoutMicros: 100, nowMicros: 1_000)
+        try assert(try close.checkIdleTimeout(nowMicros: 1_101), "idle timeout close")
+        var appClose = QUICConnectionCloseState(idleTimeoutMicros: 100)
+        try assert(appClose.closeApplication(errorCode: 0x54, reason: "done") == .connectionClose(
+            errorCode: 0x54,
+            frameType: nil,
+            reason: Data("done".utf8)
+        ), "application close mapping")
+
+        print("quic-core: connection IDs, versions, ACK/loss, congestion, streams, flow control, datagrams, close, and idle state passed")
+    }
+
+    private static func require<T>(_ value: T?, _ message: String) throws -> T {
+        guard let value else {
+            throw SpikeError.assertionFailed(message)
+        }
+        return value
     }
 
     private static func provePacketProtection() throws {

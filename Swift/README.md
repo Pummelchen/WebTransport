@@ -2,7 +2,7 @@
 
 This directory will contain the native Swift implementation of HTTP/3 WebTransport.
 
-Current Phase 1 status: closed.
+Current Phase 1 and Phase 2 status: closed.
 
 - `AppleQUICSpike` proves prompt-free localhost QUIC listener/client startup,
   HTTP/3 ALPN negotiation, client-initiated bidirectional streams,
@@ -19,6 +19,12 @@ Current Phase 1 status: closed.
   enough to claim as complete in the spike.
 - `WebTransportQUICCore` now contains native QUIC byte, varint, packet-number,
   transport-parameter, long-header packet, and frame codecs.
+- `WebTransportQUICCore` also contains reusable Phase 2 QUIC state-machine
+  primitives for connection ID lifecycle and retirement, version policy, packet
+  number spaces, ACK generation and decoding, packet-threshold loss recovery,
+  retransmission frame selection, baseline congestion accounting, stream send and
+  receive state, stream and connection flow control, DATAGRAM size enforcement,
+  connection close, and idle timeout behavior.
 - `WebTransportCryptoApple` derives QUIC v1 Initial secrets with Apple CryptoKit
   and is tested against RFC 9001 sample vectors.
 - `WebTransportCryptoApple` also proves Handshake/1-RTT style packet protection
@@ -28,8 +34,8 @@ Current Phase 1 status: closed.
   tests.
 - `NativeQUICCoreSpike` proves native STREAM, DATAGRAM, RESET_STREAM,
   STOP_SENDING, and CONNECTION_CLOSE frame exchange over Apple UDP without using
-  Network.framework QUIC, then proves packet-protection seal/open and header-mask
-  generation.
+  Network.framework QUIC, proves the Phase 2 QUIC state-machine primitives, then
+  proves packet-protection seal/open and header-mask generation.
 - `WebTransportTLSCore` now contains TLS 1.3 transcript hashing, HKDF label/key
   schedule helpers, Finished verify-data generation, ALPN `h3` extension encoding,
   QUIC transport-parameter extension encoding, typed ClientHello/ServerHello/
