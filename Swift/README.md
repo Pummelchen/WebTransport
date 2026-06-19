@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
 
-Draft-15 score: **95%**
+Draft-15 score: **96%**
 
 ## Current Status
 
@@ -18,8 +18,8 @@ Implemented:
 - Structured Fields parsing/serialization for `WT-Protocol` and `WT-Available-Protocols`.
 - QPACK static, literal, Huffman, dynamic table, Base, and post-Base behavior covered by tests.
 - WebTransport streams, datagrams, buffering, rejection, close, drain, reset, stop-sending, and flow-control behavior.
-- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; QUIC packet protection helpers, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, UDP loopback support, and prompt-free identity/trust test paths.
-- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, deterministic Certificate/CertificateVerify/Finished validation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame probe compatibility mode.
+- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; QUIC packet protection helpers, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, transcript-derived 1-RTT packet keys for protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing over UDP, UDP loopback support, and prompt-free identity/trust test paths.
+- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, deterministic Certificate/CertificateVerify/Finished validation, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame probe compatibility mode.
 - CLI conformance harness with 35 scenarios shared by `WebTransportClient` and `WebTransportServer`.
 - Apple Silicon release script for production CLI binaries.
 

@@ -70,10 +70,19 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         message: decodedRequest.message
     )
     #expect(serverPacket.range(of: Data("WT-QUIC-SERVER-FLIGHT".utf8)) == nil)
-    #expect(try WebTransportQUICPacketProbeCodec.decodeServerInitial(
+    let handshakeContext = try WebTransportQUICPacketProbeCodec.decodeServerInitialContext(
         serverPacket,
         request: decodedRequest
-    ) == "hello")
+    )
+    #expect(handshakeContext.message == "hello")
+    #expect(handshakeContext.request == decodedRequest)
+    #expect(handshakeContext.serverHandshakeMessages.map(\.type) == [
+        .serverHello,
+        .encryptedExtensions,
+        .certificate,
+        .certificateVerify,
+        .finished
+    ])
     let decodedServerPacket = try QUICInitialPacketProtection.open(
         serverPacket,
         keyPhase: .server,
@@ -129,13 +138,13 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     }
 
     let applicationRequestPacket = try WebTransportQUICPacketProbeCodec.encodeClientApplicationRequest(
-        request: decodedRequest,
+        handshakeContext: handshakeContext,
         message: "hello"
     )
     #expect(applicationRequestPacket.range(of: Data("hello".utf8)) == nil)
     let applicationRequest = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
         applicationRequestPacket,
-        request: decodedRequest
+        handshakeContext: handshakeContext
     )
     #expect(applicationRequest.message == "hello")
     #expect(applicationRequest.packetNumber == 1)
@@ -144,14 +153,31 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     })
 
     let applicationResponsePacket = try WebTransportQUICPacketProbeCodec.encodeServerApplicationResponse(
-        request: decodedRequest,
+        handshakeContext: handshakeContext,
         message: applicationRequest.message
     )
     #expect(applicationResponsePacket.range(of: Data("hello".utf8)) == nil)
     #expect(try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
         applicationResponsePacket,
-        request: decodedRequest
+        handshakeContext: handshakeContext
     ) == "hello")
+
+    let mismatchedHandshakeContext = try WebTransportQUICPacketProbeCodec.serverHandshakeContext(
+        request: decodedRequest,
+        message: "other"
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
+            applicationRequestPacket,
+            handshakeContext: mismatchedHandshakeContext
+        )
+    }
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
+            applicationResponsePacket,
+            handshakeContext: mismatchedHandshakeContext
+        )
+    }
 
     var truncated = clientPacket
     truncated.removeLast()
@@ -235,7 +261,7 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
             tamperedApplication,
-            request: decodedRequest
+            handshakeContext: handshakeContext
         )
     }
 }

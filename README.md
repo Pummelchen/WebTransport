@@ -9,7 +9,7 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 | Implementation | Status | Draft-15 Score |
 | --- | --- | ---: |
-| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, packet-protected QUIC Initial CRYPTO flight with Certificate/CertificateVerify/Finished validation plus protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, explicit TLS/QUIC application-key readiness gating, conformance scenarios, and release packaging are present. | 95% |
+| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, packet-protected QUIC Initial CRYPTO flight with Certificate/CertificateVerify/Finished validation, transcript-derived 1-RTT packet keys, protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, explicit TLS/QUIC application-key readiness gating, conformance scenarios, and release packaging are present. | 96% |
 | C99 | Placeholder only. No protocol implementation is present. | 0% |
 | C++ (`CPP`) | Placeholder only. No protocol implementation is present. | 0% |
 
@@ -25,12 +25,12 @@ Current Swift coverage includes:
 - QPACK static, literal, Huffman, dynamic table, Base, and post-Base handling needed by the current tests.
 - WebTransport stream prefixes, bidirectional streams, unidirectional streams, datagrams, buffering, rejection, close, drain, reset, and stop-sending behavior.
 - WebTransport flow-control capsules, monotonic limit handling, disabled/zero/unlimited state distinction, and receive-side violation close behavior.
-- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; packet protection, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, UDP loopback support, and prompt-free identity/trust test paths.
+- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; packet protection, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, transcript-derived 1-RTT packet keys for protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing over UDP, UDP loopback support, and prompt-free identity/trust test paths.
 - Public Swift package product: `WebTransport`.
 - Network runtime package product: `WebTransportNetworkRuntime`.
 - CLI products: `WebTransportClient` and `WebTransportServer`.
 
-Important limitation: the Swift client/server CLI now validates a packet-protected QUIC Initial CRYPTO flight with deterministic server-authentication messages and a protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, but it is still a deterministic runtime probe rather than a complete external QUIC/TLS/HTTP/3 network stack.
+Important limitation: the Swift client/server CLI now validates a packet-protected QUIC Initial CRYPTO flight with deterministic server-authentication messages and uses the validated handshake transcript to derive protected 1-RTT HTTP/3 WebTransport CONNECT/DATAGRAM packets over UDP, but it is still a deterministic runtime probe rather than a complete external QUIC/TLS/HTTP/3 network stack.
 
 Useful Swift commands:
 
