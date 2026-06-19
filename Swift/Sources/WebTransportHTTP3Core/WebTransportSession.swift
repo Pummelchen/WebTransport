@@ -337,6 +337,10 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         return session
     }
 
+    public mutating func receivePeerControlStream(_ bytes: Data) throws -> [HTTP3Frame] {
+        try http3.receivePeerControlStream(bytes)
+    }
+
     public mutating func receiveClientSessionRequest(
         streamID: UInt64,
         frame: HTTP3Frame,

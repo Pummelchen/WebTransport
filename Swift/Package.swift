@@ -96,6 +96,14 @@ let package = Package(
                 "WebTransportQUICCore"
             ]
         ),
+        .target(
+            name: "WebTransportTestSupport",
+            dependencies: [
+                "WebTransportHTTP3Core",
+                "WebTransportQUICCore",
+                "WebTransportTLSCore"
+            ]
+        ),
         .executableTarget(
             name: "WebTransportClient",
             dependencies: [
@@ -112,6 +120,25 @@ let package = Package(
                 "WebTransportCLIConformance",
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime"
+            ]
+        ),
+        .executableTarget(
+            name: "ServerCLI",
+            dependencies: [
+                "WebTransportHTTP3Core",
+                "WebTransportQUICCore",
+                "WebTransportTLSCore",
+                "WebTransportTestSupport",
+                "WebTransportUDPApple"
+            ]
+        ),
+        .executableTarget(
+            name: "ClientCLI",
+            dependencies: [
+                "WebTransportHTTP3Core",
+                "WebTransportQUICCore",
+                "WebTransportTestSupport",
+                "WebTransportUDPApple"
             ]
         ),
         .testTarget(
