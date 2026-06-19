@@ -1,36 +1,51 @@
 # WebTransport
 
-Native HTTP/3 WebTransport implementation work. Swift is the active
-implementation; C99 and C++ are currently planned language ports.
+Native HTTP/3 WebTransport implementation project.
 
-Project documentation lives in the GitHub wiki:
+Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
+Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
-- [WebTransport Wiki](https://github.com/Pummelchen/WebTransport/wiki)
-- [Protocol Bible](https://github.com/Pummelchen/WebTransport/wiki/Protocol-Bible)
-- [Swift macOS 26 Plan](https://github.com/Pummelchen/WebTransport/wiki/Swift-macOS26-Plan)
+## Implementation Status
 
-Repository layout:
+| Implementation | Status | Draft-15 Score |
+| --- | --- | ---: |
+| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, conformance scenarios, and release packaging are present. | 82% |
+| C99 | Placeholder only. No protocol implementation is present. | 0% |
+| C++ (`CPP`) | Placeholder only. No protocol implementation is present. | 0% |
 
-```text
-Swift/   Active Swift implementation
-C99/     Planned C99 implementation
-CPP/     Planned C++ implementation
+## Swift
+
+Swift is the only active implementation in this repository.
+
+Current Swift coverage includes:
+
+- HTTP/3 frame, SETTINGS, control stream, request stream, GOAWAY, and error mapping logic.
+- WebTransport extended CONNECT session establishment and rejection policy.
+- `WT-Protocol` and `WT-Available-Protocols` Structured Fields handling.
+- QPACK static, literal, Huffman, dynamic table, Base, and post-Base handling needed by the current tests.
+- WebTransport stream prefixes, bidirectional streams, unidirectional streams, datagrams, buffering, rejection, close, drain, reset, and stop-sending behavior.
+- WebTransport flow-control capsules, monotonic limit handling, disabled/zero/unlimited state distinction, and receive-side violation close behavior.
+- TLS/QUIC primitive state, packet protection, transport-parameter codecs, UDP loopback support, and prompt-free identity/trust test paths.
+- Public Swift package product: `WebTransport`.
+- CLI products: `WebTransportClient` and `WebTransportServer`.
+
+Important limitation: the Swift client/server CLI is a deterministic in-process facade over the native protocol core. It is not yet a production external network daemon/client that interoperates with arbitrary remote WebTransport endpoints.
+
+Useful Swift commands:
+
+```sh
+swift test --package-path Swift
+swift run --package-path Swift WebTransportClient --scenario all
+swift run --package-path Swift WebTransportServer --scenario all
+swift run --package-path Swift WebTransportClient
+swift run --package-path Swift WebTransportServer
+cd Swift && ./build-release-apple-silicon.sh
 ```
 
-Swift status highlights:
+## C99
 
-- `Swift/PRODUCTION_READINESS_AUDIT.md` records the 2026-06-19 production-readiness audit and the follow-up closure pass for the go-live blockers found there.
-- `WebTransport` is the public Swift package product. It exposes an async
-  client/server facade over the native HTTP/3 WebTransport core, with
-  app-style `WebTransportClient` and `WebTransportServer` CLI products for
-  deterministic loopback validation.
-- `WebTransportClient --scenario all` and `WebTransportServer --scenario all`
-  run the shared CLI conformance harness across session setup, settings, QPACK,
-  datagrams, streams, close/drain, flow control, error mapping, GOAWAY,
-  prompt-free security negatives, multi-session behavior, and release-surface
-  checks. Failures are logged under `.webtransport-cli-logs/`.
-- `WebTransportTLSCore` includes TLS 1.3 transcript/key schedule helpers plus a `TLSQUICConnectionState` integration state for CRYPTO flights, handshake/application traffic secrets, key updates, application `CONNECTION_CLOSE`, and QUIC final-size close paths.
-- `WebTransportHTTP3Core` includes deterministic WebTransport ALPN/settings/session-policy rejection paths, a `LibrarySmokeClient`/`LibrarySmokeServer` matrix, and an executable draft-15 compliance definition-of-done matrix.
-- `NativeQUICCoreSpike` and `AppleQUICSpike` remain internal spike targets, but
-  they are no longer production package products and are rejected from release
-  packaging if stale binaries are present.
+The C99 implementation has not started. The `C99/` directory currently contains documentation only.
+
+## C++
+
+The C++ implementation has not started. The implementation directory is named `CPP/` to avoid `+` characters in paths.

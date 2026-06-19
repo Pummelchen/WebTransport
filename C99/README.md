@@ -1,18 +1,17 @@
-# C99 Implementation
+# C99 WebTransport
 
-This directory will contain the native C99 implementation of HTTP/3 WebTransport.
+Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
 
-Planned contents:
+Draft-15 score: **0%**
 
-- Reusable C99 library.
-- Client test environment.
-- Server test environment.
-- C99-specific protocol tests.
+## Current Status
 
-Constraints:
+The C99 implementation has not started.
 
-- No external libraries.
-- Use C99-compatible language features.
-- Keep protocol behavior aligned with the Swift and C++ implementations.
-- Keep platform-specific networking and cryptographic primitives isolated behind
-  internal interfaces.
+Current contents:
+
+- Documentation only.
+- No C99 protocol source files.
+- No C99 build system.
+- No C99 client/server CLI.
+- No C99 conformance tests.

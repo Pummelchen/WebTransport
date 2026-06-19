@@ -1,19 +1,19 @@
-# C++ Implementation
+# C++ WebTransport
 
-This directory will contain the native C++ implementation of HTTP/3 WebTransport.
+Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
 
-The directory is named `CPP` to avoid `+` characters in paths and tooling.
+Draft-15 score: **0%**
 
-Planned contents:
+## Current Status
 
-- Reusable C++ library.
-- Client test environment.
-- Server test environment.
-- C++-specific protocol tests.
+The C++ implementation has not started.
 
-Constraints:
+The implementation directory is named `CPP/` to avoid `+` characters in paths.
 
-- No external libraries.
-- Keep protocol behavior aligned with the Swift and C99 implementations.
-- Keep platform-specific networking and cryptographic primitives isolated behind
-  internal interfaces.
+Current contents:
+
+- Documentation only.
+- No C++ protocol source files.
+- No C++ build system.
+- No C++ client/server CLI.
+- No C++ conformance tests.
