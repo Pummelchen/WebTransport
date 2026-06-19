@@ -134,11 +134,65 @@ func webTransportClientRejectsUnadvertisedSelectedProtocol() throws {
     )
     let badResponse = try QPACK.headersFrame(fields: [
         try HTTPFieldLine(name: ":status", value: "200"),
-        try HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: "chat.v2")
+        try HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: "\"chat.v2\"")
     ])
 
     #expect(throws: Error.self) {
         _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: badResponse)
+    }
+}
+
+@Test
+func webTransportDisabledFlowControlRejectsMultipleSimultaneousSessions() throws {
+    var pair = try makeReadyManagers()
+    let firstFrame = try pair.client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(authority: "example.com", path: "/one")
+    )
+    let firstDecision = try pair.server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: firstFrame,
+        policy: try WebTransportServerSessionPolicy()
+    )
+    _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: firstDecision.responseFrame)
+
+    #expect(throws: WebTransportDraft15Error.self) {
+        _ = try pair.client.makeClientSessionRequest(
+            streamID: 4,
+            request: try WebTransportSessionRequest(authority: "example.com", path: "/two")
+        )
+    }
+}
+
+@Test
+func webTransportExplicitZeroFlowControlLimitIsEnforced() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    var clientSettings = HTTP3Settings.webTransportDraft15Defaults
+    var serverSettings = HTTP3Settings.webTransportDraft15Defaults
+    try clientSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
+    try serverSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
+
+    var clientHTTP3 = HTTP3ConnectionState(role: .client, localSettings: clientSettings)
+    var serverHTTP3 = HTTP3ConnectionState(role: .server, localSettings: serverSettings)
+    _ = try serverHTTP3.receivePeerControlStream(clientHTTP3.localControlStreamBytes())
+    _ = try clientHTTP3.receivePeerControlStream(serverHTTP3.localControlStreamBytes())
+    var client = WebTransportSessionManager(http3: clientHTTP3)
+    var server = WebTransportSessionManager(http3: serverHTTP3)
+
+    let requestFrame = try client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(authority: "example.com", path: "/wt")
+    )
+    let decision = try server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: requestFrame,
+        policy: try WebTransportServerSessionPolicy()
+    )
+    let session = try client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
+    #expect(client.flowState(for: session.id)?.isEnabled == true)
+    #expect(client.flowState(for: session.id)?.maxStreamsBidi == 0)
+    #expect(throws: Error.self) {
+        _ = try client.openBidirectionalStream(streamID: 4, sessionID: session.id)
     }
 }
 

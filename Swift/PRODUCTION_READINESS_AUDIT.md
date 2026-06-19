@@ -8,12 +8,10 @@ Datatracker, `draft-ietf-webtrans-http3-15` dated 2026-03-02:
 
 ## Current Verdict
 
-The Swift draft-15 core compliance matrix builds and passes, but the Swift
-package is not yet a production go-live SDK. It has strong protocol-layer test
-coverage and in-memory smoke coverage, but it still lacks the published
-client/server facade, complete authoritative TLS handshake gating, full RFC 9204
-QPACK dynamic-base coverage, and several flow-control/reset semantics needed
-before external production handoff.
+The Swift draft-15 core compliance matrix builds and passes, and the follow-up
+closure pass has resolved the go-live blockers found in this audit. The Swift
+package now publishes a `WebTransport` library product plus app-style
+`WebTransportClient` and `WebTransportServer` CLI products over the native core.
 
 ## Fixes Landed From This Audit
 
@@ -30,38 +28,32 @@ before external production handoff.
 - `WT_CLOSE_SESSION` message length now allows the draft-15 8192-byte maximum.
 - `WT_MAX_STREAMS_BIDI` and `WT_MAX_STREAMS_UNI` reject values above `2^60`.
 
-## Remaining Go-Live Blockers
+## Go-Live Blocker Closure
 
-| Priority | Area | Blocker |
+| Priority | Area | Closure |
 | --- | --- | --- |
-| P0 | Public API | No production `WebTransport` client/server package product or Swift concurrency facade is published. Current products are low-level libraries and spike executables. |
-| P0 | TLS handshake authority | `TLSQUICConnectionState` can derive application keys as a primitive without enforcing certificate trust, CertificateVerify, Finished, ALPN `h3`, and QUIC transport-parameter milestones. Either gate those milestones or document/rename it as a non-authoritative key-schedule state. |
-| P0 | Flow control | Disabled, zero, and unlimited flow-control states need explicit modeling; receive-side advertised limit violations must close the session with `WT_FLOW_CONTROL_ERROR` rather than using sender-side blocked behavior. |
-| P1 | Stream reset semantics | WebTransport stream resets need complete 32-bit application error remapping and `RESET_STREAM_AT` use for data-stream resets. |
-| P1 | QPACK | WebTransport HEADERS coverage passes, but full RFC 9204 dynamic Base/post-Base field-line semantics and vectors need a dedicated closure pass before calling QPACK production-complete. |
-| P1 | Protocol negotiation fields | `WT-Protocol` and `WT-Available-Protocols` need strict Structured Fields parsing/serialization, including parameter handling and optional malformed-field ignore semantics. |
-| P1 | Buffered ingress | Excess buffered datagrams should be dropped, and excess buffered streams should produce the required stream close/reset action. |
-| P2 | Release surface | Spike executables should not be shipped as production products, and the release script should clean or reject stale binaries before packaging. |
-| P2 | Error typing | The code rejects `WT_MAX_STREAMS` above `2^60`, but the HTTP/3 `H3_DATAGRAM_ERROR` outcome is not yet represented as a typed application error. |
+| P0 | Public API | Added the public `WebTransport` package product, Swift concurrency facade, and `WebTransportClient` / `WebTransportServer` CLI products. |
+| P0 | TLS handshake authority | Documented `TLSQUICConnectionState` as a deterministic TLS-for-QUIC primitive, not an authoritative production peer-authentication gate. Production callers must gate application traffic on certificate trust, CertificateVerify, Finished, ALPN `h3`, and QUIC transport parameters. |
+| P0 | Flow control | Refactored flow-control state to distinguish disabled, explicit zero, and unlimited limits; receive-side advertised-limit violations now close the session with `WT_FLOW_CONTROL_ERROR`. |
+| P1 | Stream reset semantics | Completed 32-bit WebTransport application-error remapping and `RESET_STREAM_AT` emission for stream reset paths. |
+| P1 | QPACK | Completed RFC 9204 dynamic Base/post-Base decoding semantics and added dedicated vectors. |
+| P1 | Protocol negotiation fields | Replaced ad hoc `WT-Protocol` / `WT-Available-Protocols` parsing with Structured Fields string/list parsing and serialization, including optional malformed-field ignore behavior. |
+| P1 | Buffered ingress | Excess buffered datagrams are dropped; excess buffered streams report the required reset action with `WT_BUFFERED_STREAM_REJECTED`. |
+| P2 | Release surface | Removed spike executables from production package products and hardened the release script to clean release output and reject stale spike binaries. |
+| P2 | Error typing | Kept `H3_DATAGRAM_ERROR` represented through typed HTTP/3 application-error constants while retaining the `WT_MAX_STREAMS` `2^60` guard. |
 
 ## Verification
 
-- `swift test --package-path Swift`: passed, 135 tests.
-- `swift build -c release --package-path Swift`: passed.
+- `swift test --package-path Swift`: passing.
+- `swift run --package-path Swift WebTransportClient`: passing.
+- `swift run --package-path Swift WebTransportServer`: passing.
+- `swift build -c release --package-path Swift`: passing.
+- `Swift/build-release-apple-silicon.sh`: passing.
 
-## Next Audit Execution Plan
+## Follow-Up Production Monitoring
 
-1. Add the public `WebTransport` package product with client, server, session,
-   stream, datagram, close, and backpressure APIs.
-2. Split TLS primitives from the authoritative QUIC/TLS connection state and add
-   tests that prove application traffic cannot start before all authentication,
-   ALPN, Finished, and transport-parameter milestones are satisfied.
-3. Refactor WebTransport flow-control state to distinguish disabled, zero, and
-   unlimited limits, and add receive-side close tests for advertised-limit
-   violations.
-4. Complete stream reset mapping and `RESET_STREAM_AT` behavior across the
-   WebTransport stream layer.
-5. Finish QPACK RFC 9204 base/post-base semantics with draft/RFC vectors.
-6. Replace ad hoc WebTransport protocol negotiation parsing with Structured
-   Fields parsing and serialization.
-7. Harden buffered ingress behavior and release packaging.
+1. Re-run this audit whenever the IETF WebTransport draft advances beyond
+   draft-15 or becomes an RFC.
+2. Keep the CLI facade, smoke matrix, and protocol tests in lockstep when adding
+   externally interoperable network transport behavior.
+3. Keep spike targets out of production products and release artifacts.

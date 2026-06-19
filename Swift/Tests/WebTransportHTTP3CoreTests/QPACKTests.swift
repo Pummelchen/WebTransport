@@ -185,6 +185,29 @@ func qpackDynamicTableIndexesFieldsWithExplicitContext() throws {
 }
 
 @Test
+func qpackDecodesPostBaseIndexedAndNameReferences() throws {
+    var table = try QPACKDynamicTable(capacity: 256)
+    let first = try HTTPFieldLine(name: "origin", value: "https://one.example")
+    let second = try HTTPFieldLine(name: "x-demo", value: "two")
+    let third = try HTTPFieldLine(name: "x-demo", value: "three")
+    try table.insert(first)
+    try table.insert(second)
+    try table.insert(third)
+
+    var fieldSection = Data([0x03, 0x81, 0x11, 0x00, 0x08])
+    fieldSection.append(Data("override".utf8))
+
+    #expect(try QPACK.decodeFieldSection(fieldSection, dynamicTable: table) == [
+        third,
+        try HTTPFieldLine(name: "x-demo", value: "override")
+    ])
+
+    #expect(throws: Error.self) {
+        _ = try QPACK.decodeFieldSection(Data([0x01, 0x81]), dynamicTable: table)
+    }
+}
+
+@Test
 func qpackDynamicTableCapacityEvictsAndRejectsInvalidReferences() throws {
     var table = try QPACKDynamicTable(capacity: 47)
     let first = try HTTPFieldLine(name: "origin", value: "https://a")

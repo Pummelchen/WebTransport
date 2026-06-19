@@ -145,6 +145,30 @@ public struct QPACKDynamicTable: Equatable, Sendable {
         return entries[Int(index)]
     }
 
+    public func fieldSectionRelativeEntry(
+        index: UInt64,
+        base: UInt64,
+        requiredInsertCount: UInt64
+    ) throws -> HTTPFieldLine {
+        guard base > index else {
+            throw QUICCodecError.malformed("QPACK dynamic table relative index is before the table")
+        }
+        let absoluteIndex = base - index - 1
+        return try entry(absoluteIndex: absoluteIndex, requiredInsertCount: requiredInsertCount)
+    }
+
+    public func fieldSectionPostBaseEntry(
+        index: UInt64,
+        base: UInt64,
+        requiredInsertCount: UInt64
+    ) throws -> HTTPFieldLine {
+        let (absoluteIndex, overflow) = base.addingReportingOverflow(index)
+        guard !overflow else {
+            throw QUICCodecError.malformed("QPACK dynamic table post-Base index overflow")
+        }
+        return try entry(absoluteIndex: absoluteIndex, requiredInsertCount: requiredInsertCount)
+    }
+
     public func relativeIndex(name: String, value: String) -> UInt64? {
         guard let index = entries.firstIndex(where: { $0.name == name && $0.value == value }) else {
             return nil
@@ -190,6 +214,24 @@ public struct QPACKDynamicTable: Equatable, Sendable {
             return nil
         }
         return UInt64(index)
+    }
+
+    private func entry(absoluteIndex: UInt64, requiredInsertCount: UInt64) throws -> HTTPFieldLine {
+        guard absoluteIndex < requiredInsertCount else {
+            throw QUICCodecError.malformed("QPACK dynamic reference exceeds Required Insert Count")
+        }
+        guard insertedCount > absoluteIndex else {
+            throw QUICCodecError.malformed("QPACK dynamic reference has not been inserted")
+        }
+        let newestAbsoluteIndex = insertedCount - 1
+        guard newestAbsoluteIndex >= absoluteIndex else {
+            throw QUICCodecError.malformed("QPACK dynamic reference is invalid")
+        }
+        let relativeToNewest = newestAbsoluteIndex - absoluteIndex
+        guard relativeToNewest <= UInt64(Int.max), Int(relativeToNewest) < entries.count else {
+            throw QUICCodecError.malformed("QPACK dynamic reference has been evicted")
+        }
+        return entries[Int(relativeToNewest)]
     }
 
     private mutating func evictToCapacity() {
@@ -309,16 +351,31 @@ public enum QPACK {
             guard let dynamicTable, requiredInsertCount <= dynamicTable.insertedCount else {
                 throw QUICCodecError.malformed("QPACK Required Insert Count exceeds dynamic table state")
             }
+            if baseSign {
+                guard requiredInsertCount > deltaBase else {
+                    throw QUICCodecError.malformed("QPACK Base is negative")
+                }
+            }
         } else if baseSign || deltaBase != 0 {
             throw QUICCodecError.malformed("QPACK Base must be zero when there are no dynamic references")
         }
+        let base = try fieldSectionBase(
+            requiredInsertCount: requiredInsertCount,
+            deltaBase: deltaBase,
+            sign: baseSign
+        )
 
         var fields: [HTTPFieldLine] = []
         while !cursor.isAtEnd {
             guard fields.count < limits.maxFieldLineCount else {
                 throw QUICCodecError.valueOutOfRange("QPACK field line count exceeds configured limit")
             }
-            let field = try decodeFieldLine(from: &cursor, dynamicTable: dynamicTable)
+            let field = try decodeFieldLine(
+                from: &cursor,
+                dynamicTable: dynamicTable,
+                base: base,
+                requiredInsertCount: requiredInsertCount
+            )
             guard field.name.utf8.count + field.value.utf8.count <= limits.maxFieldLineBytes else {
                 throw QUICCodecError.valueOutOfRange("QPACK field line exceeds configured limit")
             }
@@ -373,7 +430,9 @@ public enum QPACK {
 
     static func decodeFieldLine(
         from cursor: inout QUICByteCursor,
-        dynamicTable: QPACKDynamicTable?
+        dynamicTable: QPACKDynamicTable?,
+        base: UInt64,
+        requiredInsertCount: UInt64
     ) throws -> HTTPFieldLine {
         let first = try cursor.readUInt8()
         if (first & 0x80) != 0 {
@@ -383,7 +442,11 @@ public enum QPACK {
                 guard let dynamicTable else {
                     throw QUICCodecError.malformed("dynamic QPACK indexed fields require a dynamic table context")
                 }
-                return try dynamicTable.relativeEntry(index: index)
+                return try dynamicTable.fieldSectionRelativeEntry(
+                    index: index,
+                    base: base,
+                    requiredInsertCount: requiredInsertCount
+                )
             }
             guard let entry = QPACKStaticTable.entry(index: index) else {
                 throw QUICCodecError.malformed("QPACK static table index is unknown")
@@ -404,8 +467,38 @@ public enum QPACK {
                 guard let dynamicTable else {
                     throw QUICCodecError.malformed("dynamic QPACK name references require a dynamic table context")
                 }
-                name = try dynamicTable.relativeEntry(index: nameIndex).name
+                name = try dynamicTable.fieldSectionRelativeEntry(
+                    index: nameIndex,
+                    base: base,
+                    requiredInsertCount: requiredInsertCount
+                ).name
             }
+            let value = try decodeStringLiteral(from: &cursor, prefixBits: 7)
+            return try HTTPFieldLine(name: name, value: value)
+        }
+
+        if (first & 0xf0) == 0x10 {
+            guard let dynamicTable else {
+                throw QUICCodecError.malformed("dynamic QPACK post-Base indexed fields require a dynamic table context")
+            }
+            let index = try decodePrefixedInteger(from: &cursor, prefixBits: 4, firstByte: first)
+            return try dynamicTable.fieldSectionPostBaseEntry(
+                index: index,
+                base: base,
+                requiredInsertCount: requiredInsertCount
+            )
+        }
+
+        if (first & 0xf0) == 0x00 {
+            guard let dynamicTable else {
+                throw QUICCodecError.malformed("dynamic QPACK post-Base name references require a dynamic table context")
+            }
+            let nameIndex = try decodePrefixedInteger(from: &cursor, prefixBits: 3, firstByte: first)
+            let name = try dynamicTable.fieldSectionPostBaseEntry(
+                index: nameIndex,
+                base: base,
+                requiredInsertCount: requiredInsertCount
+            ).name
             let value = try decodeStringLiteral(from: &cursor, prefixBits: 7)
             return try HTTPFieldLine(name: name, value: value)
         }
@@ -562,6 +655,24 @@ public enum QPACK {
         }
         return .insertCountIncrement(increment)
     }
+}
+
+private func fieldSectionBase(
+    requiredInsertCount: UInt64,
+    deltaBase: UInt64,
+    sign: Bool
+) throws -> UInt64 {
+    if sign {
+        guard requiredInsertCount > deltaBase else {
+            throw QUICCodecError.malformed("QPACK Base is negative")
+        }
+        return requiredInsertCount - deltaBase - 1
+    }
+    let (base, overflow) = requiredInsertCount.addingReportingOverflow(deltaBase)
+    guard !overflow else {
+        throw QUICCodecError.valueOutOfRange("QPACK Base overflows UInt64")
+    }
+    return base
 }
 
 private func encodeStringLiteral(

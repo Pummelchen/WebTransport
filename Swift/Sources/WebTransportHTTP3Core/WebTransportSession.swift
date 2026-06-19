@@ -183,6 +183,16 @@ public struct WebTransportReceivedFlowControlCapsule: Equatable, Sendable {
     }
 }
 
+public struct WebTransportIncomingStreamResult: Equatable, Sendable {
+    public var prefix: WebTransportStreamPrefix?
+    public var rejectionFrame: QUICFrame?
+
+    public init(prefix: WebTransportStreamPrefix?, rejectionFrame: QUICFrame?) {
+        self.prefix = prefix
+        self.rejectionFrame = rejectionFrame
+    }
+}
+
 public struct WebTransportSessionManager: Equatable, Sendable {
     public private(set) var http3: HTTP3ConnectionState
     public private(set) var sessionsByID: [WebTransportSessionID: WebTransportSession]
@@ -255,6 +265,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard sessionsByID[sessionID] == nil else {
             throw QUICCodecError.malformed("WebTransport session already exists")
         }
+        try validateSessionAdmission()
 
         var requestStream = try http3.openRequestStream(streamID: streamID)
         let frame = try requestStream.makeRequestHeadersFrame(request.headers())
@@ -332,6 +343,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard sessionsByID[sessionID] == nil else {
             throw QUICCodecError.malformed("WebTransport session already exists")
         }
+        try validateSessionAdmission()
         guard frame.type == HTTP3FrameType.headers else {
             throw WebTransportDraft15Error(
                 kind: .requirementsNotMet,
@@ -403,7 +415,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
                 "WebTransport datagram payload exceeds maximum frame size of \(maxDatagramFrameSize)"
             )
         }
-        try reserveData(for: sessionID, byteCount: payload.count)
+        try reserveData(for: sessionID, byteCount: payload.count, receiveSide: false)
         return .datagram(datagramPayload)
     }
 
@@ -425,17 +437,14 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
         let session = try sessionForIngressOrPending(parsed.sessionID)
         if session?.state == .accepted || session?.state == .draining {
-            try reserveData(for: parsed.sessionID, byteCount: parsed.payload.count)
+            try reserveData(for: parsed.sessionID, byteCount: parsed.payload.count, receiveSide: true)
         }
 
         let currentBytes = datagramPayloadBytesBySessionID[parsed.sessionID] ?? 0
         let updatedBytes = currentBytes + parsed.payload.count
         guard updatedBytes <= maxDatagramReceiveBufferBytes else {
             if session == nil || session?.state == .requested {
-                throw WebTransportDraft15Error(
-                    kind: .bufferedStreamRejected,
-                    message: "buffered WebTransport datagram exceeds receive limit"
-                )
+                return parsed.sessionID
             }
             throw QUICCodecError.valueOutOfRange("WebTransport datagram receive buffer limit exceeded")
         }
@@ -444,10 +453,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         if session?.state != .accepted && session?.state != .draining {
             try ensureCanBufferIngress(for: parsed.sessionID)
             guard queue.count < maxBufferedDatagramsPerSession else {
-                throw WebTransportDraft15Error(
-                    kind: .bufferedStreamRejected,
-                    message: "buffered WebTransport datagram count exceeds receive limit"
-                )
+                return parsed.sessionID
             }
         }
         queue.append(parsed.payload)
@@ -627,7 +633,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             direction: .bidirectional,
             initiator: expectedLocalInitiator
         )
-        try reserveStream(session.id, form: .bidirectional)
+        try reserveStream(session.id, form: .bidirectional, receiveSide: false)
         let stream = try WebTransportStreamState(
             streamID: streamID,
             sessionID: session.id,
@@ -657,7 +663,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             direction: .unidirectional,
             initiator: expectedLocalInitiator
         )
-        try reserveStream(session.id, form: .unidirectional)
+        try reserveStream(session.id, form: .unidirectional, receiveSide: false)
         let stream = try WebTransportStreamState(
             streamID: streamID,
             sessionID: session.id,
@@ -679,6 +685,20 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         streamID: UInt64,
         firstBytes: Data
     ) throws -> WebTransportStreamPrefix {
+        let result = try acceptBidirectionalStreamWithActions(streamID: streamID, firstBytes: firstBytes)
+        if let prefix = result.prefix {
+            return prefix
+        }
+        throw WebTransportDraft15Error(
+            kind: .bufferedStreamRejected,
+            message: "buffered WebTransport stream exceeds receive limit"
+        )
+    }
+
+    public mutating func acceptBidirectionalStreamWithActions(
+        streamID: UInt64,
+        firstBytes: Data
+    ) throws -> WebTransportIncomingStreamResult {
         try validateSettingsReady()
 
         try validateStreamIdentity(
@@ -693,7 +713,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
         let session = try sessionForIngressOrPending(prefix.sessionID)
         if session?.state == .accepted || session?.state == .draining {
-            try reserveStream(prefix.sessionID, form: .bidirectional)
+            try reserveStream(prefix.sessionID, form: .bidirectional, receiveSide: true)
         }
 
         var stream = try WebTransportStreamState(
@@ -705,19 +725,41 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             maxReceiveOffset: UInt64.max,
             maxBufferedBytes: maxStreamReceiveBufferBytes
         )
-        try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, buffering: session?.state == .requested || session == nil)
+        do {
+            try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, buffering: session?.state == .requested || session == nil)
+        } catch let error as WebTransportDraft15Error where error.kind == .bufferedStreamRejected {
+            return WebTransportIncomingStreamResult(prefix: nil, rejectionFrame: bufferedStreamRejectedFrame(streamID: streamID))
+        }
         if session?.state == .accepted || session?.state == .draining {
             register(stream)
         } else {
-            try buffer(stream)
+            do {
+                try buffer(stream)
+            } catch let error as WebTransportDraft15Error where error.kind == .bufferedStreamRejected {
+                return WebTransportIncomingStreamResult(prefix: nil, rejectionFrame: bufferedStreamRejectedFrame(streamID: streamID))
+            }
         }
-        return prefix
+        return WebTransportIncomingStreamResult(prefix: prefix, rejectionFrame: nil)
     }
 
     public mutating func acceptUnidirectionalStream(
         streamID: UInt64,
         firstBytes: Data
     ) throws -> WebTransportStreamPrefix {
+        let result = try acceptUnidirectionalStreamWithActions(streamID: streamID, firstBytes: firstBytes)
+        if let prefix = result.prefix {
+            return prefix
+        }
+        throw WebTransportDraft15Error(
+            kind: .bufferedStreamRejected,
+            message: "buffered WebTransport stream exceeds receive limit"
+        )
+    }
+
+    public mutating func acceptUnidirectionalStreamWithActions(
+        streamID: UInt64,
+        firstBytes: Data
+    ) throws -> WebTransportIncomingStreamResult {
         try validateSettingsReady()
 
         try validateStreamIdentity(
@@ -732,7 +774,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
         let session = try sessionForIngressOrPending(prefix.sessionID)
         if session?.state == .accepted || session?.state == .draining {
-            try reserveStream(prefix.sessionID, form: .unidirectional)
+            try reserveStream(prefix.sessionID, form: .unidirectional, receiveSide: true)
         }
 
         var stream = try WebTransportStreamState(
@@ -744,13 +786,21 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             maxReceiveOffset: UInt64.max,
             maxBufferedBytes: maxStreamReceiveBufferBytes
         )
-        try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, buffering: session?.state == .requested || session == nil)
+        do {
+            try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, buffering: session?.state == .requested || session == nil)
+        } catch let error as WebTransportDraft15Error where error.kind == .bufferedStreamRejected {
+            return WebTransportIncomingStreamResult(prefix: nil, rejectionFrame: bufferedStreamRejectedFrame(streamID: streamID))
+        }
         if session?.state == .accepted || session?.state == .draining {
             register(stream)
         } else {
-            try buffer(stream)
+            do {
+                try buffer(stream)
+            } catch let error as WebTransportDraft15Error where error.kind == .bufferedStreamRejected {
+                return WebTransportIncomingStreamResult(prefix: nil, rejectionFrame: bufferedStreamRejectedFrame(streamID: streamID))
+            }
         }
-        return prefix
+        return WebTransportIncomingStreamResult(prefix: prefix, rejectionFrame: nil)
     }
 
     public mutating func receiveStreamPayload(streamID: UInt64, payload: Data) throws {
@@ -769,7 +819,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             throw QUICCodecError.malformed("unknown WebTransport stream")
         }
         _ = try sessionForIngress(stream.sessionID)
-        try reserveData(for: stream.sessionID, byteCount: payload.count)
+        try reserveData(for: stream.sessionID, byteCount: payload.count, receiveSide: true)
         try stream.receivePayload(payload)
         streamsByID[streamID] = stream
     }
@@ -790,7 +840,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard var stream = streamsByID[streamID] else {
             throw QUICCodecError.malformed("unknown WebTransport stream")
         }
-        let frame = stream.reset(applicationErrorCode: applicationErrorCode)
+        let frame = stream.reset(applicationErrorCode: try mapApplicationErrorCode(applicationErrorCode))
         streamsByID[streamID] = stream
         return frame
     }
@@ -802,7 +852,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard var stream = streamsByID[streamID] else {
             throw QUICCodecError.malformed("unknown WebTransport stream")
         }
-        let frame = stream.stopSending(applicationErrorCode: applicationErrorCode)
+        let frame = stream.stopSending(applicationErrorCode: try mapApplicationErrorCode(applicationErrorCode))
         streamsByID[streamID] = stream
         return frame
     }
@@ -883,7 +933,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             guard let stream = bufferedStreamsByID[streamID] else {
                 continue
             }
-            try reserveStream(sessionID, form: stream.form)
+            try reserveStream(sessionID, form: stream.form, receiveSide: true)
             register(stream)
             bufferedStreamsByID.removeValue(forKey: streamID)
         }
@@ -936,16 +986,21 @@ public struct WebTransportSessionManager: Equatable, Sendable {
 
     private mutating func reserveStream(
         _ sessionID: WebTransportSessionID,
-        form: WebTransportStreamForm
+        form: WebTransportStreamForm,
+        receiveSide: Bool
     ) throws {
         var state = flowControlStateBySessionID[sessionID] ?? .init()
         do {
             try state.registerStream(form)
         } catch {
-            if let capsule = blockedCapsule(for: form, state: state) {
-                enqueueBlockedFlowCapsule(capsule, for: sessionID)
+            if receiveSide {
+                try closeForFlowControlViolation(sessionID)
+            } else {
+                if let capsule = blockedCapsule(for: form, state: state) {
+                    enqueueBlockedFlowCapsule(capsule, for: sessionID)
+                }
+                flowControlStateBySessionID[sessionID] = state
             }
-            flowControlStateBySessionID[sessionID] = state
             throw error
         }
         flowControlStateBySessionID[sessionID] = state
@@ -953,16 +1008,21 @@ public struct WebTransportSessionManager: Equatable, Sendable {
 
     private mutating func reserveData(
         for sessionID: WebTransportSessionID,
-        byteCount: Int
+        byteCount: Int,
+        receiveSide: Bool
     ) throws {
         var state = flowControlStateBySessionID[sessionID] ?? .init()
         do {
             try state.recordData(bytes: byteCount)
         } catch {
-            if let maxData = state.maxData {
-                enqueueBlockedFlowCapsule(.dataBlocked(limit: maxData), for: sessionID)
+            if receiveSide {
+                try closeForFlowControlViolation(sessionID)
+            } else {
+                if let maxData = state.maxData {
+                    enqueueBlockedFlowCapsule(.dataBlocked(limit: maxData), for: sessionID)
+                }
+                flowControlStateBySessionID[sessionID] = state
             }
-            flowControlStateBySessionID[sessionID] = state
             throw error
         }
         flowControlStateBySessionID[sessionID] = state
@@ -979,6 +1039,24 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
         queue.append(capsule)
         blockedFlowCapsulesBySessionID[sessionID] = queue
+    }
+
+    private mutating func closeForFlowControlViolation(_ sessionID: WebTransportSessionID) throws {
+        _ = try markSessionClosed(
+            sessionID,
+            applicationErrorCode: UInt32(WebTransportHTTP3DraftConstants.current.wtFlowControlError),
+            message: "WebTransport flow-control violation",
+            closeCapsuleReceived: false
+        )
+    }
+
+    private func mapApplicationErrorCode(_ applicationErrorCode: UInt64) throws -> UInt64 {
+        guard applicationErrorCode <= UInt64(UInt32.max) else {
+            throw QUICCodecError.valueOutOfRange("WebTransport application error code exceeds UInt32")
+        }
+        return WebTransportDraft15ErrorMapper.httpErrorCode(
+            forApplicationErrorCode: UInt32(applicationErrorCode)
+        )
     }
 
     private func blockedCapsule(for form: WebTransportStreamForm, state: WebTransportFlowControlState) -> WebTransportFlowCapsule? {
@@ -1147,7 +1225,31 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard let remoteSettings = http3.remoteSettings else {
             throw QUICCodecError.malformed("peer HTTP/3 SETTINGS are required before WebTransport session establishment")
         }
-        try remoteSettings.validateWebTransportDraft15Requirements()
+        let peerRole: HTTP3ConnectionRole = http3.role == .client ? .server : .client
+        try remoteSettings.validateWebTransportDraft15Requirements(peerRole: peerRole)
+    }
+
+    private func validateSessionAdmission() throws {
+        guard let remoteSettings = http3.remoteSettings else {
+            return
+        }
+        guard !remoteSettings.webTransportFlowControlEnabled() else {
+            return
+        }
+        let activeCount = sessionsByID.values.filter { session in
+            switch session.state {
+            case .requested, .accepted, .draining:
+                return true
+            case .closed, .rejected:
+                return false
+            }
+        }.count
+        guard activeCount == 0 else {
+            throw WebTransportDraft15Error(
+                kind: .requirementsNotMet,
+                message: "multiple simultaneous WebTransport sessions require WebTransport flow control"
+            )
+        }
     }
 
     private func validateRequestAllowedByGoaway(_ streamID: UInt64) throws {
@@ -1197,6 +1299,15 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 }
 
+private func bufferedStreamRejectedFrame(streamID: UInt64) -> QUICFrame {
+    .resetStreamAt(
+        id: streamID,
+        applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
+        finalSize: 0,
+        reliableSize: 0
+    )
+}
+
 public enum WebTransportHeaderName {
     public static let availableProtocols = "wt-available-protocols"
     public static let selectedProtocol = "wt-protocol"
@@ -1222,27 +1333,33 @@ public enum WebTransportProtocolNegotiation {
 
     public static func encodeList(_ protocols: [String]) throws -> String {
         try validate(protocols)
-        return protocols.map { "\"\($0)\"" }.joined(separator: ", ")
+        return protocols.map { encodeItem($0) }.joined(separator: ", ")
     }
 
     public static func decodeList(_ value: String) throws -> [String] {
-        let trimmed = value.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else {
-            return []
-        }
-
-        let parts = trimmed.split(separator: ",", omittingEmptySubsequences: false)
-        var protocols: [String] = []
-        for part in parts {
-            let token = part.trimmingCharacters(in: .whitespaces)
-            guard token.count >= 2, token.first == "\"", token.last == "\"" else {
-                throw QUICCodecError.malformed("WebTransport protocol list must contain quoted strings")
-            }
-            let inner = String(token.dropFirst().dropLast())
-            protocols.append(inner)
-        }
+        var parser = StructuredFieldStringParser(value)
+        let protocols = try parser.parseStringList()
         try validate(protocols)
         return protocols
+    }
+
+    public static func encodeItem(_ value: String) -> String {
+        let escaped = value.flatMap { character -> [Character] in
+            switch character {
+            case "\"", "\\":
+                return ["\\", character]
+            default:
+                return [character]
+            }
+        }
+        return "\"\(String(escaped))\""
+    }
+
+    public static func decodeItem(_ value: String) throws -> String {
+        var parser = StructuredFieldStringParser(value)
+        let item = try parser.parseStringItem()
+        try validate([item])
+        return item
     }
 
     public static func select(requested: [String], supported: [String]) -> String? {
@@ -1278,8 +1395,7 @@ enum WebTransportSessionHeaders {
         guard let value = try optionalUniqueField(WebTransportHeaderName.selectedProtocol, from: fields) else {
             return nil
         }
-        try WebTransportProtocolNegotiation.validate([value])
-        return value
+        return try? WebTransportProtocolNegotiation.decodeItem(value)
     }
 
     static func selectProtocol(
@@ -1303,7 +1419,10 @@ enum WebTransportSessionHeaders {
         ]
         if let selectedProtocol {
             try WebTransportProtocolNegotiation.validate([selectedProtocol])
-            fields.append(try HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: selectedProtocol))
+            fields.append(try HTTPFieldLine(
+                name: WebTransportHeaderName.selectedProtocol,
+                value: WebTransportProtocolNegotiation.encodeItem(selectedProtocol)
+            ))
         }
         return try QPACK.headersFrame(fields: fields)
     }
@@ -1312,7 +1431,7 @@ enum WebTransportSessionHeaders {
         guard let value = try optionalUniqueField(WebTransportHeaderName.availableProtocols, from: fields) else {
             return []
         }
-        return try WebTransportProtocolNegotiation.decodeList(value)
+        return (try? WebTransportProtocolNegotiation.decodeList(value)) ?? []
     }
 
     private static func requiredField(_ name: String, from fields: [HTTPFieldLine]) throws -> String {
@@ -1332,5 +1451,106 @@ enum WebTransportSessionHeaders {
             throw QUICCodecError.malformed("duplicate WebTransport field \(name)")
         }
         return matches.first?.value
+    }
+}
+
+private struct StructuredFieldStringParser {
+    private let scalars: [UnicodeScalar]
+    private var index: Int
+
+    init(_ value: String) {
+        self.scalars = Array(value.unicodeScalars)
+        self.index = 0
+    }
+
+    mutating func parseStringList() throws -> [String] {
+        skipSpaces()
+        guard !isAtEnd else { return [] }
+
+        var items: [String] = []
+        while true {
+            items.append(try parseStringItem())
+            skipSpaces()
+            guard !isAtEnd else { return items }
+            guard consume(",") else {
+                throw QUICCodecError.malformed("Structured Field list expected comma")
+            }
+            skipSpaces()
+            guard !isAtEnd else {
+                throw QUICCodecError.malformed("Structured Field list has trailing comma")
+            }
+        }
+    }
+
+    mutating func parseStringItem() throws -> String {
+        skipSpaces()
+        let item = try parseBareString()
+        skipParameters()
+        skipSpaces()
+        guard isAtEnd || current == "," else {
+            throw QUICCodecError.malformed("Structured Field item has trailing bytes")
+        }
+        return item
+    }
+
+    private mutating func parseBareString() throws -> String {
+        guard consume("\"") else {
+            throw QUICCodecError.malformed("Structured Field item must be a string")
+        }
+        var output = String.UnicodeScalarView()
+        while !isAtEnd {
+            let scalar = scalars[index]
+            index += 1
+            if scalar == "\"" {
+                return String(output)
+            }
+            if scalar == "\\" {
+                guard !isAtEnd else {
+                    throw QUICCodecError.malformed("Structured Field string has dangling escape")
+                }
+                let escaped = scalars[index]
+                index += 1
+                guard escaped == "\"" || escaped == "\\" else {
+                    throw QUICCodecError.malformed("Structured Field string has invalid escape")
+                }
+                output.append(escaped)
+                continue
+            }
+            guard scalar.value >= 0x20 && scalar.value <= 0x7e else {
+                throw QUICCodecError.malformed("Structured Field string contains invalid character")
+            }
+            output.append(scalar)
+        }
+        throw QUICCodecError.malformed("Structured Field string is unterminated")
+    }
+
+    private mutating func skipParameters() {
+        while true {
+            skipSpaces()
+            guard consume(";") else { return }
+            while !isAtEnd, current != ",", current != ";" {
+                index += 1
+            }
+        }
+    }
+
+    private mutating func skipSpaces() {
+        while !isAtEnd, current == " " {
+            index += 1
+        }
+    }
+
+    private mutating func consume(_ scalar: UnicodeScalar) -> Bool {
+        guard !isAtEnd, current == scalar else { return false }
+        index += 1
+        return true
+    }
+
+    private var current: UnicodeScalar {
+        scalars[index]
+    }
+
+    private var isAtEnd: Bool {
+        index >= scalars.count
     }
 }

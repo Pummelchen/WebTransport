@@ -5,9 +5,9 @@ WebTransport protocol layers.
 
 Current Phase 1 through Phase 13 status: the draft-15 core compliance matrix
 builds and passes. A 2026-06-19 production-readiness audit is recorded in
-`PRODUCTION_READINESS_AUDIT.md`; that audit landed targeted correctness and
-hardening fixes, but the Swift package is not yet a go-live public client/server
-SDK until the remaining blockers in that audit are closed.
+`PRODUCTION_READINESS_AUDIT.md`; the follow-up closure pass added the public
+`WebTransport` product, app-style client/server CLI products, and targeted
+correctness fixes for the remaining go-live blockers found in that audit.
 
 - `AppleQUICSpike` proves prompt-free localhost QUIC listener/client startup,
   HTTP/3 ALPN negotiation, client-initiated bidirectional streams,
@@ -83,9 +83,10 @@ SDK until the remaining blockers in that audit are closed.
   WebTransport session establishment and Phase 13 draft-15 hardening: static table
   lookup, dynamic table context lifetime and indexed references, Huffman string
   encoding/decoding from RFC 7541, encoder-stream instructions, decoder-stream
-  instructions, literal field-line encoding/decoding, required extended CONNECT
-  request and response pseudo-header validation, decoder limits, malformed-input
-  rejection, and QPACK HEADERS frame helpers.
+  instructions, RFC 9204 Base and post-Base field-line decoding, literal
+  field-line encoding/decoding, required extended CONNECT request and response
+  pseudo-header validation, decoder limits, malformed-input rejection, and QPACK
+  HEADERS frame helpers.
 - `WebTransportHTTP3Core` now includes Phase 13 draft-15 session and shutdown
   behavior for deterministic tests: `WT_DRAIN_SESSION`, `WT_CLOSE_SESSION`,
   CONNECT stream finish-as-close, close-result FIN/STOP_SENDING actions,
@@ -111,23 +112,31 @@ SDK until the remaining blockers in that audit are closed.
   TLS extension-list decoding, role-sensitive HTTP/3 WebTransport SETTINGS
   validation, WebTransport datagram prefixing, `WT_CLOSE_SESSION` message bounds,
   and `WT_MAX_STREAMS` bounds.
+- The public `WebTransport` product exposes async `WebTransportClient`,
+  `WebTransportServer`, and `WebTransportSession` types. The
+  `WebTransportClient` and `WebTransportServer` executables are app-style
+  deterministic CLI demos over the native core; they are intended for packaging,
+  smoke validation, and API exercise rather than external network interop.
+- `AppleQUICSpike` and `NativeQUICCoreSpike` remain internal executable targets
+  for protocol development, but they are not shipped as production products and
+  the release script rejects stale spike binaries in release output.
 
 Commands:
 
 ```sh
 swift build
 swift test
-swift run AppleQUICSpike --loopback
-swift run NativeQUICCoreSpike
+swift run WebTransportServer
+swift run WebTransportClient
 ./build-release-apple-silicon.sh
 ```
 
-Planned contents:
+Internal spike commands:
 
-- Public `WebTransport` client/server library target.
-- Client test environment.
-- Server test environment.
-- Swift-specific protocol and interoperability tests.
+```sh
+swift run AppleQUICSpike --loopback
+swift run NativeQUICCoreSpike
+```
 
 Constraints:
 

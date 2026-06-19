@@ -194,7 +194,18 @@ extension WebTransportHTTP3DraftConstants {
     }
 }
 
+extension HTTP3Settings {
+    public func webTransportFlowControlEnabled(
+        constants: WebTransportHTTP3DraftConstants = .current
+    ) -> Bool {
+        entries.keys.contains(constants.settingsWTInitialMaxData)
+            || entries.keys.contains(constants.settingsWTInitialMaxStreamsBidi)
+            || entries.keys.contains(constants.settingsWTInitialMaxStreamsUni)
+    }
+}
+
 public struct WebTransportFlowControlState: Equatable, Sendable {
+    public private(set) var isEnabled: Bool
     public private(set) var maxData: UInt64?
     public private(set) var maxStreamsBidi: UInt64?
     public private(set) var maxStreamsUni: UInt64?
@@ -205,8 +216,10 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     public init(
         maxData: UInt64?,
         maxStreamsBidi: UInt64?,
-        maxStreamsUni: UInt64?
+        maxStreamsUni: UInt64?,
+        isEnabled: Bool = true
     ) {
+        self.isEnabled = isEnabled
         self.maxData = maxData
         self.maxStreamsBidi = maxStreamsBidi
         self.maxStreamsUni = maxStreamsUni
@@ -216,27 +229,31 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     }
 
     public init(settings: HTTP3Settings, constants: WebTransportHTTP3DraftConstants = .current) {
-        self.maxData = normalizeLimit(settings[constants.settingsWTInitialMaxData])
-        self.maxStreamsBidi = normalizeLimit(settings[constants.settingsWTInitialMaxStreamsBidi])
-        self.maxStreamsUni = normalizeLimit(settings[constants.settingsWTInitialMaxStreamsUni])
+        self.isEnabled = settings.webTransportFlowControlEnabled(constants: constants)
+        self.maxData = settings[constants.settingsWTInitialMaxData]
+        self.maxStreamsBidi = settings[constants.settingsWTInitialMaxStreamsBidi]
+        self.maxStreamsUni = settings[constants.settingsWTInitialMaxStreamsUni]
         self.usedData = 0
         self.openedBidiStreams = 0
         self.openedUniStreams = 0
     }
 
     public init() {
-        self.init(maxData: nil, maxStreamsBidi: nil, maxStreamsUni: nil)
+        self.init(maxData: nil, maxStreamsBidi: nil, maxStreamsUni: nil, isEnabled: false)
     }
 
     public mutating func setMaxData(_ value: UInt64) throws {
+        guard isEnabled else { return }
         try setMonotonicLimit(&maxData, value: value, label: "WT_MAX_DATA")
     }
 
     public mutating func setMaxStreamsBidi(_ value: UInt64) throws {
+        guard isEnabled else { return }
         try setMonotonicLimit(&maxStreamsBidi, value: value, label: "WT_MAX_STREAMS_BIDI")
     }
 
     public mutating func setMaxStreamsUni(_ value: UInt64) throws {
+        guard isEnabled else { return }
         try setMonotonicLimit(&maxStreamsUni, value: value, label: "WT_MAX_STREAMS_UNI")
     }
 
@@ -254,6 +271,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     }
 
     public mutating func recordData(bytes: Int) throws {
+        guard isEnabled else { return }
         guard bytes >= 0 else {
             throw QUICCodecError.valueOutOfRange("negative stream payload")
         }
@@ -267,6 +285,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     }
 
     public mutating func registerStream(_ form: WebTransportStreamForm) throws {
+        guard isEnabled else { return }
         switch form {
         case .bidirectional:
             try ensureCanOpen(form: .bidirectional, current: openedBidiStreams, limit: maxStreamsBidi)
@@ -287,18 +306,8 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     }
 }
 
-private func normalizeLimit(_ value: UInt64?) -> UInt64? {
-    guard let value, value > 0 else {
-        return nil
-    }
-    return value
-}
-
 private func setMonotonicLimit(_ current: inout UInt64?, value: UInt64, label: String) throws {
-    let normalized = normalizeLimit(value)
-    guard let normalized else {
-        return
-    }
+    let normalized = value
     if let current, normalized < current {
         throw WebTransportDraft15Error(
             kind: .flowControl,

@@ -178,16 +178,11 @@ func webTransportFlowControlTracksReceivePayloadAgainstSessionDataLimit() throws
     #expect(throws: Error.self) {
         try pair.server.receiveStreamPayload(streamID: 6, payload: Data([0x03, 0x04]))
     }
-
-    guard let blocked = try pair.server.popFlowControlCapsule(sessionID: sessionID) else {
-        throw URLError(.badServerResponse)
-    }
-    #expect(
-        try WebTransportFlowControlCodecTestHelpers.isDataBlocked(
-            parsed: WebTransportFlowCapsuleCodec.parse(blocked),
-            limit: 4
-        )
-    )
+    #expect(pair.server.sessionsByID[sessionID]?.state == .closed(
+        applicationErrorCode: UInt32(WebTransportHTTP3DraftConstants.current.wtFlowControlError),
+        message: "WebTransport flow-control violation"
+    ))
+    #expect(try pair.server.popFlowControlCapsule(sessionID: sessionID) == nil)
 }
 
 @Test

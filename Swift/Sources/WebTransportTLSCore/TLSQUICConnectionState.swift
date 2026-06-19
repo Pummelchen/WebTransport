@@ -32,6 +32,15 @@ public enum TLSQUICConnectionStateError: Error, Equatable, CustomStringConvertib
     }
 }
 
+/// Deterministic TLS-for-QUIC primitive state used by tests, spikes, and the
+/// native connection scaffolding.
+///
+/// This type derives and advances key-schedule material after the caller has
+/// supplied the relevant handshake inputs. It is not the authoritative
+/// production handshake gate for peer authentication. A production connection
+/// must only treat application traffic as authenticated after certificate trust,
+/// CertificateVerify, Finished, ALPN `h3`, and QUIC transport parameters have
+/// all been validated by the layer that owns the complete handshake policy.
 public struct TLSQUICConnectionState: Equatable, Sendable {
     public let role: QUICEndpointRole
     public private(set) var phase: TLSQUICConnectionPhase

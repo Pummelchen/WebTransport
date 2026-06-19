@@ -57,10 +57,11 @@ func webTransportCloseSessionResultCarriesFINStopSendingAndStreamCleanupActions(
         applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError
     ))
     #expect(result.terminationActions.streamResetFrames == [
-        .resetStream(
+        .resetStreamAt(
             id: 4,
             applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError,
-            finalSize: 0
+            finalSize: 0,
+            reliableSize: 0
         )
     ])
     #expect(result.terminationActions.streamStopSendingFrames == [
@@ -268,24 +269,23 @@ func webTransportEarlyIngressOverflowMapsToBufferedStreamRejected() throws {
         request: try WebTransportSessionRequest(authority: "example.com", path: "/wt")
     )
 
-    do {
-        _ = try pair.client.receiveDatagramFrame(.datagram(
-            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("abc".utf8))
-        ))
-        Issue.record("early oversized datagram should throw")
-    } catch let error as WebTransportDraft15Error {
-        #expect(error.kind == .bufferedStreamRejected)
-        #expect(error.code == WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError)
-    }
+    _ = try pair.client.receiveDatagramFrame(.datagram(
+        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("abc".utf8))
+    ))
+    #expect(pair.client.popDatagramPayload(sessionID: WebTransportSessionID(rawValue: 0)) == nil)
 
-    do {
-        let prefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
-        _ = try pair.client.acceptBidirectionalStream(streamID: 1, firstBytes: prefix + Data("abc".utf8))
-        Issue.record("early oversized stream should throw")
-    } catch let error as WebTransportDraft15Error {
-        #expect(error.kind == .bufferedStreamRejected)
-        #expect(error.code == WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError)
-    }
+    let prefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
+    let rejected = try pair.client.acceptBidirectionalStreamWithActions(
+        streamID: 1,
+        firstBytes: prefix + Data("abc".utf8)
+    )
+    #expect(rejected.prefix == nil)
+    #expect(rejected.rejectionFrame == .resetStreamAt(
+        id: 1,
+        applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
+        finalSize: 0,
+        reliableSize: 0
+    ))
 }
 
 @Test
@@ -298,15 +298,10 @@ func webTransportServerBufferedIngressCountExhaustionMapsToBufferedStreamRejecte
     _ = try pair.server.receiveDatagramFrame(.datagram(
         try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("a".utf8))
     ))
-    do {
-        _ = try pair.server.receiveDatagramFrame(.datagram(
-            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("b".utf8))
-        ))
-        Issue.record("second early datagram should exceed buffered count")
-    } catch let error as WebTransportDraft15Error {
-        #expect(error.kind == .bufferedStreamRejected)
-        #expect(error.code == WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError)
-    }
+    _ = try pair.server.receiveDatagramFrame(.datagram(
+        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("b".utf8))
+    ))
+    #expect(pair.server.datagramQueue(sessionID: WebTransportSessionID(rawValue: 0))?.count == 1)
 
     let firstPrefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
     _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: firstPrefix)

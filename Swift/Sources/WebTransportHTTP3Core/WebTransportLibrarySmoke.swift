@@ -255,7 +255,7 @@ public enum WebTransportLibrarySmokeMatrix {
     }
 
     private static func runMultiSession() throws {
-        var pair = try WebTransportLibrarySmokePair.connected()
+        var pair = try WebTransportLibrarySmokePair.connectedWithFlowControl()
         let first = try pair.establishSession(
             streamID: 0,
             request: try WebTransportSessionRequest(authority: "example.com", path: "/one")
@@ -293,6 +293,29 @@ public enum WebTransportLibrarySmokeMatrix {
         guard condition else {
             throw QUICCodecError.malformed("library smoke failed: \(message)")
         }
+    }
+}
+
+public extension WebTransportLibrarySmokePair {
+    static func connectedWithFlowControl() throws -> WebTransportLibrarySmokePair {
+        let constants = WebTransportHTTP3DraftConstants.current
+        var clientSettings = HTTP3Settings.webTransportDraft15Defaults
+        var serverSettings = HTTP3Settings.webTransportDraft15Defaults
+        for settings in [constants.settingsWTInitialMaxStreamsBidi, constants.settingsWTInitialMaxStreamsUni] {
+            try clientSettings.set(16, for: settings)
+            try serverSettings.set(16, for: settings)
+        }
+        try clientSettings.set(65_536, for: constants.settingsWTInitialMaxData)
+        try serverSettings.set(65_536, for: constants.settingsWTInitialMaxData)
+
+        var clientHTTP3 = HTTP3ConnectionState(role: .client, localSettings: clientSettings)
+        var serverHTTP3 = HTTP3ConnectionState(role: .server, localSettings: serverSettings)
+        _ = try serverHTTP3.receivePeerControlStream(clientHTTP3.localControlStreamBytes())
+        _ = try clientHTTP3.receivePeerControlStream(serverHTTP3.localControlStreamBytes())
+        return WebTransportLibrarySmokePair(
+            client: LibrarySmokeClient(manager: WebTransportSessionManager(http3: clientHTTP3)),
+            server: LibrarySmokeServer(manager: WebTransportSessionManager(http3: serverHTTP3))
+        )
     }
 }
 

@@ -157,7 +157,13 @@ public struct WebTransportStreamState: Equatable, Sendable {
     }
 
     public mutating func reset(applicationErrorCode: UInt64) -> QUICFrame {
-        quicStream.reset(applicationErrorCode: applicationErrorCode)
+        _ = quicStream.reset(applicationErrorCode: applicationErrorCode)
+        return .resetStreamAt(
+            id: streamID,
+            applicationErrorCode: applicationErrorCode,
+            finalSize: quicStream.sendOffset,
+            reliableSize: quicStream.sendOffset
+        )
     }
 
     public mutating func stopSending(applicationErrorCode: UInt64) -> QUICFrame {

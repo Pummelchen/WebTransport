@@ -167,8 +167,16 @@ func webTransportStreamResetAndStopSendingEmitFrames() throws {
     let resetFrame = try pair.server.resetStream(streamID: 4, applicationErrorCode: 0x10)
     let stopSendingFrame = try pair.server.stopSendingStream(streamID: 4, applicationErrorCode: 0x11)
 
-    #expect(resetFrame == .resetStream(id: 4, applicationErrorCode: 0x10, finalSize: 0))
-    #expect(stopSendingFrame == .stopSending(id: 4, applicationErrorCode: 0x11))
+    #expect(resetFrame == .resetStreamAt(
+        id: 4,
+        applicationErrorCode: WebTransportDraft15ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x10),
+        finalSize: 0,
+        reliableSize: 0
+    ))
+    #expect(stopSendingFrame == .stopSending(
+        id: 4,
+        applicationErrorCode: WebTransportDraft15ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
+    ))
 }
 
 @Test

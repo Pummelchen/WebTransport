@@ -8,6 +8,10 @@ let package = Package(
     ],
     products: [
         .library(
+            name: "WebTransport",
+            targets: ["WebTransport"]
+        ),
+        .library(
             name: "WebTransportQUICCore",
             targets: ["WebTransportQUICCore"]
         ),
@@ -28,15 +32,22 @@ let package = Package(
             targets: ["WebTransportHTTP3Core"]
         ),
         .executable(
-            name: "AppleQUICSpike",
-            targets: ["AppleQUICSpike"]
+            name: "WebTransportClient",
+            targets: ["WebTransportClient"]
         ),
         .executable(
-            name: "NativeQUICCoreSpike",
-            targets: ["NativeQUICCoreSpike"]
+            name: "WebTransportServer",
+            targets: ["WebTransportServer"]
         )
     ],
     targets: [
+        .target(
+            name: "WebTransport",
+            dependencies: [
+                "WebTransportHTTP3Core",
+                "WebTransportQUICCore"
+            ]
+        ),
         .target(
             name: "WebTransportQUICCore"
         ),
@@ -71,6 +82,18 @@ let package = Package(
                 "WebTransportTLSCore",
                 "WebTransportUDPApple"
             ]
+        ),
+        .executableTarget(
+            name: "WebTransportClient",
+            dependencies: ["WebTransport"]
+        ),
+        .executableTarget(
+            name: "WebTransportServer",
+            dependencies: ["WebTransport"]
+        ),
+        .testTarget(
+            name: "WebTransportTests",
+            dependencies: ["WebTransport"]
         ),
         .testTarget(
             name: "WebTransportQUICCoreTests",

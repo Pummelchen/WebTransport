@@ -19,7 +19,13 @@ CPP/     Planned C++ implementation
 
 Swift status highlights:
 
-- `Swift/PRODUCTION_READINESS_AUDIT.md` records the 2026-06-19 production-readiness audit, fixes landed from that audit, and the remaining go-live blockers.
+- `Swift/PRODUCTION_READINESS_AUDIT.md` records the 2026-06-19 production-readiness audit and the follow-up closure pass for the go-live blockers found there.
+- `WebTransport` is the public Swift package product. It exposes an async
+  client/server facade over the native HTTP/3 WebTransport core, with
+  app-style `WebTransportClient` and `WebTransportServer` CLI products for
+  deterministic loopback validation.
 - `WebTransportTLSCore` includes TLS 1.3 transcript/key schedule helpers plus a `TLSQUICConnectionState` integration state for CRYPTO flights, handshake/application traffic secrets, key updates, application `CONNECTION_CLOSE`, and QUIC final-size close paths.
 - `WebTransportHTTP3Core` includes deterministic WebTransport ALPN/settings/session-policy rejection paths, a `LibrarySmokeClient`/`LibrarySmokeServer` matrix, and an executable draft-15 compliance definition-of-done matrix.
-- `NativeQUICCoreSpike` exercises UDP frame exchange, QUIC packet protection, TLS/QUIC handshake state, HTTP/3 control/request handling, WebTransport session establishment, the library smoke matrix, and the compliance matrix without interactive security prompts.
+- `NativeQUICCoreSpike` and `AppleQUICSpike` remain internal spike targets, but
+  they are no longer production package products and are rejected from release
+  packaging if stale binaries are present.
