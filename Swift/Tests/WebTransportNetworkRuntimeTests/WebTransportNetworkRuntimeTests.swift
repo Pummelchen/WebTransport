@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import WebTransportNetworkRuntime
+@testable import WebTransportNetworkRuntime
 import WebTransportQUICCore
 
 @Test
@@ -43,9 +43,10 @@ func networkProbeClientServerExchangeOverUDP() async throws {
 }
 
 @Test
-func quicPacketProbeCodecUsesInitialPacketsAndRejectsMalformedPackets() throws {
+func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets() throws {
     let clientPacket = try WebTransportQUICPacketProbeCodec.encodeClientInitial(message: "hello")
     #expect(clientPacket.count >= WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes)
+    #expect(clientPacket.range(of: Data("WT-QUIC-PROBE".utf8)) == nil)
 
     let decodedRequest = try WebTransportQUICPacketProbeCodec.decodeClientInitial(clientPacket)
     #expect(decodedRequest.message == "hello")
@@ -55,6 +56,7 @@ func quicPacketProbeCodecUsesInitialPacketsAndRejectsMalformedPackets() throws {
         request: decodedRequest,
         message: decodedRequest.message
     )
+    #expect(serverPacket.range(of: Data("WT-QUIC-ACK".utf8)) == nil)
     #expect(try WebTransportQUICPacketProbeCodec.decodeServerInitial(serverPacket) == "hello")
 
     var truncated = clientPacket
@@ -62,74 +64,71 @@ func quicPacketProbeCodecUsesInitialPacketsAndRejectsMalformedPackets() throws {
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(truncated)
     }
+    var tamperedCiphertext = clientPacket
+    tamperedCiphertext[tamperedCiphertext.count - 1] ^= 0x01
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(tamperedCiphertext)
+    }
+    var tamperedHeader = clientPacket
+    tamperedHeader[5] ^= 0x01
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(tamperedHeader)
+    }
 
-    let unexpectedFramePacket = try QUICLongHeaderPacket(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
+    let unexpectedFramePacket = try protectedClientInitial(
         destinationConnectionID: decodedRequest.destinationConnectionID,
         sourceConnectionID: decodedRequest.sourceConnectionID,
-        packetNumber: 0,
-        packetNumberLength: 2,
-        payload: try QUICFrame.encodeFrames([
+        frames: [
             .stream(id: 0, offset: 0, fin: false, data: Data("not allowed".utf8))
-        ])
-    ).encode()
+        ],
+        padToMinimumInitialSize: true
+    )
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(unexpectedFramePacket)
     }
 
-    let shortClientInitial = try QUICLongHeaderPacket(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
+    let shortClientInitial = try protectedClientInitial(
         destinationConnectionID: decodedRequest.destinationConnectionID,
         sourceConnectionID: decodedRequest.sourceConnectionID,
-        packetNumber: 0,
-        packetNumberLength: 2,
-        payload: try QUICFrame.encodeFrames([
+        frames: [
             .crypto(offset: 0, data: Data("WT-QUIC-PROBE\0short".utf8)),
             .ping
-        ])
-    ).encode()
+        ],
+        padToMinimumInitialSize: false
+    )
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(shortClientInitial)
     }
 
-    var duplicatePayload = try QUICFrame.encodeFrames([
-        .crypto(offset: 0, data: Data("WT-QUIC-PROBE\0one".utf8)),
-        .crypto(offset: 0, data: Data("WT-QUIC-PROBE\0two".utf8)),
-        .ping
-    ])
-    var duplicateCryptoPacket = QUICLongHeaderPacket(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
+    let duplicateCryptoBytes = try protectedClientInitial(
         destinationConnectionID: decodedRequest.destinationConnectionID,
         sourceConnectionID: decodedRequest.sourceConnectionID,
-        packetNumber: 0,
-        packetNumberLength: 2,
-        payload: duplicatePayload
+        frames: [
+            .crypto(offset: 0, data: Data("WT-QUIC-PROBE\0one".utf8)),
+            .crypto(offset: 0, data: Data("WT-QUIC-PROBE\0two".utf8)),
+            .ping
+        ],
+        padToMinimumInitialSize: true
     )
-    var duplicateCryptoBytes = try duplicateCryptoPacket.encode()
-    while duplicateCryptoBytes.count < WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes {
-        duplicatePayload.append(0x00)
-        duplicateCryptoPacket.payload = duplicatePayload
-        duplicateCryptoBytes = try duplicateCryptoPacket.encode()
-    }
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(duplicateCryptoBytes)
     }
 
-    let mismatchedServerInitial = try QUICLongHeaderPacket(
+    let mismatchedServerInitial = try QUICInitialPacketProtection.seal(
         packetType: .initial,
         version: WebTransportQUICPacketProbeCodec.quicVersion,
         destinationConnectionID: Data([0x01, 0x02, 0x03, 0x04]),
         sourceConnectionID: decodedRequest.destinationConnectionID,
+        token: Data(),
         packetNumber: 0,
         packetNumberLength: 2,
-        payload: try QUICFrame.encodeFrames([
+        plaintextPayload: try QUICFrame.encodeFrames([
             .ack(largestAcknowledged: decodedRequest.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
             .crypto(offset: 0, data: Data("WT-QUIC-ACK\0hello".utf8))
-        ])
-    ).encode()
+        ]),
+        keyPhase: .server,
+        initialSecretConnectionID: decodedRequest.destinationConnectionID
+    )
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(mismatchedServerInitial)
     }
@@ -175,4 +174,41 @@ func networkEndpointParserRejectsMalformedValues() throws {
     #expect(throws: Error.self) {
         _ = try WebTransportNetworkProbeTransport.parse("unknown")
     }
+}
+
+private func protectedClientInitial(
+    destinationConnectionID: Data,
+    sourceConnectionID: Data,
+    frames: [QUICFrame],
+    padToMinimumInitialSize: Bool
+) throws -> Data {
+    var payload = try QUICFrame.encodeFrames(frames)
+    var encoded = try QUICInitialPacketProtection.seal(
+        packetType: .initial,
+        version: WebTransportQUICPacketProbeCodec.quicVersion,
+        destinationConnectionID: destinationConnectionID,
+        sourceConnectionID: sourceConnectionID,
+        token: Data(),
+        packetNumber: 0,
+        packetNumberLength: 2,
+        plaintextPayload: payload,
+        keyPhase: .client,
+        initialSecretConnectionID: destinationConnectionID
+    )
+    while padToMinimumInitialSize && encoded.count < WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes {
+        payload.append(0x00)
+        encoded = try QUICInitialPacketProtection.seal(
+            packetType: .initial,
+            version: WebTransportQUICPacketProbeCodec.quicVersion,
+            destinationConnectionID: destinationConnectionID,
+            sourceConnectionID: sourceConnectionID,
+            token: Data(),
+            packetNumber: 0,
+            packetNumberLength: 2,
+            plaintextPayload: payload,
+            keyPhase: .client,
+            initialSecretConnectionID: destinationConnectionID
+        )
+    }
+    return encoded
 }

@@ -66,6 +66,7 @@ let package = Package(
         .target(
             name: "WebTransportNetworkRuntime",
             dependencies: [
+                "WebTransportCryptoApple",
                 "WebTransportQUICCore",
                 "WebTransportUDPApple"
             ]

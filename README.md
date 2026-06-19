@@ -9,7 +9,7 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 | Implementation | Status | Draft-15 Score |
 | --- | --- | ---: |
-| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, QUIC Initial packet probe over UDP, conformance scenarios, and release packaging are present. | 86% |
+| Swift | Active implementation. Protocol core, package product, deterministic client/server CLI facade, packet-protected QUIC Initial probe over UDP, conformance scenarios, and release packaging are present. | 88% |
 | C99 | Placeholder only. No protocol implementation is present. | 0% |
 | C++ (`CPP`) | Placeholder only. No protocol implementation is present. | 0% |
 
@@ -25,12 +25,12 @@ Current Swift coverage includes:
 - QPACK static, literal, Huffman, dynamic table, Base, and post-Base handling needed by the current tests.
 - WebTransport stream prefixes, bidirectional streams, unidirectional streams, datagrams, buffering, rejection, close, drain, reset, and stop-sending behavior.
 - WebTransport flow-control capsules, monotonic limit handling, disabled/zero/unlimited state distinction, and receive-side violation close behavior.
-- TLS/QUIC primitive state, packet protection, transport-parameter codecs, QUIC Initial packet probe over UDP, UDP loopback support, and prompt-free identity/trust test paths.
+- TLS/QUIC primitive state, packet protection, transport-parameter codecs, packet-protected QUIC Initial probe over UDP, UDP loopback support, and prompt-free identity/trust test paths.
 - Public Swift package product: `WebTransport`.
 - Network runtime package product: `WebTransportNetworkRuntime`.
 - CLI products: `WebTransportClient` and `WebTransportServer`.
 
-Important limitation: the Swift client/server CLI now has a cleartext QUIC Initial packet probe over UDP, but WebTransport sessions still do not run over a complete encrypted external QUIC/TLS/HTTP/3 network connection.
+Important limitation: the Swift client/server CLI now has a packet-protected QUIC Initial probe over UDP, but WebTransport sessions still do not run over a complete external QUIC/TLS/HTTP/3 network connection.
 
 Useful Swift commands:
 
