@@ -135,6 +135,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public private(set) var streamsByID: [UInt64: WebTransportStreamState]
     public private(set) var streamIDsBySessionID: [WebTransportSessionID: Set<UInt64>]
     public private(set) var datagramsBySessionID: [WebTransportSessionID: [Data]]
+    public private(set) var flowControlStateBySessionID: [WebTransportSessionID: WebTransportFlowControlState]
+    public private(set) var blockedFlowCapsulesBySessionID: [WebTransportSessionID: [WebTransportFlowCapsule]]
     public let maxDatagramFrameSize: Int
     public let maxDatagramReceiveBufferBytes: Int
     public let maxStreamReceiveBufferBytes: Int
@@ -152,6 +154,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.streamsByID = [:]
         self.streamIDsBySessionID = [:]
         self.datagramsBySessionID = [:]
+        self.flowControlStateBySessionID = [:]
+        self.blockedFlowCapsulesBySessionID = [:]
         self.maxDatagramFrameSize = maxDatagramFrameSize
         self.maxDatagramReceiveBufferBytes = maxDatagramReceiveBufferBytes
         self.maxStreamReceiveBufferBytes = maxStreamReceiveBufferBytes
@@ -295,6 +299,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
                 "WebTransport datagram payload exceeds maximum frame size of \(maxDatagramFrameSize)"
             )
         }
+        try reserveData(for: sessionID, byteCount: payload.count)
         return .datagram(datagramPayload)
     }
 
@@ -310,6 +315,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
         let parsed = try WebTransportDatagramSignaling.parse(payload)
         _ = try acceptedSession(for: parsed.sessionID)
+        try reserveData(for: parsed.sessionID, byteCount: parsed.payload.count)
 
         let currentBytes = datagramPayloadBytesBySessionID[parsed.sessionID] ?? 0
         let updatedBytes = currentBytes + parsed.payload.count
@@ -343,6 +349,34 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         datagramsBySessionID[sessionID]
     }
 
+    public func flowState(for sessionID: WebTransportSessionID) -> WebTransportFlowControlState? {
+        flowControlStateBySessionID[sessionID]
+    }
+
+    public mutating func receiveFlowControlCapsule(
+        sessionID: WebTransportSessionID,
+        bytes: Data
+    ) throws -> WebTransportFlowCapsule {
+        try validateSettingsReady()
+        _ = try acceptedSession(for: sessionID)
+        let parsed = try WebTransportFlowCapsuleCodec.parse(bytes)
+
+        var state = flowControlStateBySessionID[sessionID] ?? .init()
+        state.apply(parsed.capsule)
+        flowControlStateBySessionID[sessionID] = state
+        return parsed.capsule
+    }
+
+    public mutating func popFlowControlCapsule(sessionID: WebTransportSessionID) throws -> Data? {
+        guard var queue = blockedFlowCapsulesBySessionID[sessionID], let capsule = queue.first else {
+            return nil
+        }
+
+        queue.removeFirst()
+        blockedFlowCapsulesBySessionID[sessionID] = queue.isEmpty ? [] : queue
+        return try WebTransportFlowCapsuleCodec.serialize(capsule)
+    }
+
     public mutating func openBidirectionalStream(
         streamID: UInt64,
         sessionID: WebTransportSessionID
@@ -355,6 +389,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             direction: .bidirectional,
             initiator: expectedLocalInitiator
         )
+        try reserveStream(session.id, form: .bidirectional)
         let stream = try WebTransportStreamState(
             streamID: streamID,
             sessionID: session.id,
@@ -384,6 +419,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             direction: .unidirectional,
             initiator: expectedLocalInitiator
         )
+        try reserveStream(session.id, form: .unidirectional)
         let stream = try WebTransportStreamState(
             streamID: streamID,
             sessionID: session.id,
@@ -418,6 +454,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             throw QUICCodecError.malformed("invalid form for bidirectional stream accept")
         }
         let session = try acceptedSession(for: prefix.sessionID)
+        try reserveStream(session.id, form: .bidirectional)
 
         var stream = try WebTransportStreamState(
             streamID: streamID,
@@ -452,6 +489,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             throw QUICCodecError.malformed("invalid form for unidirectional stream accept")
         }
         let session = try acceptedSession(for: prefix.sessionID)
+        try reserveStream(session.id, form: .unidirectional)
 
         var stream = try WebTransportStreamState(
             streamID: streamID,
@@ -473,6 +511,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard var stream = streamsByID[streamID] else {
             throw QUICCodecError.malformed("unknown WebTransport stream")
         }
+        try reserveData(for: stream.sessionID, byteCount: payload.count)
         try stream.receivePayload(payload)
         streamsByID[streamID] = stream
     }
@@ -529,12 +568,61 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         sessionsByID[session.id] = session
         sessionIDsByRequestStreamID[session.requestStreamID] = session.id
         datagramsBySessionID[session.id] = []
+        flowControlStateBySessionID[session.id] = WebTransportFlowControlState(
+            settings: http3.remoteSettings ?? .webTransportDraft15Defaults
+        )
         datagramPayloadBytesBySessionID[session.id] = 0
+        blockedFlowCapsulesBySessionID[session.id] = []
     }
 
     private mutating func register(_ stream: WebTransportStreamState) {
         streamsByID[stream.streamID] = stream
         streamIDsBySessionID[stream.sessionID, default: Set<UInt64>()].insert(stream.streamID)
+    }
+
+    private mutating func reserveStream(
+        _ sessionID: WebTransportSessionID,
+        form: WebTransportStreamForm
+    ) throws {
+        var state = flowControlStateBySessionID[sessionID] ?? .init()
+        do {
+            try state.registerStream(form)
+        } catch {
+            if let capsule = blockedCapsule(for: form, state: state) {
+                blockedFlowCapsulesBySessionID[sessionID, default: []].append(capsule)
+            }
+            flowControlStateBySessionID[sessionID] = state
+            throw error
+        }
+        flowControlStateBySessionID[sessionID] = state
+    }
+
+    private mutating func reserveData(
+        for sessionID: WebTransportSessionID,
+        byteCount: Int
+    ) throws {
+        var state = flowControlStateBySessionID[sessionID] ?? .init()
+        do {
+            try state.recordData(bytes: byteCount)
+        } catch {
+            if let maxData = state.maxData {
+                blockedFlowCapsulesBySessionID[sessionID, default: []].append(.dataBlocked(limit: maxData))
+            }
+            flowControlStateBySessionID[sessionID] = state
+            throw error
+        }
+        flowControlStateBySessionID[sessionID] = state
+    }
+
+    private func blockedCapsule(for form: WebTransportStreamForm, state: WebTransportFlowControlState) -> WebTransportFlowCapsule? {
+        switch form {
+        case .bidirectional:
+            guard let limit = state.maxStreamsBidi else { return nil }
+            return .streamsBlockedBidi(limit: limit)
+        case .unidirectional:
+            guard let limit = state.maxStreamsUni else { return nil }
+            return .streamsBlockedUni(limit: limit)
+        }
     }
 
     private var expectedLocalInitiator: QUICStreamInitiator {

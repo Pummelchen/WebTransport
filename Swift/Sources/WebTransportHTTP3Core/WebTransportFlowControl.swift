@@ -1,0 +1,251 @@
+import Foundation
+import WebTransportQUICCore
+
+public enum WebTransportFlowCapsule: Equatable, Sendable {
+    case maxData(limit: UInt64)
+    case maxStreamsBidi(limit: UInt64)
+    case maxStreamsUni(limit: UInt64)
+    case dataBlocked(limit: UInt64)
+    case streamsBlockedBidi(limit: UInt64)
+    case streamsBlockedUni(limit: UInt64)
+    case unknown(type: UInt64, payload: Data)
+}
+
+public struct WebTransportFlowCapsuleEnvelope: Equatable, Sendable {
+    public let capsule: WebTransportFlowCapsule
+    public let bytesConsumed: Int
+    public let payload: Data
+
+    public init(capsule: WebTransportFlowCapsule, bytesConsumed: Int, payload: Data) {
+        self.capsule = capsule
+        self.bytesConsumed = bytesConsumed
+        self.payload = payload
+    }
+}
+
+public enum WebTransportFlowCapsuleCodec {
+    public static func serialize(_ capsule: WebTransportFlowCapsule) throws -> Data {
+        var output = Data()
+        let (type, payload) = try serializedTypeAndPayload(capsule)
+        output.append(try QUICVarInt.encode(type))
+        output.append(try QUICVarInt.encode(UInt64(payload.count)))
+        output.append(payload)
+        return output
+    }
+
+    public static func parse(
+        _ bytes: Data,
+        constants: WebTransportHTTP3DraftConstants = .current
+    ) throws -> WebTransportFlowCapsuleEnvelope {
+        var cursor = QUICByteCursor(bytes)
+        let type = try QUICVarInt.decode(from: &cursor)
+        let payloadLength = try QUICVarInt.decode(from: &cursor)
+        guard payloadLength <= UInt64(Int.max) else {
+            throw QUICCodecError.valueOutOfRange("flow control capsule payload length exceeds Int.max")
+        }
+        let length = Int(payloadLength)
+        let payload = try cursor.readBytes(count: length)
+        let bytesConsumed = bytes.count - cursor.remaining
+
+        var payloadCursor = QUICByteCursor(payload)
+        let capsule: WebTransportFlowCapsule
+
+        switch type {
+        case constants.wtMaxDataCapsule:
+            let limit = try readSingleVarInt(
+                from: &payloadCursor,
+                label: "wt-max-data"
+            )
+            capsule = .maxData(limit: limit)
+        case constants.wtMaxStreamsBidiCapsule:
+            let limit = try readSingleVarInt(
+                from: &payloadCursor,
+                label: "wt-max-streams-bidi"
+            )
+            capsule = .maxStreamsBidi(limit: limit)
+        case constants.wtMaxStreamsUniCapsule:
+            let limit = try readSingleVarInt(
+                from: &payloadCursor,
+                label: "wt-max-streams-uni"
+            )
+            capsule = .maxStreamsUni(limit: limit)
+        case constants.wtDataBlockedCapsule:
+            let limit = try readSingleVarInt(
+                from: &payloadCursor,
+                label: "wt-data-blocked"
+            )
+            capsule = .dataBlocked(limit: limit)
+        case constants.wtStreamsBlockedBidiCapsule:
+            let limit = try readSingleVarInt(
+                from: &payloadCursor,
+                label: "wt-streams-blocked-bidi"
+            )
+            capsule = .streamsBlockedBidi(limit: limit)
+        case constants.wtStreamsBlockedUniCapsule:
+            let limit = try readSingleVarInt(
+                from: &payloadCursor,
+                label: "wt-streams-blocked-uni"
+            )
+            capsule = .streamsBlockedUni(limit: limit)
+        default:
+            capsule = .unknown(type: type, payload: payload)
+            return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
+        }
+
+        if !payloadCursor.isAtEnd {
+            throw QUICCodecError.malformed("flow control capsule payload contains extra bytes")
+        }
+
+        return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
+    }
+
+    public static func serializedTypeAndPayload(_ capsule: WebTransportFlowCapsule) throws -> (UInt64, Data) {
+        switch capsule {
+        case .maxData(let limit):
+            return (WebTransportHTTP3DraftConstants.current.wtMaxDataCapsule, try encodePayload(limit: limit))
+        case .maxStreamsBidi(let limit):
+            return (WebTransportHTTP3DraftConstants.current.wtMaxStreamsBidiCapsule, try encodePayload(limit: limit))
+        case .maxStreamsUni(let limit):
+            return (WebTransportHTTP3DraftConstants.current.wtMaxStreamsUniCapsule, try encodePayload(limit: limit))
+        case .dataBlocked(let limit):
+            return (WebTransportHTTP3DraftConstants.current.wtDataBlockedCapsule, try encodePayload(limit: limit))
+        case .streamsBlockedBidi(let limit):
+            return (WebTransportHTTP3DraftConstants.current.wtStreamsBlockedBidiCapsule, try encodePayload(limit: limit))
+        case .streamsBlockedUni(let limit):
+            return (WebTransportHTTP3DraftConstants.current.wtStreamsBlockedUniCapsule, try encodePayload(limit: limit))
+        case .unknown(let type, let payload):
+            return (type, payload)
+        }
+    }
+
+    private static func encodePayload(limit: UInt64) throws -> Data {
+        var payload = Data()
+        payload.append(try QUICVarInt.encode(limit))
+        return payload
+    }
+
+    private static func readSingleVarInt(
+        from cursor: inout QUICByteCursor,
+        label: String
+    ) throws -> UInt64 {
+        guard !cursor.isAtEnd else {
+            throw QUICCodecError.malformed("flow control capsule has empty payload for \(label)")
+        }
+        let value = try QUICVarInt.decode(from: &cursor)
+        guard cursor.isAtEnd else {
+            throw QUICCodecError.malformed("flow control capsule payload has trailing bytes for \(label)")
+        }
+        return value
+    }
+}
+
+public struct WebTransportFlowControlState: Equatable, Sendable {
+    public private(set) var maxData: UInt64?
+    public private(set) var maxStreamsBidi: UInt64?
+    public private(set) var maxStreamsUni: UInt64?
+    public private(set) var usedData: UInt64
+    public private(set) var openedBidiStreams: Int
+    public private(set) var openedUniStreams: Int
+
+    public init(
+        maxData: UInt64?,
+        maxStreamsBidi: UInt64?,
+        maxStreamsUni: UInt64?
+    ) {
+        self.maxData = maxData
+        self.maxStreamsBidi = maxStreamsBidi
+        self.maxStreamsUni = maxStreamsUni
+        self.usedData = 0
+        self.openedBidiStreams = 0
+        self.openedUniStreams = 0
+    }
+
+    public init(settings: HTTP3Settings, constants: WebTransportHTTP3DraftConstants = .current) {
+        self.maxData = normalizeLimit(settings[constants.settingsWTInitialMaxData])
+        self.maxStreamsBidi = normalizeLimit(settings[constants.settingsWTInitialMaxStreamsBidi])
+        self.maxStreamsUni = normalizeLimit(settings[constants.settingsWTInitialMaxStreamsUni])
+        self.usedData = 0
+        self.openedBidiStreams = 0
+        self.openedUniStreams = 0
+    }
+
+    public init() {
+        self.init(maxData: nil, maxStreamsBidi: nil, maxStreamsUni: nil)
+    }
+
+    public mutating func setMaxData(_ value: UInt64) {
+        maxData = normalizeLimit(value)
+    }
+
+    public mutating func setMaxStreamsBidi(_ value: UInt64) {
+        maxStreamsBidi = normalizeLimit(value)
+    }
+
+    public mutating func setMaxStreamsUni(_ value: UInt64) {
+        maxStreamsUni = normalizeLimit(value)
+    }
+
+    public mutating func apply(_ capsule: WebTransportFlowCapsule) {
+        switch capsule {
+        case .maxData(let limit):
+            setMaxData(limit)
+        case .maxStreamsBidi(let limit):
+            setMaxStreamsBidi(limit)
+        case .maxStreamsUni(let limit):
+            setMaxStreamsUni(limit)
+        case .dataBlocked, .streamsBlockedBidi, .streamsBlockedUni, .unknown:
+            break
+        }
+    }
+
+    public mutating func recordData(bytes: Int) throws {
+        guard bytes >= 0 else {
+            throw QUICCodecError.valueOutOfRange("negative stream payload")
+        }
+        let count = UInt64(bytes)
+        guard let maxData else { return }
+        let (newUsage, overflow) = usedData.addingReportingOverflow(count)
+        guard !overflow && newUsage <= maxData else {
+            throw QUICCodecError.valueOutOfRange("WebTransport session data limit exceeded")
+        }
+        usedData = newUsage
+    }
+
+    public mutating func registerStream(_ form: WebTransportStreamForm) throws {
+        switch form {
+        case .bidirectional:
+            try ensureCanOpen(form: .bidirectional, current: openedBidiStreams, limit: maxStreamsBidi)
+            openedBidiStreams += 1
+        case .unidirectional:
+            try ensureCanOpen(form: .unidirectional, current: openedUniStreams, limit: maxStreamsUni)
+            openedUniStreams += 1
+        }
+    }
+
+    private func ensureCanOpen(form: WebTransportStreamForm, current: Int, limit: UInt64?) throws {
+        guard let limit else { return }
+        let next = current + 1
+        let limitInt = limit > UInt64(Int.max) ? Int.max : Int(limit)
+        guard next <= limitInt else {
+            throw QUICCodecError.valueOutOfRange("WebTransport \(form == .bidirectional ? "bidirectional" : "unidirectional") stream limit exceeded")
+        }
+    }
+}
+
+private func normalizeLimit(_ value: UInt64?) -> UInt64? {
+    guard let value, value > 0 else {
+        return nil
+    }
+    return value
+}
+
+public enum WebTransportFlowControlHelpers {
+    public static func blockedCapsule(for form: WebTransportStreamForm, limit: UInt64) -> WebTransportFlowCapsule {
+        switch form {
+        case .bidirectional:
+            return .streamsBlockedBidi(limit: limit)
+        case .unidirectional:
+            return .streamsBlockedUni(limit: limit)
+        }
+    }
+}
