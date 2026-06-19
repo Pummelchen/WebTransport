@@ -94,6 +94,14 @@ func webTransportMaxStreamsCapsulesRejectValuesAboveDraftLimit() throws {
     _ = try WebTransportFlowCapsuleCodec.parse(try WebTransportFlowCapsuleCodec.serialize(
         .maxStreamsBidi(limit: WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue)
     ))
+
+    var state = WebTransportFlowControlState(maxData: nil, maxStreamsBidi: 0, maxStreamsUni: 0)
+    #expect(throws: Error.self) {
+        try state.apply(.maxStreamsBidi(limit: invalidLimit))
+    }
+    #expect(throws: Error.self) {
+        try state.apply(.maxStreamsUni(limit: invalidLimit))
+    }
 }
 
 @Test

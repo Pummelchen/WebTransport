@@ -1,9 +1,34 @@
 import Foundation
 import WebTransport
+import WebTransportCLIConformance
 
 @main
 struct WebTransportClientCLI {
     static func main() async {
+        let executable = "WebTransportClient"
+        do {
+            let options = try WebTransportCLIConformanceOptions.parse(
+                executableName: executable,
+                arguments: Array(CommandLine.arguments.dropFirst())
+            )
+            if !CommandLine.arguments.dropFirst().isEmpty {
+                Foundation.exit(await WebTransportCLIConformance.run(options: options))
+            }
+        } catch WebTransportCLIConformanceExit.requestedHelp {
+            print(WebTransportCLIConformance.helpText(executableName: executable))
+            return
+        } catch WebTransportCLIConformanceExit.requestedList {
+            print(WebTransportCLIConformance.listText())
+            return
+        } catch WebTransportCLIConformanceExit.invalidArguments(let message) {
+            fputs("\(executable) argument error: \(message)\n", stderr)
+            fputs(WebTransportCLIConformance.helpText(executableName: executable) + "\n", stderr)
+            Foundation.exit(2)
+        } catch {
+            fputs("\(executable) argument error: \(error)\n", stderr)
+            Foundation.exit(2)
+        }
+
         do {
             let server = WebTransportServer(configuration: WebTransportServerConfiguration(
                 authority: "localhost",

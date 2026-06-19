@@ -49,6 +49,17 @@ let package = Package(
             ]
         ),
         .target(
+            name: "WebTransportCLIConformance",
+            dependencies: [
+                "WebTransport",
+                "WebTransportCryptoApple",
+                "WebTransportHTTP3Core",
+                "WebTransportQUICCore",
+                "WebTransportTLSCore",
+                "WebTransportUDPApple"
+            ]
+        ),
+        .target(
             name: "WebTransportQUICCore"
         ),
         .target(
@@ -85,11 +96,17 @@ let package = Package(
         ),
         .executableTarget(
             name: "WebTransportClient",
-            dependencies: ["WebTransport"]
+            dependencies: [
+                "WebTransport",
+                "WebTransportCLIConformance"
+            ]
         ),
         .executableTarget(
             name: "WebTransportServer",
-            dependencies: ["WebTransport"]
+            dependencies: [
+                "WebTransport",
+                "WebTransportCLIConformance"
+            ]
         ),
         .testTarget(
             name: "WebTransportTests",

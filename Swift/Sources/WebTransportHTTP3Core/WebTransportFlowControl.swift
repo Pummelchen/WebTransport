@@ -249,11 +249,17 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
 
     public mutating func setMaxStreamsBidi(_ value: UInt64) throws {
         guard isEnabled else { return }
+        guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
+            throw QUICCodecError.valueOutOfRange("WT_MAX_STREAMS_BIDI exceeds the draft-15 2^60 maximum")
+        }
         try setMonotonicLimit(&maxStreamsBidi, value: value, label: "WT_MAX_STREAMS_BIDI")
     }
 
     public mutating func setMaxStreamsUni(_ value: UInt64) throws {
         guard isEnabled else { return }
+        guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
+            throw QUICCodecError.valueOutOfRange("WT_MAX_STREAMS_UNI exceeds the draft-15 2^60 maximum")
+        }
         try setMonotonicLimit(&maxStreamsUni, value: value, label: "WT_MAX_STREAMS_UNI")
     }
 

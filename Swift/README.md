@@ -117,6 +117,13 @@ correctness fixes for the remaining go-live blockers found in that audit.
   `WebTransportClient` and `WebTransportServer` executables are app-style
   deterministic CLI demos over the native core; they are intended for packaging,
   smoke validation, and API exercise rather than external network interop.
+- Both CLI products also expose the shared conformance harness with `--scenario`.
+  The `all` scenario suite covers session establishment, protocol negotiation,
+  HTTP/3 settings/control behavior, QPACK, datagrams, streams, reset/stop-sending,
+  close/drain, flow-control edge cases, error mapping, GOAWAY, prompt-free
+  security negatives, multi-session behavior, and release packaging checks.
+  Failures are logged under `.webtransport-cli-logs/` unless `--log-dir` is
+  supplied.
 - `AppleQUICSpike` and `NativeQUICCoreSpike` remain internal executable targets
   for protocol development, but they are not shipped as production products and
   the release script rejects stale spike binaries in release output.
@@ -128,6 +135,10 @@ swift build
 swift test
 swift run WebTransportServer
 swift run WebTransportClient
+swift run WebTransportClient --scenario all --verbose
+swift run WebTransportServer --scenario all --verbose
+swift run WebTransportClient --scenario demo --json
+swift run WebTransportClient --list
 ./build-release-apple-silicon.sh
 ```
 
