@@ -96,15 +96,21 @@ public struct QPACKDecoderLimits: Equatable, Sendable {
 public struct QPACKDynamicTable: Equatable, Sendable {
     public private(set) var entries: [HTTPFieldLine]
     public private(set) var capacity: Int
+    public private(set) var maximumCapacity: Int
     public private(set) var byteSize: Int
     public private(set) var insertedCount: UInt64
 
-    public init(capacity: Int = 0) throws {
-        guard capacity >= 0 else {
+    public init(capacity: Int = 0, maximumCapacity: Int? = nil) throws {
+        let maximumCapacity = maximumCapacity ?? capacity
+        guard capacity >= 0, maximumCapacity >= 0 else {
             throw QUICCodecError.valueOutOfRange("QPACK dynamic table capacity must not be negative")
+        }
+        guard capacity <= maximumCapacity else {
+            throw QUICCodecError.valueOutOfRange("QPACK dynamic table capacity exceeds maximum capacity")
         }
         self.entries = []
         self.capacity = capacity
+        self.maximumCapacity = maximumCapacity
         self.byteSize = 0
         self.insertedCount = 0
     }
@@ -113,6 +119,9 @@ public struct QPACKDynamicTable: Equatable, Sendable {
         guard capacity >= 0 else {
             throw QUICCodecError.valueOutOfRange("QPACK dynamic table capacity must not be negative")
         }
+        guard capacity <= maximumCapacity else {
+            throw QUICCodecError.valueOutOfRange("QPACK dynamic table capacity exceeds peer maximum")
+        }
         self.capacity = capacity
         evictToCapacity()
     }
@@ -120,10 +129,7 @@ public struct QPACKDynamicTable: Equatable, Sendable {
     public mutating func insert(_ field: HTTPFieldLine) throws {
         let entrySize = Self.entrySize(field)
         guard entrySize <= capacity else {
-            entries.removeAll()
-            byteSize = 0
-            insertedCount += 1
-            return
+            throw QUICCodecError.valueOutOfRange("QPACK dynamic table entry exceeds current capacity")
         }
 
         entries.insert(field, at: 0)
@@ -146,6 +152,39 @@ public struct QPACKDynamicTable: Equatable, Sendable {
         return UInt64(index)
     }
 
+    public mutating func apply(_ instruction: QPACKEncoderStreamInstruction) throws -> HTTPFieldLine? {
+        switch instruction {
+        case .setDynamicTableCapacity(let capacity):
+            try setCapacity(capacity)
+            return nil
+        case .insertWithNameReference(let reference, let value):
+            let name = try name(for: reference)
+            let field = try HTTPFieldLine(name: name, value: value)
+            try insert(field)
+            return field
+        case .insertWithLiteralName(let name, let value):
+            let field = try HTTPFieldLine(name: name, value: value)
+            try insert(field)
+            return field
+        case .duplicate(let relativeIndex):
+            let field = try relativeEntry(index: relativeIndex)
+            try insert(field)
+            return field
+        }
+    }
+
+    private func name(for reference: QPACKNameReference) throws -> String {
+        switch reference {
+        case .staticTable(let index):
+            guard let entry = QPACKStaticTable.entry(index: index) else {
+                throw QUICCodecError.malformed("QPACK static table name index is unknown")
+            }
+            return entry.name
+        case .dynamicTable(let relativeIndex):
+            return try relativeEntry(index: relativeIndex).name
+        }
+    }
+
     public func relativeNameIndex(_ name: String) -> UInt64? {
         guard let index = entries.firstIndex(where: { $0.name == name }) else {
             return nil
@@ -162,6 +201,59 @@ public struct QPACKDynamicTable: Equatable, Sendable {
 
     private static func entrySize(_ field: HTTPFieldLine) -> Int {
         field.name.utf8.count + field.value.utf8.count + 32
+    }
+}
+
+public enum QPACKNameReference: Equatable, Sendable {
+    case staticTable(index: UInt64)
+    case dynamicTable(relativeIndex: UInt64)
+}
+
+public enum QPACKEncoderStreamInstruction: Equatable, Sendable {
+    case setDynamicTableCapacity(Int)
+    case insertWithNameReference(name: QPACKNameReference, value: String)
+    case insertWithLiteralName(name: String, value: String)
+    case duplicate(relativeIndex: UInt64)
+}
+
+public enum QPACKDecoderStreamInstruction: Equatable, Sendable {
+    case sectionAcknowledgement(streamID: UInt64)
+    case streamCancellation(streamID: UInt64)
+    case insertCountIncrement(UInt64)
+}
+
+public struct QPACKDecoderStreamState: Equatable, Sendable {
+    public private(set) var knownReceivedCount: UInt64
+    public private(set) var acknowledgedStreamIDs: Set<UInt64>
+    public private(set) var cancelledStreamIDs: Set<UInt64>
+
+    public init() {
+        self.knownReceivedCount = 0
+        self.acknowledgedStreamIDs = []
+        self.cancelledStreamIDs = []
+    }
+
+    public mutating func apply(
+        _ instruction: QPACKDecoderStreamInstruction,
+        totalInsertCountSent: UInt64
+    ) throws {
+        switch instruction {
+        case .sectionAcknowledgement(let streamID):
+            guard acknowledgedStreamIDs.insert(streamID).inserted else {
+                throw QUICCodecError.malformed("duplicate QPACK section acknowledgement")
+            }
+        case .streamCancellation(let streamID):
+            cancelledStreamIDs.insert(streamID)
+        case .insertCountIncrement(let increment):
+            guard increment > 0 else {
+                throw QUICCodecError.malformed("QPACK Insert Count Increment must be non-zero")
+            }
+            let (newCount, overflow) = knownReceivedCount.addingReportingOverflow(increment)
+            guard !overflow, newCount <= totalInsertCountSent else {
+                throw QUICCodecError.malformed("QPACK Insert Count Increment exceeds sent insert count")
+            }
+            knownReceivedCount = newCount
+        }
     }
 }
 
@@ -325,6 +417,150 @@ public enum QPACK {
         }
 
         throw QUICCodecError.malformed("unsupported QPACK field-line representation")
+    }
+
+    public static func encodeEncoderStreamInstruction(
+        _ instruction: QPACKEncoderStreamInstruction,
+        huffman: Bool = false
+    ) throws -> Data {
+        switch instruction {
+        case .setDynamicTableCapacity(let capacity):
+            guard capacity >= 0 else {
+                throw QUICCodecError.valueOutOfRange("QPACK dynamic table capacity must not be negative")
+            }
+            return try encodePrefixedInteger(UInt64(capacity), prefixBits: 5, firstBytePrefix: 0x20)
+        case .insertWithNameReference(let reference, let value):
+            let prefix: UInt8
+            let index: UInt64
+            switch reference {
+            case .staticTable(let staticIndex):
+                prefix = 0xc0
+                index = staticIndex
+            case .dynamicTable(let relativeIndex):
+                prefix = 0x80
+                index = relativeIndex
+            }
+            var output = try encodePrefixedInteger(index, prefixBits: 6, firstBytePrefix: prefix)
+            output.append(try encodeStringLiteral(Data(value.utf8), prefixBits: 7, firstBytePrefix: 0x00, huffman: huffman))
+            return output
+        case .insertWithLiteralName(let name, let value):
+            var output = try encodeStringLiteral(Data(name.utf8), prefixBits: 5, firstBytePrefix: 0x40, huffman: huffman)
+            output.append(try encodeStringLiteral(Data(value.utf8), prefixBits: 7, firstBytePrefix: 0x00, huffman: huffman))
+            return output
+        case .duplicate(let relativeIndex):
+            return try encodePrefixedInteger(relativeIndex, prefixBits: 5, firstBytePrefix: 0x00)
+        }
+    }
+
+    public static func encodeEncoderStreamInstructions(
+        _ instructions: [QPACKEncoderStreamInstruction],
+        huffman: Bool = false
+    ) throws -> Data {
+        var output = Data()
+        for instruction in instructions {
+            output.append(try encodeEncoderStreamInstruction(instruction, huffman: huffman))
+        }
+        return output
+    }
+
+    public static func decodeEncoderStreamInstructions(_ data: Data) throws -> [QPACKEncoderStreamInstruction] {
+        var cursor = QUICByteCursor(data)
+        var instructions: [QPACKEncoderStreamInstruction] = []
+        while !cursor.isAtEnd {
+            instructions.append(try decodeEncoderStreamInstruction(from: &cursor))
+        }
+        return instructions
+    }
+
+    public static func applyEncoderStream(
+        _ data: Data,
+        to dynamicTable: inout QPACKDynamicTable
+    ) throws -> [HTTPFieldLine] {
+        let instructions = try decodeEncoderStreamInstructions(data)
+        var insertedFields: [HTTPFieldLine] = []
+        for instruction in instructions {
+            if let field = try dynamicTable.apply(instruction) {
+                insertedFields.append(field)
+            }
+        }
+        return insertedFields
+    }
+
+    public static func encodeDecoderStreamInstruction(_ instruction: QPACKDecoderStreamInstruction) throws -> Data {
+        switch instruction {
+        case .sectionAcknowledgement(let streamID):
+            return try encodePrefixedInteger(streamID, prefixBits: 7, firstBytePrefix: 0x80)
+        case .streamCancellation(let streamID):
+            return try encodePrefixedInteger(streamID, prefixBits: 6, firstBytePrefix: 0x40)
+        case .insertCountIncrement(let increment):
+            guard increment > 0 else {
+                throw QUICCodecError.malformed("QPACK Insert Count Increment must be non-zero")
+            }
+            return try encodePrefixedInteger(increment, prefixBits: 6, firstBytePrefix: 0x00)
+        }
+    }
+
+    public static func encodeDecoderStreamInstructions(_ instructions: [QPACKDecoderStreamInstruction]) throws -> Data {
+        var output = Data()
+        for instruction in instructions {
+            output.append(try encodeDecoderStreamInstruction(instruction))
+        }
+        return output
+    }
+
+    public static func decodeDecoderStreamInstructions(_ data: Data) throws -> [QPACKDecoderStreamInstruction] {
+        var cursor = QUICByteCursor(data)
+        var instructions: [QPACKDecoderStreamInstruction] = []
+        while !cursor.isAtEnd {
+            instructions.append(try decodeDecoderStreamInstruction(from: &cursor))
+        }
+        return instructions
+    }
+
+    private static func decodeEncoderStreamInstruction(
+        from cursor: inout QUICByteCursor
+    ) throws -> QPACKEncoderStreamInstruction {
+        let first = try cursor.readUInt8()
+        if (first & 0x80) != 0 {
+            let index = try decodePrefixedInteger(from: &cursor, prefixBits: 6, firstByte: first)
+            let reference: QPACKNameReference = (first & 0x40) != 0
+                ? .staticTable(index: index)
+                : .dynamicTable(relativeIndex: index)
+            let value = try decodeStringLiteral(from: &cursor, prefixBits: 7)
+            return .insertWithNameReference(name: reference, value: value)
+        }
+        if (first & 0x40) != 0 {
+            let name = try decodeStringLiteral(from: &cursor, prefixBits: 5, firstByte: first)
+            let value = try decodeStringLiteral(from: &cursor, prefixBits: 7)
+            return .insertWithLiteralName(name: name, value: value)
+        }
+        if (first & 0x20) != 0 {
+            let capacity = try checkedLength(try decodePrefixedInteger(from: &cursor, prefixBits: 5, firstByte: first))
+            return .setDynamicTableCapacity(capacity)
+        }
+        let relativeIndex = try decodePrefixedInteger(from: &cursor, prefixBits: 5, firstByte: first)
+        return .duplicate(relativeIndex: relativeIndex)
+    }
+
+    private static func decodeDecoderStreamInstruction(
+        from cursor: inout QUICByteCursor
+    ) throws -> QPACKDecoderStreamInstruction {
+        let first = try cursor.readUInt8()
+        if (first & 0x80) != 0 {
+            return .sectionAcknowledgement(
+                streamID: try decodePrefixedInteger(from: &cursor, prefixBits: 7, firstByte: first)
+            )
+        }
+        if (first & 0x40) != 0 {
+            return .streamCancellation(
+                streamID: try decodePrefixedInteger(from: &cursor, prefixBits: 6, firstByte: first)
+            )
+        }
+        let increment = try decodePrefixedInteger(from: &cursor, prefixBits: 6, firstByte: first)
+        guard increment > 0 else {
+            throw QUICCodecError.malformed("QPACK Insert Count Increment must be non-zero")
+        }
+        return .insertCountIncrement(increment)
     }
 }
 
