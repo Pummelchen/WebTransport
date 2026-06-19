@@ -1,5 +1,6 @@
 import Foundation
 import WebTransportCryptoApple
+import WebTransportHTTP3Core
 import WebTransportQUICCore
 import WebTransportTLSCore
 import WebTransportUDPApple
@@ -68,17 +69,20 @@ public struct WebTransportNetworkProbeResult: Equatable, Sendable {
     public var remoteEndpoint: WebTransportNetworkEndpoint
     public var message: String
     public var transport: WebTransportNetworkProbeTransport
+    public var sessionEstablished: Bool
 
     public init(
         localEndpoint: WebTransportNetworkEndpoint,
         remoteEndpoint: WebTransportNetworkEndpoint,
         message: String,
-        transport: WebTransportNetworkProbeTransport = .frame
+        transport: WebTransportNetworkProbeTransport = .frame,
+        sessionEstablished: Bool = false
     ) {
         self.localEndpoint = localEndpoint
         self.remoteEndpoint = remoteEndpoint
         self.message = message
         self.transport = transport
+        self.sessionEstablished = sessionEstablished
     }
 }
 
@@ -105,11 +109,28 @@ public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
             message: decoded.message
         )
         try port.send(response, to: remote)
+        let (requestBytes, requestRemote) = try port.receive(timeoutMilliseconds: timeoutMilliseconds)
+        guard requestRemote == remote else {
+            throw WebTransportNetworkRuntimeError.unexpectedPacket
+        }
+        let applicationRequest = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
+            requestBytes,
+            request: decoded
+        )
+        guard applicationRequest.message == decoded.message else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        let applicationResponse = try WebTransportQUICPacketProbeCodec.encodeServerApplicationResponse(
+            request: decoded,
+            message: applicationRequest.message
+        )
+        try port.send(applicationResponse, to: remote)
         return WebTransportNetworkProbeResult(
             localEndpoint: localEndpoint,
             remoteEndpoint: WebTransportNetworkEndpoint(host: remote.host, port: remote.port),
-            message: decoded.message,
-            transport: .packet
+            message: applicationRequest.message,
+            transport: .packet,
+            sessionEstablished: true
         )
     }
 }
@@ -139,14 +160,32 @@ public struct WebTransportQUICPacketProbeClient: Sendable {
         guard responseMessage == message else {
             throw WebTransportNetworkRuntimeError.invalidProbePayload
         }
+        let request = try WebTransportQUICPacketProbeCodec.decodeClientInitial(packet)
+        let applicationRequest = try WebTransportQUICPacketProbeCodec.encodeClientApplicationRequest(
+            request: request,
+            message: message
+        )
+        try port.send(applicationRequest, to: endpoint.udpEndpoint)
+        let (applicationResponseBytes, applicationResponseRemote) = try port.receive(timeoutMilliseconds: timeoutMilliseconds)
+        guard WebTransportNetworkEndpoint(host: applicationResponseRemote.host, port: applicationResponseRemote.port) == endpoint else {
+            throw WebTransportNetworkRuntimeError.unexpectedPacket
+        }
+        let applicationMessage = try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
+            applicationResponseBytes,
+            request: request
+        )
+        guard applicationMessage == message else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
         return WebTransportNetworkProbeResult(
             localEndpoint: WebTransportNetworkEndpoint(
                 host: port.localEndpoint.host,
                 port: port.localEndpoint.port
             ),
             remoteEndpoint: remoteEndpoint,
-            message: responseMessage,
-            transport: .packet
+            message: applicationMessage,
+            transport: .packet,
+            sessionEstablished: true
         )
     }
 }
@@ -246,6 +285,12 @@ public enum WebTransportQUICPacketProbeCodec {
     private static let clientDestinationConnectionID = Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65])
     private static let clientSourceConnectionID = Data([0x77, 0x74, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e])
     private static let h3ALPN = "h3"
+    private static let sessionAuthority = "localhost"
+    private static let sessionPath = "/wt"
+    private static let sessionOrigin = "https://localhost"
+    private static let sessionProtocol = "demo.v1"
+    private static let sessionStreamID: UInt64 = 0
+    private static let applicationPacketNumber: UInt64 = 1
     private static let clientCryptoFramePayloadBytes = 7
     private static let serverCryptoFramePayloadBytes = 9
 
@@ -326,6 +371,109 @@ public enum WebTransportQUICPacketProbeCodec {
             requiresPing: false,
             requiresAck: true
         ).message
+    }
+
+    public static func encodeClientApplicationRequest(
+        request: WebTransportQUICPacketProbeRequest,
+        message: String
+    ) throws -> Data {
+        let sessionRequest = try WebTransportSessionRequest(
+            authority: sessionAuthority,
+            path: sessionPath,
+            origin: sessionOrigin,
+            availableProtocols: [sessionProtocol]
+        )
+        let headersFrame = try QPACK.headersFrame(fields: sessionRequest.headers())
+        let streamBytes = try HTTP3Frame.encodeFrames([headersFrame])
+        let datagram = try WebTransportDatagramSignaling.serialize(
+            sessionID: sessionStreamID,
+            payload: Data(message.utf8)
+        )
+        return try encodeProtectedShortHeader(
+            destinationConnectionID: request.destinationConnectionID,
+            packetNumber: applicationPacketNumber,
+            keyPhase: .client,
+            frames: [
+                .ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
+                .stream(id: sessionStreamID, offset: 0, fin: false, data: streamBytes),
+                .datagram(datagram)
+            ]
+        )
+    }
+
+    public static func decodeClientApplicationRequest(
+        _ data: Data,
+        request: WebTransportQUICPacketProbeRequest
+    ) throws -> WebTransportQUICPacketApplicationRequest {
+        let packet = try decodeProtectedShortHeader(
+            data,
+            destinationConnectionID: request.destinationConnectionID,
+            keyPhase: .client
+        )
+        guard packet.packetNumber == applicationPacketNumber else {
+            throw WebTransportNetworkRuntimeError.unexpectedPacket
+        }
+        let frames = try QUICFrame.decodeFrames(packet.payload)
+        let fields = try requestHeaderFields(from: frames)
+        try WebTransportHTTP3Headers.validateConnectRequest(fields)
+        guard try availableProtocols(from: fields).contains(sessionProtocol) else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        let message = try messageDatagram(from: frames)
+        return WebTransportQUICPacketApplicationRequest(
+            message: message,
+            packetNumber: packet.packetNumber,
+            requestHeaders: fields
+        )
+    }
+
+    public static func encodeServerApplicationResponse(
+        request: WebTransportQUICPacketProbeRequest,
+        message: String
+    ) throws -> Data {
+        var responseFields = try WebTransportHTTP3Headers.successfulResponse(status: 200)
+        responseFields.append(try HTTPFieldLine(
+            name: WebTransportHeaderName.selectedProtocol,
+            value: WebTransportProtocolNegotiation.encodeItem(sessionProtocol)
+        ))
+        let headersFrame = try QPACK.headersFrame(fields: responseFields)
+        let streamBytes = try HTTP3Frame.encodeFrames([headersFrame])
+        let datagram = try WebTransportDatagramSignaling.serialize(
+            sessionID: sessionStreamID,
+            payload: Data(message.utf8)
+        )
+        return try encodeProtectedShortHeader(
+            destinationConnectionID: request.sourceConnectionID,
+            packetNumber: applicationPacketNumber,
+            keyPhase: .server,
+            frames: [
+                .handshakeDone,
+                .ack(largestAcknowledged: applicationPacketNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
+                .stream(id: sessionStreamID, offset: 0, fin: false, data: streamBytes),
+                .datagram(datagram)
+            ]
+        )
+    }
+
+    public static func decodeServerApplicationResponse(
+        _ data: Data,
+        request: WebTransportQUICPacketProbeRequest
+    ) throws -> String {
+        let packet = try decodeProtectedShortHeader(
+            data,
+            destinationConnectionID: request.sourceConnectionID,
+            keyPhase: .server
+        )
+        guard packet.packetNumber == applicationPacketNumber else {
+            throw WebTransportNetworkRuntimeError.unexpectedPacket
+        }
+        let frames = try QUICFrame.decodeFrames(packet.payload)
+        let fields = try responseHeaderFields(from: frames)
+        try WebTransportHTTP3Headers.validateSuccessfulResponse(fields)
+        guard try selectedProtocol(from: fields) == sessionProtocol else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        return try messageDatagram(from: frames)
     }
 
     static func makeClientHelloHandshakeMessage(message: String) throws -> TLSHandshakeMessage {
@@ -426,6 +574,86 @@ public enum WebTransportQUICPacketProbeCodec {
             )
         }
         return encoded
+    }
+
+    private static func encodeProtectedShortHeader(
+        destinationConnectionID: Data,
+        packetNumber: UInt64,
+        keyPhase: QUICInitialPacketProtection.KeyPhase,
+        frames: [QUICFrame]
+    ) throws -> Data {
+        let plaintextPayload = try QUICFrame.encodeFrames(frames)
+        let keys = try applicationPacketProtectionKeys(for: keyPhase)
+        let packetNumberLength = 2
+        let packetNumberBytes = try QUICPacketNumber.encodeTruncated(packetNumber, byteCount: packetNumberLength)
+        var header = Data()
+        header.append(0x40 | UInt8(packetNumberLength - 1))
+        header.append(destinationConnectionID)
+        let packetNumberOffset = header.count
+        header.append(packetNumberBytes)
+        let ciphertextAndTag = try QUICPacketProtection.seal(
+            plaintext: plaintextPayload,
+            packetNumber: packetNumber,
+            associatedData: header,
+            keys: keys
+        )
+        return try QUICInitialPacketProtection.applyHeaderProtection(
+            headerAndCiphertext: header + ciphertextAndTag,
+            packetNumberOffset: packetNumberOffset,
+            packetNumberLength: packetNumberLength,
+            headerProtectionKey: keys.headerProtectionKey
+        )
+    }
+
+    private static func decodeProtectedShortHeader(
+        _ data: Data,
+        destinationConnectionID: Data,
+        keyPhase: QUICInitialPacketProtection.KeyPhase
+    ) throws -> QUICShortHeaderPacket {
+        guard data.count >= 1 + destinationConnectionID.count + 2 + 16 else {
+            throw WebTransportNetworkRuntimeError.unexpectedPacket
+        }
+        let keys = try applicationPacketProtectionKeys(for: keyPhase)
+        var unprotected = data
+        let packetNumberOffset = 1 + destinationConnectionID.count
+        try QUICInitialPacketProtection.removeHeaderProtection(
+            packet: &unprotected,
+            packetNumberOffset: packetNumberOffset,
+            headerProtectionKey: keys.headerProtectionKey
+        )
+        let first = unprotected[0]
+        guard (first & 0x80) == 0, (first & 0x40) != 0 else {
+            throw WebTransportNetworkRuntimeError.unexpectedPacket
+        }
+        let packetNumberLength = Int(first & 0x03) + 1
+        guard packetNumberOffset + packetNumberLength <= unprotected.count else {
+            throw WebTransportNetworkRuntimeError.unexpectedPacket
+        }
+        guard Data(unprotected[1..<packetNumberOffset]) == destinationConnectionID else {
+            throw WebTransportNetworkRuntimeError.unexpectedPacket
+        }
+        let packetNumberBytes = unprotected[packetNumberOffset..<(packetNumberOffset + packetNumberLength)]
+        let truncatedPacketNumber = packetNumberBytes.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        let packetNumber = try QUICPacketNumber.decodeTruncated(
+            truncatedPacketNumber,
+            byteCount: packetNumberLength,
+            largestAcknowledged: nil
+        )
+        let associatedData = Data(unprotected[..<(packetNumberOffset + packetNumberLength)])
+        let ciphertextAndTag = Data(unprotected[(packetNumberOffset + packetNumberLength)...])
+        let plaintextPayload = try QUICPacketProtection.open(
+            ciphertextAndTag: ciphertextAndTag,
+            packetNumber: packetNumber,
+            associatedData: associatedData,
+            keys: keys
+        )
+        return QUICShortHeaderPacket(
+            destinationConnectionID: destinationConnectionID,
+            keyPhase: (first & 0x04) != 0,
+            packetNumber: packetNumber,
+            packetNumberLength: packetNumberLength,
+            payload: plaintextPayload
+        )
     }
 
     private static func decodeProtectedInitial(
@@ -577,6 +805,94 @@ public enum WebTransportQUICPacketProbeCodec {
             throw WebTransportNetworkRuntimeError.invalidProbePayload
         }
         return item
+    }
+
+    private static func requestHeaderFields(from frames: [QUICFrame]) throws -> [HTTPFieldLine] {
+        try headerFields(from: frames)
+    }
+
+    private static func responseHeaderFields(from frames: [QUICFrame]) throws -> [HTTPFieldLine] {
+        let fields = try headerFields(from: frames)
+        guard fields.contains(where: { $0.name == ":status" }) else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        return fields
+    }
+
+    private static func headerFields(from frames: [QUICFrame]) throws -> [HTTPFieldLine] {
+        let streamData = try streamData(from: frames)
+        let httpFrames = try HTTP3Frame.decodeFrames(streamData)
+        guard let headers = httpFrames.first(where: { $0.type == HTTP3FrameType.headers }) else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        return try QPACK.decodeHeadersFrame(headers)
+    }
+
+    private static func streamData(from frames: [QUICFrame]) throws -> Data {
+        let streams = frames.compactMap { frame -> Data? in
+            guard case .stream(let id, _, _, let data) = frame, id == sessionStreamID else {
+                return nil
+            }
+            return data
+        }
+        guard streams.count == 1, let data = streams.first else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        return data
+    }
+
+    private static func messageDatagram(from frames: [QUICFrame]) throws -> String {
+        let datagrams = frames.compactMap { frame -> Data? in
+            guard case .datagram(let payload) = frame else {
+                return nil
+            }
+            return payload
+        }
+        guard datagrams.count == 1, let datagram = datagrams.first else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        let parsed = try WebTransportDatagramSignaling.parse(datagram)
+        guard parsed.sessionID.rawValue == sessionStreamID,
+              let message = String(data: parsed.payload, encoding: .utf8) else {
+            throw WebTransportNetworkRuntimeError.invalidProbePayload
+        }
+        return message
+    }
+
+    private static func availableProtocols(from fields: [HTTPFieldLine]) throws -> [String] {
+        guard let field = fields.first(where: { $0.name == WebTransportHeaderName.availableProtocols }) else {
+            return []
+        }
+        return try WebTransportProtocolNegotiation.decodeList(field.value)
+    }
+
+    private static func selectedProtocol(from fields: [HTTPFieldLine]) throws -> String? {
+        guard let field = fields.first(where: { $0.name == WebTransportHeaderName.selectedProtocol }) else {
+            return nil
+        }
+        return try WebTransportProtocolNegotiation.decodeItem(field.value)
+    }
+
+    private static func applicationPacketProtectionKeys(
+        for keyPhase: QUICInitialPacketProtection.KeyPhase
+    ) throws -> QUICPacketProtectionKeys {
+        var seed = Data("WebTransportNetworkRuntime packet 1RTT".utf8)
+        seed.append(clientDestinationConnectionID)
+        seed.append(clientSourceConnectionID)
+        seed.append(keyPhase == .client ? 0x01 : 0x02)
+        return try QUICPacketProtection.deriveKeys(trafficSecret: TLS13KeySchedule.transcriptHash(seed))
+    }
+}
+
+public struct WebTransportQUICPacketApplicationRequest: Equatable, Sendable {
+    public var message: String
+    public var packetNumber: UInt64
+    public var requestHeaders: [HTTPFieldLine]
+
+    public init(message: String, packetNumber: UInt64, requestHeaders: [HTTPFieldLine]) {
+        self.message = message
+        self.packetNumber = packetNumber
+        self.requestHeaders = requestHeaders
     }
 }
 
@@ -784,7 +1100,7 @@ enum QUICInitialPacketProtection {
         }
     }
 
-    private static func applyHeaderProtection(
+    static func applyHeaderProtection(
         headerAndCiphertext: Data,
         packetNumberOffset: Int,
         packetNumberLength: Int,
@@ -810,7 +1126,7 @@ enum QUICInitialPacketProtection {
         return output
     }
 
-    private static func removeHeaderProtection(
+    static func removeHeaderProtection(
         packet: inout Data,
         packetNumberOffset: Int,
         headerProtectionKey: Data

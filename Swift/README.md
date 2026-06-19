@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
 
-Draft-15 score: **93%**
+Draft-15 score: **94%**
 
 ## Current Status
 
@@ -18,14 +18,14 @@ Implemented:
 - Structured Fields parsing/serialization for `WT-Protocol` and `WT-Available-Protocols`.
 - QPACK static, literal, Huffman, dynamic table, Base, and post-Base behavior covered by tests.
 - WebTransport streams, datagrams, buffering, rejection, close, drain, reset, stop-sending, and flow-control behavior.
-- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; QUIC packet protection helpers, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation over UDP, UDP loopback support, and prompt-free identity/trust test paths.
-- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3 and QUIC transport-parameter validation for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame probe compatibility mode.
+- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; QUIC packet protection helpers, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation, protected HTTP/3 WebTransport CONNECT/DATAGRAM session probe over UDP, UDP loopback support, and prompt-free identity/trust test paths.
+- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame probe compatibility mode.
 - CLI conformance harness with 35 scenarios shared by `WebTransportClient` and `WebTransportServer`.
 - Apple Silicon release script for production CLI binaries.
 
 Known limitation:
 
-- WebTransport sessions still do not run over a complete external QUIC/TLS/HTTP/3 network connection.
+- The separate-process network mode is still a deterministic runtime probe rather than a complete external QUIC/TLS/HTTP/3 network stack.
 
 ## Commands
 

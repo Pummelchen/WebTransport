@@ -72,6 +72,31 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     #expect(serverPacket.range(of: Data("WT-QUIC-SERVER-FLIGHT".utf8)) == nil)
     #expect(try WebTransportQUICPacketProbeCodec.decodeServerInitial(serverPacket) == "hello")
 
+    let applicationRequestPacket = try WebTransportQUICPacketProbeCodec.encodeClientApplicationRequest(
+        request: decodedRequest,
+        message: "hello"
+    )
+    #expect(applicationRequestPacket.range(of: Data("hello".utf8)) == nil)
+    let applicationRequest = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
+        applicationRequestPacket,
+        request: decodedRequest
+    )
+    #expect(applicationRequest.message == "hello")
+    #expect(applicationRequest.packetNumber == 1)
+    #expect(applicationRequest.requestHeaders.contains {
+        $0.name == ":protocol" && $0.value == "webtransport-h3"
+    })
+
+    let applicationResponsePacket = try WebTransportQUICPacketProbeCodec.encodeServerApplicationResponse(
+        request: decodedRequest,
+        message: applicationRequest.message
+    )
+    #expect(applicationResponsePacket.range(of: Data("hello".utf8)) == nil)
+    #expect(try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
+        applicationResponsePacket,
+        request: decodedRequest
+    ) == "hello")
+
     var truncated = clientPacket
     truncated.removeLast()
     #expect(throws: Error.self) {
@@ -145,6 +170,15 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(mismatchedServerInitial)
     }
+
+    var tamperedApplication = applicationRequestPacket
+    tamperedApplication[tamperedApplication.count - 1] ^= 0x01
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
+            tamperedApplication,
+            request: decodedRequest
+        )
+    }
 }
 
 @Test
@@ -209,6 +243,8 @@ func quicPacketProbeClientServerExchangeOverUDP() async throws {
 
     #expect(clientResult.transport == .packet)
     #expect(serverResult.transport == .packet)
+    #expect(clientResult.sessionEstablished)
+    #expect(serverResult.sessionEstablished)
     #expect(clientResult.message == "packet-runtime")
     #expect(serverResult.message == "packet-runtime")
     #expect(clientResult.remoteEndpoint.port == server.localEndpoint.port)

@@ -67,6 +67,7 @@ let package = Package(
             name: "WebTransportNetworkRuntime",
             dependencies: [
                 "WebTransportCryptoApple",
+                "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
                 "WebTransportTLSCore",
                 "WebTransportUDPApple"

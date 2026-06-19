@@ -25,7 +25,8 @@ struct WebTransportServerCLI {
                     print("network frame probe listening: \(local.host):\(local.port)")
                     result = try server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
                 }
-                print("network \(result.transport.rawValue) probe served: remote=\(result.remoteEndpoint.host):\(result.remoteEndpoint.port) message=\"\(result.message)\"")
+                let session = result.sessionEstablished ? " session=established" : ""
+                print("network \(result.transport.rawValue) probe served: remote=\(result.remoteEndpoint.host):\(result.remoteEndpoint.port)\(session) message=\"\(result.message)\"")
                 return
             } catch {
                 fputs("\(executable) network probe failed: \(error)\n", stderr)
