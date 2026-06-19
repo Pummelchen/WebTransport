@@ -929,7 +929,7 @@ private func runClientServerAPIDemo() async throws {
           serverResult.sessionEstablished,
           connected.message == message,
           serverResult.message == message else {
-        throw QUICCodecError.malformed("WebTransport network facade did not complete echo session")
+        throw QUICCodecError.malformed("WebTransport network API did not complete echo session")
     }
 }
 
@@ -956,7 +956,7 @@ private func runClientServerAPIDemoAttempt(
             ))
             let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
             async let served = listener.serveOne()
-            let connected = try await client.connect(to: listener.localEndpoint, message: message)
+            let connected = try await client.echo(to: listener.localEndpoint, message: message)
             let serverResult = try await served
             return (connected, serverResult)
         } catch {
@@ -964,7 +964,7 @@ private func runClientServerAPIDemoAttempt(
             try await Task.sleep(for: .milliseconds(100))
         }
     }
-    throw lastError ?? QUICCodecError.malformed("WebTransport network facade demo failed")
+    throw lastError ?? QUICCodecError.malformed("WebTransport network API demo failed")
 }
 
 private func expectThrows(_ operation: () throws -> Void) throws {

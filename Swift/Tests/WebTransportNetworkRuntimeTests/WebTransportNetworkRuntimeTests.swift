@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import WebTransportNetworkRuntime
 import WebTransportQUICCore
@@ -24,23 +25,26 @@ func networkProbeCodecRoundTripsAndRejectsMalformedPackets() throws {
 
 @Test
 func networkProbeClientServerExchangeOverUDP() async throws {
-    let server = try WebTransportNetworkProbeServer(bindPort: 0)
-    let task = Task.detached {
-        try server.serveOne(timeoutMilliseconds: 15_000)
-    }
-    try await Task.sleep(for: .milliseconds(25))
+    let (clientResult, serverResult, localPort) = try await WebTransportRuntimeLoopbackGate.withLock(label: #function) {
+        let server = try WebTransportNetworkProbeServer(bindPort: 0)
+        let task = Task.detached {
+            try server.serveOne(timeoutMilliseconds: 15_000)
+        }
+        try await Task.sleep(for: .milliseconds(25))
 
-    let client = WebTransportNetworkProbeClient()
-    let clientResult = try client.run(
-        to: server.localEndpoint,
-        message: "runtime",
-        timeoutMilliseconds: 15_000
-    )
-    let serverResult = try await task.value
+        let client = WebTransportNetworkProbeClient()
+        let clientResult = try client.run(
+            to: server.localEndpoint,
+            message: "runtime",
+            timeoutMilliseconds: 15_000
+        )
+        let serverResult = try await task.value
+        return (clientResult, serverResult, server.localEndpoint.port)
+    }
 
     #expect(clientResult.message == "runtime")
     #expect(serverResult.message == "runtime")
-    #expect(clientResult.remoteEndpoint.port == server.localEndpoint.port)
+    #expect(clientResult.remoteEndpoint.port == localPort)
     #expect(serverResult.remoteEndpoint.port == clientResult.localEndpoint.port)
 }
 
@@ -314,19 +318,22 @@ func quicPacketProbeRejectsWrongALPNAndTransportParameters() throws {
 
 @Test
 func quicPacketProbeClientServerExchangeOverUDP() async throws {
-    let server = try WebTransportQUICPacketProbeServer(bindPort: 0)
-    let task = Task.detached {
-        try server.serveOne(timeoutMilliseconds: 15_000)
-    }
-    try await Task.sleep(for: .milliseconds(25))
+    let (clientResult, serverResult, localPort) = try await WebTransportRuntimeLoopbackGate.withLock(label: #function) {
+        let server = try WebTransportQUICPacketProbeServer(bindPort: 0)
+        let task = Task.detached {
+            try server.serveOne(timeoutMilliseconds: 15_000)
+        }
+        try await Task.sleep(for: .milliseconds(25))
 
-    let client = WebTransportQUICPacketProbeClient()
-    let clientResult = try client.run(
-        to: server.localEndpoint,
-        message: "packet-runtime",
-        timeoutMilliseconds: 15_000
-    )
-    let serverResult = try await task.value
+        let client = WebTransportQUICPacketProbeClient()
+        let clientResult = try client.run(
+            to: server.localEndpoint,
+            message: "packet-runtime",
+            timeoutMilliseconds: 15_000
+        )
+        let serverResult = try await task.value
+        return (clientResult, serverResult, server.localEndpoint.port)
+    }
 
     #expect(clientResult.transport == .packet)
     #expect(serverResult.transport == .packet)
@@ -334,7 +341,7 @@ func quicPacketProbeClientServerExchangeOverUDP() async throws {
     #expect(serverResult.sessionEstablished)
     #expect(clientResult.message == "packet-runtime")
     #expect(serverResult.message == "packet-runtime")
-    #expect(clientResult.remoteEndpoint.port == server.localEndpoint.port)
+    #expect(clientResult.remoteEndpoint.port == localPort)
     #expect(serverResult.remoteEndpoint.port == clientResult.localEndpoint.port)
 }
 
@@ -448,4 +455,70 @@ private func clientHelloForValidationTest(
             try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519])
         ]
     ).handshakeMessage()
+}
+
+private enum WebTransportRuntimeLoopbackGate {
+    private static let lockPath = "/tmp/webtransport-loopback-tests.dirlock"
+    private static let ownerFile = "owner.txt"
+    private static let maximumWait: TimeInterval = 180
+
+    static func withLock<T>(label: String, _ body: () async throws -> T) async throws -> T {
+        try await acquireAsync(label: label)
+        defer {
+            release()
+        }
+        return try await body()
+    }
+
+    private static func acquireAsync(label: String) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try acquireBlocking(label: label)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func acquireBlocking(label: String) throws {
+        let deadline = Date().addingTimeInterval(maximumWait)
+        while true {
+            if Darwin.mkdir(lockPath, S_IRWXU) == 0 {
+                try writeOwner(label)
+                return
+            }
+            guard errno == EEXIST else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            if Date() >= deadline {
+                throw NSError(
+                    domain: "WebTransportRuntimeLoopbackGate",
+                    code: Int(ETIMEDOUT),
+                    userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for loopback lock held by \(readOwner())"]
+                )
+            }
+            usleep(10_000)
+        }
+    }
+
+    private static func writeOwner(_ label: String) throws {
+        let owner = "\(label) pid=\(getpid())"
+        try owner.write(
+            toFile: "\(lockPath)/\(ownerFile)",
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    private static func readOwner() -> String {
+        (try? String(contentsOfFile: "\(lockPath)/\(ownerFile)", encoding: .utf8)) ?? "unknown owner"
+    }
+
+    private static func release() {
+        _ = Darwin.unlink("\(lockPath)/\(ownerFile)")
+        _ = Darwin.rmdir(lockPath)
+    }
 }

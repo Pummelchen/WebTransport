@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
 
-Draft-15 score: **98%**
+Draft-15 score: **99%**
 
 ## Current Status
 
@@ -22,10 +22,10 @@ Implemented:
 - Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, validated Certificate/CertificateVerify/Finished handling, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session signaling for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame compatibility mode.
 - CLI conformance harness with 40 scenarios shared by `WebTransportClient` and `WebTransportServer`, including positive/negative interop matrices for CONNECT, streams, datagrams, GOAWAY, close/drain, malformed input, and flow-control errors.
 - Deterministic parser/property hardening tests for QPACK, HTTP/3 frames, capsules, QUIC varints, QUIC transport parameters, WebTransport stream prefixes, resource limits, malformed peers, ordering, replay, exhaustion, and close/reset races.
-- Process-level CLI tests for help/list/error/scenario exit codes and IPv4/IPv6 frame/packet loopback.
+- Process-level CLI tests for help/list/error/scenario exit codes, IPv4/IPv6 packet loopback, and explicit rejection of unsupported network transport modes.
 - Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
-- Public `WebTransport` package facade backed by the Network.framework QUIC/TLS/HTTP/3 runtime; the former public in-process client/server and placeholder stream/session types are no longer part of the production API.
+- Public `WebTransport` package API backed by the Network.framework QUIC/TLS/HTTP/3 runtime, including sessions, bidirectional streams, datagrams, drain, and close.
 - External interoperability proof runners via `./run-third-party-interop.sh` and `./run-pywebtransport-interop.sh`. The three-endpoint runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream echo proofs in `.build/external-interop/third-party-latest.json`. Configured public endpoint probing remains available through `./run-external-interop.sh`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
 - Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
@@ -33,7 +33,7 @@ Implemented:
 
 Recent status:
 
-- The separate-process `--transport packet` and `--transport frame` paths are wired to the Network.framework QUIC/TLS/HTTP/3 runtime. Platform trust is the runtime default. The `local-self-signed` trust mode is test-only and rejected for non-loopback hosts; the CLI auto-selects it only for localhost loopback development endpoints.
+- The separate-process `--transport packet` path is wired to the Network.framework QUIC/TLS/HTTP/3 runtime. `--transport frame` is rejected for real `--listen/--connect` sessions and remains available only inside lower-level conformance scenarios. Platform trust is the runtime default. The `local-self-signed` trust mode is test-only and rejected for non-loopback hosts; the CLI auto-selects it only for localhost loopback development endpoints.
 
 ## Public API Surface
 
@@ -42,6 +42,7 @@ The high-level `WebTransport` product exposes:
 - `WebTransportClientConfiguration` and `WebTransportServerConfiguration` for authority, path, origin, subprotocol policy, trust policy, settings validation, and timeouts.
 - `WebTransportEndpoint` and `WebTransportConnectionResult` for network endpoint and session-result values.
 - `WebTransportClient`, `WebTransportServer`, and `WebTransportListeningServer` for Swift concurrency network session establishment over the production runtime.
+- `WebTransportSession` and `WebTransportBidirectionalStream` for app-controlled stream, datagram, drain, and close operations.
 - `WebTransportLogger` and `WebTransportLogEvent` for sanitized opt-in production events.
 - `WebTransportErrorSurface.publicDescription(for:)` for user-visible/logged error text that redacts peer-controlled detail.
 

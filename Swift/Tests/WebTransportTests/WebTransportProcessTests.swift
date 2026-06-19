@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 
 // MARK: - Help and Scenario Selection
@@ -220,15 +221,29 @@ func webTransportCLIProcessMalformedFlowAndStreamMatrix() throws {
 // MARK: - Connectivity and Loopback
 
 @Test
-func webTransportCLIProcessLoopbackCoversFrameAndPacketTransports() throws {
+func webTransportCLIProcessLoopbackCoversPacketTransportAndRejectsFrameNetworkMode() throws {
     try WebTransportProcessSupport.withExclusiveProcessExecution {
         guard try WebTransportProcessSupport.debugProductsAvailable() else {
             return
         }
-        try WebTransportProcessSupport.runLoopback(host: "127.0.0.1", transport: "frame", expectsEstablishedSession: true)
         try WebTransportProcessSupport.runLoopback(host: "127.0.0.1", transport: "packet", expectsEstablishedSession: true)
-        try WebTransportProcessSupport.runLoopback(host: "::1", transport: "frame", expectsEstablishedSession: true)
         try WebTransportProcessSupport.runLoopback(host: "::1", transport: "packet", expectsEstablishedSession: true)
+
+        let client = try WebTransportProcessSupport.productURL("WebTransportClient", configuration: "debug")
+        let server = try WebTransportProcessSupport.productURL("WebTransportServer", configuration: "debug")
+        let rejectedClient = try WebTransportProcessSupport.run(
+            client,
+            ["--connect", "127.0.0.1:65000", "--transport", "frame", "--timeout-ms", "200"]
+        )
+        #expect(rejectedClient.exitCode == 1)
+        #expect(rejectedClient.stderr.contains("packet transport only"))
+
+        let rejectedServer = try WebTransportProcessSupport.run(
+            server,
+            ["--listen", "127.0.0.1:0", "--transport", "frame", "--timeout-ms", "200"]
+        )
+        #expect(rejectedServer.exitCode == 1)
+        #expect(rejectedServer.stderr.contains("packet transport only"))
     }
 }
 
@@ -497,7 +512,7 @@ func webTransportAPISurfaceIsExercisedByPublicImports() throws {
     #expect(FileManager.default.isExecutableFile(atPath: script.path))
 }
 
-private enum WebTransportProcessSupport {
+enum WebTransportProcessSupport {
     private static let processLock = NSLock()
 
     static let packageDirectory: URL = {
@@ -507,12 +522,22 @@ private enum WebTransportProcessSupport {
             .deletingLastPathComponent()
     }()
 
-    static func withExclusiveProcessExecution<T>(_ body: () throws -> T) throws -> T {
+    static func withExclusiveProcessExecution<T>(
+        label: String = #function,
+        _ body: () throws -> T
+    ) throws -> T {
         processLock.lock()
         defer {
             processLock.unlock()
         }
         return try body()
+    }
+
+    static func withExclusiveProcessExecution<T>(
+        label: String = #function,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        try await WebTransportLoopbackProcessGate.withLock(label: label, body)
     }
 
     static func debugProductsAvailable() throws -> Bool {
@@ -549,6 +574,7 @@ private enum WebTransportProcessSupport {
         }
 
         let line = try runningServer.waitForOutput(containing: "listening:", timeout: 5)
+        _ = try runningServer.waitForOutput(containing: "certificate-sha256:", timeout: 5)
         let port = try parseListeningPort(from: line)
         let connectEndpoint = endpointArgument(host: host, port: port)
         let loopbackName = "loopback-\(transport)-\(host == "::1" ? "ipv6" : "ipv4")"
@@ -570,7 +596,7 @@ private enum WebTransportProcessSupport {
         #expect(serverResult.stdout.contains(loopbackName))
     }
 
-    static func run(
+    fileprivate static func run(
         _ executable: URL,
         _ arguments: [String],
         timeout: TimeInterval = 30,
@@ -602,7 +628,7 @@ private enum WebTransportProcessSupport {
         )
     }
 
-    static func start(_ executable: URL, _ arguments: [String]) throws -> RunningProcess {
+    fileprivate static func start(_ executable: URL, _ arguments: [String]) throws -> RunningProcess {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -663,7 +689,7 @@ private enum WebTransportProcessSupport {
         return directory
     }
 
-    static func writeExternalInteropProof(
+    fileprivate static func writeExternalInteropProof(
         implementation: String,
         endpoint: String,
         authority: String,
@@ -699,6 +725,76 @@ private enum WebTransportProcessSupport {
         try data.write(to: directory.appendingPathComponent("latest.json"))
         try result.stdout.write(to: directory.appendingPathComponent("latest.stdout"), atomically: true, encoding: .utf8)
         try result.stderr.write(to: directory.appendingPathComponent("latest.stderr"), atomically: true, encoding: .utf8)
+    }
+}
+
+private enum WebTransportLoopbackProcessGate {
+    private static let lockPath = "/tmp/webtransport-loopback-tests.dirlock"
+    private static let ownerFile = "owner.txt"
+    private static let maximumWait: TimeInterval = 180
+
+    static func withLock<T>(label: String, _ body: () throws -> T) throws -> T {
+        try acquireBlocking(label: label)
+        defer {
+            release()
+        }
+        return try body()
+    }
+
+    static func withLock<T>(label: String, _ body: () async throws -> T) async throws -> T {
+        try await acquireAsync(label: label)
+        defer {
+            release()
+        }
+        return try await body()
+    }
+
+    private static func acquireAsync(label: String) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try acquireBlocking(label: label)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func acquireBlocking(label: String) throws {
+        let deadline = Date().addingTimeInterval(maximumWait)
+        while true {
+            if Darwin.mkdir(lockPath, S_IRWXU) == 0 {
+                try writeOwner(label)
+                return
+            }
+            guard errno == EEXIST else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            if Date() >= deadline {
+                throw ProcessTestError.timeout("loopback-lock", [readOwner()])
+            }
+            usleep(10_000)
+        }
+    }
+
+    private static func writeOwner(_ label: String) throws {
+        let owner = "\(label) pid=\(getpid())"
+        try owner.write(
+            toFile: "\(lockPath)/\(ownerFile)",
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    private static func readOwner() -> String {
+        (try? String(contentsOfFile: "\(lockPath)/\(ownerFile)", encoding: .utf8)) ?? "unknown owner"
+    }
+
+    private static func release() {
+        _ = Darwin.unlink("\(lockPath)/\(ownerFile)")
+        _ = Darwin.rmdir(lockPath)
     }
 }
 

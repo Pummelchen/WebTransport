@@ -12,35 +12,23 @@ struct WebTransportClientCLI {
         if arguments.contains("--connect") || arguments.contains(where: { $0.hasPrefix("--connect=") }) {
             do {
                 let options = try NetworkClientOptions.parse(arguments)
-                let result: WebTransportNetworkSessionResult
-                switch options.transport {
-                case .packet:
-                    result = try await WebTransportQUICClient(
-                        trustPolicy: options.trustPolicy
-                    ).run(
-                        to: options.endpoint,
-                        message: options.message,
-                        authority: options.authority,
-                        path: options.path,
-                        origin: options.origin,
-                        protocols: options.protocols,
-                        settingsValidation: options.settingsValidation,
-                        timeoutMilliseconds: options.timeoutMilliseconds
-                    )
-                case .frame:
-                    result = try await WebTransportQUICClient(
-                        trustPolicy: options.trustPolicy
-                    ).run(
-                        to: options.endpoint,
-                        message: options.message,
-                        authority: options.authority,
-                        path: options.path,
-                        origin: options.origin,
-                        protocols: options.protocols,
-                        settingsValidation: options.settingsValidation,
-                        timeoutMilliseconds: options.timeoutMilliseconds
+                guard options.transport == .packet else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport(
+                        "real --connect sessions support packet transport only"
                     )
                 }
+                let result = try await WebTransportQUICClient(
+                    trustPolicy: options.trustPolicy
+                ).run(
+                    to: options.endpoint,
+                    message: options.message,
+                    authority: options.authority,
+                    path: options.path,
+                    origin: options.origin,
+                    protocols: options.protocols,
+                    settingsValidation: options.settingsValidation,
+                    timeoutMilliseconds: options.timeoutMilliseconds
+                )
                 let session = result.sessionEstablished ? " session=established" : ""
                 print("network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
                 return
@@ -91,7 +79,7 @@ struct WebTransportClientCLI {
             ))
             let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
             async let served = listener.serveOne()
-            let result = try await client.connect(to: listener.localEndpoint, message: "hello from WebTransportClient")
+            let result = try await client.echo(to: listener.localEndpoint, message: "hello from WebTransportClient")
             _ = try await served
             print("client received reliable stream echo path: \(result.message)")
             print("WebTransportClient demo completed")

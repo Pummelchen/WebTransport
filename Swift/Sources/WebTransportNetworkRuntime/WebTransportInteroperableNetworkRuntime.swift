@@ -73,16 +73,15 @@ public struct WebTransportQUICClient: Sendable {
     }
 
     @discardableResult
-    public func run(
+    public func connectSession(
         to endpoint: WebTransportNetworkEndpoint,
-        message: String,
         authority: String? = nil,
         path: String = "/wt",
         origin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
         timeoutMilliseconds: Int32 = 1_000
-    ) async throws -> WebTransportNetworkSessionResult {
+    ) async throws -> WebTransportNetworkSession {
         try trustPolicy.validate(endpoint: endpoint)
         let host = InteroperableQUICRuntime.host(for: endpoint.host)
         let destination = NWEndpoint.hostPort(
@@ -128,9 +127,6 @@ public struct WebTransportQUICClient: Sendable {
             } catch {
                 await inboundStreams.fail(error)
             }
-        }
-        defer {
-            inboundTask.cancel()
         }
 
         let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
@@ -200,48 +196,69 @@ public struct WebTransportQUICClient: Sendable {
             throw WebTransportNetworkRuntimeError.unexpectedFrame
         }
 
-        _ = try manager.receiveServerSessionResponse(streamID: requestStreamID, frame: responseFrame)
+        let session = try manager.receiveServerSessionResponse(streamID: requestStreamID, frame: responseFrame)
+        guard session.state == .accepted else {
+            inboundTask.cancel()
+            throw WebTransportDraft15Error(
+                kind: .requirementsNotMet,
+                message: "WebTransport session was rejected"
+            )
+        }
         let sessionID = try WebTransportSessionID.fromRequestStreamID(requestStreamID)
 
-        let responseMessage: String
-        if useDatagrams {
-            InteroperableQUICDebug.log("client using datagram path")
-            let datagrams = try await connection.datagrams
-            let datagramPayload = try manager.makeDatagramFrame(sessionID: sessionID, payload: Data(message.utf8))
-            try await runWithTimeout {
-                try await datagrams.send(datagramPayload.datagramPayload)
-            }
-            InteroperableQUICDebug.log("client sent datagram")
+        return WebTransportNetworkSession(
+            connection: connection,
+            inboundStreams: inboundStreams,
+            inboundTask: inboundTask,
+            manager: manager,
+            sessionID: sessionID,
+            selectedProtocol: session.selectedProtocol,
+            localControlStream: localControlStream,
+            connectStream: requestStream,
+            localEndpoint: WebTransportNetworkEndpoint(host: endpoint.host, port: endpoint.port),
+            remoteEndpoint: endpoint,
+            datagramsAvailable: useDatagrams,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
+    }
 
-            let receivedDatagram = try await InteroperableQUICHelpers.withTimeout(remainingTimeout()) {
-                try await datagrams.receive().content
-            }
-            InteroperableQUICDebug.log("client received datagram bytes=\(receivedDatagram.count)")
-            let responseSessionID = try manager.receiveDatagramFrame(.datagram(receivedDatagram))
-            guard let responsePayload = manager.popDatagramPayload(sessionID: responseSessionID) else {
-                throw WebTransportNetworkRuntimeError.invalidPayload
-            }
+    @discardableResult
+    public func run(
+        to endpoint: WebTransportNetworkEndpoint,
+        message: String,
+        authority: String? = nil,
+        path: String = "/wt",
+        origin: String? = "https://localhost",
+        protocols: [String] = ["demo.v1"],
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        timeoutMilliseconds: Int32 = 1_000
+    ) async throws -> WebTransportNetworkSessionResult {
+        let session = try await connectSession(
+            to: endpoint,
+            authority: authority,
+            path: path,
+            origin: origin,
+            protocols: protocols,
+            settingsValidation: settingsValidation,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
+
+        let responseMessage: String
+        let preferStreams = settingsValidation == .pywebtransportStreamInterop
+        if session.datagramsAvailable && !preferStreams {
+            InteroperableQUICDebug.log("client using datagram path")
+            try await session.sendDatagram(Data(message.utf8), timeoutMilliseconds: timeoutMilliseconds)
+            InteroperableQUICDebug.log("client sent datagram")
+            let responsePayload = try await session.receiveDatagram(timeoutMilliseconds: timeoutMilliseconds)
             guard let responseMessageValue = String(data: responsePayload, encoding: .utf8) else {
                 throw WebTransportNetworkRuntimeError.invalidPayload
             }
             responseMessage = responseMessageValue
         } else {
             InteroperableQUICDebug.log("client using stream fallback path")
-            let fallbackStream = try await InteroperableQUICHelpers.withTimeout(
-                remainingTimeout()
-            ) {
-                try await connection.openStream(directionality: .bidirectional)
-            }
-            var mutableFallbackPayload = try WebTransportStreamSignaling.serializeBidirectionalPrefix(sessionID: sessionID.rawValue)
-            mutableFallbackPayload.append(contentsOf: Data(message.utf8))
-            let fallbackPayload = mutableFallbackPayload
-            try await runWithTimeout {
-                try await fallbackStream.send(fallbackPayload, endOfStream: true)
-            }
-            let fallbackResponse = try await InteroperableQUICHelpers.readStream(
-                fallbackStream,
-                timeoutMilliseconds: remainingTimeout()
-            )
+            let fallbackStream = try await session.openBidirectionalStream(timeoutMilliseconds: timeoutMilliseconds)
+            try await fallbackStream.send(Data(message.utf8), endOfStream: true, timeoutMilliseconds: timeoutMilliseconds)
+            let fallbackResponse = try await fallbackStream.receive(timeoutMilliseconds: timeoutMilliseconds)
             guard let responseMessageValue = String(data: fallbackResponse, encoding: .utf8) else {
                 throw WebTransportNetworkRuntimeError.invalidPayload
             }
@@ -249,16 +266,284 @@ public struct WebTransportQUICClient: Sendable {
         }
 
         return WebTransportNetworkSessionResult(
-            localEndpoint: WebTransportNetworkEndpoint(host: endpoint.host, port: endpoint.port),
-            remoteEndpoint: endpoint,
+            localEndpoint: session.localEndpoint,
+            remoteEndpoint: session.remoteEndpoint,
             message: responseMessage,
             transport: .packet,
             sessionEstablished: true
         )
     }
 }
+
+public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
+    public let streamID: UInt64
+
+    private let stream: QUIC.Stream<QUICStream>
+    private let timeoutMilliseconds: Int32
+    private let prefix: Data?
+    private let state: WebTransportNetworkStreamState
+
+    init(
+        stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        prefix: Data? = nil,
+        initialPayload: Data = Data()
+    ) {
+        self.streamID = stream.streamID
+        self.stream = stream
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.prefix = prefix
+        self.state = WebTransportNetworkStreamState(prefix: prefix, initialPayload: initialPayload)
+    }
+
+    public func send(
+        _ data: Data,
+        endOfStream: Bool = false,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws {
+        var mutablePayload = Data()
+        if let prefix = await state.consumeOutboundPrefix() {
+            mutablePayload.append(prefix)
+        }
+        mutablePayload.append(data)
+        let payload = mutablePayload
+        try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await self.stream.send(payload, endOfStream: endOfStream)
+        }
+    }
+
+    public func receive(
+        maximumBytes: Int = 64 * 1024,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> Data {
+        if let initialPayload = await state.consumeInitialPayload(), !initialPayload.isEmpty {
+            return initialPayload
+        }
+        return try await InteroperableQUICHelpers.readStream(
+            stream,
+            timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
+            maxBytes: maximumBytes
+        )
+    }
+}
+
+public final class WebTransportNetworkSession: @unchecked Sendable {
+    public let localEndpoint: WebTransportNetworkEndpoint
+    public let remoteEndpoint: WebTransportNetworkEndpoint
+    public let sessionID: UInt64
+    public let selectedProtocol: String?
+    public let datagramsAvailable: Bool
+    public let transport: WebTransportNetworkTransport = .packet
+
+    private let connection: NetworkConnection<QUIC>
+    private let inboundStreams: InteroperableQUICInboundStreamCollector
+    private let inboundTask: Task<Void, Never>
+    private let manager: WebTransportNetworkSessionManagerState
+    private let localControlStream: QUIC.Stream<QUICStream>
+    private let connectStream: QUIC.Stream<QUICStream>
+    private let timeoutMilliseconds: Int32
+
+    fileprivate init(
+        connection: NetworkConnection<QUIC>,
+        inboundStreams: InteroperableQUICInboundStreamCollector,
+        inboundTask: Task<Void, Never>,
+        manager: WebTransportSessionManager,
+        sessionID: WebTransportSessionID,
+        selectedProtocol: String?,
+        localControlStream: QUIC.Stream<QUICStream>,
+        connectStream: QUIC.Stream<QUICStream>,
+        localEndpoint: WebTransportNetworkEndpoint,
+        remoteEndpoint: WebTransportNetworkEndpoint,
+        datagramsAvailable: Bool,
+        timeoutMilliseconds: Int32
+    ) {
+        self.connection = connection
+        self.inboundStreams = inboundStreams
+        self.inboundTask = inboundTask
+        self.manager = WebTransportNetworkSessionManagerState(manager: manager)
+        self.sessionID = sessionID.rawValue
+        self.selectedProtocol = selectedProtocol
+        self.localControlStream = localControlStream
+        self.connectStream = connectStream
+        self.localEndpoint = localEndpoint
+        self.remoteEndpoint = remoteEndpoint
+        self.datagramsAvailable = datagramsAvailable
+        self.timeoutMilliseconds = timeoutMilliseconds
+    }
+
+    deinit {
+        inboundTask.cancel()
+    }
+
+    public func openBidirectionalStream(
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> WebTransportNetworkBidirectionalStream {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        let started = Date()
+        var lastError: Error?
+        while true {
+            do {
+                let stream = try await InteroperableQUICHelpers.withTimeout(
+                    InteroperableQUICHelpers.remainingTimeout(
+                        timeoutMilliseconds: timeout,
+                        started: started
+                    )
+                ) {
+                    try await self.connection.openStream(directionality: .bidirectional)
+                }
+                let prefix = try WebTransportStreamSignaling.serializeBidirectionalPrefix(sessionID: sessionID)
+                return WebTransportNetworkBidirectionalStream(
+                    stream: stream,
+                    timeoutMilliseconds: timeout,
+                    prefix: prefix
+                )
+            } catch {
+                guard InteroperableQUICHelpers.isTransientNotConnected(error) else {
+                    throw error
+                }
+                lastError = error
+                let remaining = InteroperableQUICHelpers.remainingTimeout(
+                    timeoutMilliseconds: timeout,
+                    started: started
+                )
+                guard remaining > 100 else {
+                    throw lastError ?? error
+                }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    public func acceptBidirectionalStream(
+        maximumInitialBytes: Int = 64 * 1024,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> WebTransportNetworkBidirectionalStream {
+        let stream = try await inboundStreams.next(
+            direction: InteroperableQUICHelpers.bidirectionalStreamDirection,
+            timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        )
+        let firstChunk = try await InteroperableQUICHelpers.readStream(
+            stream,
+            timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
+            maxBytes: maximumInitialBytes
+        )
+        let prefix = try WebTransportStreamSignaling.parsePrefix(firstChunk)
+        guard prefix.form == .bidirectional, prefix.sessionID.rawValue == sessionID else {
+            throw WebTransportNetworkRuntimeError.unexpectedFrame
+        }
+        return WebTransportNetworkBidirectionalStream(
+            stream: stream,
+            timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
+            initialPayload: prefix.remainingPayload
+        )
+    }
+
+    public func sendDatagram(
+        _ data: Data,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws {
+        guard datagramsAvailable else {
+            throw WebTransportNetworkRuntimeError.invalidTransport("QUIC DATAGRAM is not available on this connection")
+        }
+        let datagrams = try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await self.connection.datagrams
+        }
+        let frame = try await manager.withManager { manager in
+            try manager.makeDatagramFrame(sessionID: WebTransportSessionID(rawValue: self.sessionID), payload: data)
+        }
+        guard case .datagram(let payload) = frame else {
+            throw WebTransportNetworkRuntimeError.invalidPayload
+        }
+        try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await datagrams.send(payload)
+        }
+    }
+
+    public func receiveDatagram(
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> Data {
+        guard datagramsAvailable else {
+            throw WebTransportNetworkRuntimeError.invalidTransport("QUIC DATAGRAM is not available on this connection")
+        }
+        let datagrams = try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await self.connection.datagrams
+        }
+        let receivedDatagram = try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await datagrams.receive().content
+        }
+        return try await manager.withManager { manager in
+            let responseSessionID = try manager.receiveDatagramFrame(.datagram(receivedDatagram))
+            guard responseSessionID.rawValue == self.sessionID,
+                  let payload = manager.popDatagramPayload(sessionID: responseSessionID) else {
+                throw WebTransportNetworkRuntimeError.invalidPayload
+            }
+            return payload
+        }
+    }
+
+    public func drain(timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil) async throws {
+        let capsule = try await manager.withManager { manager in
+            try manager.makeDrainSessionCapsule(sessionID: WebTransportSessionID(rawValue: self.sessionID))
+        }
+        try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await self.connectStream.send(capsule, endOfStream: false)
+        }
+    }
+
+    public func close(
+        applicationErrorCode: UInt32,
+        reason: String = "",
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws {
+        let capsule = try await manager.withManager { manager in
+            try manager.makeCloseSessionCapsule(
+                sessionID: WebTransportSessionID(rawValue: self.sessionID),
+                applicationErrorCode: applicationErrorCode,
+                message: reason
+            )
+        }
+        try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await self.connectStream.send(capsule, endOfStream: true)
+        }
+    }
+}
+
+private actor WebTransportNetworkStreamState {
+    private var outboundPrefix: Data?
+    private var initialPayload: Data?
+
+    init(prefix: Data?, initialPayload: Data) {
+        self.outboundPrefix = prefix
+        self.initialPayload = initialPayload
+    }
+
+    func consumeOutboundPrefix() -> Data? {
+        let value = outboundPrefix
+        outboundPrefix = nil
+        return value
+    }
+
+    func consumeInitialPayload() -> Data? {
+        let value = initialPayload
+        initialPayload = nil
+        return value
+    }
+}
+
+private actor WebTransportNetworkSessionManagerState {
+    private var manager: WebTransportSessionManager
+
+    init(manager: WebTransportSessionManager) {
+        self.manager = manager
+    }
+
+    func withManager<T: Sendable>(_ body: @Sendable (inout WebTransportSessionManager) throws -> T) rethrows -> T {
+        try body(&manager)
+    }
+}
+
 public final class WebTransportQUICServer: @unchecked Sendable {
-    public var localEndpoint: WebTransportNetworkEndpoint
+    public private(set) var localEndpoint: WebTransportNetworkEndpoint
     public let certificateSHA256: Data
 
     private let listener: NetworkListener<QUIC>
@@ -277,7 +562,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        localOnly: Bool = false
     ) throws {
         try self.init(
             endpoint: WebTransportNetworkEndpoint(port: bindPort),
@@ -286,7 +572,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             path: path,
             allowedOrigin: allowedOrigin,
             protocols: protocols,
-            settingsValidation: settingsValidation
+            settingsValidation: settingsValidation,
+            localOnly: localOnly
         )
     }
 
@@ -297,12 +584,13 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        localOnly: Bool = false
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
         let identity = try InteroperableTLSIdentity.create()
         certificateSHA256 = Data(SHA256.hash(data: identity.certificateDER))
-        let parameters = NWParametersBuilder(auto: {
+        let baseParameters = NWParametersBuilder(auto: {
             InteroperableQUICRuntime.makeServerQUIC(identity: identity.networkIdentity)
         })
         .localEndpoint(
@@ -311,7 +599,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                 port: NWEndpoint.Port(rawValue: endpoint.port) ?? .any
             )
         )
-        .localOnly(true)
+        let parameters = localOnly ? baseParameters.localOnly(true) : baseParameters
 
         listener = try NetworkListener<QUIC>(using: parameters)
             .newConnectionLimit(max(1, max(16, maxConcurrentConnections * 2)))
@@ -350,17 +638,20 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         return localEndpoint
     }
 
-    deinit {
+    public func shutdown() {
         listenerTask.cancel()
     }
 
-    @discardableResult
-    public func serveOne(timeoutMilliseconds: Int32 = 1_000) async throws -> WebTransportNetworkSessionResult {
+    deinit {
+        shutdown()
+    }
+
+    public func acceptSession(timeoutMilliseconds: Int32 = 1_000) async throws -> WebTransportNetworkSession {
         let connection = try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
             try await self.acceptedConnections.dequeue()
         }
-        InteroperableQUICDebug.log("server serveOne dequeued")
-        InteroperableQUICDebug.log("server serveOne connection state before wait: \(connection.state)")
+        InteroperableQUICDebug.log("server acceptSession dequeued")
+        InteroperableQUICDebug.log("server acceptSession connection state before wait: \(connection.state)")
         connection.onStateUpdate { _, state in
             InteroperableQUICDebug.log("server connection state update: \(state)")
         }
@@ -377,16 +668,40 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             throw error
         }
 
-        return try await serveSession(
+        return try await acceptSession(
             on: connection,
             timeoutMilliseconds: timeoutMilliseconds
         )
     }
 
-    private func serveSession(
+    @discardableResult
+    public func serveOne(timeoutMilliseconds: Int32 = 1_000) async throws -> WebTransportNetworkSessionResult {
+        let session = try await acceptSession(timeoutMilliseconds: timeoutMilliseconds)
+        let echoed: Data
+        if session.datagramsAvailable {
+            echoed = try await session.receiveDatagram(timeoutMilliseconds: timeoutMilliseconds)
+            try await session.sendDatagram(echoed, timeoutMilliseconds: timeoutMilliseconds)
+        } else {
+            let stream = try await session.acceptBidirectionalStream(timeoutMilliseconds: timeoutMilliseconds)
+            echoed = try await stream.receive(timeoutMilliseconds: timeoutMilliseconds)
+            try await stream.send(echoed, endOfStream: true, timeoutMilliseconds: timeoutMilliseconds)
+        }
+        guard let echoedMessage = String(data: echoed, encoding: .utf8) else {
+            throw WebTransportNetworkRuntimeError.invalidPayload
+        }
+        return WebTransportNetworkSessionResult(
+            localEndpoint: session.localEndpoint,
+            remoteEndpoint: session.remoteEndpoint,
+            message: echoedMessage,
+            transport: session.transport,
+            sessionEstablished: true
+        )
+    }
+
+    private func acceptSession(
         on connection: NetworkConnection<QUIC>,
         timeoutMilliseconds: Int32
-    ) async throws -> WebTransportNetworkSessionResult {
+    ) async throws -> WebTransportNetworkSession {
         let started = Date()
         let remainingTimeout: @Sendable () -> Int32 = { [timeoutMilliseconds] () -> Int32 in
             InteroperableQUICHelpers.remainingTimeout(
@@ -425,9 +740,6 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             } catch {
                 await inboundStreams.fail(error)
             }
-        }
-        defer {
-            inboundTask.cancel()
         }
 
         let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
@@ -492,6 +804,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
         var allowedAuthorities = Set([authority])
         allowedAuthorities.insert("\(authority):\(localEndpoint.port)")
+        allowedAuthorities.insert(localEndpoint.host)
+        allowedAuthorities.insert("\(localEndpoint.host):\(localEndpoint.port)")
         let policy = try WebTransportServerSessionPolicy(
             allowedAuthorities: allowedAuthorities,
             allowedPaths: [path],
@@ -509,65 +823,24 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         try await runWithTimeout {
             try await requestStream.send(responsePayload, endOfStream: false)
         }
-
-        if useDatagrams {
-            let datagrams = try await runWithTimeout {
-                try await connection.datagrams
-            }
-            let incoming = try await runWithTimeout {
-                try await datagrams.receive().content
-            }
-            let sessionID = try manager.receiveDatagramFrame(.datagram(incoming))
-            guard let requestDatagram = manager.popDatagramPayload(sessionID: sessionID) else {
-                throw WebTransportNetworkRuntimeError.invalidPayload
-            }
-            let echoed = requestDatagram
-            let responseDatagram = try manager.makeDatagramFrame(sessionID: sessionID, payload: echoed)
-            try await runWithTimeout {
-                try await datagrams.send(responseDatagram.datagramPayload)
-            }
-            guard let echoedMessage = String(data: echoed, encoding: .utf8) else {
-                throw WebTransportNetworkRuntimeError.invalidPayload
-            }
-            return WebTransportNetworkSessionResult(
-                localEndpoint: localEndpoint,
-                remoteEndpoint: localEndpoint,
-                message: echoedMessage,
-                transport: .packet,
-                sessionEstablished: decision.rejectionError == nil
-            )
+        if let rejectionError = decision.rejectionError {
+            inboundTask.cancel()
+            throw rejectionError
         }
 
-        InteroperableQUICDebug.log("server using stream fallback path")
-        let fallbackStream = try await runWithTimeout {
-            try await inboundStreams.next(
-                direction: InteroperableQUICHelpers.bidirectionalStreamDirection,
-                timeoutMilliseconds: remainingTimeout()
-            )
-        }
-        var fallbackPayload = try await runWithTimeout {
-            try await InteroperableQUICHelpers.readStream(
-                fallbackStream,
-                timeoutMilliseconds: remainingTimeout()
-            )
-        }
-        if let prefixed = try? WebTransportStreamSignaling.parsePrefix(fallbackPayload),
-           prefixed.form == .bidirectional {
-            fallbackPayload = prefixed.remainingPayload
-        }
-        guard let echoedMessage = String(data: fallbackPayload, encoding: .utf8) else {
-            throw WebTransportNetworkRuntimeError.invalidPayload
-        }
-        try await runWithTimeout {
-            try await fallbackStream.send(Data(echoedMessage.utf8), endOfStream: true)
-        }
-
-        return WebTransportNetworkSessionResult(
+        return WebTransportNetworkSession(
+            connection: connection,
+            inboundStreams: inboundStreams,
+            inboundTask: inboundTask,
+            manager: manager,
+            sessionID: decision.session.id,
+            selectedProtocol: decision.session.selectedProtocol,
+            localControlStream: localControlStream,
+            connectStream: requestStream,
             localEndpoint: localEndpoint,
             remoteEndpoint: localEndpoint,
-            message: echoedMessage,
-            transport: .packet,
-            sessionEstablished: decision.rejectionError == nil
+            datagramsAvailable: useDatagrams,
+            timeoutMilliseconds: timeoutMilliseconds
         )
     }
 
@@ -805,7 +1078,7 @@ private enum InteroperableQUICHelpers {
 
         return try await withCheckedThrowingContinuation { continuation in
             let gate = TimeoutCompletion()
-            _ = Task.detached { @Sendable in
+            let operationTask = Task { @Sendable in
                 do {
                     let value = try await operation()
                     if await gate.tryFinish() {
@@ -818,14 +1091,29 @@ private enum InteroperableQUICHelpers {
                 }
             }
 
-            _ = Task.detached { @Sendable in
+            let timeoutTask = Task { @Sendable in
                 let nanoseconds = UInt64(max(1, timeoutMilliseconds)) * 1_000_000
                 try? await Task.sleep(for: .nanoseconds(nanoseconds))
                 if await gate.tryFinish() {
+                    operationTask.cancel()
                     continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
                 }
             }
+
+            Task { @Sendable in
+                await gate.waitUntilFinished()
+                operationTask.cancel()
+                timeoutTask.cancel()
+            }
         }
+    }
+
+    static func isTransientNotConnected(_ error: Error) -> Bool {
+        if let posix = error as? POSIXError {
+            return posix.code == .ENOTCONN
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ENOTCONN)
     }
 }
 
@@ -838,6 +1126,12 @@ private actor TimeoutCompletion {
         }
         completed = true
         return true
+    }
+
+    func waitUntilFinished() async {
+        while !completed {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
     }
 }
 
@@ -954,15 +1248,6 @@ private actor OneShotContinuation {
         }
         resumed = true
         operation()
-    }
-}
-
-private extension QUICFrame {
-    var datagramPayload: Data {
-        guard case .datagram(let payload) = self else {
-            return Data()
-        }
-        return payload
     }
 }
 

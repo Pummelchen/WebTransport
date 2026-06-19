@@ -56,7 +56,7 @@ func webTransportDeterministicSoakRunsRepeatedSessionLifecycle() async throws {
 }
 
 @Test
-func webTransportFacadeLoadKeepsLogSurfaceBoundedToCounts() async throws {
+func webTransportPublicAPILoadKeepsLogSurfaceBoundedToCounts() async throws {
     let events = WebTransportStressEventRecorder()
     let logger = WebTransportLogger { events.append($0) }
 

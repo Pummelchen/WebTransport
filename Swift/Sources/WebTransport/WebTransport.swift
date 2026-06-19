@@ -57,6 +57,8 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
     public var settingsValidation: HTTP3WebTransportSettingsValidation
     /// Listener/session timeout in milliseconds.
     public var timeoutMilliseconds: Int32
+    /// Restrict the listener to local traffic only. Defaults to false for deployable server bindings.
+    public var localOnly: Bool
 
     public init(
         authority: String = "localhost",
@@ -64,7 +66,8 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         origin: String? = nil,
         supportedProtocols: [String] = [],
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
-        timeoutMilliseconds: Int32 = 15_000
+        timeoutMilliseconds: Int32 = 15_000,
+        localOnly: Bool = false
     ) {
         self.authority = authority
         self.path = path
@@ -72,6 +75,7 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         self.supportedProtocols = supportedProtocols
         self.settingsValidation = settingsValidation
         self.timeoutMilliseconds = timeoutMilliseconds
+        self.localOnly = localOnly
     }
 }
 
@@ -181,7 +185,7 @@ public struct WebTransportEndpoint: Equatable, Sendable, CustomStringConvertible
     }
 }
 
-/// Result returned by the production network WebTransport facade.
+/// Result returned by the production network WebTransport API.
 public struct WebTransportConnectionResult: Equatable, Sendable {
     public var localEndpoint: WebTransportEndpoint
     public var remoteEndpoint: WebTransportEndpoint
@@ -198,6 +202,79 @@ public struct WebTransportConnectionResult: Equatable, Sendable {
     }
 }
 
+/// Bidirectional WebTransport stream backed by a real QUIC stream.
+public final class WebTransportBidirectionalStream: @unchecked Sendable {
+    public let id: UInt64
+
+    private let runtime: WebTransportNetworkBidirectionalStream
+
+    init(_ runtime: WebTransportNetworkBidirectionalStream) {
+        self.runtime = runtime
+        self.id = runtime.streamID
+    }
+
+    public func send(_ data: Data, endOfStream: Bool = false) async throws {
+        try await runtime.send(data, endOfStream: endOfStream)
+    }
+
+    public func receive(maximumBytes: Int = 64 * 1024) async throws -> Data {
+        try await runtime.receive(maximumBytes: maximumBytes)
+    }
+}
+
+/// Established WebTransport session backed by the production network runtime.
+public final class WebTransportSession: @unchecked Sendable {
+    public let id: UInt64
+    public let localEndpoint: WebTransportEndpoint
+    public let remoteEndpoint: WebTransportEndpoint
+    public let selectedProtocol: String?
+    public let datagramsAvailable: Bool
+
+    private let runtime: WebTransportNetworkSession
+    private let logger: WebTransportLogger
+
+    init(_ runtime: WebTransportNetworkSession, logger: WebTransportLogger) {
+        self.runtime = runtime
+        self.logger = logger
+        self.id = runtime.sessionID
+        self.localEndpoint = WebTransportEndpoint(runtime.localEndpoint)
+        self.remoteEndpoint = WebTransportEndpoint(runtime.remoteEndpoint)
+        self.selectedProtocol = runtime.selectedProtocol
+        self.datagramsAvailable = runtime.datagramsAvailable
+    }
+
+    public func openBidirectionalStream() async throws -> WebTransportBidirectionalStream {
+        try await WebTransportBidirectionalStream(runtime.openBidirectionalStream())
+    }
+
+    public func acceptBidirectionalStream(maximumInitialBytes: Int = 64 * 1024) async throws -> WebTransportBidirectionalStream {
+        try await WebTransportBidirectionalStream(runtime.acceptBidirectionalStream(maximumInitialBytes: maximumInitialBytes))
+    }
+
+    public func sendDatagram(_ data: Data) async throws {
+        try await runtime.sendDatagram(data)
+        logger.record(.datagramSent(byteCount: data.count))
+    }
+
+    public func receiveDatagram() async throws -> Data {
+        let data = try await runtime.receiveDatagram()
+        logger.record(.datagramReceived(byteCount: data.count))
+        return data
+    }
+
+    public func drain() async throws {
+        try await runtime.drain()
+    }
+
+    public func close(applicationErrorCode: UInt32 = 0, reason: String = "") async throws {
+        try await runtime.close(applicationErrorCode: applicationErrorCode, reason: reason)
+        logger.record(.sessionClosed(
+            applicationErrorCode: applicationErrorCode,
+            reasonByteCount: Data(reason.utf8).count
+        ))
+    }
+}
+
 /// Client API backed by the Network.framework QUIC/TLS/HTTP/3 WebTransport runtime.
 public actor WebTransportClient {
     public let configuration: WebTransportClientConfiguration
@@ -208,22 +285,19 @@ public actor WebTransportClient {
         self.logger = logger
     }
 
-    /// Establishes a real WebTransport session to a network endpoint and performs
-    /// a reliable-stream echo exchange used by the current runtime smoke path.
+    /// Establishes a real WebTransport session to a network endpoint.
     public func connect(
-        to endpoint: WebTransportEndpoint,
-        message: String
-    ) async throws -> WebTransportConnectionResult {
+        to endpoint: WebTransportEndpoint
+    ) async throws -> WebTransportSession {
         guard configuration.transport == .packet else {
             throw WebTransportNetworkRuntimeError.invalidTransport(
-                "WebTransport facade currently supports packet transport only"
+                "WebTransport client currently supports packet transport only"
             )
         }
-        let result = try await WebTransportQUICClient(
+        let session = try await WebTransportQUICClient(
             trustPolicy: configuration.trustPolicy
-        ).run(
+        ).connectSession(
             to: endpoint.networkEndpoint,
-            message: message,
             authority: configuration.authority,
             path: configuration.path,
             origin: configuration.origin,
@@ -232,7 +306,34 @@ public actor WebTransportClient {
             timeoutMilliseconds: configuration.timeoutMilliseconds
         )
         logger.record(.sessionEstablished(role: "client"))
-        return WebTransportConnectionResult(result)
+        return WebTransportSession(session, logger: logger)
+    }
+
+    /// Compatibility helper that establishes a session and performs one echo exchange.
+    public func echo(
+        to endpoint: WebTransportEndpoint,
+        message: String
+    ) async throws -> WebTransportConnectionResult {
+        let session = try await connect(to: endpoint)
+        let response: Data
+        if session.datagramsAvailable {
+            try await session.sendDatagram(Data(message.utf8))
+            response = try await session.receiveDatagram()
+        } else {
+            let stream = try await session.openBidirectionalStream()
+            try await stream.send(Data(message.utf8), endOfStream: true)
+            response = try await stream.receive()
+        }
+        guard let responseMessage = String(data: response, encoding: .utf8) else {
+            throw WebTransportNetworkRuntimeError.invalidPayload
+        }
+        return WebTransportConnectionResult(
+            localEndpoint: session.localEndpoint,
+            remoteEndpoint: session.remoteEndpoint,
+            message: responseMessage,
+            transport: .packet,
+            sessionEstablished: true
+        )
     }
 }
 
@@ -259,7 +360,8 @@ public actor WebTransportServer {
             path: configuration.path,
             allowedOrigin: configuration.origin,
             protocols: configuration.supportedProtocols,
-            settingsValidation: configuration.settingsValidation
+            settingsValidation: configuration.settingsValidation,
+            localOnly: configuration.localOnly
         )
         let local = try await server.waitForListening(timeoutMilliseconds: configuration.timeoutMilliseconds)
         logger.record(.serverControlAccepted)
@@ -299,5 +401,31 @@ public final class WebTransportListeningServer: @unchecked Sendable {
         let result = try await runtime.serveOne(timeoutMilliseconds: timeoutMilliseconds)
         logger.record(.sessionEstablished(role: "server"))
         return WebTransportConnectionResult(result)
+    }
+
+    public func acceptSession() async throws -> WebTransportSession {
+        let session = try await runtime.acceptSession(timeoutMilliseconds: timeoutMilliseconds)
+        logger.record(.sessionEstablished(role: "server"))
+        return WebTransportSession(session, logger: logger)
+    }
+
+    public func shutdown() {
+        runtime.shutdown()
+    }
+}
+
+extension WebTransportConnectionResult {
+    init(
+        localEndpoint: WebTransportEndpoint,
+        remoteEndpoint: WebTransportEndpoint,
+        message: String,
+        transport: WebTransportNetworkTransport,
+        sessionEstablished: Bool
+    ) {
+        self.localEndpoint = localEndpoint
+        self.remoteEndpoint = remoteEndpoint
+        self.message = message
+        self.transport = transport
+        self.sessionEstablished = sessionEstablished
     }
 }

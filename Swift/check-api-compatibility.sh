@@ -61,6 +61,21 @@ _ = WebTransportQUICClient(trustPolicy: .systemTrust)
 _ = WebTransportErrorSurface.publicDescription(for: WebTransportSampleError())
 
 struct WebTransportSampleError: Error {}
+
+func exercisePublicSessionAPI(_ session: WebTransportSession) async throws {
+    let stream: WebTransportBidirectionalStream = try await session.openBidirectionalStream()
+    _ = stream.id
+    try await stream.send(Data("hello".utf8))
+    _ = try await stream.receive()
+    try await session.sendDatagram(Data("datagram".utf8))
+    _ = try await session.receiveDatagram()
+    try await session.drain()
+    try await session.close(applicationErrorCode: 0, reason: "done")
+}
+
+func exercisePublicListenerAPI(_ listener: WebTransportListeningServer) {
+    listener.shutdown()
+}
 EOF
 
 swift build --package-path "$tmpdir"

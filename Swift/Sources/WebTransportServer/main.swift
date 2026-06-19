@@ -13,61 +13,35 @@ struct WebTransportServerCLI {
             do {
                 let options = try NetworkServerOptions.parse(arguments)
                 var results: [WebTransportNetworkSessionResult] = []
-                let local: WebTransportNetworkEndpoint
-                switch options.transport {
-                case .packet:
-                    let server = try WebTransportQUICServer(
-                        endpoint: options.endpoint,
-                        maxConcurrentConnections: options.maxSessions,
-                        authority: options.authority,
-                        path: options.path,
-                        allowedOrigin: options.allowedOrigin,
-                        protocols: options.protocols,
-                        settingsValidation: options.settingsValidation
+                guard options.transport == .packet else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport(
+                        "real --listen sessions support packet transport only"
                     )
-                    local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
-                    print("network packet session listening: \(local.commandLineValue)")
-                    print("network packet session certificate-sha256: \(server.certificateSHA256.base64EncodedString())")
-                    fflush(stdout)
-                    let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
-                        Task {
-                            try await server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
-                        }
+                }
+                let server = try WebTransportQUICServer(
+                    endpoint: options.endpoint,
+                    maxConcurrentConnections: options.maxSessions,
+                    authority: options.authority,
+                    path: options.path,
+                    allowedOrigin: options.allowedOrigin,
+                    protocols: options.protocols,
+                    settingsValidation: options.settingsValidation
+                )
+                let local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
+                print("network packet session listening: \(local.commandLineValue)")
+                print("network packet session certificate-sha256: \(server.certificateSHA256.base64EncodedString())")
+                fflush(stdout)
+                let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
+                    Task {
+                        try await server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
                     }
-                    for task in tasks {
-                        do {
-                            let result = try await task.value
-                            results.append(result)
-                        } catch {
-                            fputs("network packet session serve error: \(error)\n", stderr)
-                        }
-                    }
-                case .frame:
-                    let server = try WebTransportQUICServer(
-                        endpoint: options.endpoint,
-                        maxConcurrentConnections: options.maxSessions,
-                        authority: options.authority,
-                        path: options.path,
-                        allowedOrigin: options.allowedOrigin,
-                        protocols: options.protocols,
-                        settingsValidation: options.settingsValidation
-                    )
-                    local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
-                    print("network frame session listening: \(local.commandLineValue)")
-                    print("network frame session certificate-sha256: \(server.certificateSHA256.base64EncodedString())")
-                    fflush(stdout)
-                    let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
-                        Task {
-                            try await server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
-                        }
-                    }
-                    for task in tasks {
-                        do {
-                            let result = try await task.value
-                            results.append(result)
-                        } catch {
-                            fputs("network frame session serve error: \(error)\n", stderr)
-                        }
+                }
+                for task in tasks {
+                    do {
+                        let result = try await task.value
+                        results.append(result)
+                    } catch {
+                        fputs("network packet session serve error: \(error)\n", stderr)
                     }
                 }
                 for result in results {

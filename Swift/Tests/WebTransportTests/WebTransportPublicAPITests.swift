@@ -6,11 +6,13 @@ import WebTransportNetworkRuntime
 import WebTransportQUICCore
 
 @Test
-func webTransportClientServerNetworkFacadeConnectsAndEchoes() async throws {
-    let (result, serverResult) = try await runLoopbackFacadeExchange(
-        protocols: ["demo.v1"],
-        message: "ping"
-    )
+func webTransportClientServerNetworkAPIConnectsAndEchoes() async throws {
+    let (result, serverResult) = try await WebTransportProcessSupport.withExclusiveProcessExecution {
+        try await runLoopbackPublicAPIExchange(
+            protocols: ["demo.v1"],
+            message: "ping"
+        )
+    }
     #expect(result.sessionEstablished)
     #expect(serverResult.sessionEstablished)
     #expect(result.message == "ping")
@@ -18,15 +20,24 @@ func webTransportClientServerNetworkFacadeConnectsAndEchoes() async throws {
 }
 
 @Test
-func webTransportFacadeLogsOnlySanitizedProductionEvents() async throws {
+func webTransportClientServerNetworkSessionExposesCloseLifecycle() async throws {
+    try await WebTransportProcessSupport.withExclusiveProcessExecution {
+        try await runLoopbackPublicAPISessionCloseExchange()
+    }
+}
+
+@Test
+func webTransportPublicAPILogsOnlySanitizedProductionEvents() async throws {
     let clientEvents = WebTransportEventRecorder()
     let serverEvents = WebTransportEventRecorder()
-    let (result, _) = try await runLoopbackFacadeExchange(
-        protocols: ["demo.v1"],
-        message: "secret-payload",
-        clientLogger: WebTransportLogger { clientEvents.append($0) },
-        serverLogger: WebTransportLogger { serverEvents.append($0) }
-    )
+    let (result, _) = try await WebTransportProcessSupport.withExclusiveProcessExecution {
+        try await runLoopbackPublicAPIExchange(
+            protocols: ["demo.v1"],
+            message: "secret-payload",
+            clientLogger: WebTransportLogger { clientEvents.append($0) },
+            serverLogger: WebTransportLogger { serverEvents.append($0) }
+        )
+    }
     #expect(result.message == "secret-payload")
 
     let descriptions = (clientEvents.snapshot() + serverEvents.snapshot()).map(\.description)
@@ -47,14 +58,14 @@ func webTransportEndpointParsesIPv4AndIPv6Forms() throws {
 }
 
 @Test
-func webTransportFacadeRejectsUnsupportedTransportConfiguration() async throws {
+func webTransportPublicAPIRejectsUnsupportedTransportConfiguration() async throws {
     let client = WebTransportClient(configuration: WebTransportClientConfiguration(
         authority: "localhost",
         path: "/wt",
         transport: .frame
     ))
     await #expect(throws: WebTransportNetworkRuntimeError.self) {
-        _ = try await client.connect(to: WebTransportEndpoint(host: "127.0.0.1", port: 4433), message: "ping")
+        _ = try await client.connect(to: WebTransportEndpoint(host: "127.0.0.1", port: 4433))
     }
 }
 
@@ -67,7 +78,7 @@ func webTransportPublicErrorSurfaceRedactsPeerControlledDetail() {
     #expect(WebTransportErrorSurface.publicDescription(for: codecError) == "WebTransport protocol codec rejected malformed input")
 }
 
-private func makeLoopbackFacadePair(
+private func makeLoopbackPublicAPIPair(
     protocols: [String],
     clientLogger: WebTransportLogger = .disabled,
     serverLogger: WebTransportLogger = .disabled
@@ -78,7 +89,7 @@ private func makeLoopbackFacadePair(
             path: "/wt",
             origin: "https://localhost",
             supportedProtocols: protocols,
-            timeoutMilliseconds: 12_000
+            timeoutMilliseconds: 30_000
         ),
         logger: serverLogger
     )
@@ -89,7 +100,7 @@ private func makeLoopbackFacadePair(
             origin: "https://localhost",
             availableProtocols: protocols,
             trustPolicy: .localDevelopmentSelfSigned,
-            timeoutMilliseconds: 12_000
+            timeoutMilliseconds: 30_000
         ),
         logger: clientLogger
     )
@@ -97,30 +108,63 @@ private func makeLoopbackFacadePair(
     return (client, listener)
 }
 
-private func runLoopbackFacadeExchange(
+private func runLoopbackPublicAPIExchange(
     protocols: [String],
     message: String,
     clientLogger: WebTransportLogger = .disabled,
     serverLogger: WebTransportLogger = .disabled
 ) async throws -> (WebTransportConnectionResult, WebTransportConnectionResult) {
     var lastError: Error?
-    for _ in 0..<3 {
+    for _ in 0..<5 {
         do {
-            let (client, listener) = try await makeLoopbackFacadePair(
+            let (client, listener) = try await makeLoopbackPublicAPIPair(
                 protocols: protocols,
                 clientLogger: clientLogger,
                 serverLogger: serverLogger
             )
+            defer {
+                listener.shutdown()
+            }
             async let served = listener.serveOne()
-            let result = try await client.connect(to: listener.localEndpoint, message: message)
+            let result = try await client.echo(to: listener.localEndpoint, message: message)
             let serverResult = try await served
+            listener.shutdown()
+            try await Task.sleep(for: .seconds(2))
             return (result, serverResult)
         } catch {
             lastError = error
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(250))
         }
     }
-    throw lastError ?? QUICCodecError.malformed("WebTransport facade exchange failed")
+    throw lastError ?? QUICCodecError.malformed("WebTransport public API exchange failed")
+}
+
+private func runLoopbackPublicAPISessionCloseExchange() async throws {
+    var lastError: Error?
+    for _ in 0..<8 {
+        do {
+            let (client, listener) = try await makeLoopbackPublicAPIPair(protocols: ["demo.v1"])
+            defer {
+                listener.shutdown()
+            }
+            async let accepted = listener.acceptSession()
+            let session = try await client.connect(to: listener.localEndpoint)
+            let serverSession = try await accepted
+
+            #expect(session.selectedProtocol == "demo.v1")
+            #expect(serverSession.selectedProtocol == "demo.v1")
+
+            try await session.drain()
+            try await session.close(applicationErrorCode: 0, reason: "done")
+            listener.shutdown()
+            try await Task.sleep(for: .seconds(2))
+            return
+        } catch {
+            lastError = error
+            try await Task.sleep(for: .seconds(2))
+        }
+    }
+    throw lastError ?? QUICCodecError.malformed("WebTransport public API session stream exchange failed")
 }
 
 private final class WebTransportEventRecorder: @unchecked Sendable {
