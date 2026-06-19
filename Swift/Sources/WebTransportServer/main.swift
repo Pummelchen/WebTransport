@@ -16,11 +16,11 @@ struct WebTransportServerCLI {
                 switch options.transport {
                 case .packet:
                     let server = try WebTransportQUICInteroperablePacketProbeServer(
-                        bindPort: options.endpoint.port,
+                        endpoint: options.endpoint,
                         maxConcurrentConnections: options.maxSessions
                     )
                     local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
-                    print("network packet probe listening: \(local.host):\(local.port)")
+                    print("network packet probe listening: \(local.commandLineValue)")
                     fflush(stdout)
                     let tasks: [Task<WebTransportNetworkProbeResult, Error>] = (0..<options.maxSessions).map { _ in
                         Task {
@@ -37,11 +37,11 @@ struct WebTransportServerCLI {
                     }
                 case .frame:
                     let server = try WebTransportQUICInteroperablePacketProbeServer(
-                        bindPort: options.endpoint.port,
+                        endpoint: options.endpoint,
                         maxConcurrentConnections: options.maxSessions
                     )
                     local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
-                    print("network frame probe listening: \(local.host):\(local.port)")
+                    print("network frame probe listening: \(local.commandLineValue)")
                     fflush(stdout)
                     let tasks: [Task<WebTransportNetworkProbeResult, Error>] = (0..<options.maxSessions).map { _ in
                         Task {
@@ -59,7 +59,7 @@ struct WebTransportServerCLI {
                 }
                 for result in results {
                     let session = result.sessionEstablished ? " session=established" : ""
-                    print("network \(result.transport.rawValue) probe served: remote=\(result.remoteEndpoint.host):\(result.remoteEndpoint.port)\(session) message=\"\(result.message)\"")
+                    print("network \(result.transport.rawValue) probe served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
                 }
                 return
             } catch {

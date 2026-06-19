@@ -53,6 +53,22 @@ public struct WebTransportNetworkEndpoint: Equatable, Sendable {
     }
 
     public static func parse(_ value: String) throws -> WebTransportNetworkEndpoint {
+        if value.hasPrefix("[") {
+            guard let close = value.firstIndex(of: "]"),
+                  value.index(after: close) < value.endIndex,
+                  value[value.index(after: close)] == ":" else {
+                throw WebTransportNetworkRuntimeError.invalidEndpoint(value)
+            }
+            let host = String(value[value.index(after: value.startIndex)..<close])
+            let portStart = value.index(close, offsetBy: 2)
+            guard !host.isEmpty,
+                  portStart < value.endIndex,
+                  let port = UInt16(value[portStart...]) else {
+                throw WebTransportNetworkRuntimeError.invalidEndpoint(value)
+            }
+            return WebTransportNetworkEndpoint(host: host, port: port)
+        }
+
         let parts = value.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 2,
               !parts[0].isEmpty,
@@ -60,6 +76,10 @@ public struct WebTransportNetworkEndpoint: Equatable, Sendable {
             throw WebTransportNetworkRuntimeError.invalidEndpoint(value)
         }
         return WebTransportNetworkEndpoint(host: String(parts[0]), port: port)
+    }
+
+    public var commandLineValue: String {
+        host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
     }
 
     var udpEndpoint: QUICUDPEndpoint {

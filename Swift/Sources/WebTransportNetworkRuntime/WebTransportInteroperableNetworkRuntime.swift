@@ -34,9 +34,7 @@ public struct WebTransportQUICInteroperablePacketProbeClient: Sendable {
         message: String,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkProbeResult {
-        let host: NWEndpoint.Host = endpoint.host == "127.0.0.1"
-            ? .ipv4(.loopback)
-            : .init(endpoint.host)
+        let host = InteroperableQUICRuntime.host(for: endpoint.host)
         let destination = NWEndpoint.hostPort(
             host: host,
             port: NWEndpoint.Port(rawValue: endpoint.port) ?? .any
@@ -208,16 +206,23 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
     private let acceptedConnections: InteroperableQUICConnectionQueue
     private let listenerTask: Task<Void, Never>
 
-    public init(bindPort: UInt16, maxConcurrentConnections: Int = 16) throws {
-        InteroperableQUICDebug.log("server init bindPort=\(bindPort)")
+    public convenience init(bindPort: UInt16, maxConcurrentConnections: Int = 16) throws {
+        try self.init(
+            endpoint: WebTransportNetworkEndpoint(port: bindPort),
+            maxConcurrentConnections: maxConcurrentConnections
+        )
+    }
+
+    public init(endpoint: WebTransportNetworkEndpoint, maxConcurrentConnections: Int = 16) throws {
+        InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
         let identity = try InteroperableTLSIdentity.create()
         let parameters = NWParametersBuilder(auto: {
             InteroperableQUICRuntime.makeServerQUIC(identity: identity)
         })
         .localEndpoint(
             .hostPort(
-                host: .ipv4(.loopback),
-                port: NWEndpoint.Port(rawValue: bindPort) ?? .any
+                host: InteroperableQUICRuntime.host(for: endpoint.host),
+                port: NWEndpoint.Port(rawValue: endpoint.port) ?? .any
             )
         )
         .localOnly(true)
@@ -225,7 +230,7 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
         listener = try NetworkListener<QUIC>(using: parameters)
             .newConnectionLimit(max(1, max(8, maxConcurrentConnections)))
         acceptedConnections = InteroperableQUICConnectionQueue()
-        localEndpoint = WebTransportNetworkEndpoint(host: "127.0.0.1", port: bindPort)
+        localEndpoint = endpoint
         listener.onStateUpdate { _, state in
             InteroperableQUICDebug.log("server listener state update: \(state)")
         }
@@ -475,6 +480,17 @@ private enum InteroperableQUICRuntime {
     static let defaultPath = "/wt"
     static let defaultOrigin = "https://localhost"
     static let defaultProtocol = "demo.v1"
+
+    static func host(for value: String) -> NWEndpoint.Host {
+        switch value {
+        case "127.0.0.1", "localhost":
+            return .ipv4(.loopback)
+        case "::1":
+            return .ipv6(.loopback)
+        default:
+            return .init(value)
+        }
+    }
 
     static func makeBaseQUIC() -> QUIC {
         QUIC(alpn: ["h3"]) {

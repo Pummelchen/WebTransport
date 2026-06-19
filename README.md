@@ -28,7 +28,7 @@ Current Swift coverage includes:
 - TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; packet protection, transport-parameter codecs, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, transcript-derived 1-RTT packet keys for protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing over UDP, UDP loopback support, and prompt-free identity/trust test paths.
 - CLI positive/negative interop matrices for CONNECT, streams, datagrams, GOAWAY, close/drain, malformed input, and flow-control errors.
 - Deterministic parser/property hardening tests for QPACK, HTTP/3 frames, capsules, QUIC varints, QUIC transport parameters, WebTransport stream prefixes, resource limits, malformed peers, ordering, replay, exhaustion, and close/reset races.
-- Process-level CLI tests for help/list/error/scenario exit codes and frame/packet loopback.
+- Process-level CLI tests for help/list/error/scenario exit codes and IPv4/IPv6 frame/packet loopback.
 - Concurrent multi-session stress, deterministic soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
 - Environment-gated external interop hook via `WEBTRANSPORT_EXTERNAL_INTEROP_ENDPOINT`.
@@ -49,6 +49,8 @@ swift run --package-path Swift WebTransportClient --scenario all
 swift run --package-path Swift WebTransportServer --scenario all
 swift run --package-path Swift WebTransportServer --listen 127.0.0.1:4433 --transport packet
 swift run --package-path Swift WebTransportClient --connect 127.0.0.1:4433 --transport packet
+swift run --package-path Swift WebTransportServer --listen '[::1]:4433' --transport packet
+swift run --package-path Swift WebTransportClient --connect '[::1]:4433' --transport packet
 swift run --package-path Swift WebTransportClient
 swift run --package-path Swift WebTransportServer
 cd Swift && ./build-release-apple-silicon.sh

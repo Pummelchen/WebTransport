@@ -344,11 +344,22 @@ func networkEndpointParserRejectsMalformedValues() throws {
         host: "127.0.0.1",
         port: 4433
     ))
+    #expect(try WebTransportNetworkEndpoint.parse("[::1]:4433") == WebTransportNetworkEndpoint(
+        host: "::1",
+        port: 4433
+    ))
+    #expect(WebTransportNetworkEndpoint(host: "::1", port: 4433).commandLineValue == "[::1]:4433")
     #expect(throws: Error.self) {
         _ = try WebTransportNetworkEndpoint.parse("127.0.0.1")
     }
     #expect(throws: Error.self) {
         _ = try WebTransportNetworkEndpoint.parse("127.0.0.1:not-a-port")
+    }
+    #expect(throws: Error.self) {
+        _ = try WebTransportNetworkEndpoint.parse("::1:4433")
+    }
+    #expect(throws: Error.self) {
+        _ = try WebTransportNetworkEndpoint.parse("[::1]")
     }
     #expect(try WebTransportNetworkProbeTransport.parse("packet") == .packet)
     #expect(try WebTransportNetworkProbeTransport.parse("frame") == .frame)

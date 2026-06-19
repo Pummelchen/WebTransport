@@ -225,8 +225,10 @@ func webTransportCLIProcessLoopbackCoversFrameAndPacketTransports() throws {
         guard try WebTransportProcessSupport.debugProductsAvailable() else {
             return
         }
-        try WebTransportProcessSupport.runLoopback(transport: "frame", expectsEstablishedSession: true)
-        try WebTransportProcessSupport.runLoopback(transport: "packet", expectsEstablishedSession: true)
+        try WebTransportProcessSupport.runLoopback(host: "127.0.0.1", transport: "frame", expectsEstablishedSession: true)
+        try WebTransportProcessSupport.runLoopback(host: "127.0.0.1", transport: "packet", expectsEstablishedSession: true)
+        try WebTransportProcessSupport.runLoopback(host: "::1", transport: "frame", expectsEstablishedSession: true)
+        try WebTransportProcessSupport.runLoopback(host: "::1", transport: "packet", expectsEstablishedSession: true)
     }
 }
 
@@ -500,12 +502,13 @@ private enum WebTransportProcessSupport {
         throw ProcessTestError.missingExecutable(product)
     }
 
-    static func runLoopback(transport: String, expectsEstablishedSession: Bool) throws {
+    static func runLoopback(host: String, transport: String, expectsEstablishedSession: Bool) throws {
         let server = try productURL("WebTransportServer", configuration: "debug")
         let client = try productURL("WebTransportClient", configuration: "debug")
+        let listenEndpoint = endpointArgument(host: host, port: 0)
         let runningServer = try start(
             server,
-            ["--listen", "127.0.0.1:0", "--transport", transport, "--timeout-ms", "5000"]
+            ["--listen", listenEndpoint, "--transport", transport, "--timeout-ms", "5000"]
         )
         defer {
             runningServer.terminateIfNeeded()
@@ -513,14 +516,16 @@ private enum WebTransportProcessSupport {
 
         let line = try runningServer.waitForOutput(containing: "listening:", timeout: 5)
         let port = try parseListeningPort(from: line)
+        let connectEndpoint = endpointArgument(host: host, port: port)
+        let loopbackName = "loopback-\(transport)-\(host == "::1" ? "ipv6" : "ipv4")"
         let clientResult = try run(
             client,
-            ["--connect", "127.0.0.1:\(port)", "--transport", transport, "--message", "loopback-\(transport)", "--timeout-ms", "5000"],
+            ["--connect", connectEndpoint, "--transport", transport, "--message", loopbackName, "--timeout-ms", "5000"],
             timeout: 10
         )
         #expect(clientResult.exitCode == 0)
         #expect(clientResult.stdout.contains("connected"))
-        #expect(clientResult.stdout.contains("loopback-\(transport)"))
+        #expect(clientResult.stdout.contains(loopbackName))
         if expectsEstablishedSession {
             #expect(clientResult.stdout.contains("session=established"))
         }
@@ -528,7 +533,7 @@ private enum WebTransportProcessSupport {
         let serverResult = try runningServer.wait(timeout: 10)
         #expect(serverResult.exitCode == 0)
         #expect(serverResult.stdout.contains("served"))
-        #expect(serverResult.stdout.contains("loopback-\(transport)"))
+        #expect(serverResult.stdout.contains(loopbackName))
     }
 
     static func run(
@@ -579,11 +584,15 @@ private enum WebTransportProcessSupport {
     }
 
     static func parseListeningPort(from line: String) throws -> UInt16 {
-        guard let range = line.range(of: #"listening: [^:]+:(\d+)"#, options: .regularExpression),
-              let port = UInt16(line[range].split(separator: ":").last ?? "") else {
+        guard let range = line.range(of: #":(\d+)$"#, options: .regularExpression),
+              let port = UInt16(line[range].dropFirst()) else {
             throw ProcessTestError.malformedOutput(line)
         }
         return port
+    }
+
+    static func endpointArgument(host: String, port: UInt16) -> String {
+        host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
     }
 
     static func parseJSONResult(_ text: String) throws -> [String: Any] {

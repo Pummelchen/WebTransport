@@ -22,7 +22,7 @@ Implemented:
 - Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, validated Certificate/CertificateVerify/Finished handling, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame compatibility mode.
 - CLI conformance harness with 40 scenarios shared by `WebTransportClient` and `WebTransportServer`, including positive/negative interop matrices for CONNECT, streams, datagrams, GOAWAY, close/drain, malformed input, and flow-control errors.
 - Deterministic parser/property hardening tests for QPACK, HTTP/3 frames, capsules, QUIC varints, QUIC transport parameters, WebTransport stream prefixes, resource limits, malformed peers, ordering, replay, exhaustion, and close/reset races.
-- Process-level CLI tests for help/list/error/scenario exit codes and frame/packet loopback.
+- Process-level CLI tests for help/list/error/scenario exit codes and IPv4/IPv6 frame/packet loopback.
 - Concurrent multi-session stress, deterministic soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
 - Environment-gated external interop hook via `WEBTRANSPORT_EXTERNAL_INTEROP_ENDPOINT`.
@@ -57,6 +57,8 @@ swift run WebTransportClient --scenario all
 swift run WebTransportServer --scenario all
 swift run WebTransportServer --listen 127.0.0.1:4433 --transport packet
 swift run WebTransportClient --connect 127.0.0.1:4433 --transport packet
+swift run WebTransportServer --listen '[::1]:4433' --transport packet
+swift run WebTransportClient --connect '[::1]:4433' --transport packet
 swift run WebTransportClient
 swift run WebTransportServer
 ./build-release-apple-silicon.sh

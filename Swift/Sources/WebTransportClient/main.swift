@@ -27,7 +27,7 @@ struct WebTransportClientCLI {
                     )
                 }
                 let session = result.sessionEstablished ? " session=established" : ""
-                print("network \(result.transport.rawValue) probe connected: local=\(result.localEndpoint.host):\(result.localEndpoint.port) remote=\(result.remoteEndpoint.host):\(result.remoteEndpoint.port)\(session) message=\"\(result.message)\"")
+                print("network \(result.transport.rawValue) probe connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
                 return
             } catch {
                 fputs("\(executable) network probe failed: \(error)\n", stderr)
