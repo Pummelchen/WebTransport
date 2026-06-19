@@ -23,6 +23,47 @@ func webTransportFlowControlCapsulesSerializeAndParseRoundTrip() throws {
 }
 
 @Test
+func webTransportFlowControlStateDistinguishesDisabledZeroAndUnlimitedModes() throws {
+    let disabled = WebTransportFlowControlState()
+    #expect(disabled.maxDataState == .disabled)
+    #expect(disabled.maxStreamsBidiState == .disabled)
+    #expect(disabled.maxStreamsUniState == .disabled)
+    #expect(disabled.maxData == nil)
+    #expect(disabled.maxStreamsBidi == nil)
+
+    let explicitZero = WebTransportFlowControlState(
+        maxData: 0,
+        maxStreamsBidi: 0,
+        maxStreamsUni: 0,
+        isEnabled: true
+    )
+    #expect(explicitZero.maxDataState == .zero)
+    #expect(explicitZero.maxStreamsBidiState == .zero)
+    #expect(explicitZero.maxStreamsUniState == .zero)
+    #expect(explicitZero.maxData == 0)
+    #expect(explicitZero.maxStreamsBidi == 0)
+
+    var withSettings = WebTransportFlowControlState(
+        maxData: nil,
+        maxStreamsBidi: nil,
+        maxStreamsUni: nil,
+        isEnabled: true
+    )
+    #expect(withSettings.maxDataState == .unlimited)
+    #expect(withSettings.maxStreamsBidiState == .unlimited)
+    #expect(withSettings.maxStreamsUniState == .unlimited)
+    #expect(withSettings.maxData == nil)
+    #expect(withSettings.maxStreamsBidi == nil)
+
+    try withSettings.apply(.maxData(limit: 4))
+    try withSettings.apply(.maxStreamsBidi(limit: 2))
+    try withSettings.apply(.maxStreamsUni(limit: 1))
+    #expect(withSettings.maxData == 4)
+    #expect(withSettings.maxStreamsBidi == 2)
+    #expect(withSettings.maxStreamsUni == 1)
+}
+
+@Test
 func webTransportFlowControlRejectsMalformedCapsulePayload() throws {
     let constants = WebTransportHTTP3DraftConstants.current
     let malformedPayloadType = try QUICVarInt.encode(constants.wtMaxDataCapsule)

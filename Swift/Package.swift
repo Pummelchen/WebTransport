@@ -96,19 +96,6 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "AppleQUICSpike"
-        ),
-        .executableTarget(
-            name: "NativeQUICCoreSpike",
-            dependencies: [
-                "WebTransportCryptoApple",
-                "WebTransportHTTP3Core",
-                "WebTransportQUICCore",
-                "WebTransportTLSCore",
-                "WebTransportUDPApple"
-            ]
-        ),
-        .executableTarget(
             name: "WebTransportClient",
             dependencies: [
                 "WebTransport",

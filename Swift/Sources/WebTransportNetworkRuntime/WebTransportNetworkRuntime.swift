@@ -88,6 +88,13 @@ public struct WebTransportNetworkProbeResult: Equatable, Sendable {
 
 public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
     private let port: QUICUDPPort
+    private var bufferedInitialPackets: [String: [BufferedInitialPacket]] = [:]
+    private let bufferLock = NSLock()
+
+    private struct BufferedInitialPacket: Sendable {
+        let remote: QUICUDPEndpoint
+        let bytes: Data
+    }
 
     public var localEndpoint: WebTransportNetworkEndpoint {
         WebTransportNetworkEndpoint(
@@ -102,7 +109,7 @@ public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
 
     @discardableResult
     public func serveOne(timeoutMilliseconds: Int32 = 1_000) throws -> WebTransportNetworkProbeResult {
-        let (bytes, remote) = try port.receive(timeoutMilliseconds: timeoutMilliseconds)
+        let (bytes, remote) = try receiveOrTakePendingInitial(timeoutMilliseconds: timeoutMilliseconds)
         let decoded = try WebTransportQUICPacketProbeCodec.decodeClientInitial(bytes)
         let handshakeContext = try WebTransportQUICPacketProbeCodec.serverHandshakeContext(
             request: decoded,
@@ -110,10 +117,10 @@ public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
         )
         let response = try WebTransportQUICPacketProbeCodec.encodeServerInitial(handshakeContext: handshakeContext)
         try port.send(response, to: remote)
-        let (requestBytes, requestRemote) = try port.receive(timeoutMilliseconds: timeoutMilliseconds)
-        guard requestRemote == remote else {
-            throw WebTransportNetworkRuntimeError.unexpectedPacket
-        }
+        let (requestBytes, _) = try receiveApplicationPacket(
+            forRemote: remote,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
         let applicationRequest = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
             requestBytes,
             handshakeContext: handshakeContext
@@ -133,6 +140,88 @@ public final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
             transport: .packet,
             sessionEstablished: true
         )
+    }
+
+    private func receiveOrTakePendingInitial(timeoutMilliseconds: Int32) throws -> (Data, QUICUDPEndpoint) {
+        if let (bytes, remote) = consumePendingInitialPacket() {
+            return (bytes, remote)
+        }
+        return try port.receive(timeoutMilliseconds: timeoutMilliseconds)
+    }
+
+    private func receiveApplicationPacket(
+        forRemote remote: QUICUDPEndpoint,
+        timeoutMilliseconds: Int32
+    ) throws -> (Data, QUICUDPEndpoint) {
+        let deadline = Date().addingTimeInterval(TimeInterval(max(0, timeoutMilliseconds)) / 1_000)
+        if let (bytes, bufferedRemote) = consumePendingInitialPacket(for: remote) {
+            return (bytes, bufferedRemote)
+        }
+
+        while true {
+            let remainingTimeout = Int32(
+                max(0, Int(ceil(deadline.timeIntervalSinceNow * 1_000)))
+            )
+            guard remainingTimeout > 0 else {
+                throw QUICUDPError.timeout
+            }
+
+            let (bytes, packetRemote) = try port.receive(timeoutMilliseconds: remainingTimeout)
+            if packetRemote == remote {
+                return (bytes, packetRemote)
+            }
+            bufferInitialPacket(remote: packetRemote, bytes: bytes)
+        }
+    }
+
+    private func key(for remote: QUICUDPEndpoint) -> String {
+        "\(remote.host):\(remote.port)"
+    }
+
+    private func bufferInitialPacket(remote: QUICUDPEndpoint, bytes: Data) {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+        let item = BufferedInitialPacket(remote: remote, bytes: bytes)
+        bufferedInitialPackets[key(for: remote), default: []].append(item)
+    }
+
+    private func consumePendingInitialPacket(
+        for expectedRemote: QUICUDPEndpoint? = nil
+    ) -> (Data, QUICUDPEndpoint)? {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+
+        if let expectedRemote {
+            let expectedKey = key(for: expectedRemote)
+            if var packets = bufferedInitialPackets.removeValue(forKey: expectedKey),
+               let buffered = packets.first {
+                packets.removeFirst()
+                if packets.isEmpty {
+                    return (buffered.bytes, buffered.remote)
+                }
+                bufferedInitialPackets[expectedKey] = packets
+                return (buffered.bytes, buffered.remote)
+            }
+            return nil
+        }
+
+        guard let entry = bufferedInitialPackets.first(where: { !$0.value.isEmpty }) else {
+            return nil
+        }
+        var packets = entry.value
+        guard let packet = packets.first else {
+            bufferedInitialPackets.removeValue(forKey: entry.key)
+            return nil
+        }
+        packets.removeFirst()
+        let remotePort = entry.key
+        let remote = packet.remote
+        if packets.isEmpty {
+            bufferedInitialPackets.removeValue(forKey: remotePort)
+        } else {
+            bufferedInitialPackets[remotePort] = packets
+        }
+        return (packet.bytes, remote)
     }
 }
 

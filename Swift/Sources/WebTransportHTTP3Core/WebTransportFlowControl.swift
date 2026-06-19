@@ -188,6 +188,50 @@ public enum WebTransportFlowCapsuleCodec {
     }
 }
 
+public enum WebTransportFlowControlLimitState: Equatable, Sendable {
+    case disabled
+    case zero
+    case unlimited
+    case limited(UInt64)
+
+    public var numericValue: UInt64? {
+        switch self {
+        case .zero:
+            return 0
+        case .limited(let value):
+            return value
+        case .disabled, .unlimited:
+            return nil
+        }
+    }
+}
+
+private extension WebTransportFlowControlLimitState {
+    init(_ limit: UInt64?, isEnabled: Bool) {
+        guard isEnabled else {
+            self = .disabled
+            return
+        }
+        guard let limit else {
+            self = .unlimited
+            return
+        }
+        self = limit == 0 ? .zero : .limited(limit)
+    }
+
+    var asUInt64: UInt64? {
+        switch self {
+        case .zero:
+            return 0
+        case .limited(let value):
+            return value
+        case .disabled, .unlimited:
+            return nil
+        }
+    }
+
+}
+
 extension WebTransportHTTP3DraftConstants {
     public var maximumMaxStreamsValue: UInt64 {
         1 << 60
@@ -206,12 +250,24 @@ extension HTTP3Settings {
 
 public struct WebTransportFlowControlState: Equatable, Sendable {
     public private(set) var isEnabled: Bool
-    public private(set) var maxData: UInt64?
-    public private(set) var maxStreamsBidi: UInt64?
-    public private(set) var maxStreamsUni: UInt64?
+    public private(set) var maxDataState: WebTransportFlowControlLimitState
+    public private(set) var maxStreamsBidiState: WebTransportFlowControlLimitState
+    public private(set) var maxStreamsUniState: WebTransportFlowControlLimitState
     public private(set) var usedData: UInt64
     public private(set) var openedBidiStreams: Int
     public private(set) var openedUniStreams: Int
+
+    public var maxData: UInt64? {
+        maxDataState.asUInt64
+    }
+
+    public var maxStreamsBidi: UInt64? {
+        maxStreamsBidiState.asUInt64
+    }
+
+    public var maxStreamsUni: UInt64? {
+        maxStreamsUniState.asUInt64
+    }
 
     public init(
         maxData: UInt64?,
@@ -220,9 +276,9 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         isEnabled: Bool = true
     ) {
         self.isEnabled = isEnabled
-        self.maxData = maxData
-        self.maxStreamsBidi = maxStreamsBidi
-        self.maxStreamsUni = maxStreamsUni
+        self.maxDataState = WebTransportFlowControlLimitState(maxData, isEnabled: isEnabled)
+        self.maxStreamsBidiState = WebTransportFlowControlLimitState(maxStreamsBidi, isEnabled: isEnabled)
+        self.maxStreamsUniState = WebTransportFlowControlLimitState(maxStreamsUni, isEnabled: isEnabled)
         self.usedData = 0
         self.openedBidiStreams = 0
         self.openedUniStreams = 0
@@ -230,9 +286,9 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
 
     public init(settings: HTTP3Settings, constants: WebTransportHTTP3DraftConstants = .current) {
         self.isEnabled = settings.webTransportFlowControlEnabled(constants: constants)
-        self.maxData = settings[constants.settingsWTInitialMaxData]
-        self.maxStreamsBidi = settings[constants.settingsWTInitialMaxStreamsBidi]
-        self.maxStreamsUni = settings[constants.settingsWTInitialMaxStreamsUni]
+        self.maxDataState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxData], isEnabled: isEnabled)
+        self.maxStreamsBidiState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxStreamsBidi], isEnabled: isEnabled)
+        self.maxStreamsUniState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxStreamsUni], isEnabled: isEnabled)
         self.usedData = 0
         self.openedBidiStreams = 0
         self.openedUniStreams = 0
@@ -244,7 +300,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
 
     public mutating func setMaxData(_ value: UInt64) throws {
         guard isEnabled else { return }
-        try setMonotonicLimit(&maxData, value: value, label: "WT_MAX_DATA")
+        try setMonotonicLimit(&maxDataState, value: value, label: "WT_MAX_DATA")
     }
 
     public mutating func setMaxStreamsBidi(_ value: UInt64) throws {
@@ -252,7 +308,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
             throw QUICCodecError.valueOutOfRange("WT_MAX_STREAMS_BIDI exceeds the draft-15 2^60 maximum")
         }
-        try setMonotonicLimit(&maxStreamsBidi, value: value, label: "WT_MAX_STREAMS_BIDI")
+        try setMonotonicLimit(&maxStreamsBidiState, value: value, label: "WT_MAX_STREAMS_BIDI")
     }
 
     public mutating func setMaxStreamsUni(_ value: UInt64) throws {
@@ -260,7 +316,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
             throw QUICCodecError.valueOutOfRange("WT_MAX_STREAMS_UNI exceeds the draft-15 2^60 maximum")
         }
-        try setMonotonicLimit(&maxStreamsUni, value: value, label: "WT_MAX_STREAMS_UNI")
+        try setMonotonicLimit(&maxStreamsUniState, value: value, label: "WT_MAX_STREAMS_UNI")
     }
 
     public mutating func apply(_ capsule: WebTransportFlowCapsule) throws {
@@ -282,28 +338,38 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
             throw QUICCodecError.valueOutOfRange("negative stream payload")
         }
         let count = UInt64(bytes)
-        guard let maxData else { return }
-        let (newUsage, overflow) = usedData.addingReportingOverflow(count)
-        guard !overflow && newUsage <= maxData else {
+        switch maxDataState {
+        case .disabled, .unlimited:
+            return
+        case .zero:
             throw QUICCodecError.valueOutOfRange("WebTransport session data limit exceeded")
+        case .limited(let limit):
+            let (newUsage, overflow) = usedData.addingReportingOverflow(count)
+            guard !overflow && newUsage <= limit else {
+                throw QUICCodecError.valueOutOfRange("WebTransport session data limit exceeded")
+            }
+            usedData = newUsage
+            return
         }
-        usedData = newUsage
     }
 
     public mutating func registerStream(_ form: WebTransportStreamForm) throws {
         guard isEnabled else { return }
         switch form {
         case .bidirectional:
-            try ensureCanOpen(form: .bidirectional, current: openedBidiStreams, limit: maxStreamsBidi)
+            try ensureCanOpen(form: .bidirectional, current: openedBidiStreams, limit: maxStreamsBidiState)
             openedBidiStreams += 1
         case .unidirectional:
-            try ensureCanOpen(form: .unidirectional, current: openedUniStreams, limit: maxStreamsUni)
+            try ensureCanOpen(form: .unidirectional, current: openedUniStreams, limit: maxStreamsUniState)
             openedUniStreams += 1
         }
     }
 
-    private func ensureCanOpen(form: WebTransportStreamForm, current: Int, limit: UInt64?) throws {
-        guard let limit else { return }
+    private func ensureCanOpen(form: WebTransportStreamForm, current: Int, limit: WebTransportFlowControlLimitState) throws {
+        let limit = limit.asUInt64
+        guard let limit else {
+            return
+        }
         let next = current + 1
         let limitInt = limit > UInt64(Int.max) ? Int.max : Int(limit)
         guard next <= limitInt else {
@@ -312,9 +378,15 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     }
 }
 
-private func setMonotonicLimit(_ current: inout UInt64?, value: UInt64, label: String) throws {
-    let normalized = value
-    if let current, normalized < current {
+private func setMonotonicLimit(
+    _ current: inout WebTransportFlowControlLimitState,
+    value: UInt64,
+    label: String
+) throws {
+    let normalized = WebTransportFlowControlLimitState(value, isEnabled: true)
+    if let currentValue = current.asUInt64,
+       let newValue = normalized.asUInt64,
+       newValue < currentValue {
         throw WebTransportDraft15Error(
             kind: .flowControl,
             message: "\(label) must not decrease"

@@ -13,6 +13,16 @@ artifacts_dir=".build/release-artifacts"
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/webtransport-release.XXXXXX")"
 trap 'rm -rf "$workdir"' EXIT
 
+check_spikes_absent() {
+  local root="$1"
+  for spike in $spikes; do
+    if [ -e "$root/$spike" ]; then
+      echo "Unexpected spike binary in production release output: $spike" >&2
+      exit 1
+    fi
+  done
+}
+
 normalized_macho_hash() {
   python3 - "$1" <<'PY'
 import hashlib
@@ -76,13 +86,8 @@ build_pass() {
     normalized_macho_hash "$pass_dir/$product" > "$pass_dir/$product.normalized.sha256"
     file "$pass_dir/$product"
   done
-
-  for spike in $spikes; do
-    if [ -e ".build/arm64-apple-macosx/release/$spike" ] || [ -e ".build/release/$spike" ]; then
-      echo "Unexpected spike binary in production release output: $spike" >&2
-      exit 1
-    fi
-  done
+  check_spikes_absent ".build/arm64-apple-macosx/release"
+  check_spikes_absent ".build/release"
 }
 
 echo "Building production release pass 1..."
@@ -102,6 +107,8 @@ done
 rm -rf "$artifacts_dir"
 mkdir -p "$artifacts_dir"
 : > "$artifacts_dir/SHA256SUMS"
+
+check_spikes_absent "$artifacts_dir"
 
 for product in $products; do
   cp "$workdir/pass2/$product" "$artifacts_dir/$product"
