@@ -2,7 +2,8 @@
 
 This directory will contain the native Swift implementation of HTTP/3 WebTransport.
 
-Current Phase 1 through Phase 10 status: audited and closed.
+Current Phase 1 through Phase 12 status: audited and closed. Phase 13
+draft-15 compliance closure is in progress.
 
 - `AppleQUICSpike` proves prompt-free localhost QUIC listener/client startup,
   HTTP/3 ALPN negotiation, client-initiated bidirectional streams,
@@ -73,11 +74,18 @@ Current Phase 1 through Phase 10 status: audited and closed.
   per-session flow-control settings from SETTINGS, capsule codec and parsing for
   max-*/blocked WebTransport capsules, stream-open and stream/send-path data
   limit enforcement, and flow-control capsule queueing for blocked senders.
-- `WebTransportHTTP3Core` also contains the minimal QPACK support needed for
-  WebTransport session establishment: static table lookup, literal field-line
-  encoding/decoding, required extended CONNECT request and response
-  pseudo-header validation, decoder limits, malformed-input rejection, and QPACK
-  HEADERS frame helpers.
+- `WebTransportHTTP3Core` also contains the QPACK support needed for
+  WebTransport session establishment and Phase 13 draft-15 hardening: static table
+  lookup, dynamic table context lifetime and indexed references, Huffman string
+  encoding/decoding from RFC 7541, literal field-line encoding/decoding, required
+  extended CONNECT request and response pseudo-header validation, decoder limits,
+  malformed-input rejection, and QPACK HEADERS frame helpers.
+- `WebTransportHTTP3Core` now includes Phase 13 draft-15 session and shutdown
+  behavior for deterministic tests: `WT_DRAIN_SESSION`, `WT_CLOSE_SESSION`,
+  CONNECT stream finish-as-close, `WT_SESSION_GONE` post-close gating, buffered
+  stream/datagram ingress before session acceptance, explicit draft error mapping,
+  0-RTT CONNECT rejection, GOAWAY-driven draining, and monotonic WebTransport
+  flow-control limit updates.
 
 Commands:
 

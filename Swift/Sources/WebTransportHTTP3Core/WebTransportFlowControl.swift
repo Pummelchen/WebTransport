@@ -2,6 +2,8 @@ import Foundation
 import WebTransportQUICCore
 
 public enum WebTransportFlowCapsule: Equatable, Sendable {
+    case drainSession
+    case closeSession(applicationErrorCode: UInt32, message: String)
     case maxData(limit: UInt64)
     case maxStreamsBidi(limit: UInt64)
     case maxStreamsUni(limit: UInt64)
@@ -51,6 +53,15 @@ public enum WebTransportFlowCapsuleCodec {
         let capsule: WebTransportFlowCapsule
 
         switch type {
+        case constants.wtDrainSessionCapsule:
+            guard payload.isEmpty else {
+                throw QUICCodecError.malformed("WT_DRAIN_SESSION capsule must have an empty payload")
+            }
+            capsule = .drainSession
+            return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
+        case constants.wtCloseSessionCapsule:
+            capsule = try parseCloseSession(payload)
+            return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
         case constants.wtMaxDataCapsule:
             let limit = try readSingleVarInt(
                 from: &payloadCursor,
@@ -101,6 +112,16 @@ public enum WebTransportFlowCapsuleCodec {
 
     public static func serializedTypeAndPayload(_ capsule: WebTransportFlowCapsule) throws -> (UInt64, Data) {
         switch capsule {
+        case .drainSession:
+            return (WebTransportHTTP3DraftConstants.current.wtDrainSessionCapsule, Data())
+        case .closeSession(let applicationErrorCode, let message):
+            var payload = Data()
+            payload.append(UInt8((applicationErrorCode >> 24) & 0xff))
+            payload.append(UInt8((applicationErrorCode >> 16) & 0xff))
+            payload.append(UInt8((applicationErrorCode >> 8) & 0xff))
+            payload.append(UInt8(applicationErrorCode & 0xff))
+            payload.append(Data(message.utf8))
+            return (WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule, payload)
         case .maxData(let limit):
             return (WebTransportHTTP3DraftConstants.current.wtMaxDataCapsule, try encodePayload(limit: limit))
         case .maxStreamsBidi(let limit):
@@ -122,6 +143,22 @@ public enum WebTransportFlowCapsuleCodec {
         var payload = Data()
         payload.append(try QUICVarInt.encode(limit))
         return payload
+    }
+
+    private static func parseCloseSession(_ payload: Data) throws -> WebTransportFlowCapsule {
+        guard payload.count >= 4 else {
+            throw QUICCodecError.malformed("WT_CLOSE_SESSION capsule payload is shorter than 32-bit error code")
+        }
+        let bytes = [UInt8](payload.prefix(4))
+        let errorCode = UInt32(bytes[0]) << 24
+            | UInt32(bytes[1]) << 16
+            | UInt32(bytes[2]) << 8
+            | UInt32(bytes[3])
+        let messageBytes = payload.dropFirst(4)
+        guard let message = String(data: Data(messageBytes), encoding: .utf8) else {
+            throw QUICCodecError.malformed("WT_CLOSE_SESSION message must be UTF-8")
+        }
+        return .closeSession(applicationErrorCode: errorCode, message: message)
     }
 
     private static func readSingleVarInt(
@@ -173,27 +210,27 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         self.init(maxData: nil, maxStreamsBidi: nil, maxStreamsUni: nil)
     }
 
-    public mutating func setMaxData(_ value: UInt64) {
-        maxData = normalizeLimit(value)
+    public mutating func setMaxData(_ value: UInt64) throws {
+        try setMonotonicLimit(&maxData, value: value, label: "WT_MAX_DATA")
     }
 
-    public mutating func setMaxStreamsBidi(_ value: UInt64) {
-        maxStreamsBidi = normalizeLimit(value)
+    public mutating func setMaxStreamsBidi(_ value: UInt64) throws {
+        try setMonotonicLimit(&maxStreamsBidi, value: value, label: "WT_MAX_STREAMS_BIDI")
     }
 
-    public mutating func setMaxStreamsUni(_ value: UInt64) {
-        maxStreamsUni = normalizeLimit(value)
+    public mutating func setMaxStreamsUni(_ value: UInt64) throws {
+        try setMonotonicLimit(&maxStreamsUni, value: value, label: "WT_MAX_STREAMS_UNI")
     }
 
-    public mutating func apply(_ capsule: WebTransportFlowCapsule) {
+    public mutating func apply(_ capsule: WebTransportFlowCapsule) throws {
         switch capsule {
         case .maxData(let limit):
-            setMaxData(limit)
+            try setMaxData(limit)
         case .maxStreamsBidi(let limit):
-            setMaxStreamsBidi(limit)
+            try setMaxStreamsBidi(limit)
         case .maxStreamsUni(let limit):
-            setMaxStreamsUni(limit)
-        case .dataBlocked, .streamsBlockedBidi, .streamsBlockedUni, .unknown:
+            try setMaxStreamsUni(limit)
+        case .drainSession, .closeSession, .dataBlocked, .streamsBlockedBidi, .streamsBlockedUni, .unknown:
             break
         }
     }
@@ -237,6 +274,20 @@ private func normalizeLimit(_ value: UInt64?) -> UInt64? {
         return nil
     }
     return value
+}
+
+private func setMonotonicLimit(_ current: inout UInt64?, value: UInt64, label: String) throws {
+    let normalized = normalizeLimit(value)
+    guard let normalized else {
+        return
+    }
+    if let current, normalized < current {
+        throw WebTransportDraft15Error(
+            kind: .flowControl,
+            message: "\(label) must not decrease"
+        )
+    }
+    current = normalized
 }
 
 public enum WebTransportFlowControlHelpers {

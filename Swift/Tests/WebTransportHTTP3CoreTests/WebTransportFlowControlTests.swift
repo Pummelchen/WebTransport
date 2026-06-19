@@ -141,6 +141,74 @@ func webTransportFlowControlTracksReceivePayloadAgainstSessionDataLimit() throws
     )
 }
 
+@Test
+func webTransportFlowControlRejectsDecreasingMaxUpdates() throws {
+    var pair = try WebTransportFlowControlTestSupport.makeReadyManagers(
+        maxStreamsBidi: 2,
+        maxStreamsUni: 2,
+        maxData: 8
+    )
+    let sessionID = try WebTransportFlowControlTestSupport.establishSession(
+        client: &pair.client,
+        server: &pair.server
+    )
+
+    _ = try pair.client.receiveFlowControlCapsule(
+        sessionID: sessionID,
+        bytes: try WebTransportFlowCapsuleCodec.serialize(.maxData(limit: 10))
+    )
+    #expect(pair.client.flowState(for: sessionID)?.maxData == 10)
+
+    do {
+        _ = try pair.client.receiveFlowControlCapsule(
+            sessionID: sessionID,
+            bytes: try WebTransportFlowCapsuleCodec.serialize(.maxData(limit: 4))
+        )
+        Issue.record("decreasing WT_MAX_DATA should throw")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .flowControl)
+        #expect(error.code == WebTransportHTTP3DraftConstants.current.wtFlowControlError)
+    }
+
+    #expect(throws: WebTransportDraft15Error.self) {
+        _ = try pair.client.receiveFlowControlCapsule(
+            sessionID: sessionID,
+            bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 1))
+        )
+    }
+    #expect(throws: WebTransportDraft15Error.self) {
+        _ = try pair.client.receiveFlowControlCapsule(
+            sessionID: sessionID,
+            bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsUni(limit: 1))
+        )
+    }
+}
+
+@Test
+func webTransportFlowControlClosedSessionRejectsPostCloseAccounting() throws {
+    var pair = try WebTransportFlowControlTestSupport.makeReadyManagers(maxData: 8)
+    let sessionID = try WebTransportFlowControlTestSupport.establishSession(
+        client: &pair.client,
+        server: &pair.server
+    )
+    let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+    _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
+
+    _ = try pair.server.receiveFlowControlCapsule(
+        sessionID: sessionID,
+        bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: "closed"))
+    )
+
+    #expect(throws: WebTransportDraft15Error.self) {
+        try pair.server.receiveStreamPayload(streamID: 4, payload: Data("x".utf8))
+    }
+    #expect(throws: WebTransportDraft15Error.self) {
+        _ = try pair.server.receiveDatagramFrame(.datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8))
+        ))
+    }
+}
+
 private enum WebTransportFlowControlTestSupport {
     static func makeReadyManagers(
         maxStreamsBidi: UInt64? = nil,

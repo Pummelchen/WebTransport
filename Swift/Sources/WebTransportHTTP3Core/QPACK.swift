@@ -93,17 +93,111 @@ public struct QPACKDecoderLimits: Equatable, Sendable {
     }
 }
 
+public struct QPACKDynamicTable: Equatable, Sendable {
+    public private(set) var entries: [HTTPFieldLine]
+    public private(set) var capacity: Int
+    public private(set) var byteSize: Int
+    public private(set) var insertedCount: UInt64
+
+    public init(capacity: Int = 0) throws {
+        guard capacity >= 0 else {
+            throw QUICCodecError.valueOutOfRange("QPACK dynamic table capacity must not be negative")
+        }
+        self.entries = []
+        self.capacity = capacity
+        self.byteSize = 0
+        self.insertedCount = 0
+    }
+
+    public mutating func setCapacity(_ capacity: Int) throws {
+        guard capacity >= 0 else {
+            throw QUICCodecError.valueOutOfRange("QPACK dynamic table capacity must not be negative")
+        }
+        self.capacity = capacity
+        evictToCapacity()
+    }
+
+    public mutating func insert(_ field: HTTPFieldLine) throws {
+        let entrySize = Self.entrySize(field)
+        guard entrySize <= capacity else {
+            entries.removeAll()
+            byteSize = 0
+            insertedCount += 1
+            return
+        }
+
+        entries.insert(field, at: 0)
+        byteSize += entrySize
+        insertedCount += 1
+        evictToCapacity()
+    }
+
+    public func relativeEntry(index: UInt64) throws -> HTTPFieldLine {
+        guard index <= UInt64(Int.max), Int(index) < entries.count else {
+            throw QUICCodecError.malformed("QPACK dynamic table relative index is invalid")
+        }
+        return entries[Int(index)]
+    }
+
+    public func relativeIndex(name: String, value: String) -> UInt64? {
+        guard let index = entries.firstIndex(where: { $0.name == name && $0.value == value }) else {
+            return nil
+        }
+        return UInt64(index)
+    }
+
+    public func relativeNameIndex(_ name: String) -> UInt64? {
+        guard let index = entries.firstIndex(where: { $0.name == name }) else {
+            return nil
+        }
+        return UInt64(index)
+    }
+
+    private mutating func evictToCapacity() {
+        while byteSize > capacity, let last = entries.last {
+            byteSize -= Self.entrySize(last)
+            entries.removeLast()
+        }
+    }
+
+    private static func entrySize(_ field: HTTPFieldLine) -> Int {
+        field.name.utf8.count + field.value.utf8.count + 32
+    }
+}
+
 public enum QPACK {
-    public static func encodeFieldSection(_ fields: [HTTPFieldLine]) throws -> Data {
-        var output = Data([0x00, 0x00])
+    public static func encodeFieldSection(
+        _ fields: [HTTPFieldLine],
+        huffman: Bool = false
+    ) throws -> Data {
+        try encodeFieldSection(fields, dynamicTable: nil, huffman: huffman)
+    }
+
+    public static func encodeFieldSection(
+        _ fields: [HTTPFieldLine],
+        dynamicTable: QPACKDynamicTable?,
+        huffman: Bool = false
+    ) throws -> Data {
+        let requiredInsertCount = dynamicTable?.insertedCount ?? 0
+        var output = Data()
+        output.append(try encodePrefixedInteger(requiredInsertCount, prefixBits: 8, firstBytePrefix: 0x00))
+        output.append(0x00)
         for field in fields {
-            output.append(try encodeFieldLine(field))
+            output.append(try encodeFieldLine(field, dynamicTable: dynamicTable, huffman: huffman))
         }
         return output
     }
 
     public static func decodeFieldSection(
         _ data: Data,
+        limits: QPACKDecoderLimits = .default
+    ) throws -> [HTTPFieldLine] {
+        try decodeFieldSection(data, dynamicTable: nil, limits: limits)
+    }
+
+    public static func decodeFieldSection(
+        _ data: Data,
+        dynamicTable: QPACKDynamicTable?,
         limits: QPACKDecoderLimits = .default
     ) throws -> [HTTPFieldLine] {
         guard data.count <= limits.maxFieldSectionBytes else {
@@ -116,11 +210,15 @@ public enum QPACK {
         let deltaBase = try decodePrefixedInteger(from: &cursor, prefixBits: 7, firstByte: baseByte)
         let baseSign = (baseByte & 0x80) != 0
 
-        guard requiredInsertCount == 0 else {
-            throw QUICCodecError.malformed("dynamic QPACK references are not supported by the minimal decoder")
+        guard requiredInsertCount == 0 || dynamicTable != nil else {
+            throw QUICCodecError.malformed("dynamic QPACK references require a dynamic table context")
         }
-        guard !baseSign, deltaBase == 0 else {
-            throw QUICCodecError.malformed("minimal QPACK decoder only accepts zero Base without dynamic references")
+        if requiredInsertCount > 0 {
+            guard let dynamicTable, requiredInsertCount <= dynamicTable.insertedCount else {
+                throw QUICCodecError.malformed("QPACK Required Insert Count exceeds dynamic table state")
+            }
+        } else if baseSign || deltaBase != 0 {
+            throw QUICCodecError.malformed("QPACK Base must be zero when there are no dynamic references")
         }
 
         var fields: [HTTPFieldLine] = []
@@ -128,7 +226,7 @@ public enum QPACK {
             guard fields.count < limits.maxFieldLineCount else {
                 throw QUICCodecError.valueOutOfRange("QPACK field line count exceeds configured limit")
             }
-            let field = try decodeFieldLine(from: &cursor)
+            let field = try decodeFieldLine(from: &cursor, dynamicTable: dynamicTable)
             guard field.name.utf8.count + field.value.utf8.count <= limits.maxFieldLineBytes else {
                 throw QUICCodecError.valueOutOfRange("QPACK field line exceeds configured limit")
             }
@@ -151,7 +249,15 @@ public enum QPACK {
         return try decodeFieldSection(frame.payload, limits: limits)
     }
 
-    static func encodeFieldLine(_ field: HTTPFieldLine) throws -> Data {
+    static func encodeFieldLine(
+        _ field: HTTPFieldLine,
+        dynamicTable: QPACKDynamicTable?,
+        huffman: Bool
+    ) throws -> Data {
+        if let dynamicIndex = dynamicTable?.relativeIndex(name: field.name, value: field.value) {
+            return try encodePrefixedInteger(dynamicIndex, prefixBits: 6, firstBytePrefix: 0x80)
+        }
+
         if let index = QPACKStaticTable.exactIndex(name: field.name, value: field.value) {
             return try encodePrefixedInteger(index, prefixBits: 6, firstBytePrefix: 0xc0)
         }
@@ -159,22 +265,33 @@ public enum QPACK {
         let valueBytes = Data(field.value.utf8)
         if let nameIndex = QPACKStaticTable.nameIndex(field.name) {
             var output = try encodePrefixedInteger(nameIndex, prefixBits: 4, firstBytePrefix: 0x50)
-            output.append(try encodeStringLiteral(valueBytes, prefixBits: 7, firstBytePrefix: 0x00))
+            output.append(try encodeStringLiteral(valueBytes, prefixBits: 7, firstBytePrefix: 0x00, huffman: huffman))
+            return output
+        }
+        if let dynamicNameIndex = dynamicTable?.relativeNameIndex(field.name) {
+            var output = try encodePrefixedInteger(dynamicNameIndex, prefixBits: 4, firstBytePrefix: 0x40)
+            output.append(try encodeStringLiteral(valueBytes, prefixBits: 7, firstBytePrefix: 0x00, huffman: huffman))
             return output
         }
 
-        var output = try encodeStringLiteral(Data(field.name.utf8), prefixBits: 3, firstBytePrefix: 0x20)
-        output.append(try encodeStringLiteral(valueBytes, prefixBits: 7, firstBytePrefix: 0x00))
+        var output = try encodeStringLiteral(Data(field.name.utf8), prefixBits: 3, firstBytePrefix: 0x20, huffman: huffman)
+        output.append(try encodeStringLiteral(valueBytes, prefixBits: 7, firstBytePrefix: 0x00, huffman: huffman))
         return output
     }
 
-    static func decodeFieldLine(from cursor: inout QUICByteCursor) throws -> HTTPFieldLine {
+    static func decodeFieldLine(
+        from cursor: inout QUICByteCursor,
+        dynamicTable: QPACKDynamicTable?
+    ) throws -> HTTPFieldLine {
         let first = try cursor.readUInt8()
         if (first & 0x80) != 0 {
             let index = try decodePrefixedInteger(from: &cursor, prefixBits: 6, firstByte: first)
             let isStatic = (first & 0x40) != 0
-            guard isStatic else {
-                throw QUICCodecError.malformed("dynamic QPACK indexed fields are not supported")
+            if !isStatic {
+                guard let dynamicTable else {
+                    throw QUICCodecError.malformed("dynamic QPACK indexed fields require a dynamic table context")
+                }
+                return try dynamicTable.relativeEntry(index: index)
             }
             guard let entry = QPACKStaticTable.entry(index: index) else {
                 throw QUICCodecError.malformed("QPACK static table index is unknown")
@@ -185,14 +302,20 @@ public enum QPACK {
         if (first & 0x40) != 0 {
             let nameIndex = try decodePrefixedInteger(from: &cursor, prefixBits: 4, firstByte: first)
             let isStatic = (first & 0x10) != 0
-            guard isStatic else {
-                throw QUICCodecError.malformed("dynamic QPACK name references are not supported")
-            }
-            guard let entry = QPACKStaticTable.entry(index: nameIndex) else {
-                throw QUICCodecError.malformed("QPACK static table name index is unknown")
+            let name: String
+            if isStatic {
+                guard let entry = QPACKStaticTable.entry(index: nameIndex) else {
+                    throw QUICCodecError.malformed("QPACK static table name index is unknown")
+                }
+                name = entry.name
+            } else {
+                guard let dynamicTable else {
+                    throw QUICCodecError.malformed("dynamic QPACK name references require a dynamic table context")
+                }
+                name = try dynamicTable.relativeEntry(index: nameIndex).name
             }
             let value = try decodeStringLiteral(from: &cursor, prefixBits: 7)
-            return try HTTPFieldLine(name: entry.name, value: value)
+            return try HTTPFieldLine(name: name, value: value)
         }
 
         if (first & 0x20) != 0 {
@@ -205,12 +328,23 @@ public enum QPACK {
     }
 }
 
-private func encodeStringLiteral(_ bytes: Data, prefixBits: UInt8, firstBytePrefix: UInt8) throws -> Data {
-    guard bytes.count <= Int(QUICVarInt.maximum) else {
+private func encodeStringLiteral(
+    _ bytes: Data,
+    prefixBits: UInt8,
+    firstBytePrefix: UInt8,
+    huffman: Bool
+) throws -> Data {
+    let encodedBytes = huffman ? QPACKHuffman.encode(bytes) : bytes
+    guard encodedBytes.count <= Int(QUICVarInt.maximum) else {
         throw QUICCodecError.valueOutOfRange("QPACK string literal length exceeds range")
     }
-    var output = try encodePrefixedInteger(UInt64(bytes.count), prefixBits: prefixBits, firstBytePrefix: firstBytePrefix)
-    output.append(bytes)
+    let huffmanPrefix = huffman ? UInt8(1 << prefixBits) : 0
+    var output = try encodePrefixedInteger(
+        UInt64(encodedBytes.count),
+        prefixBits: prefixBits,
+        firstBytePrefix: firstBytePrefix | huffmanPrefix
+    )
+    output.append(encodedBytes)
     return output
 }
 
@@ -221,12 +355,10 @@ private func decodeStringLiteral(
 ) throws -> String {
     let first = try firstByte ?? cursor.readUInt8()
     let huffmanFlag = (first & (1 << prefixBits)) != 0
-    guard !huffmanFlag else {
-        throw QUICCodecError.malformed("QPACK Huffman strings are not supported by the minimal decoder")
-    }
     let length = try checkedLength(try decodePrefixedInteger(from: &cursor, prefixBits: prefixBits, firstByte: first))
     let bytes = try cursor.readBytes(count: length)
-    guard let value = String(data: bytes, encoding: .utf8) else {
+    let decodedBytes = huffmanFlag ? try QPACKHuffman.decode(bytes) : bytes
+    guard let value = String(data: decodedBytes, encoding: .utf8) else {
         throw QUICCodecError.malformed("QPACK string literal is not UTF-8")
     }
     return value
@@ -244,8 +376,8 @@ private func encodePrefixedInteger(
     prefixBits: UInt8,
     firstBytePrefix: UInt8
 ) throws -> Data {
-    guard prefixBits > 0, prefixBits < 8 else {
-        throw QUICCodecError.valueOutOfRange("QPACK prefix width must be 1...7 bits")
+    guard prefixBits > 0, prefixBits <= 8 else {
+        throw QUICCodecError.valueOutOfRange("QPACK prefix width must be 1...8 bits")
     }
     let maxPrefixValue = UInt64((1 << prefixBits) - 1)
     guard value <= QUICVarInt.maximum else {
