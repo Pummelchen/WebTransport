@@ -251,9 +251,10 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
     }
 
     public func waitForListening(timeoutMilliseconds: Int32 = 5_000) async throws -> WebTransportNetworkEndpoint {
-        let port = try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
-            try await Self.resolveListenerPort(self.listener)
-        }
+        let port = try await Self.resolveListenerPort(
+            self.listener,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
         localEndpoint = WebTransportNetworkEndpoint(host: localEndpoint.host, port: port.rawValue)
         return localEndpoint
     }
@@ -463,13 +464,17 @@ public final class WebTransportQUICInteroperablePacketProbeServer: @unchecked Se
         )
     }
 
-    private static func resolveListenerPort(_ listener: NetworkListener<QUIC>) async throws -> NWEndpoint.Port {
+    private static func resolveListenerPort(
+        _ listener: NetworkListener<QUIC>,
+        timeoutMilliseconds: Int32
+    ) async throws -> NWEndpoint.Port {
         let start = Date()
-        while (listener.port == nil || listener.port?.rawValue == 0) && Date().timeIntervalSince(start) < 5.0 {
+        let timeoutSeconds = TimeInterval(max(1, timeoutMilliseconds)) / 1_000
+        while (listener.port == nil || listener.port?.rawValue == 0) && Date().timeIntervalSince(start) < timeoutSeconds {
             try await Task.sleep(for: .milliseconds(10))
         }
         guard let port = listener.port, port.rawValue != 0 else {
-            throw WebTransportNetworkRuntimeError.timeout(5_000)
+            throw WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds)
         }
         return port
     }

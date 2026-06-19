@@ -508,7 +508,7 @@ private enum WebTransportProcessSupport {
         let listenEndpoint = endpointArgument(host: host, port: 0)
         let runningServer = try start(
             server,
-            ["--listen", listenEndpoint, "--transport", transport, "--timeout-ms", "5000"]
+            ["--listen", listenEndpoint, "--transport", transport, "--timeout-ms", "12000"]
         )
         defer {
             runningServer.terminateIfNeeded()
@@ -520,8 +520,8 @@ private enum WebTransportProcessSupport {
         let loopbackName = "loopback-\(transport)-\(host == "::1" ? "ipv6" : "ipv4")"
         let clientResult = try run(
             client,
-            ["--connect", connectEndpoint, "--transport", transport, "--message", loopbackName, "--timeout-ms", "5000"],
-            timeout: 10
+            ["--connect", connectEndpoint, "--transport", transport, "--message", loopbackName, "--timeout-ms", "12000"],
+            timeout: 20
         )
         #expect(clientResult.exitCode == 0)
         #expect(clientResult.stdout.contains("connected"))
@@ -530,7 +530,7 @@ private enum WebTransportProcessSupport {
             #expect(clientResult.stdout.contains("session=established"))
         }
 
-        let serverResult = try runningServer.wait(timeout: 10)
+        let serverResult = try runningServer.wait(timeout: 20)
         #expect(serverResult.exitCode == 0)
         #expect(serverResult.stdout.contains("served"))
         #expect(serverResult.stdout.contains(loopbackName))

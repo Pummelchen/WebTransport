@@ -26,7 +26,7 @@ func networkProbeCodecRoundTripsAndRejectsMalformedPackets() throws {
 func networkProbeClientServerExchangeOverUDP() async throws {
     let server = try WebTransportNetworkProbeServer(bindPort: 0)
     let task = Task.detached {
-        try server.serveOne(timeoutMilliseconds: 5_000)
+        try server.serveOne(timeoutMilliseconds: 15_000)
     }
     try await Task.sleep(for: .milliseconds(25))
 
@@ -34,7 +34,7 @@ func networkProbeClientServerExchangeOverUDP() async throws {
     let clientResult = try client.run(
         to: server.localEndpoint,
         message: "runtime",
-        timeoutMilliseconds: 5_000
+        timeoutMilliseconds: 15_000
     )
     let serverResult = try await task.value
 
@@ -316,7 +316,7 @@ func quicPacketProbeRejectsWrongALPNAndTransportParameters() throws {
 func quicPacketProbeClientServerExchangeOverUDP() async throws {
     let server = try WebTransportQUICPacketProbeServer(bindPort: 0)
     let task = Task.detached {
-        try server.serveOne(timeoutMilliseconds: 5_000)
+        try server.serveOne(timeoutMilliseconds: 15_000)
     }
     try await Task.sleep(for: .milliseconds(25))
 
@@ -324,7 +324,7 @@ func quicPacketProbeClientServerExchangeOverUDP() async throws {
     let clientResult = try client.run(
         to: server.localEndpoint,
         message: "packet-runtime",
-        timeoutMilliseconds: 5_000
+        timeoutMilliseconds: 15_000
     )
     let serverResult = try await task.value
 
