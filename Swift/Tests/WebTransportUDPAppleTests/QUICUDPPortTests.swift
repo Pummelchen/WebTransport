@@ -36,3 +36,29 @@ func udpPortRejectsInvalidReceiveConfiguration() throws {
         _ = try server.receive(maximumBytes: 1, timeoutMilliseconds: -1)
     }
 }
+
+@Test
+func udpPortCancellationObservedWithShortReceiveTimeout() async throws {
+    let port = try QUICUDPPort()
+
+    let task = Task { () -> Bool in
+        var looped = false
+        while true {
+            do {
+                _ = try port.receive(timeoutMilliseconds: 10)
+            } catch {
+                // expected for timeout
+            }
+            if Task.isCancelled {
+                looped = true
+                break
+            }
+        }
+        return looped
+    }
+
+    try await Task.sleep(for: .milliseconds(60))
+    task.cancel()
+    let observedCancellation = await task.value
+    #expect(observedCancellation)
+}

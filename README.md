@@ -7,6 +7,8 @@ Native WebTransport over HTTP/3 implementations.
 
 Latest official HTTP/3 draft target: `draft-ietf-webtrans-http3-15`.
 
+Project documentation lives in the GitHub wiki:
+
 Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 ## Status
