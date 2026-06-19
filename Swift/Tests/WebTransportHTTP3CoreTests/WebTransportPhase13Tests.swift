@@ -444,6 +444,14 @@ func webTransportSecurityNegativesAreDeterministicAndPromptFree() throws {
 }
 
 @Test
+func webTransportLibrarySmokeMatrixCoversPhase13IScenarios() throws {
+    let results = WebTransportLibrarySmokeMatrix.runAll()
+    #expect(results.map(\.scenario) == WebTransportLibrarySmokeScenario.allCases)
+    #expect(results.allSatisfy { $0.passed })
+    #expect(results.map(\.detail).allSatisfy { $0 == "passed" })
+}
+
+@Test
 func webTransportRejectsMalformedConnectDataOrderingWithRequirementsNotMet() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
     do {

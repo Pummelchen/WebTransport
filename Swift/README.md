@@ -94,6 +94,10 @@ draft-15 compliance closure is in progress.
   protocol-policy rejection metadata, GOAWAY-driven draining, monotonic
   WebTransport flow-control limit updates, non-mutating failed capacity attempts,
   and deduplicated blocked-flow capsule queues under repeated blocked sends.
+- `WebTransportHTTP3Core` also provides `LibrarySmokeClient`/
+  `LibrarySmokeServer` in-memory smoke drivers and a strict pass/fail smoke matrix
+  for close/drain, rejection, backpressure, early-ingress ordering promotion, and
+  multi-session isolation scenarios. `NativeQUICCoreSpike` runs this matrix.
 
 Commands:
 

@@ -53,6 +53,7 @@ enum NativeQUICCoreSpike {
             try proveHTTP3ByteCodecs()
             try proveHTTP3ConnectionLayer()
             try proveWebTransportSessionEstablishment()
+            try proveWebTransportLibrarySmokeMatrix()
             print("phase1b: native QUIC core frame exchange over Apple UDP passed without security prompts")
         } catch {
             fputs("NativeQUICCoreSpike failed: \(error)\n", stderr)
@@ -479,6 +480,14 @@ enum NativeQUICCoreSpike {
         try assert(rejectedSession.state == .rejected(status: 404), "client rejected WebTransport session")
 
         print("webtransport-session: extended CONNECT, pseudo-headers, accept/reject, session IDs, settings, version, and mapping passed")
+    }
+
+    private static func proveWebTransportLibrarySmokeMatrix() throws {
+        let results = WebTransportLibrarySmokeMatrix.runAll()
+        let failures = results.filter { !$0.passed }
+        try assert(failures.isEmpty, "library smoke matrix passed: \(failures)")
+        try assert(results.map(\.scenario) == WebTransportLibrarySmokeScenario.allCases, "library smoke matrix covers all scenarios")
+        print("library-smoke: close/drain, rejection, backpressure, ordering, and multi-session matrix passed")
     }
 }
 
