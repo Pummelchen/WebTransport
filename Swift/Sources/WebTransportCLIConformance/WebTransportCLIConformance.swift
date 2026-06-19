@@ -603,6 +603,8 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             let text = try String(contentsOf: url, encoding: .utf8)
             try require(text.contains("rm -rf .build/arm64-apple-macosx/release .build/release"), "release output cleaned")
             try require(text.contains("Unexpected spike binary in production release output"), "stale spike rejection present")
+            try require(text.contains("Release artifact is not reproducible"), "reproducibility failure path present")
+            try require(text.contains("SHA256SUMS"), "checksum manifest is emitted")
         }
     ]
 }

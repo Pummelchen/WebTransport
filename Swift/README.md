@@ -22,11 +22,27 @@ Implemented:
 - Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, deterministic Certificate/CertificateVerify/Finished validation, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session probing for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame probe compatibility mode.
 - CLI conformance harness with 40 scenarios shared by `WebTransportClient` and `WebTransportServer`, including positive/negative interop matrices for CONNECT, streams, datagrams, GOAWAY, close/drain, malformed input, and flow-control errors.
 - Deterministic parser/property hardening tests for QPACK, HTTP/3 frames, capsules, QUIC varints, QUIC transport parameters, WebTransport stream prefixes, resource limits, malformed peers, ordering, replay, exhaustion, and close/reset races.
-- Apple Silicon release script for production CLI binaries.
+- macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
+- Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
+- Apple Silicon release script for reproducibility-checked production CLI binaries with `SHA256SUMS`.
 
 Known limitation:
 
 - The separate-process network mode is still a deterministic runtime probe rather than a complete external QUIC/TLS/HTTP/3 network stack.
+
+## Public API Surface
+
+The high-level `WebTransport` product exposes:
+
+- `WebTransportClientConfiguration` and `WebTransportServerConfiguration` for authority, path, origin, and subprotocol policy.
+- `WebTransportClient` and `WebTransportServer` actors for in-process Swift concurrency session establishment.
+- `WebTransportClientSession` through the `WebTransportSession` protocol for datagram send/receive and close.
+- `WebTransportLogger` and `WebTransportLogEvent` for sanitized opt-in production events.
+- `WebTransportErrorSurface.publicDescription(for:)` for user-visible/logged error text that redacts peer-controlled detail.
+
+The logger never emits TLS secrets, certificate material, QUIC connection IDs, raw session IDs, packet bytes, datagram payloads, or close reason text.
+
+Release artifacts are written to `.build/release-artifacts/` by `./build-release-apple-silicon.sh` after two clean release builds produce matching product hashes.
 
 ## Commands
 

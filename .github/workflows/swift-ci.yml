@@ -1,0 +1,57 @@
+name: Swift CI
+
+"on":
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: swift-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-swift:
+    name: macOS 26 arm64 / ${{ matrix.xcode }}
+    runs-on: macos-26-arm64
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - xcode: Xcode 26.0.1
+            developer_dir: /Applications/Xcode_26.0.1.app/Contents/Developer
+          - xcode: Xcode 26.5
+            developer_dir: /Applications/Xcode_26.5.app/Contents/Developer
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          if [ ! -d "${{ matrix.developer_dir }}" ]; then
+            echo "Expected Xcode not found: ${{ matrix.developer_dir }}" >&2
+            ls -1 /Applications | grep '^Xcode' >&2 || true
+            exit 1
+          fi
+          sudo xcode-select -s "${{ matrix.developer_dir }}"
+          xcodebuild -version
+          swift --version
+
+      - name: Build package
+        run: swift build --package-path Swift
+
+      - name: Run package tests
+        run: swift test --package-path Swift
+
+      - name: Run client CLI conformance
+        run: swift run --package-path Swift WebTransportClient --scenario all
+
+      - name: Run server CLI conformance
+        run: swift run --package-path Swift WebTransportServer --scenario all
+
+      - name: Verify release artifacts
+        run: ./build-release-apple-silicon.sh
+        working-directory: Swift
