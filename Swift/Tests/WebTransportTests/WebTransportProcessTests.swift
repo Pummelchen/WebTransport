@@ -521,6 +521,9 @@ enum WebTransportProcessSupport {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
     }()
+    static let repositoryDirectory: URL = {
+        packageDirectory.deletingLastPathComponent()
+    }()
 
     static func withExclusiveProcessExecution<T>(
         label: String = #function,
@@ -552,6 +555,8 @@ enum WebTransportProcessSupport {
 
     static func productURL(_ product: String, configuration: String) throws -> URL {
         let candidates = [
+            repositoryDirectory.appendingPathComponent(".build/\(configuration)/\(product)"),
+            repositoryDirectory.appendingPathComponent(".build/arm64-apple-macosx/\(configuration)/\(product)"),
             packageDirectory.appendingPathComponent(".build/\(configuration)/\(product)"),
             packageDirectory.appendingPathComponent(".build/arm64-apple-macosx/\(configuration)/\(product)")
         ]

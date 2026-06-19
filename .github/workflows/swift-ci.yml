@@ -41,7 +41,7 @@ jobs:
           swift --version
 
       - name: Build package
-        run: swift build --package-path Swift
+        run: swift build
 
       - name: Build public API compatibility sample
         run: ./check-api-compatibility.sh
@@ -55,10 +55,10 @@ jobs:
         env:
           WEBTRANSPORT_REQUIRE_CLI_BINARIES: "1"
           WEBTRANSPORT_REQUIRE_RELEASE_ARTIFACTS: "1"
-        run: swift test --package-path Swift
+        run: swift test
 
       - name: Run client CLI conformance
-        run: swift run --package-path Swift WebTransportClient --scenario all
+        run: swift run WebTransportClient --scenario all
 
       - name: Run server CLI conformance
-        run: swift run --package-path Swift WebTransportServer --scenario all
+        run: swift run WebTransportServer --scenario all

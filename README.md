@@ -17,6 +17,11 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 Swift is the only active implementation in this repository.
 
+The repository root is a normal SwiftPM package. Consumers can depend on the
+repository URL and import the `WebTransport` library product directly. The
+`Swift/` subdirectory remains as a compatibility package root for release and
+interop helper scripts.
+
 Current Swift coverage includes:
 
 - HTTP/3 frame, SETTINGS, control stream, request stream, GOAWAY, and error mapping logic.
@@ -45,15 +50,16 @@ Important note: the Swift client/server CLI routes `--listen/--connect` sessions
 Useful Swift commands:
 
 ```sh
-swift test --package-path Swift
-swift run --package-path Swift WebTransportClient --scenario all
-swift run --package-path Swift WebTransportServer --scenario all
-swift run --package-path Swift WebTransportServer --listen 127.0.0.1:4433 --transport packet
-swift run --package-path Swift WebTransportClient --connect 127.0.0.1:4433 --transport packet
-swift run --package-path Swift WebTransportServer --listen '[::1]:4433' --transport packet
-swift run --package-path Swift WebTransportClient --connect '[::1]:4433' --transport packet
-swift run --package-path Swift WebTransportClient
-swift run --package-path Swift WebTransportServer
+swift build
+swift test
+swift run WebTransportClient --scenario all
+swift run WebTransportServer --scenario all
+swift run WebTransportServer --listen 127.0.0.1:4433 --transport packet
+swift run WebTransportClient --connect 127.0.0.1:4433 --transport packet
+swift run WebTransportServer --listen '[::1]:4433' --transport packet
+swift run WebTransportClient --connect '[::1]:4433' --transport packet
+swift run WebTransportClient
+swift run WebTransportServer
 cd Swift && ./run-pywebtransport-interop.sh
 cd Swift && ./run-third-party-interop.sh
 cd Swift && ./build-release-apple-silicon.sh
