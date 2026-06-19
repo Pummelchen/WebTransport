@@ -420,6 +420,63 @@ func certificateVerifySignatureVerifiesWithInMemorySecKey() throws {
 }
 
 @Test
+func handshakeFlightFragmentsReassemblesAndUpdatesTranscript() throws {
+    let messages = [
+        TLSHandshakeMessage(type: .clientHello, body: Data(repeating: 0x01, count: 7)),
+        TLSHandshakeMessage(type: .serverHello, body: Data(repeating: 0x02, count: 5)),
+        TLSHandshakeMessage(type: .encryptedExtensions, body: Data([0x03, 0x04, 0x05]))
+    ]
+    let flight = TLSHandshakeFlight(messages: messages)
+    let frames = try flight.cryptoFrames(maxFramePayloadBytes: 4)
+    #expect(frames.count > messages.count)
+
+    var decoder = TLSHandshakeFlightDecoder()
+    #expect(try decoder.receive(frame: frames[2]).isEmpty)
+    #expect(try decoder.receive(frame: frames[1]).isEmpty)
+    let firstDecoded = try decoder.receive(frame: frames[0])
+    #expect(firstDecoded == [messages[0]])
+
+    let restDecoded = try decoder.receive(frames: Array(frames.dropFirst(3)))
+    #expect(firstDecoded + restDecoded == messages)
+    #expect(decoder.transcript.hash == TLS13KeySchedule.transcriptHash(try flight.encodedBytes()))
+    #expect(decoder.consumedByteCount == UInt64(try flight.encodedBytes().count))
+}
+
+@Test
+func handshakeFlightBuffersPartialMessagesUntilComplete() throws {
+    let message = TLSHandshakeMessage(type: .finished, body: Data(repeating: 0xaa, count: 12))
+    let frames = try TLSHandshakeFlight(messages: [message]).cryptoFrames(maxFramePayloadBytes: 5)
+    var decoder = TLSHandshakeFlightDecoder()
+
+    #expect(try decoder.receive(frame: frames[0]).isEmpty)
+    #expect(try decoder.receive(frame: frames[1]).isEmpty)
+    #expect(try decoder.receive(frame: frames[2]).isEmpty)
+    #expect(try decoder.receive(frame: frames[3]) == [message])
+}
+
+@Test
+func handshakeFlightRejectsInvalidCryptoInput() throws {
+    let first = QUICFrame.crypto(offset: 0, data: Data([0x01, 0x00, 0x00, 0x01, 0xaa]))
+    let conflicting = QUICFrame.crypto(offset: 4, data: Data([0xbb]))
+    var decoder = TLSHandshakeFlightDecoder()
+
+    #expect(try decoder.receive(frame: first) == [
+        TLSHandshakeMessage(type: .clientHello, body: Data([0xaa]))
+    ])
+    try expectThrowing {
+        _ = try decoder.receive(frame: conflicting)
+    }
+    try expectThrowing {
+        _ = try decoder.receive(frame: .ping)
+    }
+    try expectThrowing {
+        _ = try TLSHandshakeFlight(messages: [
+            TLSHandshakeMessage(type: .clientHello, body: Data([0x01]))
+        ]).cryptoFrames(maxFramePayloadBytes: 0)
+    }
+}
+
+@Test
 func typedExtensionDecodersRejectMalformedVectors() throws {
     try expectThrowing {
         _ = try TLSSupportedVersionsExtension.clientVersions(from: Data([0x00]))

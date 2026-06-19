@@ -38,6 +38,10 @@ Current Phase 1 status: closed.
   X25519 handshake secret derivation, application traffic secret progression,
   prompt-free identity/trust input models, and CertificateVerify verification
   primitives.
+- `WebTransportTLSCore` also provides a CRYPTO-frame handshake flight encoder and
+  decoder that fragments typed TLS messages into QUIC CRYPTO frames, reassembles
+  out-of-order CRYPTO data, emits complete handshake messages, and updates the
+  TLS transcript.
 
 Commands:
 

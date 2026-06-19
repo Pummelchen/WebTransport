@@ -132,20 +132,35 @@ enum NativeQUICCoreSpike {
         )
         let encryptedExtensions = TLSEncryptedExtensions(extensions: decodedExtensions)
 
-        var transcript = TLS13Transcript()
-        try transcript.append(clientHello.handshakeMessage())
-        try transcript.append(serverHello.handshakeMessage())
+        var flightDecoder = TLSHandshakeFlightDecoder()
+        let clientHelloMessage = try clientHello.handshakeMessage()
+        let serverHelloMessage = try serverHello.handshakeMessage()
+        let decodedClientHello = try flightDecoder.receive(frames: TLSHandshakeFlight(
+            messages: [clientHelloMessage]
+        ).cryptoFrames(maxFramePayloadBytes: 19))
+        let decodedServerHello = try flightDecoder.receive(frames: TLSHandshakeFlight(
+            messages: [serverHelloMessage]
+        ).cryptoFrames(startingOffset: UInt64(try clientHelloMessage.encode().count), maxFramePayloadBytes: 17))
+        try assert(decodedClientHello == [clientHelloMessage], "ClientHello CRYPTO flight")
+        try assert(decodedServerHello == [serverHelloMessage], "ServerHello CRYPTO flight")
 
         let handshakeSecret = try TLS13KeyAgreement.handshakeSecret(sharedSecret: clientSharedSecret)
         let trafficSecrets = try TLS13KeyAgreement.handshakeTrafficSecrets(
             handshakeSecret: handshakeSecret,
-            transcriptHash: transcript.hash
+            transcriptHash: flightDecoder.transcript.hash
         )
-        try transcript.append(encryptedExtensions.handshakeMessage())
+        let encryptedExtensionsMessage = try encryptedExtensions.handshakeMessage()
+        let decodedEncryptedExtensions = try flightDecoder.receive(frames: TLSHandshakeFlight(
+            messages: [encryptedExtensionsMessage]
+        ).cryptoFrames(
+            startingOffset: flightDecoder.consumedByteCount,
+            maxFramePayloadBytes: 13
+        ))
+        try assert(decodedEncryptedExtensions == [encryptedExtensionsMessage], "EncryptedExtensions CRYPTO flight")
 
         let verifyData = try TLS13KeySchedule.finishedVerifyData(
             baseKey: trafficSecrets.serverHandshakeTrafficSecret,
-            transcriptHash: transcript.hash
+            transcriptHash: flightDecoder.transcript.hash
         )
         let trafficKeys = try QUICPacketProtection.deriveKeys(
             trafficSecret: trafficSecrets.serverHandshakeTrafficSecret
@@ -160,11 +175,18 @@ enum NativeQUICCoreSpike {
             "QUIC handshake traffic key lengths"
         )
 
-        try transcript.append(finished.handshakeMessage())
+        let finishedMessage = finished.handshakeMessage()
+        let decodedFinished = try flightDecoder.receive(frames: TLSHandshakeFlight(
+            messages: [finishedMessage]
+        ).cryptoFrames(
+            startingOffset: flightDecoder.consumedByteCount,
+            maxFramePayloadBytes: 11
+        ))
+        try assert(decodedFinished == [finishedMessage], "Finished CRYPTO flight")
         let masterSecret = try TLS13KeyAgreement.masterSecret(handshakeSecret: handshakeSecret)
         let applicationTrafficSecrets = try TLS13KeyAgreement.applicationTrafficSecrets(
             masterSecret: masterSecret,
-            transcriptHash: transcript.hash
+            transcriptHash: flightDecoder.transcript.hash
         )
         let applicationKeys = try QUICPacketProtection.deriveKeys(
             trafficSecret: applicationTrafficSecrets.serverApplicationTrafficSecret
@@ -182,7 +204,7 @@ enum NativeQUICCoreSpike {
             keys: applicationKeys
         )
         try assert(openedPayload == Data("1rtt webtransport payload".utf8), "1-RTT QUIC packet protection")
-        print("tls: X25519, ALPN h3, QUIC transport parameters, Finished verify data, and QUIC handshake/1-RTT keys passed")
+        print("tls: CRYPTO flights, X25519, ALPN h3, QUIC transport parameters, Finished verify data, and QUIC handshake/1-RTT keys passed")
     }
 }
 
