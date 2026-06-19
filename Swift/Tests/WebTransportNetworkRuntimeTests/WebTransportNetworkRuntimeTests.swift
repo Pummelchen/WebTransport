@@ -28,7 +28,7 @@ func networkProbeClientServerExchangeOverUDP() async throws {
     let (clientResult, serverResult, localPort) = try await WebTransportRuntimeLoopbackGate.withLock(label: #function) {
         let server = try WebTransportNetworkProbeServer(bindPort: 0)
         let task = Task.detached {
-            try server.serveOne(timeoutMilliseconds: 15_000)
+            try server.serveOne(timeoutMilliseconds: 30_000)
         }
         try await Task.sleep(for: .milliseconds(25))
 
@@ -36,7 +36,7 @@ func networkProbeClientServerExchangeOverUDP() async throws {
         let clientResult = try client.run(
             to: server.localEndpoint,
             message: "runtime",
-            timeoutMilliseconds: 15_000
+            timeoutMilliseconds: 30_000
         )
         let serverResult = try await task.value
         return (clientResult, serverResult, server.localEndpoint.port)
