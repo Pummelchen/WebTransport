@@ -72,6 +72,126 @@ func keyScheduleDerivesFinishedVerifyDataAndTrafficKeys() throws {
     #expect(verifyData != transcriptHash)
 }
 
+@Test
+func typedTLS13HandshakeBodiesRoundTripWithQUICExtensions() throws {
+    var parameters = QUICTransportParameters()
+    try parameters.setInteger(1_200, for: QUICTransportParameterID.maxDatagramFrameSize)
+
+    let clientHello = try TLSClientHello(
+        random: Data(repeating: 0x01, count: 32),
+        legacySessionID: Data([0xaa]),
+        extensions: [
+            try TLSSupportedVersionsExtension.client(),
+            try TLSALPNExtension.make(protocols: ["h3"]),
+            try TLSQUICTransportParametersExtension.make(parameters),
+            try TLSKeyShareExtension.client([
+                TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x11, count: 32))
+            ]),
+            try TLSSignatureAlgorithmsExtension.make([
+                TLSSignatureScheme.ed25519,
+                TLSSignatureScheme.ecdsaSecp256r1SHA256
+            ])
+        ]
+    )
+    let decodedClientHello = try TLSClientHello.decode(try clientHello.body())
+    #expect(decodedClientHello == clientHello)
+
+    let alpnExtension = try #require(decodedClientHello.extensions.first {
+        $0.type == TLSExtensionType.applicationLayerProtocolNegotiation.rawValue
+    })
+    #expect(try TLSALPNExtension.protocols(from: alpnExtension.data) == ["h3"])
+
+    let serverHello = try TLSServerHello(
+        random: Data(repeating: 0x02, count: 32),
+        legacySessionIDEcho: Data([0xaa]),
+        extensions: [
+            TLSSupportedVersionsExtension.server(),
+            try TLSKeyShareExtension.server(
+                TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x22, count: 32))
+            )
+        ]
+    )
+    #expect(try TLSServerHello.decode(try serverHello.body()) == serverHello)
+
+    let encryptedExtensions = TLSEncryptedExtensions(extensions: [
+        try TLSALPNExtension.make(protocols: ["h3"]),
+        try TLSQUICTransportParametersExtension.make(parameters)
+    ])
+    #expect(try TLSEncryptedExtensions.decode(try encryptedExtensions.body()) == encryptedExtensions)
+}
+
+@Test
+func typedHandshakeTranscriptProducesFinishedMessage() throws {
+    let clientHello = try TLSClientHello(
+        random: Data(repeating: 0x03, count: 32),
+        extensions: [
+            try TLSSupportedVersionsExtension.client(),
+            try TLSALPNExtension.make(protocols: ["h3"])
+        ]
+    )
+    let serverHello = try TLSServerHello(
+        random: Data(repeating: 0x04, count: 32),
+        extensions: [
+            TLSSupportedVersionsExtension.server()
+        ]
+    )
+    let encryptedExtensions = TLSEncryptedExtensions(extensions: [
+        try TLSALPNExtension.make(protocols: ["h3"])
+    ])
+
+    var transcript = TLS13Transcript()
+    try transcript.append(clientHello.handshakeMessage())
+    try transcript.append(serverHello.handshakeMessage())
+    try transcript.append(encryptedExtensions.handshakeMessage())
+
+    let trafficSecret = try TLS13KeySchedule.deriveSecret(
+        secret: Data(repeating: 0x55, count: 32),
+        label: "s hs traffic",
+        transcriptHash: transcript.hash
+    )
+    let verifyData = try TLS13KeySchedule.finishedVerifyData(
+        baseKey: trafficSecret,
+        transcriptHash: transcript.hash
+    )
+    let finished = TLSFinished(verifyData: verifyData)
+    #expect(TLSFinished.decode(finished.handshakeMessage().body) == finished)
+}
+
+@Test
+func typedExtensionDecodersRejectMalformedVectors() throws {
+    try expectThrowing {
+        _ = try TLSSupportedVersionsExtension.clientVersions(from: Data([0x00]))
+    }
+    try expectThrowing {
+        _ = try TLSSupportedVersionsExtension.clientVersions(from: Data([0x03, 0x03, 0x04, 0x03]))
+    }
+    try expectThrowing {
+        _ = try TLSSignatureAlgorithmsExtension.schemes(from: Data([0x00, 0x00]))
+    }
+    try expectThrowing {
+        _ = try TLSSignatureAlgorithmsExtension.schemes(from: Data([0x00, 0x03, 0x04, 0x03, 0x08]))
+    }
+    try expectThrowing {
+        _ = try TLSKeyShareExtension.serverShare(from: Data([0x00, 0x1d, 0x00, 0x00]))
+    }
+    try expectThrowing {
+        _ = try TLSKeyShareExtension.clientShares(from: Data([0x00, 0x05, 0x00, 0x1d, 0x00, 0x20, 0x11]))
+    }
+}
+
+private func expectThrowing(_ operation: () throws -> Void) throws {
+    do {
+        try operation()
+    } catch {
+        return
+    }
+    throw ExpectedThrowError.missingThrow
+}
+
+private enum ExpectedThrowError: Error {
+    case missingThrow
+}
+
 private extension Data {
     init(hex: String) throws {
         guard hex.count.isMultiple(of: 2) else {

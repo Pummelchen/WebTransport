@@ -99,9 +99,33 @@ enum NativeQUICCoreSpike {
         let decodedExtensions = try TLSExtension.decodeList(extensionList)
         try assert(decodedExtensions.count == 2, "decoded TLS extensions")
 
+        let clientHello = try TLSClientHello(
+            random: Data(repeating: 0x01, count: 32),
+            extensions: [
+                try TLSSupportedVersionsExtension.client(),
+                try TLSALPNExtension.make(protocols: ["h3"]),
+                try TLSQUICTransportParametersExtension.make(parameters),
+                try TLSKeyShareExtension.client([
+                    TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x11, count: 32))
+                ]),
+                try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519])
+            ]
+        )
+        let serverHello = try TLSServerHello(
+            random: Data(repeating: 0x02, count: 32),
+            extensions: [
+                TLSSupportedVersionsExtension.server(),
+                try TLSKeyShareExtension.server(
+                    TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x22, count: 32))
+                )
+            ]
+        )
+        let encryptedExtensions = TLSEncryptedExtensions(extensions: decodedExtensions)
+
         var transcript = TLS13Transcript()
-        try transcript.append(TLSHandshakeMessage(type: .clientHello, body: extensionList))
-        try transcript.append(TLSHandshakeMessage(type: .encryptedExtensions, body: extensionList))
+        try transcript.append(clientHello.handshakeMessage())
+        try transcript.append(serverHello.handshakeMessage())
+        try transcript.append(encryptedExtensions.handshakeMessage())
 
         let baseSecret = Data(repeating: 0x33, count: 32)
         let trafficSecret = try TLS13KeySchedule.deriveSecret(
@@ -114,6 +138,8 @@ enum NativeQUICCoreSpike {
             transcriptHash: transcript.hash
         )
         let trafficKeys = try TLS13KeySchedule.trafficKeys(trafficSecret: trafficSecret)
+        let finished = TLSFinished(verifyData: verifyData)
+        try assert(finished.handshakeMessage().type == .finished, "Finished handshake message type")
         try assert(verifyData.count == 32, "Finished verify data length")
         try assert(trafficKeys.key.count == 16 && trafficKeys.iv.count == 12, "TLS traffic key lengths")
         print("tls: ALPN h3, QUIC transport parameters, transcript hash, Finished verify data, and traffic keys passed")
