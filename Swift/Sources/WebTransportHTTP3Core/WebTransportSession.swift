@@ -132,11 +132,17 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public private(set) var http3: HTTP3ConnectionState
     public private(set) var sessionsByID: [WebTransportSessionID: WebTransportSession]
     public private(set) var sessionIDsByRequestStreamID: [UInt64: WebTransportSessionID]
+    public private(set) var streamsByID: [UInt64: WebTransportStreamState]
+    public private(set) var streamIDsBySessionID: [WebTransportSessionID: Set<UInt64>]
+    public let maxStreamReceiveBufferBytes: Int
 
-    public init(http3: HTTP3ConnectionState) {
+    public init(http3: HTTP3ConnectionState, maxStreamReceiveBufferBytes: Int = 64 * 1024) {
         self.http3 = http3
         self.sessionsByID = [:]
         self.sessionIDsByRequestStreamID = [:]
+        self.streamsByID = [:]
+        self.streamIDsBySessionID = [:]
+        self.maxStreamReceiveBufferBytes = maxStreamReceiveBufferBytes
     }
 
     public mutating func makeClientSessionRequest(
@@ -260,6 +266,181 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         return WebTransportServerSessionDecision(session: session, responseFrame: responseFrame)
     }
 
+    public mutating func openBidirectionalStream(
+        streamID: UInt64,
+        sessionID: WebTransportSessionID
+    ) throws -> Data {
+        try validateSettingsReady()
+        let session = try acceptedSession(for: sessionID)
+
+        try validateStreamIdentity(
+            streamID: streamID,
+            direction: .bidirectional,
+            initiator: expectedLocalInitiator
+        )
+        let stream = try WebTransportStreamState(
+            streamID: streamID,
+            sessionID: session.id,
+            form: .bidirectional,
+            localRole: http3.role,
+            maxSendOffset: UInt64.max,
+            maxReceiveOffset: UInt64.max,
+            maxBufferedBytes: maxStreamReceiveBufferBytes
+        )
+        register(stream)
+
+        return try WebTransportStreamSignaling.serializePrefix(
+            form: .bidirectional,
+            sessionID: session.id.rawValue
+        )
+    }
+
+    public mutating func openUnidirectionalStream(
+        streamID: UInt64,
+        sessionID: WebTransportSessionID
+    ) throws -> Data {
+        try validateSettingsReady()
+        let session = try acceptedSession(for: sessionID)
+
+        try validateStreamIdentity(
+            streamID: streamID,
+            direction: .unidirectional,
+            initiator: expectedLocalInitiator
+        )
+        let stream = try WebTransportStreamState(
+            streamID: streamID,
+            sessionID: session.id,
+            form: .unidirectional,
+            localRole: http3.role,
+            maxSendOffset: UInt64.max,
+            maxReceiveOffset: UInt64.max,
+            maxBufferedBytes: maxStreamReceiveBufferBytes
+        )
+        register(stream)
+
+        return try WebTransportStreamSignaling.serializePrefix(
+            form: .unidirectional,
+            sessionID: session.id.rawValue
+        )
+    }
+
+    public mutating func acceptBidirectionalStream(
+        streamID: UInt64,
+        firstBytes: Data
+    ) throws -> WebTransportStreamPrefix {
+        try validateSettingsReady()
+
+        try validateStreamIdentity(
+            streamID: streamID,
+            direction: .bidirectional,
+            initiator: expectedRemoteInitiator
+        )
+
+        let prefix = try WebTransportStreamSignaling.parsePrefix(firstBytes)
+        guard prefix.form == .bidirectional else {
+            throw QUICCodecError.malformed("invalid form for bidirectional stream accept")
+        }
+        let session = try acceptedSession(for: prefix.sessionID)
+
+        var stream = try WebTransportStreamState(
+            streamID: streamID,
+            sessionID: session.id,
+            form: .bidirectional,
+            localRole: http3.role,
+            maxSendOffset: UInt64.max,
+            maxReceiveOffset: UInt64.max,
+            maxBufferedBytes: maxStreamReceiveBufferBytes
+        )
+        if !prefix.remainingPayload.isEmpty {
+            try stream.receivePayload(prefix.remainingPayload)
+        }
+        register(stream)
+        return prefix
+    }
+
+    public mutating func acceptUnidirectionalStream(
+        streamID: UInt64,
+        firstBytes: Data
+    ) throws -> WebTransportStreamPrefix {
+        try validateSettingsReady()
+
+        try validateStreamIdentity(
+            streamID: streamID,
+            direction: .unidirectional,
+            initiator: expectedRemoteInitiator
+        )
+
+        let prefix = try WebTransportStreamSignaling.parsePrefix(firstBytes)
+        guard prefix.form == .unidirectional else {
+            throw QUICCodecError.malformed("invalid form for unidirectional stream accept")
+        }
+        let session = try acceptedSession(for: prefix.sessionID)
+
+        var stream = try WebTransportStreamState(
+            streamID: streamID,
+            sessionID: session.id,
+            form: .unidirectional,
+            localRole: http3.role,
+            maxSendOffset: UInt64.max,
+            maxReceiveOffset: UInt64.max,
+            maxBufferedBytes: maxStreamReceiveBufferBytes
+        )
+        if !prefix.remainingPayload.isEmpty {
+            try stream.receivePayload(prefix.remainingPayload)
+        }
+        register(stream)
+        return prefix
+    }
+
+    public mutating func receiveStreamPayload(streamID: UInt64, payload: Data) throws {
+        guard var stream = streamsByID[streamID] else {
+            throw QUICCodecError.malformed("unknown WebTransport stream")
+        }
+        try stream.receivePayload(payload)
+        streamsByID[streamID] = stream
+    }
+
+    public mutating func popStreamPayload(streamID: UInt64) -> Data? {
+        guard var stream = streamsByID[streamID] else {
+            return nil
+        }
+        let payload = stream.popPayload()
+        streamsByID[streamID] = stream
+        return payload
+    }
+
+    public mutating func resetStream(
+        streamID: UInt64,
+        applicationErrorCode: UInt64
+    ) throws -> QUICFrame {
+        guard var stream = streamsByID[streamID] else {
+            throw QUICCodecError.malformed("unknown WebTransport stream")
+        }
+        let frame = stream.reset(applicationErrorCode: applicationErrorCode)
+        streamsByID[streamID] = stream
+        return frame
+    }
+
+    public mutating func stopSendingStream(
+        streamID: UInt64,
+        applicationErrorCode: UInt64
+    ) throws -> QUICFrame {
+        guard var stream = streamsByID[streamID] else {
+            throw QUICCodecError.malformed("unknown WebTransport stream")
+        }
+        let frame = stream.stopSending(applicationErrorCode: applicationErrorCode)
+        streamsByID[streamID] = stream
+        return frame
+    }
+
+    public func stream(for streamID: UInt64) -> WebTransportStreamState? {
+        streamsByID[streamID]
+    }
+
+    public func streamIDs(for sessionID: WebTransportSessionID) -> Set<UInt64>? {
+        streamIDsBySessionID[sessionID]
+    }
+
     public func session(forRequestStreamID streamID: UInt64) -> WebTransportSession? {
         guard let sessionID = sessionIDsByRequestStreamID[streamID] else {
             return nil
@@ -270,6 +451,46 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     private mutating func store(_ session: WebTransportSession) {
         sessionsByID[session.id] = session
         sessionIDsByRequestStreamID[session.requestStreamID] = session.id
+    }
+
+    private mutating func register(_ stream: WebTransportStreamState) {
+        streamsByID[stream.streamID] = stream
+        streamIDsBySessionID[stream.sessionID, default: Set<UInt64>()].insert(stream.streamID)
+    }
+
+    private var expectedLocalInitiator: QUICStreamInitiator {
+        http3.role == .client ? .client : .server
+    }
+
+    private var expectedRemoteInitiator: QUICStreamInitiator {
+        http3.role == .client ? .server : .client
+    }
+
+    private func validateStreamIdentity(
+        streamID: UInt64,
+        direction: QUICStreamDirection,
+        initiator: QUICStreamInitiator
+    ) throws {
+        guard streamsByID[streamID] == nil else {
+            throw QUICCodecError.malformed("WebTransport stream already exists")
+        }
+
+        guard QUICStreamID.direction(of: streamID) == direction else {
+            throw QUICCodecError.malformed("stream direction mismatch for WebTransport stream")
+        }
+        guard QUICStreamID.initiator(of: streamID) == initiator else {
+            throw QUICCodecError.malformed("stream initiator mismatch for WebTransport stream")
+        }
+    }
+
+    private func acceptedSession(for sessionID: WebTransportSessionID) throws -> WebTransportSession {
+        guard let session = sessionsByID[sessionID] else {
+            throw QUICCodecError.malformed("unknown WebTransport session")
+        }
+        guard session.state == .accepted else {
+            throw QUICCodecError.malformed("WebTransport session is not accepted")
+        }
+        return session
     }
 
     private func validateSettingsReady() throws {
