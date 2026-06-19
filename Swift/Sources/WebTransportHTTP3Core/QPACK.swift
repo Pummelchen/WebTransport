@@ -69,12 +69,28 @@ public struct QPACKDecoderLimits: Equatable, Sendable {
         guard maxFieldSectionBytes > 0, maxFieldLineBytes > 0, maxFieldLineCount > 0 else {
             throw QUICCodecError.valueOutOfRange("QPACK decoder limits must be positive")
         }
+        self.init(
+            uncheckedMaxFieldSectionBytes: maxFieldSectionBytes,
+            maxFieldLineBytes: maxFieldLineBytes,
+            maxFieldLineCount: maxFieldLineCount
+        )
+    }
+
+    public static let `default` = QPACKDecoderLimits(
+        uncheckedMaxFieldSectionBytes: 16_384,
+        maxFieldLineBytes: 8_192,
+        maxFieldLineCount: 128
+    )
+
+    private init(
+        uncheckedMaxFieldSectionBytes maxFieldSectionBytes: Int,
+        maxFieldLineBytes: Int,
+        maxFieldLineCount: Int
+    ) {
         self.maxFieldSectionBytes = maxFieldSectionBytes
         self.maxFieldLineBytes = maxFieldLineBytes
         self.maxFieldLineCount = maxFieldLineCount
     }
-
-    public static let `default` = try! QPACKDecoderLimits()
 }
 
 public enum QPACK {

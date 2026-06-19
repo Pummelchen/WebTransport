@@ -151,9 +151,17 @@ private struct LoopbackProbe {
         try await proveCloseAndReset(clientConnection: clientConnection)
         try proveDraftPrefixControls(clientConnection: clientConnection)
 
-        print("close: application error code property is exposed; runtime mutation is not safe to claim yet")
-        try await proveDatagrams(clientConnection: clientConnection, serverConnection: serverConnection)
-        print("phase1: all runtime checks passed without security prompts")
+        print("close: application error code property is exposed; runtime mutation is not safe to claim for the adapter")
+        let datagramsSupported = try await proveDatagrams(
+            clientConnection: clientConnection,
+            serverConnection: serverConnection
+        )
+        if datagramsSupported {
+            print("phase1a: Network.framework QUIC adapter audit complete; datagrams are usable on this runtime")
+        } else {
+            print("phase1a: Network.framework QUIC adapter audit complete; adapter remains blocked for WebTransport datagrams")
+        }
+        print("phase1a: audit finished without security prompts")
     }
 
     private func waitForReady(_ connection: NetworkConnection<QUIC>) async throws {
@@ -217,11 +225,12 @@ private struct LoopbackProbe {
     private func proveDatagrams(
         clientConnection: NetworkConnection<QUIC>,
         serverConnection: NetworkConnection<QUIC>
-    ) async throws {
+    ) async throws -> Bool {
         print("datagrams: usable sizes client=\(clientConnection.usableDatagramFrameSize) server=\(serverConnection.usableDatagramFrameSize)")
         guard clientConnection.usableDatagramFrameSize > 0,
               serverConnection.usableDatagramFrameSize > 0 else {
-            throw ProbeError.runtimeUnsupported("QUIC datagrams negotiated usable size 0")
+            print("datagrams: Network.framework negotiated usable size 0; native QUIC path is required")
+            return false
         }
 
         let serverDatagrams = try await serverConnection.datagrams
@@ -235,6 +244,7 @@ private struct LoopbackProbe {
         let clientReceived = try await clientDatagrams.receive().content
         try assertEqual(String(decoding: clientReceived, as: UTF8.self), "server-datagram", "server datagram payload")
         print("datagrams: bidirectional datagram send and receive proved")
+        return true
     }
 
     private func proveCloseAndReset(clientConnection: NetworkConnection<QUIC>) async throws {
@@ -435,17 +445,17 @@ private enum InMemoryTLSIdentity {
 private enum SelfSignedCertificate {
     static func make(privateKey: SecKey, rsaPublicKeyDER: Data) throws -> Data {
         let signatureAlgorithm = DER.sequence([
-            DER.objectIdentifier([1, 2, 840, 113_549, 1, 1, 11]),
+            try DER.objectIdentifier([1, 2, 840, 113_549, 1, 1, 11]),
             DER.null()
         ])
         let rsaAlgorithm = DER.sequence([
-            DER.objectIdentifier([1, 2, 840, 113_549, 1, 1, 1]),
+            try DER.objectIdentifier([1, 2, 840, 113_549, 1, 1, 1]),
             DER.null()
         ])
         let name = DER.sequence([
             DER.set([
                 DER.sequence([
-                    DER.objectIdentifier([2, 5, 4, 3]),
+                    try DER.objectIdentifier([2, 5, 4, 3]),
                     DER.utf8String("localhost")
                 ])
             ])
@@ -460,23 +470,23 @@ private enum SelfSignedCertificate {
         ])
         let extensions = DER.explicit(3, DER.sequence([
             DER.sequence([
-                DER.objectIdentifier([2, 5, 29, 19]),
+                try DER.objectIdentifier([2, 5, 29, 19]),
                 DER.boolean(true),
                 DER.octetString(DER.sequence([DER.boolean(false)]))
             ]),
             DER.sequence([
-                DER.objectIdentifier([2, 5, 29, 15]),
+                try DER.objectIdentifier([2, 5, 29, 15]),
                 DER.boolean(true),
                 DER.octetString(DER.bitString(Data([0xa0]), unusedBits: 5))
             ]),
             DER.sequence([
-                DER.objectIdentifier([2, 5, 29, 37]),
+                try DER.objectIdentifier([2, 5, 29, 37]),
                 DER.octetString(DER.sequence([
-                    DER.objectIdentifier([1, 3, 6, 1, 5, 5, 7, 3, 1])
+                    try DER.objectIdentifier([1, 3, 6, 1, 5, 5, 7, 3, 1])
                 ]))
             ]),
             DER.sequence([
-                DER.objectIdentifier([2, 5, 29, 17]),
+                try DER.objectIdentifier([2, 5, 29, 17]),
                 DER.octetString(DER.sequence([
                     DER.contextSpecificPrimitive(2, Data("localhost".utf8))
                 ]))
@@ -569,9 +579,18 @@ private enum DER {
         Data([0x05, 0x00])
     }
 
-    static func objectIdentifier(_ components: [UInt64]) -> Data {
-        precondition(components.count >= 2)
-        var bytes = [UInt8(components[0] * 40 + components[1])]
+    static func objectIdentifier(_ components: [UInt64]) throws -> Data {
+        guard components.count >= 2 else {
+            throw ProbeError.securityFailed("DER object identifier requires at least two components")
+        }
+        guard components[0] <= 2, components[1] < 40 || components[0] == 2 else {
+            throw ProbeError.securityFailed("DER object identifier has invalid root components")
+        }
+        let rootValue = components[0] * 40 + components[1]
+        guard rootValue <= UInt64(UInt8.max) else {
+            throw ProbeError.securityFailed("DER object identifier root byte overflow")
+        }
+        var bytes = [UInt8(rootValue)]
         for component in components.dropFirst(2) {
             var encoded = [UInt8(component & 0x7f)]
             var value = component >> 7

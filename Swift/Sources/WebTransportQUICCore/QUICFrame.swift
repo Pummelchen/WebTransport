@@ -22,6 +22,7 @@ public enum QUICFrame: Equatable, Sendable {
     case crypto(offset: UInt64, data: Data)
     case stream(id: UInt64, offset: UInt64?, fin: Bool, data: Data)
     case resetStream(id: UInt64, applicationErrorCode: UInt64, finalSize: UInt64)
+    case resetStreamAt(id: UInt64, applicationErrorCode: UInt64, finalSize: UInt64, reliableSize: UInt64)
     case stopSending(id: UInt64, applicationErrorCode: UInt64)
     case maxData(UInt64)
     case maxStreamData(id: UInt64, maximum: UInt64)
@@ -79,6 +80,15 @@ public enum QUICFrame: Equatable, Sendable {
             output.append(try QUICVarInt.encode(id))
             output.append(try QUICVarInt.encode(applicationErrorCode))
             output.append(try QUICVarInt.encode(finalSize))
+        case .resetStreamAt(let id, let applicationErrorCode, let finalSize, let reliableSize):
+            guard reliableSize <= finalSize else {
+                throw QUICCodecError.valueOutOfRange("RESET_STREAM_AT reliable size exceeds final size")
+            }
+            output.append(0x24)
+            output.append(try QUICVarInt.encode(id))
+            output.append(try QUICVarInt.encode(applicationErrorCode))
+            output.append(try QUICVarInt.encode(finalSize))
+            output.append(try QUICVarInt.encode(reliableSize))
         case .stopSending(let id, let applicationErrorCode):
             output.append(0x05)
             output.append(try QUICVarInt.encode(id))
@@ -177,6 +187,20 @@ public enum QUICFrame: Equatable, Sendable {
             return .stopSending(
                 id: try QUICVarInt.decode(from: &cursor),
                 applicationErrorCode: try QUICVarInt.decode(from: &cursor)
+            )
+        case 0x24:
+            let id = try QUICVarInt.decode(from: &cursor)
+            let applicationErrorCode = try QUICVarInt.decode(from: &cursor)
+            let finalSize = try QUICVarInt.decode(from: &cursor)
+            let reliableSize = try QUICVarInt.decode(from: &cursor)
+            guard reliableSize <= finalSize else {
+                throw QUICCodecError.valueOutOfRange("RESET_STREAM_AT reliable size exceeds final size")
+            }
+            return .resetStreamAt(
+                id: id,
+                applicationErrorCode: applicationErrorCode,
+                finalSize: finalSize,
+                reliableSize: reliableSize
             )
         case 0x06:
             let offset = try QUICVarInt.decode(from: &cursor)

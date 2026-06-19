@@ -6,7 +6,8 @@ public enum WebTransportHTTP3Headers {
         authority: String,
         path: String,
         scheme: String = "https",
-        origin: String? = nil
+        origin: String? = nil,
+        constants: WebTransportHTTP3DraftConstants = .current
     ) throws -> [HTTPFieldLine] {
         guard !authority.isEmpty else {
             throw QUICCodecError.malformed("WebTransport CONNECT :authority must not be empty")
@@ -20,7 +21,7 @@ public enum WebTransportHTTP3Headers {
             try HTTPFieldLine(name: ":scheme", value: scheme),
             try HTTPFieldLine(name: ":authority", value: authority),
             try HTTPFieldLine(name: ":path", value: path),
-            try HTTPFieldLine(name: ":protocol", value: "webtransport")
+            try HTTPFieldLine(name: ":protocol", value: constants.upgradeToken)
         ]
         if let origin {
             fields.append(try HTTPFieldLine(name: "origin", value: origin))
@@ -40,8 +41,8 @@ public enum WebTransportHTTP3Headers {
     public static func validateConnectRequest(_ fields: [HTTPFieldLine]) throws {
         let map = try pseudoHeaderMap(fields)
         try require(map, ":method", equals: "CONNECT")
-        try require(map, ":protocol", equals: "webtransport")
-        try requirePresent(map, ":scheme")
+        try require(map, ":protocol", equals: WebTransportHTTP3DraftConstants.current.upgradeToken)
+        try require(map, ":scheme", equals: "https")
         try requirePresent(map, ":authority")
         try requirePresent(map, ":path")
         guard map[":path"]?.hasPrefix("/") == true else {
@@ -60,13 +61,15 @@ public enum WebTransportHTTP3Headers {
         authority: String,
         path: String,
         scheme: String = "https",
-        origin: String? = nil
+        origin: String? = nil,
+        constants: WebTransportHTTP3DraftConstants = .current
     ) throws -> HTTP3Frame {
         try QPACK.headersFrame(fields: connectRequest(
             authority: authority,
             path: path,
             scheme: scheme,
-            origin: origin
+            origin: origin,
+            constants: constants
         ))
     }
 

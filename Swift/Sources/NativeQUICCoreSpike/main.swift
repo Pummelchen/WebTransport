@@ -24,6 +24,7 @@ enum NativeQUICCoreSpike {
                 .stream(id: 2, offset: 0, fin: true, data: Data([0x54, 0x00])),
                 .datagram(Data("client-datagram".utf8)),
                 .resetStream(id: 0, applicationErrorCode: 0x54, finalSize: 11),
+                .resetStreamAt(id: 2, applicationErrorCode: 0x54, finalSize: 2, reliableSize: 2),
                 .stopSending(id: 0, applicationErrorCode: 0x55),
                 .connectionClose(errorCode: 0x100, frameType: 0x08, reason: Data("phase1b".utf8))
             ]
@@ -33,7 +34,7 @@ enum NativeQUICCoreSpike {
             let serverFrames = try QUICFrame.decodeFrames(serverBytes)
             try assert(serverFrames == outboundFrames, "server decoded client frames")
             print("udp: client-to-server frame packet received from \(clientEndpoint.host):\(clientEndpoint.port)")
-            print("frames: stream, datagram, reset, stop-sending, and close decoded")
+            print("frames: stream, datagram, reset, reset-stream-at, stop-sending, and close decoded")
 
             let responseFrames: [QUICFrame] = [
                 .stream(id: 1, offset: 0, fin: false, data: Data("server-bidi".utf8)),

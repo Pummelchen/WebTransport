@@ -38,6 +38,7 @@ func frameRoundTripsRepresentativeFrameSet() throws {
         .stream(id: 0, offset: 0, fin: false, data: Data("bidi".utf8)),
         .stream(id: 2, offset: nil, fin: true, data: Data("uni".utf8)),
         .resetStream(id: 0, applicationErrorCode: 0x54, finalSize: 4),
+        .resetStreamAt(id: 0, applicationErrorCode: 0x54, finalSize: 8, reliableSize: 3),
         .stopSending(id: 0, applicationErrorCode: 0x55),
         .maxData(1_000),
         .maxStreamData(id: 0, maximum: 2_000),
@@ -60,15 +61,32 @@ func frameRoundTripsRepresentativeFrameSet() throws {
 }
 
 @Test
+func resetStreamAtRejectsReliableSizeBeyondFinalSize() throws {
+    #expect(throws: Error.self) {
+        _ = try QUICFrame.resetStreamAt(
+            id: 0,
+            applicationErrorCode: 0x54,
+            finalSize: 3,
+            reliableSize: 4
+        ).encode()
+    }
+    #expect(throws: Error.self) {
+        _ = try QUICFrame.decodeFrames(Data([0x24, 0x00, 0x40, 0x54, 0x03, 0x04]))
+    }
+}
+
+@Test
 func transportParametersRoundTripIntegerValues() throws {
     var parameters = QUICTransportParameters()
     try parameters.setInteger(1_048_576, for: QUICTransportParameterID.initialMaxData)
     try parameters.setInteger(1_200, for: QUICTransportParameterID.maxDatagramFrameSize)
+    parameters[QUICTransportParameterID.resetStreamAt] = Data()
     parameters[QUICTransportParameterID.initialSourceConnectionID] = Data([0xca, 0xfe])
 
     let decoded = try QUICTransportParameters.decode(try parameters.encode())
     #expect(try decoded.integer(for: QUICTransportParameterID.initialMaxData) == 1_048_576)
     #expect(try decoded.integer(for: QUICTransportParameterID.maxDatagramFrameSize) == 1_200)
+    #expect(decoded[QUICTransportParameterID.resetStreamAt] == Data())
     #expect(decoded[QUICTransportParameterID.initialSourceConnectionID] == Data([0xca, 0xfe]))
 }
 

@@ -79,4 +79,5 @@ public enum QUICTransportParameterID {
     public static let initialSourceConnectionID: UInt64 = 0x0f
     public static let retrySourceConnectionID: UInt64 = 0x10
     public static let maxDatagramFrameSize: UInt64 = 0x20
+    public static let resetStreamAt: UInt64 = 0x17f7_586d_2cb5_71
 }

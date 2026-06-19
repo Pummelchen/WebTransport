@@ -40,6 +40,8 @@ func http3FrameSequenceRoundTripsAndVarIntPayloadDecodes() throws {
 func http3SettingsRoundTripAndRejectMalformedSettings() throws {
     let constants = WebTransportHTTP3DraftConstants.current
     var settings = try HTTP3Settings()
+    try settings.set(1, for: constants.settingsEnableConnectProtocol)
+    try settings.set(1, for: constants.settingsH3Datagram)
     try settings.set(1, for: constants.settingsWTEnabled)
     try settings.set(3, for: constants.settingsWTInitialMaxStreamsUni)
     try settings.set(5, for: constants.settingsWTInitialMaxStreamsBidi)
@@ -100,6 +102,9 @@ func webTransportDraft15ConstantsMatchProtocolBible() {
     #expect(constants.name == "draft-ietf-webtrans-http3-15")
     #expect(constants.revision == 15)
     #expect(constants.lastUpdated == "2026-03-02")
+    #expect(constants.upgradeToken == "webtransport-h3")
+    #expect(constants.settingsEnableConnectProtocol == 0x08)
+    #expect(constants.settingsH3Datagram == 0x33)
     #expect(constants.settingsWTEnabled == 0x2c7c_f000)
     #expect(constants.settingsWTInitialMaxStreamsUni == 0x2b64)
     #expect(constants.settingsWTInitialMaxStreamsBidi == 0x2b65)

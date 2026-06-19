@@ -17,7 +17,7 @@ func qpackEncodesStaticIndexedAndLiteralFieldLines() throws {
     let fields = [
         try HTTPFieldLine(name: ":method", value: "CONNECT"),
         try HTTPFieldLine(name: ":authority", value: "example.com"),
-        try HTTPFieldLine(name: ":protocol", value: "webtransport")
+        try HTTPFieldLine(name: ":protocol", value: "webtransport-h3")
     ]
     let encoded = try QPACK.encodeFieldSection(fields)
 
@@ -42,7 +42,7 @@ func webTransportConnectRequestHeadersFrameRoundTrips() throws {
         try HTTPFieldLine(name: ":scheme", value: "https"),
         try HTTPFieldLine(name: ":authority", value: "example.com"),
         try HTTPFieldLine(name: ":path", value: "/wt"),
-        try HTTPFieldLine(name: ":protocol", value: "webtransport"),
+        try HTTPFieldLine(name: ":protocol", value: "webtransport-h3"),
         try HTTPFieldLine(name: "origin", value: "https://example.com")
     ])
 }
@@ -68,6 +68,24 @@ func webTransportHeaderValidatorsRejectMalformedPseudoHeaders() throws {
     #expect(throws: Error.self) {
         try WebTransportHTTP3Headers.validateConnectRequest([
             try HTTPFieldLine(name: ":method", value: "GET"),
+            try HTTPFieldLine(name: ":scheme", value: "https"),
+            try HTTPFieldLine(name: ":authority", value: "example.com"),
+            try HTTPFieldLine(name: ":path", value: "/wt"),
+            try HTTPFieldLine(name: ":protocol", value: "webtransport-h3")
+        ])
+    }
+    #expect(throws: Error.self) {
+        try WebTransportHTTP3Headers.validateConnectRequest([
+            try HTTPFieldLine(name: ":method", value: "CONNECT"),
+            try HTTPFieldLine(name: ":scheme", value: "http"),
+            try HTTPFieldLine(name: ":authority", value: "example.com"),
+            try HTTPFieldLine(name: ":path", value: "/wt"),
+            try HTTPFieldLine(name: ":protocol", value: "webtransport-h3")
+        ])
+    }
+    #expect(throws: Error.self) {
+        try WebTransportHTTP3Headers.validateConnectRequest([
+            try HTTPFieldLine(name: ":method", value: "CONNECT"),
             try HTTPFieldLine(name: ":scheme", value: "https"),
             try HTTPFieldLine(name: ":authority", value: "example.com"),
             try HTTPFieldLine(name: ":path", value: "/wt"),

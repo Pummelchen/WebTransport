@@ -2,7 +2,7 @@
 
 This directory will contain the native Swift implementation of HTTP/3 WebTransport.
 
-Current Phase 1 and Phase 2 status: closed.
+Current Phase 1 through Phase 5 status: audited and closed.
 
 - `AppleQUICSpike` proves prompt-free localhost QUIC listener/client startup,
   HTTP/3 ALPN negotiation, client-initiated bidirectional streams,
@@ -14,11 +14,13 @@ Current Phase 1 and Phase 2 status: closed.
 - QUIC datagrams are currently blocked: `NetworkConnection<QUIC>` negotiates
   `usableDatagramFrameSize == 0` on both peers even when both sides configure
   `.maxDatagramFrameSize(1_200)`.
-- Full close/reset/application-error behavior is not yet proven. The relevant
-  properties are exposed by Network.framework, but runtime mutation was not safe
-  enough to claim as complete in the spike.
+- Full Network.framework QUIC datagram and runtime reset mutation support remains
+  blocked in the Apple adapter audit. This does not block the project because the
+  production transport path is the native Swift QUIC core over Apple UDP.
 - `WebTransportQUICCore` now contains native QUIC byte, varint, packet-number,
   transport-parameter, long-header packet, and frame codecs.
+- `WebTransportQUICCore` includes `RESET_STREAM_AT` and the draft reset-stream-at
+  transport parameter required by `draft-ietf-webtrans-http3-15`.
 - `WebTransportQUICCore` also contains reusable Phase 2 QUIC state-machine
   primitives for connection ID lifecycle and retirement, version policy, packet
   number spaces, ACK generation and decoding, packet-threshold loss recovery,
@@ -49,8 +51,9 @@ Current Phase 1 and Phase 2 status: closed.
   out-of-order CRYPTO data, emits complete handshake messages, and updates the
   TLS transcript.
 - `WebTransportHTTP3Core` contains HTTP/3 frame header codecs, SETTINGS payload
-  encoding/decoding, unidirectional stream type parsing, and a versioned
-  WebTransport-over-HTTP/3 draft-15 constants table.
+  encoding/decoding, unidirectional stream type parsing, the draft-15
+  `webtransport-h3` upgrade token, WebTransport-required SETTINGS constants, and
+  a versioned WebTransport-over-HTTP/3 draft-15 constants table.
 - `WebTransportHTTP3Core` also contains the minimal QPACK support needed for
   WebTransport session establishment: static table lookup, literal field-line
   encoding/decoding, required extended CONNECT request and response

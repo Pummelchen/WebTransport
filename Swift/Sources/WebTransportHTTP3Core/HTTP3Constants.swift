@@ -18,6 +18,8 @@ public enum HTTP3SettingID {
     public static let qpackMaxTableCapacity: UInt64 = 0x01
     public static let maxFieldSectionSize: UInt64 = 0x06
     public static let qpackBlockedStreams: UInt64 = 0x07
+    public static let enableConnectProtocol: UInt64 = 0x08
+    public static let h3Datagram: UInt64 = 0x33
 
     public static func isReservedHTTP2Setting(_ value: UInt64) -> Bool {
         value == 0x02 || value == 0x03 || value == 0x04 || value == 0x05
@@ -39,6 +41,9 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
     public var name: String
     public var revision: Int
     public var lastUpdated: String
+    public var upgradeToken: String
+    public var settingsEnableConnectProtocol: UInt64
+    public var settingsH3Datagram: UInt64
     public var settingsWTEnabled: UInt64
     public var settingsWTInitialMaxStreamsUni: UInt64
     public var settingsWTInitialMaxStreamsBidi: UInt64
@@ -64,6 +69,9 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
         name: "draft-ietf-webtrans-http3-15",
         revision: 15,
         lastUpdated: "2026-03-02",
+        upgradeToken: "webtransport-h3",
+        settingsEnableConnectProtocol: HTTP3SettingID.enableConnectProtocol,
+        settingsH3Datagram: HTTP3SettingID.h3Datagram,
         settingsWTEnabled: 0x2c7c_f000,
         settingsWTInitialMaxStreamsUni: 0x2b64,
         settingsWTInitialMaxStreamsBidi: 0x2b65,
