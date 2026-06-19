@@ -79,6 +79,7 @@ from datetime import datetime, timezone
     version,
     endpoint,
     settings_validation,
+    exchange,
     message,
     attempts,
     client_status,
@@ -101,11 +102,12 @@ proof = {
     "url": f"https://{endpoint}/",
     "transport": "packet",
     "settingsValidation": settings_validation,
+    "exchange": exchange,
     "message": message,
     "attempts": int(attempts),
     "clientExitCode": int(client_status),
     "serverExitCode": int(server_status),
-    "passed": int(client_status) == 0 and "connected" in stdout and message in stdout,
+    "passed": int(client_status) == 0 and "connected" in stdout and f"exchange={exchange}" in stdout and message in stdout,
     "clientStdout": stdout,
     "clientStderr": stderr,
     "serverStdout": server_stdout,
@@ -128,8 +130,10 @@ proofs = [json.loads(pathlib.Path(path).read_text()) for path in sys.argv[2:]]
 summary = {
     "timestamp": datetime.now(timezone.utc).isoformat(),
     "requiredEndpointCount": 3,
-    "passedEndpointCount": sum(1 for proof in proofs if proof.get("passed")),
-    "passed": len(proofs) == 3 and all(proof.get("passed") for proof in proofs),
+    "requiredProofCount": 4,
+    "passedProofCount": sum(1 for proof in proofs if proof.get("passed")),
+    "passed": len(proofs) == 4 and all(proof.get("passed") for proof in proofs),
+    "requiredExchanges": ["stream", "datagram"],
     "endpoints": proofs,
 }
 aggregate_file.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
@@ -149,7 +153,8 @@ run_rust_endpoint() {
   version="$3"
   crate_dir="$4"
   bind_flag="$5"
-  message="$name-interop-$timestamp"
+  exchange="$6"
+  message="$name-$exchange-interop-$timestamp"
 
   server_stdout="$proof_dir/third-party-$name-server.stdout"
   server_stderr="$proof_dir/third-party-$name-server.stderr"
@@ -226,6 +231,7 @@ run_rust_endpoint() {
         --protocol none \
         --trust local-self-signed \
         --settings-validation chromium-interop \
+        --exchange "$exchange" \
         --message "$message" \
         --timeout-ms "$timeout_ms" \
         >"$attempt_stdout" 2>"$attempt_stderr"
@@ -256,14 +262,14 @@ run_rust_endpoint() {
     set -e
 
     attempts_used="$attempt"
-    if [ "$ready" -eq 1 ] && [ "$client_status" -eq 0 ] && grep -q "connected" "$attempt_stdout" && grep -q "$message" "$attempt_stdout"; then
+    if [ "$ready" -eq 1 ] && [ "$client_status" -eq 0 ] && grep -q "connected" "$attempt_stdout" && grep -q "exchange=$exchange" "$attempt_stdout" && grep -q "$message" "$attempt_stdout"; then
       break
     fi
     attempt=$((attempt + 1))
     sleep 0.5
   done
 
-  write_json "$json_file" "$implementation" "$version" "$endpoint" "chromium-interop" "$message" "$attempts_used" "$client_status" "$server_status" "$stdout_file" "$stderr_file" "$server_stdout" "$server_stderr" >/dev/null
+  write_json "$json_file" "$implementation" "$version" "$endpoint" "chromium-interop" "$exchange" "$message" "$attempts_used" "$client_status" "$server_status" "$stdout_file" "$stderr_file" "$server_stdout" "$server_stderr" >/dev/null
   echo "$json_file"
 }
 
@@ -278,15 +284,24 @@ quinn_json="$(run_rust_endpoint \
   web-transport-quinn \
   "web-transport-quinn 0.11.9" \
   "$quinn_dir" \
-  --addr)"
+  --addr \
+  stream)"
+quinn_datagram_json="$(run_rust_endpoint \
+  quinn-datagram \
+  web-transport-quinn \
+  "web-transport-quinn 0.11.9" \
+  "$quinn_dir" \
+  --addr \
+  datagram)"
 quiche_json="$(run_rust_endpoint \
   quiche \
   web-transport-quiche \
   "web-transport-quiche 0.4.1" \
   "$quiche_dir" \
-  --bind)"
+  --bind \
+  stream)"
 
-append_aggregate "$py_json" "$quinn_json" "$quiche_json"
+append_aggregate "$py_json" "$quinn_json" "$quinn_datagram_json" "$quiche_json"
 
 python3 - "$aggregate_json" <<'PY'
 import json

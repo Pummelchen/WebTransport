@@ -27,10 +27,11 @@ struct WebTransportClientCLI {
                     origin: options.origin,
                     protocols: options.protocols,
                     settingsValidation: options.settingsValidation,
+                    exchangeMode: options.exchangeMode,
                     timeoutMilliseconds: options.timeoutMilliseconds
                 )
                 let session = result.sessionEstablished ? " session=established" : ""
-                print("network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
+                print("network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) exchange=\(options.exchangeMode.rawValue) message=\"\(result.message)\"")
                 return
             } catch {
                 fputs("\(executable) network session failed: \(error)\n", stderr)
@@ -101,6 +102,7 @@ private struct NetworkClientOptions {
     var protocols: [String]
     var trustPolicy: WebTransportQUICPeerTrustPolicy
     var settingsValidation: HTTP3WebTransportSettingsValidation
+    var exchangeMode: WebTransportNetworkExchangeMode
 
     static func parse(_ arguments: [String]) throws -> NetworkClientOptions {
         var endpoint: WebTransportNetworkEndpoint?
@@ -113,6 +115,7 @@ private struct NetworkClientOptions {
         var protocols = ["demo.v1"]
         var trustPolicy: WebTransportQUICPeerTrustPolicy?
         var settingsValidation = HTTP3WebTransportSettingsValidation.draft15Strict
+        var exchangeMode = WebTransportNetworkExchangeMode.auto
         var index = 0
 
         while index < arguments.count {
@@ -178,6 +181,12 @@ private struct NetworkClientOptions {
                     throw WebTransportNetworkRuntimeError.invalidPayload
                 }
                 settingsValidation = try HTTP3WebTransportSettingsValidation.parse(arguments[index])
+            case "--exchange":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport("--exchange requires auto, stream, or datagram")
+                }
+                exchangeMode = try WebTransportNetworkExchangeMode.parse(arguments[index])
             default:
                 if argument.hasPrefix("--connect=") {
                     endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--connect=".count)))
@@ -210,6 +219,8 @@ private struct NetworkClientOptions {
                     trustPolicy = try WebTransportQUICPeerTrustPolicy.parse(String(argument.dropFirst("--trust=".count)))
                 } else if argument.hasPrefix("--settings-validation=") {
                     settingsValidation = try HTTP3WebTransportSettingsValidation.parse(String(argument.dropFirst("--settings-validation=".count)))
+                } else if argument.hasPrefix("--exchange=") {
+                    exchangeMode = try WebTransportNetworkExchangeMode.parse(String(argument.dropFirst("--exchange=".count)))
                 } else {
                     throw WebTransportNetworkRuntimeError.invalidPayload
                 }
@@ -231,7 +242,8 @@ private struct NetworkClientOptions {
             origin: origin,
             protocols: protocols,
             trustPolicy: resolvedTrustPolicy,
-            settingsValidation: settingsValidation
+            settingsValidation: settingsValidation,
+            exchangeMode: exchangeMode
         )
     }
 

@@ -9,7 +9,7 @@ Datatracker: <https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/>
 
 | Implementation | Status | Draft-15 Score |
 | --- | --- | ---: |
-| Swift | Active implementation. Protocol core, public network-backed package API, separate-process CLI, Network.framework QUIC/TLS/HTTP/3 session path, packet-protected QUIC Initial CRYPTO validation, transcript-derived 1-RTT packet keys, explicit TLS/QUIC application-key readiness gating, positive/negative interop conformance scenarios, parser/resource hardening tests, process/stress/artifact/API compatibility tests, three-endpoint external interop proof, macOS Swift CI matrix, sanitized production logging/error surfaces, and reproducibility-checked release packaging are present. | 99% |
+| Swift | Active implementation. Protocol core, public network-backed package API, separate-process CLI, Network.framework QUIC/TLS/HTTP/3 session path, packet-protected QUIC Initial CRYPTO validation, transcript-derived 1-RTT packet keys, explicit TLS/QUIC application-key readiness gating, positive/negative interop conformance scenarios, parser/resource hardening tests, process/stress/artifact/API compatibility tests, stream and datagram external interop proof, macOS Swift CI matrix, sanitized production logging/error surfaces, and reproducibility-checked release packaging are present. | 100% |
 | C99 | Not implemented. No protocol implementation is present. | 0% |
 | C++ (`CPP`) | Not implemented. No protocol implementation is present. | 0% |
 
@@ -32,7 +32,7 @@ Current Swift coverage includes:
 - Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
 - Public `WebTransport` package API backed by the Network.framework QUIC/TLS/HTTP/3 runtime, including sessions, bidirectional streams, datagrams, drain, and close.
-- External interoperability proof runners via `Swift/run-third-party-interop.sh` and `Swift/run-pywebtransport-interop.sh`. The three-endpoint runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream echo proofs in `.build/external-interop/third-party-latest.json`. Configured public endpoint probing remains available through `Swift/run-external-interop.sh`.
+- External interoperability proof runners via `Swift/run-third-party-interop.sh` and `Swift/run-pywebtransport-interop.sh`. The three-endpoint runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream and QUIC DATAGRAM echo proofs in `.build/external-interop/third-party-latest.json`. Configured public endpoint probing remains available through `Swift/run-external-interop.sh`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
 - Reproducibility-checked Apple Silicon release artifacts with `SHA256SUMS`.
 - Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.

@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
 
-Draft-15 score: **99%**
+Draft-15 score: **100%**
 
 ## Current Status
 
@@ -26,7 +26,7 @@ Implemented:
 - Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
 - Public `WebTransport` package API backed by the Network.framework QUIC/TLS/HTTP/3 runtime, including sessions, bidirectional streams, datagrams, drain, and close.
-- External interoperability proof runners via `./run-third-party-interop.sh` and `./run-pywebtransport-interop.sh`. The three-endpoint runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream echo proofs in `.build/external-interop/third-party-latest.json`. Configured public endpoint probing remains available through `./run-external-interop.sh`.
+- External interoperability proof runners via `./run-third-party-interop.sh` and `./run-pywebtransport-interop.sh`. The three-endpoint runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream and QUIC DATAGRAM echo proofs in `.build/external-interop/third-party-latest.json`. Configured public endpoint probing remains available through `./run-external-interop.sh`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
 - Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
 - Apple Silicon release script for reproducibility-checked production CLI binaries with `SHA256SUMS`.
@@ -71,7 +71,7 @@ swift run WebTransportServer
 
 ## External Interop
 
-`./run-third-party-interop.sh` is the release proof for three independent draft-15-compatible endpoints. It installs local tool dependencies under `.build/` as needed, including a Python-wheel CMake for the Quiche/BoringSSL build when no system `cmake` exists. It then launches:
+`./run-third-party-interop.sh` is the release proof for three independent draft-15-compatible endpoints and four required exchange proofs. It installs local tool dependencies under `.build/` as needed, including a Python-wheel CMake for the Quiche/BoringSSL build when no system `cmake` exists. It then launches:
 
 - `pywebtransport==0.1.2` / `aioquic`
 - `web-transport-quinn 0.11.9`
@@ -79,7 +79,9 @@ swift run WebTransportServer
 
 The runner records per-endpoint logs plus a consolidated pass/fail report in `.build/external-interop/third-party-latest.json`.
 
-`./run-pywebtransport-interop.sh` installs `pywebtransport==0.1.2` into `.build/external-interop/pywebtransport-venv`, starts a local independent `pywebtransport`/`aioquic` echo server, runs the Swift client against it, and records the result in `.build/external-interop/pywebtransport-latest.json`. This proof covers QUIC/TLS/HTTP/3 CONNECT and reliable WebTransport stream echo. QUIC DATAGRAM interop remains a separate gate because the current Network.framework runtime reports datagrams unavailable against external peers.
+The aggregate gate requires stream exchange proofs against `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche`, plus a forced QUIC DATAGRAM exchange proof against `web-transport-quinn`. A pass means the Swift client completed real HTTP/3 WebTransport CONNECT and echoed both reliable stream payloads and unreliable datagrams through independent endpoints.
+
+`./run-pywebtransport-interop.sh` installs `pywebtransport==0.1.2` into `.build/external-interop/pywebtransport-venv`, starts a local independent `pywebtransport`/`aioquic` echo server, runs the Swift client against it, and records the result in `.build/external-interop/pywebtransport-latest.json`. This proof covers QUIC/TLS/HTTP/3 CONNECT and reliable WebTransport stream echo.
 
 `./run-external-interop.sh` runs the Swift client against a configured independent WebTransport endpoint and records the result in `.build/external-interop/latest.json`. Configure the target with:
 

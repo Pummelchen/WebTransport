@@ -39,6 +39,19 @@ public enum WebTransportNetworkTransport: String, CaseIterable, Sendable {
     }
 }
 
+public enum WebTransportNetworkExchangeMode: String, CaseIterable, Sendable {
+    case auto
+    case stream
+    case datagram
+
+    public static func parse(_ value: String) throws -> WebTransportNetworkExchangeMode {
+        guard let mode = WebTransportNetworkExchangeMode(rawValue: value) else {
+            throw WebTransportNetworkRuntimeError.invalidTransport("unknown exchange mode: \(value)")
+        }
+        return mode
+    }
+}
+
 public struct WebTransportNetworkEndpoint: Equatable, Sendable {
     public var host: String
     public var port: UInt16

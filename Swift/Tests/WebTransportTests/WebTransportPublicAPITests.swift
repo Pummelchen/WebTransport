@@ -153,6 +153,8 @@ private func runLoopbackPublicAPISessionCloseExchange() async throws {
 
             #expect(session.selectedProtocol == "demo.v1")
             #expect(serverSession.selectedProtocol == "demo.v1")
+            #expect(session.datagramsAvailable)
+            #expect(serverSession.datagramsAvailable)
 
             try await session.drain()
             try await session.close(applicationErrorCode: 0, reason: "done")

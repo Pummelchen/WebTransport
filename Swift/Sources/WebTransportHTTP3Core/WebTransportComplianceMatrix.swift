@@ -37,7 +37,8 @@ public enum WebTransportDraft15ComplianceMatrix {
                 "WebTransportStreamTests",
                 "WebTransportDatagramTests",
                 "WebTransportPhase13Tests",
-                "WebTransportLibrarySmokeMatrix"
+                "WebTransportLibrarySmokeMatrix",
+                "run-third-party-interop.sh datagram exchange proof"
             ]
         ),
         WebTransportDraft15ComplianceItem(
@@ -62,7 +63,11 @@ public enum WebTransportDraft15ComplianceMatrix {
             requirementFamily: "Security and identity handling without prompts",
             status: .pass,
             documentedBehavior: "ALPN/settings/session-policy negatives, prompt-free identity inputs, pinned trust, and deterministic trust failures are implemented and documented.",
-            evidence: ["WebTransportTLSCoreTests", "WebTransportPhase13Tests"]
+            evidence: [
+                "WebTransportTLSCoreTests",
+                "WebTransportPhase13Tests",
+                "run-third-party-interop.sh three independent endpoint proof"
+            ]
         )
     ]
 

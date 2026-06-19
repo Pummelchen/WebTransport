@@ -15,6 +15,7 @@ origin="${WEBTRANSPORT_EXTERNAL_INTEROP_ORIGIN:-none}"
 protocol="${WEBTRANSPORT_EXTERNAL_INTEROP_PROTOCOL:-none}"
 transport="${WEBTRANSPORT_EXTERNAL_INTEROP_TRANSPORT:-packet}"
 trust="${WEBTRANSPORT_EXTERNAL_INTEROP_TRUST:-system}"
+exchange="${WEBTRANSPORT_EXTERNAL_INTEROP_EXCHANGE:-auto}"
 message="${WEBTRANSPORT_EXTERNAL_INTEROP_MESSAGE:-external-interop-$(date -u +%Y%m%dT%H%M%SZ)}"
 timeout_ms="${WEBTRANSPORT_EXTERNAL_INTEROP_TIMEOUT_MS:-15000}"
 implementation="${WEBTRANSPORT_EXTERNAL_INTEROP_IMPLEMENTATION:-configured independent WebTransport endpoint}"
@@ -36,13 +37,14 @@ swift run WebTransportClient \
   --origin "$origin" \
   --protocol "$protocol" \
   --trust "$trust" \
+  --exchange "$exchange" \
   --message "$message" \
   --timeout-ms "$timeout_ms" \
   >"$stdout_file" 2>"$stderr_file"
 status=$?
 set -e
 
-python3 - "$json_file" "$status" "$implementation" "$endpoint" "$authority" "$path" "$origin" "$protocol" "$transport" "$trust" "$message" "$timeout_ms" "$stdout_file" "$stderr_file" <<'PY'
+python3 - "$json_file" "$status" "$implementation" "$endpoint" "$authority" "$path" "$origin" "$protocol" "$transport" "$trust" "$exchange" "$message" "$timeout_ms" "$stdout_file" "$stderr_file" <<'PY'
 import json
 import pathlib
 import sys
@@ -59,6 +61,7 @@ from datetime import datetime, timezone
     protocol,
     transport,
     trust,
+    exchange,
     message,
     timeout_ms,
     stdout_file,
@@ -77,10 +80,11 @@ proof = {
     "protocol": None if protocol == "none" else protocol,
     "transport": transport,
     "trust": trust,
+    "exchange": exchange,
     "message": message,
     "timeoutMilliseconds": int(timeout_ms),
     "exitCode": int(status),
-    "passed": int(status) == 0 and "connected" in stdout and message in stdout,
+    "passed": int(status) == 0 and "connected" in stdout and f"exchange={exchange}" in stdout and message in stdout,
     "stdout": stdout,
     "stderr": stderr,
 }
@@ -93,7 +97,7 @@ if [ "$status" -ne 0 ]; then
   exit "$status"
 fi
 
-if ! grep -q "connected" "$stdout_file" || ! grep -q "$message" "$stdout_file"; then
+if ! grep -q "connected" "$stdout_file" || ! grep -q "exchange=$exchange" "$stdout_file" || ! grep -q "$message" "$stdout_file"; then
   echo "external interop did not produce connected echo proof" >&2
   exit 1
 fi

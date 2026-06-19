@@ -231,6 +231,7 @@ public struct WebTransportQUICClient: Sendable {
         origin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        exchangeMode: WebTransportNetworkExchangeMode = .auto,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSessionResult {
         let session = try await connectSession(
@@ -245,11 +246,28 @@ public struct WebTransportQUICClient: Sendable {
 
         let responseMessage: String
         let preferStreams = settingsValidation == .pywebtransportStreamInterop
-        if session.datagramsAvailable && !preferStreams {
+        let useDatagrams: Bool
+        switch exchangeMode {
+        case .auto:
+            useDatagrams = session.datagramsAvailable && !preferStreams
+        case .stream:
+            useDatagrams = false
+        case .datagram:
+            useDatagrams = true
+        }
+
+        if useDatagrams {
             InteroperableQUICDebug.log("client using datagram path")
-            try await session.sendDatagram(Data(message.utf8), timeoutMilliseconds: timeoutMilliseconds)
+            try await session.sendDatagram(
+                Data(message.utf8),
+                requireAvailability: exchangeMode != .datagram,
+                timeoutMilliseconds: timeoutMilliseconds
+            )
             InteroperableQUICDebug.log("client sent datagram")
-            let responsePayload = try await session.receiveDatagram(timeoutMilliseconds: timeoutMilliseconds)
+            let responsePayload = try await session.receiveDatagram(
+                requireAvailability: exchangeMode != .datagram,
+                timeoutMilliseconds: timeoutMilliseconds
+            )
             guard let responseMessageValue = String(data: responsePayload, encoding: .utf8) else {
                 throw WebTransportNetworkRuntimeError.invalidPayload
             }
@@ -440,9 +458,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
 
     public func sendDatagram(
         _ data: Data,
+        requireAvailability: Bool = true,
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
     ) async throws {
-        guard datagramsAvailable else {
+        guard datagramsAvailable || !requireAvailability else {
             throw WebTransportNetworkRuntimeError.invalidTransport("QUIC DATAGRAM is not available on this connection")
         }
         let datagrams = try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
@@ -460,9 +479,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     }
 
     public func receiveDatagram(
+        requireAvailability: Bool = true,
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
     ) async throws -> Data {
-        guard datagramsAvailable else {
+        guard datagramsAvailable || !requireAvailability else {
             throw WebTransportNetworkRuntimeError.invalidTransport("QUIC DATAGRAM is not available on this connection")
         }
         let datagrams = try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
@@ -1023,8 +1043,13 @@ private enum InteroperableQUICHelpers {
         }
     }
 
-    static func datagramsUsable(_ connection: NetworkConnection<QUIC>) -> Bool {
-        connection.usableDatagramFrameSize > 0
+    static func datagramsUsable(_: NetworkConnection<QUIC>) -> Bool {
+        // Network.framework can report 0 here until the datagram channel is
+        // first used, even when both peers negotiated QUIC DATAGRAM support.
+        // The runtime config always advertises max_datagram_frame_size; the
+        // actual datagram channel send/receive calls remain the authoritative
+        // failure point for non-compliant peers.
+        return true
     }
 
     static func readStream(

@@ -5,6 +5,7 @@ cd "$(dirname "$0")"
 
 message="${WEBTRANSPORT_PYWEBTRANSPORT_INTEROP_MESSAGE:-pywebtransport-interop-$(date -u +%Y%m%dT%H%M%SZ)}"
 timeout_ms="${WEBTRANSPORT_PYWEBTRANSPORT_INTEROP_TIMEOUT_MS:-15000}"
+exchange="${WEBTRANSPORT_PYWEBTRANSPORT_INTEROP_EXCHANGE:-stream}"
 proof_dir=".build/external-interop"
 venv_dir="$proof_dir/pywebtransport-venv"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/webtransport-pywebtransport-interop.XXXXXX")"
@@ -146,6 +147,7 @@ while [ "$attempt" -le 3 ]; do
     --protocol none \
     --trust local-self-signed \
     --settings-validation pywebtransport-stream-interop \
+    --exchange "$exchange" \
     --message "$message" \
     --timeout-ms "$timeout_ms" \
     >"$attempt_stdout" 2>"$attempt_stderr"
@@ -177,14 +179,14 @@ server_pid=""
 cp "$server_stdout" "$proof_dir/pywebtransport-server.stdout"
 cp "$server_stderr" "$proof_dir/pywebtransport-server.stderr"
 
-"$venv_dir/bin/python" - "$json_file" "$status" "$server_status" "$endpoint" "$message" "$attempts_used" "$stdout_file" "$stderr_file" "$server_stdout" "$server_stderr" <<'PY'
+"$venv_dir/bin/python" - "$json_file" "$status" "$server_status" "$endpoint" "$exchange" "$message" "$attempts_used" "$stdout_file" "$stderr_file" "$server_stdout" "$server_stderr" <<'PY'
 import importlib.metadata
 import json
 import pathlib
 import sys
 from datetime import datetime, timezone
 
-json_file, status, server_status, endpoint, message, attempts, stdout_file, stderr_file, server_stdout, server_stderr = sys.argv[1:]
+json_file, status, server_status, endpoint, exchange, message, attempts, stdout_file, stderr_file, server_stdout, server_stderr = sys.argv[1:]
 stdout = pathlib.Path(stdout_file).read_text(errors="replace")
 stderr = pathlib.Path(stderr_file).read_text(errors="replace")
 server_out = pathlib.Path(server_stdout).read_text(errors="replace")
@@ -196,12 +198,13 @@ proof = {
     "endpoint": endpoint,
     "url": f"https://{endpoint}/",
     "transport": "packet",
+    "exchange": exchange,
     "settingsValidation": "pywebtransport-stream-interop",
     "message": message,
     "attempts": int(attempts),
     "clientExitCode": int(status),
     "serverExitCode": int(server_status),
-    "passed": int(status) == 0 and "connected" in stdout and message in stdout,
+    "passed": int(status) == 0 and "connected" in stdout and f"exchange={exchange}" in stdout and message in stdout,
     "clientStdout": stdout,
     "clientStderr": stderr,
     "serverStdout": server_out,
@@ -215,7 +218,7 @@ if [ "$status" -ne 0 ]; then
   exit "$status"
 fi
 
-if ! grep -q "connected" "$stdout_file" || ! grep -q "$message" "$stdout_file"; then
+if ! grep -q "connected" "$stdout_file" || ! grep -q "exchange=$exchange" "$stdout_file" || ! grep -q "$message" "$stdout_file"; then
   echo "pywebtransport interop did not produce connected echo proof" >&2
   exit 1
 fi
