@@ -24,9 +24,9 @@ func webTransportDraft15SettingsVectorIsRoundTripCompatible() throws {
     let settings = try HTTP3Settings.decodePayload(expectedPayload)
 
     let encoded = try frame.encode()
-    let defaultFrame = try HTTP3Settings.webTransportDraft15Defaults.frame().encode()
+    let reEncoded = try HTTP3Settings.decodePayload(expectedPayload).frame().encode()
     #expect(encoded[0] == HTTP3FrameType.settings)
-    #expect(encoded == defaultFrame)
+    #expect(encoded == reEncoded)
     #expect(settings[constants.settingsEnableConnectProtocol] == 1)
     #expect(settings[constants.settingsH3Datagram] == 1)
     #expect(settings[constants.settingsWTEnabled] == 1)

@@ -42,7 +42,7 @@ let package = Package(
         .executable(
             name: "WebTransportServer",
             targets: ["WebTransportServer"]
-        )
+        ),
         .executable(
             name: "LibrarySmokeServer",
             targets: ["LibrarySmokeServer"]
@@ -128,25 +128,6 @@ let package = Package(
                 "WebTransportCLIConformance",
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime"
-            ]
-        ),
-        .executableTarget(
-            name: "ServerCLI",
-            dependencies: [
-                "WebTransportHTTP3Core",
-                "WebTransportQUICCore",
-                "WebTransportTLSCore",
-                "WebTransportTestSupport",
-                "WebTransportUDPApple"
-            ]
-        ),
-        .executableTarget(
-            name: "ClientCLI",
-            dependencies: [
-                "WebTransportHTTP3Core",
-                "WebTransportQUICCore",
-                "WebTransportTestSupport",
-                "WebTransportUDPApple"
             ]
         ),
         .executableTarget(
