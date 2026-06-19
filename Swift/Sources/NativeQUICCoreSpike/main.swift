@@ -326,6 +326,7 @@ enum NativeQUICCoreSpike {
         let serverFrames = try TLSHandshakeFlight(messages: [serverHello]).cryptoFrames(maxFramePayloadBytes: 4)
         try assert(try connection.receiveHandshakeFrames(serverFrames) == [serverHello], "TLS/QUIC state decoded peer flight")
         _ = try connection.deriveHandshakeTrafficSecrets(sharedSecret: Data(repeating: 0x44, count: 32))
+        connection.markApplicationKeyRequirementsSatisfied(TLSQUICApplicationKeyRequirement.allCases)
         let firstApplicationSecrets = try connection.deriveApplicationTrafficSecrets()
         let updatedApplicationSecrets = try connection.updateApplicationTrafficSecrets()
         try assert(connection.keyUpdateGeneration == 1, "TLS/QUIC key update generation advanced")
@@ -433,8 +434,18 @@ enum NativeQUICCoreSpike {
     }
 
     private static func proveWebTransportSessionEstablishment() throws {
-        var clientHTTP3 = HTTP3ConnectionState(role: .client)
-        var serverHTTP3 = HTTP3ConnectionState(role: .server)
+        let constants = WebTransportHTTP3DraftConstants.current
+        var clientSettings = HTTP3Settings.webTransportDraft15Defaults
+        var serverSettings = HTTP3Settings.webTransportDraft15Defaults
+        for setting in [constants.settingsWTInitialMaxStreamsBidi, constants.settingsWTInitialMaxStreamsUni] {
+            try clientSettings.set(16, for: setting)
+            try serverSettings.set(16, for: setting)
+        }
+        try clientSettings.set(65_536, for: constants.settingsWTInitialMaxData)
+        try serverSettings.set(65_536, for: constants.settingsWTInitialMaxData)
+
+        var clientHTTP3 = HTTP3ConnectionState(role: .client, localSettings: clientSettings)
+        var serverHTTP3 = HTTP3ConnectionState(role: .server, localSettings: serverSettings)
         _ = try serverHTTP3.receivePeerControlStream(clientHTTP3.localControlStreamBytes())
         _ = try clientHTTP3.receivePeerControlStream(serverHTTP3.localControlStreamBytes())
 

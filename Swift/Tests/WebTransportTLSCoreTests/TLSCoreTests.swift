@@ -555,15 +555,52 @@ func tlsQUICConnectionStateRunsHandshakeKeysAndKeyUpdateLifecycle() throws {
     let handshakeSecrets = try state.deriveHandshakeTrafficSecrets(sharedSecret: Data(repeating: 0x33, count: 32))
     #expect(state.phase == .handshakeKeysReady)
     #expect(handshakeSecrets.clientHandshakeTrafficSecret != handshakeSecrets.serverHandshakeTrafficSecret)
+    #expect(state.applicationKeyReadiness.missingRequirements == TLSQUICApplicationKeyRequirement.allCases)
+    do {
+        _ = try state.deriveApplicationTrafficSecrets()
+        Issue.record("application keys should be gated until handshake validation is complete")
+    } catch let error as TLSQUICConnectionStateError {
+        #expect(error == .applicationKeyRequirementsNotMet(TLSQUICApplicationKeyRequirement.allCases))
+    }
 
+    state.markApplicationKeyRequirementsSatisfied(TLSQUICApplicationKeyRequirement.allCases)
     let applicationSecrets = try state.deriveApplicationTrafficSecrets()
     #expect(state.phase == .applicationKeysReady)
+    #expect(state.applicationKeyReadiness.isReady)
     #expect(state.keyUpdateGeneration == 0)
 
     let updatedSecrets = try state.updateApplicationTrafficSecrets()
     #expect(state.keyUpdateGeneration == 1)
     #expect(updatedSecrets.clientApplicationTrafficSecret != applicationSecrets.clientApplicationTrafficSecret)
     #expect(updatedSecrets.serverApplicationTrafficSecret != applicationSecrets.serverApplicationTrafficSecret)
+
+    _ = try state.deriveHandshakeTrafficSecrets(sharedSecret: Data(repeating: 0x34, count: 32))
+    #expect(state.phase == .handshakeKeysReady)
+    #expect(state.applicationKeyReadiness.isReady == false)
+    #expect(state.applicationTrafficSecrets == nil)
+    #expect(state.keyUpdateGeneration == 0)
+}
+
+@Test
+func tlsQUICConnectionStateReportsPartialApplicationKeyReadiness() throws {
+    var state = TLSQUICConnectionState(role: .server)
+    _ = try state.deriveHandshakeTrafficSecrets(sharedSecret: Data(repeating: 0x45, count: 32))
+
+    state.markApplicationKeyRequirementsSatisfied([
+        .certificateTrust,
+        .certificateVerify,
+        .finished,
+        .alpnH3
+    ])
+
+    #expect(state.applicationKeyReadiness.missingRequirements == [.quicTransportParameters])
+    do {
+        _ = try state.deriveApplicationTrafficSecrets()
+        Issue.record("missing QUIC transport parameters should block application keys")
+    } catch let error as TLSQUICConnectionStateError {
+        #expect(error == .applicationKeyRequirementsNotMet([.quicTransportParameters]))
+        #expect(error.description.contains("QUIC transport parameters"))
+    }
 }
 
 @Test

@@ -9,10 +9,39 @@ public enum TLSQUICConnectionPhase: Equatable, Sendable {
     case closed
 }
 
+public enum TLSQUICApplicationKeyRequirement: String, CaseIterable, Equatable, Sendable {
+    case certificateTrust = "certificate trust"
+    case certificateVerify = "CertificateVerify"
+    case finished = "Finished"
+    case alpnH3 = "ALPN h3"
+    case quicTransportParameters = "QUIC transport parameters"
+}
+
+public struct TLSQUICApplicationKeyReadiness: Equatable, Sendable {
+    public private(set) var satisfiedRequirements: Set<TLSQUICApplicationKeyRequirement>
+
+    public init(satisfiedRequirements: Set<TLSQUICApplicationKeyRequirement> = []) {
+        self.satisfiedRequirements = satisfiedRequirements
+    }
+
+    public var missingRequirements: [TLSQUICApplicationKeyRequirement] {
+        TLSQUICApplicationKeyRequirement.allCases.filter { !satisfiedRequirements.contains($0) }
+    }
+
+    public var isReady: Bool {
+        missingRequirements.isEmpty
+    }
+
+    public mutating func markSatisfied(_ requirement: TLSQUICApplicationKeyRequirement) {
+        satisfiedRequirements.insert(requirement)
+    }
+}
+
 public enum TLSQUICConnectionStateError: Error, Equatable, CustomStringConvertible, Sendable {
     case connectionClosed
     case handshakeKeysNotReady
     case applicationKeysNotReady
+    case applicationKeyRequirementsNotMet([TLSQUICApplicationKeyRequirement])
     case unknownStream(UInt64)
     case expectedStreamFrame
 
@@ -24,6 +53,8 @@ public enum TLSQUICConnectionStateError: Error, Equatable, CustomStringConvertib
             "TLS handshake traffic secrets are not available"
         case .applicationKeysNotReady:
             "TLS application traffic secrets are not available"
+        case .applicationKeyRequirementsNotMet(let requirements):
+            "TLS application traffic secrets are gated on: \(requirements.map(\.rawValue).joined(separator: ", "))"
         case .unknownStream(let streamID):
             "unknown QUIC stream: \(streamID)"
         case .expectedStreamFrame:
@@ -37,14 +68,15 @@ public enum TLSQUICConnectionStateError: Error, Equatable, CustomStringConvertib
 ///
 /// This type derives and advances key-schedule material after the caller has
 /// supplied the relevant handshake inputs. It is not the authoritative
-/// production handshake gate for peer authentication. A production connection
-/// must only treat application traffic as authenticated after certificate trust,
-/// CertificateVerify, Finished, ALPN `h3`, and QUIC transport parameters have
-/// all been validated by the layer that owns the complete handshake policy.
+/// production handshake parser for peer authentication. Application traffic
+/// secret derivation is gated on explicit validation signals for certificate
+/// trust, CertificateVerify, Finished, ALPN `h3`, and QUIC transport
+/// parameters.
 public struct TLSQUICConnectionState: Equatable, Sendable {
     public let role: QUICEndpointRole
     public private(set) var phase: TLSQUICConnectionPhase
     public private(set) var handshakeDecoder: TLSHandshakeFlightDecoder
+    public private(set) var applicationKeyReadiness: TLSQUICApplicationKeyReadiness
     public private(set) var handshakeSecret: Data?
     public private(set) var handshakeTrafficSecrets: TLS13HandshakeTrafficSecrets?
     public private(set) var masterSecret: Data?
@@ -61,6 +93,7 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
         self.role = role
         self.phase = .idle
         self.handshakeDecoder = TLSHandshakeFlightDecoder()
+        self.applicationKeyReadiness = TLSQUICApplicationKeyReadiness()
         self.handshakeSecret = nil
         self.handshakeTrafficSecrets = nil
         self.masterSecret = nil
@@ -114,8 +147,24 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
         )
         handshakeSecret = secret
         handshakeTrafficSecrets = trafficSecrets
+        applicationKeyReadiness = TLSQUICApplicationKeyReadiness()
+        masterSecret = nil
+        applicationTrafficSecrets = nil
+        keyUpdateGeneration = 0
         phase = .handshakeKeysReady
         return trafficSecrets
+    }
+
+    public mutating func markApplicationKeyRequirementSatisfied(_ requirement: TLSQUICApplicationKeyRequirement) {
+        applicationKeyReadiness.markSatisfied(requirement)
+    }
+
+    public mutating func markApplicationKeyRequirementsSatisfied(
+        _ requirements: some Sequence<TLSQUICApplicationKeyRequirement>
+    ) {
+        for requirement in requirements {
+            markApplicationKeyRequirementSatisfied(requirement)
+        }
     }
 
     @discardableResult
@@ -123,6 +172,10 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
         try ensureOpen()
         guard let handshakeSecret else {
             throw TLSQUICConnectionStateError.handshakeKeysNotReady
+        }
+        let missingRequirements = applicationKeyReadiness.missingRequirements
+        guard missingRequirements.isEmpty else {
+            throw TLSQUICConnectionStateError.applicationKeyRequirementsNotMet(missingRequirements)
         }
 
         let secret = try TLS13KeyAgreement.masterSecret(handshakeSecret: handshakeSecret)
