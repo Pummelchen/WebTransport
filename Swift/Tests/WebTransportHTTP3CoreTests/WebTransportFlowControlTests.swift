@@ -115,6 +115,36 @@ func webTransportFlowControlDataLimitsEmitDataBlockedCapsules() throws {
 }
 
 @Test
+func webTransportFlowControlRepeatedDataBlockedDoesNotAdvanceUsageOrDuplicateCapsules() throws {
+    var pair = try WebTransportFlowControlTestSupport.makeReadyManagers(maxData: 4)
+    let sessionID = try WebTransportFlowControlTestSupport.establishSession(
+        client: &pair.client,
+        server: &pair.server
+    )
+
+    _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data([0x01, 0x02, 0x03]))
+    #expect(pair.client.flowState(for: sessionID)?.usedData == 3)
+
+    for _ in 0..<3 {
+        #expect(throws: Error.self) {
+            _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data([0x04, 0x05]))
+        }
+        #expect(pair.client.flowState(for: sessionID)?.usedData == 3)
+    }
+
+    guard let blocked = try pair.client.popFlowControlCapsule(sessionID: sessionID) else {
+        throw URLError(.badServerResponse)
+    }
+    #expect(
+        try WebTransportFlowControlCodecTestHelpers.isDataBlocked(
+            parsed: WebTransportFlowCapsuleCodec.parse(blocked),
+            limit: 4
+        )
+    )
+    #expect(try pair.client.popFlowControlCapsule(sessionID: sessionID) == nil)
+}
+
+@Test
 func webTransportFlowControlTracksReceivePayloadAgainstSessionDataLimit() throws {
     var pair = try WebTransportFlowControlTestSupport.makeReadyManagers(maxData: 4)
     let sessionID = try WebTransportFlowControlTestSupport.establishSession(
@@ -139,6 +169,31 @@ func webTransportFlowControlTracksReceivePayloadAgainstSessionDataLimit() throws
             limit: 4
         )
     )
+}
+
+@Test
+func webTransportFlowControlRepeatedStreamsBlockedDoesNotAdvanceOpenCountsOrDuplicateCapsules() throws {
+    var pair = try WebTransportFlowControlTestSupport.makeReadyManagers(maxStreamsBidi: 1)
+    let sessionID = try WebTransportFlowControlTestSupport.establishSession(
+        client: &pair.client,
+        server: &pair.server
+    )
+
+    _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+    #expect(pair.client.flowState(for: sessionID)?.openedBidiStreams == 1)
+
+    for streamID in [8, 12, 16] {
+        #expect(throws: Error.self) {
+            _ = try pair.client.openBidirectionalStream(streamID: UInt64(streamID), sessionID: sessionID)
+        }
+        #expect(pair.client.flowState(for: sessionID)?.openedBidiStreams == 1)
+    }
+
+    guard let blocked = try pair.client.popFlowControlCapsule(sessionID: sessionID) else {
+        throw URLError(.badServerResponse)
+    }
+    #expect(try WebTransportFlowCapsuleCodec.parse(blocked).capsule == .streamsBlockedBidi(limit: 1))
+    #expect(try pair.client.popFlowControlCapsule(sessionID: sessionID) == nil)
 }
 
 @Test
@@ -185,6 +240,47 @@ func webTransportFlowControlRejectsDecreasingMaxUpdates() throws {
 }
 
 @Test
+func webTransportFlowControlRejectsMaliciousOrderUpdatesWithoutMutatingState() throws {
+    var pair = try WebTransportFlowControlTestSupport.makeReadyManagers(
+        maxStreamsBidi: 2,
+        maxStreamsUni: 2,
+        maxData: 8
+    )
+    let sessionID = try WebTransportFlowControlTestSupport.establishSession(
+        client: &pair.client,
+        server: &pair.server
+    )
+
+    _ = try pair.client.receiveFlowControlCapsule(
+        sessionID: sessionID,
+        bytes: try WebTransportFlowCapsuleCodec.serialize(.maxData(limit: 10))
+    )
+    _ = try pair.client.receiveFlowControlCapsule(
+        sessionID: sessionID,
+        bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 4))
+    )
+    _ = try pair.client.receiveFlowControlCapsule(
+        sessionID: sessionID,
+        bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsUni(limit: 5))
+    )
+    let before = pair.client.flowState(for: sessionID)
+
+    for capsule in [
+        WebTransportFlowCapsule.maxData(limit: 9),
+        .maxStreamsBidi(limit: 3),
+        .maxStreamsUni(limit: 4)
+    ] {
+        #expect(throws: WebTransportDraft15Error.self) {
+            _ = try pair.client.receiveFlowControlCapsule(
+                sessionID: sessionID,
+                bytes: try WebTransportFlowCapsuleCodec.serialize(capsule)
+            )
+        }
+        #expect(pair.client.flowState(for: sessionID) == before)
+    }
+}
+
+@Test
 func webTransportFlowControlClosedSessionRejectsPostCloseAccounting() throws {
     var pair = try WebTransportFlowControlTestSupport.makeReadyManagers(maxData: 8)
     let sessionID = try WebTransportFlowControlTestSupport.establishSession(
@@ -207,6 +303,9 @@ func webTransportFlowControlClosedSessionRejectsPostCloseAccounting() throws {
             try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8))
         ))
     }
+    #expect(pair.server.flowState(for: sessionID)?.usedData == 0)
+    #expect(pair.server.flowState(for: sessionID)?.openedBidiStreams == 1)
+    #expect(try pair.server.popFlowControlCapsule(sessionID: sessionID) == nil)
 }
 
 private enum WebTransportFlowControlTestSupport {

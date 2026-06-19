@@ -943,7 +943,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             try state.registerStream(form)
         } catch {
             if let capsule = blockedCapsule(for: form, state: state) {
-                blockedFlowCapsulesBySessionID[sessionID, default: []].append(capsule)
+                enqueueBlockedFlowCapsule(capsule, for: sessionID)
             }
             flowControlStateBySessionID[sessionID] = state
             throw error
@@ -960,12 +960,25 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             try state.recordData(bytes: byteCount)
         } catch {
             if let maxData = state.maxData {
-                blockedFlowCapsulesBySessionID[sessionID, default: []].append(.dataBlocked(limit: maxData))
+                enqueueBlockedFlowCapsule(.dataBlocked(limit: maxData), for: sessionID)
             }
             flowControlStateBySessionID[sessionID] = state
             throw error
         }
         flowControlStateBySessionID[sessionID] = state
+    }
+
+    private mutating func enqueueBlockedFlowCapsule(
+        _ capsule: WebTransportFlowCapsule,
+        for sessionID: WebTransportSessionID
+    ) {
+        var queue = blockedFlowCapsulesBySessionID[sessionID] ?? []
+        guard !queue.contains(capsule) else {
+            blockedFlowCapsulesBySessionID[sessionID] = queue
+            return
+        }
+        queue.append(capsule)
+        blockedFlowCapsulesBySessionID[sessionID] = queue
     }
 
     private func blockedCapsule(for form: WebTransportStreamForm, state: WebTransportFlowControlState) -> WebTransportFlowCapsule? {

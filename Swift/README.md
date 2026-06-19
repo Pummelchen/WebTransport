@@ -91,8 +91,9 @@ draft-15 compliance closure is in progress.
   rejected-session buffer cleanup, explicit draft error mapping and QUIC frame
   helpers, 0-RTT CONNECT rejection, remembered-settings compatibility checks for
   future accepted 0-RTT paths, malformed CONNECT data-ordering rejection,
-  protocol-policy rejection metadata, GOAWAY-driven draining, and monotonic
-  WebTransport flow-control limit updates.
+  protocol-policy rejection metadata, GOAWAY-driven draining, monotonic
+  WebTransport flow-control limit updates, non-mutating failed capacity attempts,
+  and deduplicated blocked-flow capsule queues under repeated blocked sends.
 
 Commands:
 
