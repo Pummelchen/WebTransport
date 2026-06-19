@@ -186,6 +186,9 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public let maxDatagramFrameSize: Int
     public let maxDatagramReceiveBufferBytes: Int
     public let maxStreamReceiveBufferBytes: Int
+    public let maxBufferedStreamsPerSession: Int
+    public let maxBufferedDatagramsPerSession: Int
+    public let maxBufferedSessions: Int
     private var datagramPayloadBytesBySessionID: [WebTransportSessionID: Int]
     private var closedStreamSessionIDsByStreamID: [UInt64: WebTransportSessionID]
     private var requestStreamIDsClosedByReceivedCloseCapsule: Set<UInt64>
@@ -194,7 +197,10 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         http3: HTTP3ConnectionState,
         maxStreamReceiveBufferBytes: Int = 64 * 1024,
         maxDatagramFrameSize: Int = 1_200,
-        maxDatagramReceiveBufferBytes: Int = 64 * 1024
+        maxDatagramReceiveBufferBytes: Int = 64 * 1024,
+        maxBufferedStreamsPerSession: Int = 64,
+        maxBufferedDatagramsPerSession: Int = 64,
+        maxBufferedSessions: Int = 64
     ) {
         self.http3 = http3
         self.sessionsByID = [:]
@@ -209,6 +215,9 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.maxDatagramFrameSize = maxDatagramFrameSize
         self.maxDatagramReceiveBufferBytes = maxDatagramReceiveBufferBytes
         self.maxStreamReceiveBufferBytes = maxStreamReceiveBufferBytes
+        self.maxBufferedStreamsPerSession = maxBufferedStreamsPerSession
+        self.maxBufferedDatagramsPerSession = maxBufferedDatagramsPerSession
+        self.maxBufferedSessions = maxBufferedSessions
         self.datagramPayloadBytesBySessionID = [:]
         self.closedStreamSessionIDsByStreamID = [:]
         self.requestStreamIDsClosedByReceivedCloseCapsule = []
@@ -291,6 +300,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         store(session)
         if session.state == .accepted {
             try promoteBufferedStreams(for: session.id)
+        } else {
+            discardBufferedIngress(for: session.id, tombstoneStreams: true)
         }
         return session
     }
@@ -349,6 +360,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         store(session)
         if session.state == .accepted {
             try promoteBufferedStreams(for: session.id)
+        } else {
+            discardBufferedIngress(for: session.id, tombstoneStreams: true)
         }
         return WebTransportServerSessionDecision(session: session, responseFrame: responseFrame)
     }
@@ -389,15 +402,15 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         } catch {
             throw WebTransportDraft15Error(kind: .h3ID, message: "invalid WebTransport datagram session ID")
         }
-        let session = try sessionForIngress(parsed.sessionID)
-        if session.state == .accepted || session.state == .draining {
+        let session = try sessionForIngressOrPending(parsed.sessionID)
+        if session?.state == .accepted || session?.state == .draining {
             try reserveData(for: parsed.sessionID, byteCount: parsed.payload.count)
         }
 
         let currentBytes = datagramPayloadBytesBySessionID[parsed.sessionID] ?? 0
         let updatedBytes = currentBytes + parsed.payload.count
         guard updatedBytes <= maxDatagramReceiveBufferBytes else {
-            if session.state == .requested {
+            if session == nil || session?.state == .requested {
                 throw WebTransportDraft15Error(
                     kind: .bufferedStreamRejected,
                     message: "buffered WebTransport datagram exceeds receive limit"
@@ -407,6 +420,15 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
 
         var queue = datagramsBySessionID[parsed.sessionID] ?? []
+        if session?.state != .accepted && session?.state != .draining {
+            try ensureCanBufferIngress(for: parsed.sessionID)
+            guard queue.count < maxBufferedDatagramsPerSession else {
+                throw WebTransportDraft15Error(
+                    kind: .bufferedStreamRejected,
+                    message: "buffered WebTransport datagram count exceeds receive limit"
+                )
+            }
+        }
         queue.append(parsed.payload)
         datagramsBySessionID[parsed.sessionID] = queue
         datagramPayloadBytesBySessionID[parsed.sessionID] = updatedBytes
@@ -648,22 +670,22 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard prefix.form == .bidirectional else {
             throw QUICCodecError.malformed("invalid form for bidirectional stream accept")
         }
-        let session = try sessionForIngress(prefix.sessionID)
-        if session.state == .accepted || session.state == .draining {
-            try reserveStream(session.id, form: .bidirectional)
+        let session = try sessionForIngressOrPending(prefix.sessionID)
+        if session?.state == .accepted || session?.state == .draining {
+            try reserveStream(prefix.sessionID, form: .bidirectional)
         }
 
         var stream = try WebTransportStreamState(
             streamID: streamID,
-            sessionID: session.id,
+            sessionID: prefix.sessionID,
             form: .bidirectional,
             localRole: http3.role,
             maxSendOffset: UInt64.max,
             maxReceiveOffset: UInt64.max,
             maxBufferedBytes: maxStreamReceiveBufferBytes
         )
-        try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, session: session)
-        if session.state == .accepted || session.state == .draining {
+        try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, buffering: session?.state == .requested || session == nil)
+        if session?.state == .accepted || session?.state == .draining {
             register(stream)
         } else {
             try buffer(stream)
@@ -687,22 +709,22 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard prefix.form == .unidirectional else {
             throw QUICCodecError.malformed("invalid form for unidirectional stream accept")
         }
-        let session = try sessionForIngress(prefix.sessionID)
-        if session.state == .accepted || session.state == .draining {
-            try reserveStream(session.id, form: .unidirectional)
+        let session = try sessionForIngressOrPending(prefix.sessionID)
+        if session?.state == .accepted || session?.state == .draining {
+            try reserveStream(prefix.sessionID, form: .unidirectional)
         }
 
         var stream = try WebTransportStreamState(
             streamID: streamID,
-            sessionID: session.id,
+            sessionID: prefix.sessionID,
             form: .unidirectional,
             localRole: http3.role,
             maxSendOffset: UInt64.max,
             maxReceiveOffset: UInt64.max,
             maxBufferedBytes: maxStreamReceiveBufferBytes
         )
-        try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, session: session)
-        if session.state == .accepted || session.state == .draining {
+        try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, buffering: session?.state == .requested || session == nil)
+        if session?.state == .accepted || session?.state == .draining {
             register(stream)
         } else {
             try buffer(stream)
@@ -713,8 +735,15 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public mutating func receiveStreamPayload(streamID: UInt64, payload: Data) throws {
         guard var stream = streamsByID[streamID] else {
             if let sessionID = closedStreamSessionIDsByStreamID[streamID],
-               case .closed = sessionsByID[sessionID]?.state {
-                throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session is closed")
+               let state = sessionsByID[sessionID]?.state {
+                switch state {
+                case .closed:
+                    throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session is closed")
+                case .rejected:
+                    throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session was rejected")
+                case .requested, .accepted, .draining:
+                    break
+                }
             }
             throw QUICCodecError.malformed("unknown WebTransport stream")
         }
@@ -788,7 +817,13 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     private mutating func buffer(_ stream: WebTransportStreamState) throws {
-        guard stream.bufferedPayloadBytes <= maxStreamReceiveBufferBytes else {
+        try ensureCanBufferIngress(for: stream.sessionID)
+        let bufferedStreamIDs = bufferedStreamIDsBySessionID[stream.sessionID] ?? []
+        let bufferedPayloadBytes = bufferedStreamIDs.reduce(0) { total, streamID in
+            total + (bufferedStreamsByID[streamID]?.bufferedPayloadBytes ?? 0)
+        }
+        guard bufferedStreamIDs.count < maxBufferedStreamsPerSession,
+              bufferedPayloadBytes + stream.bufferedPayloadBytes <= maxStreamReceiveBufferBytes else {
             throw WebTransportDraft15Error(
                 kind: .bufferedStreamRejected,
                 message: "buffered WebTransport stream exceeds receive limit"
@@ -801,7 +836,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     private func receiveInitialPayloadIfPresent(
         _ payload: Data,
         into stream: inout WebTransportStreamState,
-        session: WebTransportSession
+        buffering: Bool
     ) throws {
         guard !payload.isEmpty else {
             return
@@ -809,7 +844,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         do {
             try stream.receivePayload(payload)
         } catch {
-            if session.state == .requested {
+            if buffering {
                 throw WebTransportDraft15Error(
                     kind: .bufferedStreamRejected,
                     message: "buffered WebTransport stream exceeds receive limit"
@@ -832,6 +867,50 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             bufferedStreamsByID.removeValue(forKey: streamID)
         }
         bufferedStreamIDsBySessionID[sessionID] = []
+    }
+
+    private mutating func discardBufferedIngress(
+        for sessionID: WebTransportSessionID,
+        tombstoneStreams: Bool
+    ) {
+        let streamIDs = bufferedStreamIDsBySessionID[sessionID] ?? []
+        for streamID in streamIDs {
+            if tombstoneStreams {
+                closedStreamSessionIDsByStreamID[streamID] = sessionID
+            }
+            bufferedStreamsByID.removeValue(forKey: streamID)
+        }
+        bufferedStreamIDsBySessionID[sessionID] = []
+        datagramsBySessionID[sessionID] = []
+        datagramPayloadBytesBySessionID[sessionID] = 0
+    }
+
+    private func ensureCanBufferIngress(for sessionID: WebTransportSessionID) throws {
+        guard hasBufferedIngress(for: sessionID) || bufferedIngressSessionCount < maxBufferedSessions else {
+            throw WebTransportDraft15Error(
+                kind: .bufferedStreamRejected,
+                message: "buffered WebTransport session count exceeds receive limit"
+            )
+        }
+    }
+
+    private func hasBufferedIngress(for sessionID: WebTransportSessionID) -> Bool {
+        guard let streamIDs = bufferedStreamIDsBySessionID[sessionID],
+              !streamIDs.isEmpty else {
+            return datagramsBySessionID[sessionID]?.isEmpty == false
+        }
+        return true
+    }
+
+    private var bufferedIngressSessionCount: Int {
+        var sessionIDs = Set<WebTransportSessionID>()
+        for (sessionID, streamIDs) in bufferedStreamIDsBySessionID where !streamIDs.isEmpty {
+            sessionIDs.insert(sessionID)
+        }
+        for (sessionID, datagrams) in datagramsBySessionID where !datagrams.isEmpty {
+            sessionIDs.insert(sessionID)
+        }
+        return sessionIDs.count
     }
 
     private mutating func reserveStream(
@@ -894,6 +973,13 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     ) throws {
         guard streamsByID[streamID] == nil else {
             throw QUICCodecError.malformed("WebTransport stream already exists")
+        }
+        guard bufferedStreamsByID[streamID] == nil else {
+            throw QUICCodecError.malformed("WebTransport stream is already buffered")
+        }
+        if let sessionID = closedStreamSessionIDsByStreamID[streamID],
+           sessionsByID[sessionID] != nil {
+            throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport stream belongs to a terminated session")
         }
 
         guard QUICStreamID.direction(of: streamID) == direction else {
@@ -993,6 +1079,23 @@ public struct WebTransportSessionManager: Equatable, Sendable {
 
     private func sessionForIngress(_ sessionID: WebTransportSessionID) throws -> WebTransportSession {
         guard let session = sessionsByID[sessionID] else {
+            throw WebTransportDraft15Error(kind: .h3ID, message: "unknown WebTransport session")
+        }
+        switch session.state {
+        case .requested, .accepted, .draining:
+            return session
+        case .closed:
+            throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session is closed")
+        case .rejected:
+            throw WebTransportDraft15Error(kind: .sessionGone, message: "WebTransport session was rejected")
+        }
+    }
+
+    private func sessionForIngressOrPending(_ sessionID: WebTransportSessionID) throws -> WebTransportSession? {
+        guard let session = sessionsByID[sessionID] else {
+            if http3.role == .server {
+                return nil
+            }
             throw WebTransportDraft15Error(kind: .h3ID, message: "unknown WebTransport session")
         }
         switch session.state {

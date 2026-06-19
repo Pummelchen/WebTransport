@@ -86,9 +86,11 @@ draft-15 compliance closure is in progress.
   CONNECT stream finish-as-close, close-result FIN/STOP_SENDING actions,
   `WT_SESSION_GONE` post-close stream/datagram cleanup, additional CONNECT stream
   data reset with `H3_MESSAGE_ERROR` after received close, bounded close-message
-  validation, buffered stream/datagram ingress before session acceptance, explicit
-  draft error mapping, 0-RTT CONNECT rejection, GOAWAY-driven draining, and
-  monotonic WebTransport flow-control limit updates.
+  validation, client and server buffered stream/datagram ingress before session
+  acceptance, per-session and connection-level buffered ingress exhaustion,
+  rejected-session buffer cleanup, explicit draft error mapping, 0-RTT CONNECT
+  rejection, GOAWAY-driven draining, and monotonic WebTransport flow-control
+  limit updates.
 
 Commands:
 

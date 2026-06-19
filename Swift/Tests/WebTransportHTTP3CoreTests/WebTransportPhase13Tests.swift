@@ -188,6 +188,70 @@ func webTransportBuffersEarlyDatagramsAndStreamsUntilSessionAccept() throws {
 }
 
 @Test
+func webTransportServerBuffersIngressBeforeConnectRequestArrives() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+
+    let earlyDatagram = try WebTransportDatagramSignaling.serialize(
+        sessionID: 0,
+        payload: Data("server-early-d".utf8)
+    )
+    _ = try pair.server.receiveDatagramFrame(.datagram(earlyDatagram))
+
+    let earlyPrefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
+    _ = try pair.server.acceptBidirectionalStream(
+        streamID: 4,
+        firstBytes: earlyPrefix + Data("server-early-s".utf8)
+    )
+    #expect(pair.server.stream(for: 4) == nil)
+    #expect(pair.server.bufferedStreamIDs(for: WebTransportSessionID(rawValue: 0))?.contains(4) == true)
+
+    let requestFrame = try pair.client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(authority: "example.com", path: "/wt")
+    )
+    let decision = try pair.server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: requestFrame,
+        policy: try WebTransportServerSessionPolicy()
+    )
+
+    #expect(decision.session.state == .accepted)
+    #expect(pair.server.popDatagramPayload(sessionID: WebTransportSessionID(rawValue: 0)) == Data("server-early-d".utf8))
+    #expect(pair.server.stream(for: 4) != nil)
+    #expect(pair.server.popStreamPayload(streamID: 4) == Data("server-early-s".utf8))
+}
+
+@Test
+func webTransportServerDiscardsBufferedIngressWhenConnectIsRejected() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    _ = try pair.server.receiveDatagramFrame(.datagram(
+        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("reject-d".utf8))
+    ))
+    let earlyPrefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
+    _ = try pair.server.acceptBidirectionalStream(
+        streamID: 4,
+        firstBytes: earlyPrefix + Data("reject-s".utf8)
+    )
+
+    let requestFrame = try pair.client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(authority: "example.com", path: "/blocked")
+    )
+    let decision = try pair.server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: requestFrame,
+        policy: try WebTransportServerSessionPolicy(allowedPaths: ["/wt"])
+    )
+
+    #expect(decision.session.state == .rejected(status: 404))
+    #expect(pair.server.popDatagramPayload(sessionID: WebTransportSessionID(rawValue: 0)) == nil)
+    #expect(pair.server.stream(for: 4) == nil)
+    #expect(throws: WebTransportDraft15Error.self) {
+        try pair.server.receiveStreamPayload(streamID: 4, payload: Data("late".utf8))
+    }
+}
+
+@Test
 func webTransportEarlyIngressOverflowMapsToBufferedStreamRejected() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers(
         maxDatagramReceiveBufferBytes: 2,
@@ -219,6 +283,56 @@ func webTransportEarlyIngressOverflowMapsToBufferedStreamRejected() throws {
 }
 
 @Test
+func webTransportServerBufferedIngressCountExhaustionMapsToBufferedStreamRejected() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers(
+        maxBufferedStreamsPerSession: 1,
+        maxBufferedDatagramsPerSession: 1
+    )
+
+    _ = try pair.server.receiveDatagramFrame(.datagram(
+        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("a".utf8))
+    ))
+    do {
+        _ = try pair.server.receiveDatagramFrame(.datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("b".utf8))
+        ))
+        Issue.record("second early datagram should exceed buffered count")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .bufferedStreamRejected)
+        #expect(error.code == WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError)
+    }
+
+    let firstPrefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
+    _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: firstPrefix)
+    do {
+        let secondPrefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
+        _ = try pair.server.acceptBidirectionalStream(streamID: 8, firstBytes: secondPrefix)
+        Issue.record("second early stream should exceed buffered count")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .bufferedStreamRejected)
+        #expect(error.code == WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError)
+    }
+}
+
+@Test
+func webTransportServerBufferedSessionExhaustionMapsToBufferedStreamRejected() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers(maxBufferedSessions: 1)
+
+    _ = try pair.server.receiveDatagramFrame(.datagram(
+        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("a".utf8))
+    ))
+    do {
+        _ = try pair.server.receiveDatagramFrame(.datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 4, payload: Data("b".utf8))
+        ))
+        Issue.record("second early session should exceed buffered session count")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .bufferedStreamRejected)
+        #expect(error.code == WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError)
+    }
+}
+
+@Test
 func webTransportMapsUnknownSessionIDsToH3IDError() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
     do {
@@ -226,6 +340,22 @@ func webTransportMapsUnknownSessionIDsToH3IDError() throws {
             try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("x".utf8))
         ))
         Issue.record("unknown session datagram should throw")
+    } catch let error as WebTransportDraft15Error {
+        #expect(error.kind == .h3ID)
+        #expect(error.code == HTTP3ApplicationErrorCode.idError.rawValue)
+    }
+}
+
+@Test
+func webTransportMapsInvalidStreamSessionIDsToH3IDError() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    var firstBytes = Data()
+    firstBytes.append(try QUICVarInt.encode(WebTransportHTTP3DraftConstants.current.wtStreamFrame))
+    firstBytes.append(try QUICVarInt.encode(2))
+
+    do {
+        _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: firstBytes)
+        Issue.record("invalid session ID should throw H3_ID_ERROR")
     } catch let error as WebTransportDraft15Error {
         #expect(error.kind == .h3ID)
         #expect(error.code == HTTP3ApplicationErrorCode.idError.rawValue)
@@ -266,7 +396,10 @@ func webTransportGoawayDrainsExistingSessionsAndAllowsExistingSessionWork() thro
 private enum WebTransportPhase13Support {
     static func makeReadyManagers(
         maxDatagramReceiveBufferBytes: Int = 64 * 1024,
-        maxStreamReceiveBufferBytes: Int = 64 * 1024
+        maxStreamReceiveBufferBytes: Int = 64 * 1024,
+        maxBufferedStreamsPerSession: Int = 64,
+        maxBufferedDatagramsPerSession: Int = 64,
+        maxBufferedSessions: Int = 64
     ) throws -> (client: WebTransportSessionManager, server: WebTransportSessionManager) {
         var clientHTTP3 = HTTP3ConnectionState(role: .client)
         var serverHTTP3 = HTTP3ConnectionState(role: .server)
@@ -276,12 +409,18 @@ private enum WebTransportPhase13Support {
             WebTransportSessionManager(
                 http3: clientHTTP3,
                 maxStreamReceiveBufferBytes: maxStreamReceiveBufferBytes,
-                maxDatagramReceiveBufferBytes: maxDatagramReceiveBufferBytes
+                maxDatagramReceiveBufferBytes: maxDatagramReceiveBufferBytes,
+                maxBufferedStreamsPerSession: maxBufferedStreamsPerSession,
+                maxBufferedDatagramsPerSession: maxBufferedDatagramsPerSession,
+                maxBufferedSessions: maxBufferedSessions
             ),
             WebTransportSessionManager(
                 http3: serverHTTP3,
                 maxStreamReceiveBufferBytes: maxStreamReceiveBufferBytes,
-                maxDatagramReceiveBufferBytes: maxDatagramReceiveBufferBytes
+                maxDatagramReceiveBufferBytes: maxDatagramReceiveBufferBytes,
+                maxBufferedStreamsPerSession: maxBufferedStreamsPerSession,
+                maxBufferedDatagramsPerSession: maxBufferedDatagramsPerSession,
+                maxBufferedSessions: maxBufferedSessions
             )
         )
     }

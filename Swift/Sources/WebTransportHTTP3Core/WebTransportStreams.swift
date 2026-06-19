@@ -69,7 +69,15 @@ public enum WebTransportStreamSignaling {
         }
 
         let sessionRaw = try QUICVarInt.decode(from: &cursor)
-        let sessionID = try WebTransportSessionID.fromRequestStreamID(sessionRaw)
+        let sessionID: WebTransportSessionID
+        do {
+            sessionID = try WebTransportSessionID.fromRequestStreamID(sessionRaw)
+        } catch {
+            throw WebTransportDraft15Error(
+                kind: .h3ID,
+                message: "invalid WebTransport stream session ID"
+            )
+        }
         let remainingPayload = try cursor.readBytes(count: cursor.remaining)
         return WebTransportStreamPrefix(
             form: form,
