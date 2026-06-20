@@ -4,6 +4,11 @@ All notable changes to this project will be documented here.
 
 The project uses semantic versioning.
 
+## Unreleased
+
+- Hardened Swift runtime endpoint reporting, local self-signed trust handling, and `@unchecked Sendable` documentation.
+- Restricted the Swift UDP packet-probe helper to explicit loopback use and added IPv6 loopback coverage.
+
 ## [1.0.0] - 2026-06-20
 
 - Swift implementation exposed as a repository-root SwiftPM package.

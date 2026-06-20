@@ -203,6 +203,11 @@ public struct WebTransportConnectionResult: Equatable, Sendable {
 }
 
 /// Bidirectional WebTransport stream backed by a real QUIC stream.
+///
+/// SAFETY: This wrapper is immutable after initialization and delegates all
+/// mutable stream state to the runtime stream object, which serializes prefix
+/// consumption through an actor. The underlying Network.framework stream handle
+/// is concurrency-capable but is not modeled as `Sendable` by Swift.
 public final class WebTransportBidirectionalStream: @unchecked Sendable {
     public let id: UInt64
 
@@ -223,6 +228,11 @@ public final class WebTransportBidirectionalStream: @unchecked Sendable {
 }
 
 /// Established WebTransport session backed by the production network runtime.
+///
+/// SAFETY: Public state is immutable after initialization. Mutable session
+/// protocol state is isolated in the runtime session actor/queues; the stored
+/// runtime handle wraps Network.framework objects that are used only through
+/// async methods and explicit shutdown/close operations.
 public final class WebTransportSession: @unchecked Sendable {
     public let id: UInt64
     public let localEndpoint: WebTransportEndpoint
@@ -375,6 +385,10 @@ public actor WebTransportServer {
 }
 
 /// Active network WebTransport listener returned by `WebTransportServer.listen`.
+///
+/// SAFETY: The listener object is immutable after initialization except for the
+/// underlying runtime listener, whose mutable accept queue is actor-isolated.
+/// `shutdown()` is idempotent and only cancels the listener task.
 public final class WebTransportListeningServer: @unchecked Sendable {
     public let localEndpoint: WebTransportEndpoint
     public let certificateSHA256: Data

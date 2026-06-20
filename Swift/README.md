@@ -33,7 +33,7 @@ Implemented:
 
 Recent status:
 
-- The separate-process `--transport packet` path is wired to the Network.framework QUIC/TLS/HTTP/3 runtime. `--transport frame` is rejected for real `--listen/--connect` sessions and remains available only inside lower-level conformance scenarios. Platform trust is the runtime default. The `local-self-signed` trust mode is test-only and rejected for non-loopback hosts; the CLI auto-selects it only for localhost loopback development endpoints.
+- The separate-process `--transport packet` path is wired to the Network.framework QUIC/TLS/HTTP/3 runtime. `--transport frame` is rejected for real `--listen/--connect` sessions and remains available only inside lower-level conformance scenarios. Platform trust is the runtime default. The `local-self-signed` trust mode is test-only, must be requested explicitly, and is rejected for non-loopback hosts.
 
 ## Public API Surface
 
@@ -58,9 +58,9 @@ swift test
 swift run WebTransportClient --scenario all
 swift run WebTransportServer --scenario all
 swift run WebTransportServer --listen 127.0.0.1:4433 --transport packet
-swift run WebTransportClient --connect 127.0.0.1:4433 --transport packet
+swift run WebTransportClient --connect 127.0.0.1:4433 --transport packet --trust local-self-signed
 swift run WebTransportServer --listen '[::1]:4433' --transport packet
-swift run WebTransportClient --connect '[::1]:4433' --transport packet
+swift run WebTransportClient --connect '[::1]:4433' --transport packet --trust local-self-signed
 swift run WebTransportClient
 swift run WebTransportServer
 ./run-pywebtransport-interop.sh

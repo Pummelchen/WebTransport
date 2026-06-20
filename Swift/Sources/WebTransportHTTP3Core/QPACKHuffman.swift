@@ -224,6 +224,8 @@ public enum QPACKHuffman {
     ]
 }
 
+// SAFETY: Huffman nodes are fully constructed during static table setup and are
+// thereafter read-only. No mutation occurs after the root table is published.
 private final class HuffmanNode: @unchecked Sendable {
     var zero: HuffmanNode?
     var one: HuffmanNode?

@@ -42,22 +42,28 @@ public enum WebTransportQUICPeerTrustPolicy: Equatable, Sendable {
         }
     }
 
-    func validate(endpoint: WebTransportNetworkEndpoint) throws {
+    fileprivate func runtimeConfiguration(endpoint: WebTransportNetworkEndpoint) throws -> InteroperableQUICTrustConfiguration {
         switch self {
         case .systemTrust:
-            return
+            return .systemTrust
         case .localDevelopmentSelfSigned:
             guard Self.isLoopbackHost(endpoint.host) else {
                 throw WebTransportNetworkRuntimeError.invalidTransport(
                     "local-self-signed trust is restricted to localhost, 127.0.0.1, and ::1"
                 )
             }
+            return .localLoopbackDevelopmentSelfSigned
         }
     }
 
     private static func isLoopbackHost(_ host: String) -> Bool {
         host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
+}
+
+private enum InteroperableQUICTrustConfiguration: Sendable {
+    case systemTrust
+    case localLoopbackDevelopmentSelfSigned
 }
 
 public struct WebTransportQUICClient: Sendable {
@@ -82,7 +88,7 @@ public struct WebTransportQUICClient: Sendable {
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSession {
-        try trustPolicy.validate(endpoint: endpoint)
+        let trustConfiguration = try trustPolicy.runtimeConfiguration(endpoint: endpoint)
         let host = InteroperableQUICRuntime.host(for: endpoint.host)
         let destination = NWEndpoint.hostPort(
             host: host,
@@ -90,7 +96,7 @@ public struct WebTransportQUICClient: Sendable {
         )
         InteroperableQUICDebug.log("client connecting to \(endpoint.host):\(endpoint.port)")
         let connection = NetworkConnection(to: destination) {
-            InteroperableQUICRuntime.makeClientQUIC(trustPolicy: trustPolicy)
+            InteroperableQUICRuntime.makeClientQUIC(trustConfiguration: trustConfiguration)
         }
         InteroperableQUICDebug.log("client state before start: \(connection.state)")
         InteroperableQUICDebug.log("client started")
@@ -215,8 +221,11 @@ public struct WebTransportQUICClient: Sendable {
             selectedProtocol: session.selectedProtocol,
             localControlStream: localControlStream,
             connectStream: requestStream,
-            localEndpoint: WebTransportNetworkEndpoint(host: endpoint.host, port: endpoint.port),
-            remoteEndpoint: endpoint,
+            localEndpoint: InteroperableQUICRuntime.networkEndpoint(
+                from: connection.localEndpoint,
+                fallback: WebTransportNetworkEndpoint(host: "unknown", port: 0)
+            ),
+            remoteEndpoint: InteroperableQUICRuntime.networkEndpoint(from: connection.remoteEndpoint, fallback: endpoint),
             datagramsAvailable: useDatagrams,
             timeoutMilliseconds: timeoutMilliseconds
         )
@@ -293,6 +302,9 @@ public struct WebTransportQUICClient: Sendable {
     }
 }
 
+// SAFETY: The wrapper is immutable after initialization. Prefix and initial
+// payload state are isolated in `WebTransportNetworkStreamState`; the stored
+// Network.framework stream handle is used only through async send/receive calls.
 public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
     public let streamID: UInt64
 
@@ -345,6 +357,9 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
     }
 }
 
+// SAFETY: Endpoint/session metadata are immutable. Mutable WebTransport state is
+// isolated in `WebTransportNetworkSessionManagerState`; inbound stream queues are
+// actors; the Network.framework connection is only accessed through async APIs.
 public final class WebTransportNetworkSession: @unchecked Sendable {
     public let localEndpoint: WebTransportNetworkEndpoint
     public let remoteEndpoint: WebTransportNetworkEndpoint
@@ -562,6 +577,10 @@ private actor WebTransportNetworkSessionManagerState {
     }
 }
 
+// SAFETY: Listener configuration is immutable after initialization apart from
+// `localEndpoint`, which is set during startup before serving. Accepted
+// connections are handed through an actor queue, and shutdown only cancels the
+// listener task.
 public final class WebTransportQUICServer: @unchecked Sendable {
     public private(set) var localEndpoint: WebTransportNetworkEndpoint
     public let certificateSHA256: Data
@@ -858,7 +877,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             localControlStream: localControlStream,
             connectStream: requestStream,
             localEndpoint: localEndpoint,
-            remoteEndpoint: localEndpoint,
+            remoteEndpoint: InteroperableQUICRuntime.networkEndpoint(
+                from: connection.remoteEndpoint,
+                fallback: WebTransportNetworkEndpoint(host: "unknown", port: 0)
+            ),
             datagramsAvailable: useDatagrams,
             timeoutMilliseconds: timeoutMilliseconds
         )
@@ -897,6 +919,17 @@ private enum InteroperableQUICRuntime {
         }
     }
 
+    static func networkEndpoint(
+        from endpoint: NWEndpoint?,
+        fallback: WebTransportNetworkEndpoint
+    ) -> WebTransportNetworkEndpoint {
+        guard let endpoint,
+              case .hostPort(let host, let port) = endpoint else {
+            return fallback
+        }
+        return WebTransportNetworkEndpoint(host: host.debugDescription, port: port.rawValue)
+    }
+
     static func makeBaseQUIC() -> QUIC {
         QUIC(alpn: ["h3"]) {
             UDP()
@@ -911,11 +944,11 @@ private enum InteroperableQUICRuntime {
         .maxDatagramFrameSize(65_535)
     }
 
-    static func makeClientQUIC(trustPolicy: WebTransportQUICPeerTrustPolicy) -> QUIC {
-        switch trustPolicy {
+    static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
+        switch trustConfiguration {
         case .systemTrust:
             return makeBaseQUIC()
-        case .localDevelopmentSelfSigned:
+        case .localLoopbackDevelopmentSelfSigned:
             return makeBaseQUIC().tls.peerAuthentication(.none)
         }
     }

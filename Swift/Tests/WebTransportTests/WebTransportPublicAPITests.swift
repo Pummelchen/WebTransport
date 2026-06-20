@@ -17,6 +17,8 @@ func webTransportClientServerNetworkAPIConnectsAndEchoes() async throws {
     #expect(serverResult.sessionEstablished)
     #expect(result.message == "ping")
     #expect(serverResult.message == "ping")
+    #expect(result.remoteEndpoint.port == serverResult.localEndpoint.port)
+    #expect(serverResult.remoteEndpoint.port == result.localEndpoint.port)
 }
 
 @Test
@@ -155,6 +157,8 @@ private func runLoopbackPublicAPISessionCloseExchange() async throws {
             #expect(serverSession.selectedProtocol == "demo.v1")
             #expect(session.datagramsAvailable)
             #expect(serverSession.datagramsAvailable)
+            #expect(session.remoteEndpoint.port == serverSession.localEndpoint.port)
+            #expect(serverSession.remoteEndpoint.port == session.localEndpoint.port)
 
             try await session.drain()
             try await session.close(applicationErrorCode: 0, reason: "done")

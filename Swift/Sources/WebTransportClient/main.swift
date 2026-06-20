@@ -231,7 +231,7 @@ private struct NetworkClientOptions {
         guard let endpoint else {
             throw WebTransportNetworkRuntimeError.invalidEndpoint("--connect requires host:port")
         }
-        let resolvedTrustPolicy = trustPolicy ?? (Self.isLoopback(endpoint.host) ? .localDevelopmentSelfSigned : .systemTrust)
+        let resolvedTrustPolicy = trustPolicy ?? .systemTrust
         return NetworkClientOptions(
             endpoint: endpoint,
             message: message,
@@ -247,7 +247,4 @@ private struct NetworkClientOptions {
         )
     }
 
-    private static func isLoopback(_ host: String) -> Bool {
-        host == "localhost" || host == "127.0.0.1" || host == "::1"
-    }
 }

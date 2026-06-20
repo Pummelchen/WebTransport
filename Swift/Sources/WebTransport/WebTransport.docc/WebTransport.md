@@ -4,7 +4,7 @@ Native Swift WebTransport over HTTP/3 client and server APIs.
 
 ## Overview
 
-The `WebTransport` module exposes the public Swift concurrency facade for
+The `WebTransport` module exposes the public Swift concurrency API for
 opening WebTransport sessions, bidirectional streams, unidirectional streams,
 datagrams, and graceful close/drain flows.
 

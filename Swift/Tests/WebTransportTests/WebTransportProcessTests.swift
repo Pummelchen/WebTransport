@@ -350,7 +350,7 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
                 do {
                     var result = try WebTransportProcessSupport.run(
                         client,
-                        ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)", "--timeout-ms", "25000"],
+                        ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)", "--timeout-ms", "25000"],
                         timeout: 30
                     )
                     var attempts = 1
@@ -359,7 +359,7 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
                         Thread.sleep(forTimeInterval: 0.12)
                         result = try WebTransportProcessSupport.run(
                             client,
-                            ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--message", "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "25000"],
+                            ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "25000"],
                             timeout: 30
                         )
                     }
@@ -592,7 +592,7 @@ enum WebTransportProcessSupport {
         let loopbackName = "loopback-\(transport)-\(host == "::1" ? "ipv6" : "ipv4")"
         var clientResult = try run(
             client,
-            ["--connect", connectEndpoint, "--transport", transport, "--message", loopbackName, "--timeout-ms", "25000"],
+            ["--connect", connectEndpoint, "--transport", transport, "--trust", "local-self-signed", "--message", loopbackName, "--timeout-ms", "25000"],
             timeout: 30
         )
         var attempts = 1
@@ -601,7 +601,7 @@ enum WebTransportProcessSupport {
             attempts += 1
             clientResult = try run(
                 client,
-                ["--connect", connectEndpoint, "--transport", transport, "--message", "\(loopbackName)-retry-\(attempts)", "--timeout-ms", "25000"],
+                ["--connect", connectEndpoint, "--transport", transport, "--trust", "local-self-signed", "--message", "\(loopbackName)-retry-\(attempts)", "--timeout-ms", "25000"],
                 timeout: 30
             )
         }
