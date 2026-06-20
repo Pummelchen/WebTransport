@@ -100,7 +100,7 @@ cd Swift && ./build-release-apple-silicon.sh
 
 ## C99
 
-Planned implementation. The `C99/` directory currently contains documentation and an `Experiments/` folder only.
+Planned implementation. The `C99/` directory currently contains the C99 implementation plan, source/API/test skeleton, platform build-support folders, generated artifact layout, and an `Experiments/` folder. No protocol implementation exists yet.
 
 ## C++
 
