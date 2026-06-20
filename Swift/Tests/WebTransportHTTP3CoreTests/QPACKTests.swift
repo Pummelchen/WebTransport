@@ -5,11 +5,13 @@ import WebTransportQUICCore
 
 @Test
 func qpackStaticTableLooksUpExactAndNameEntries() {
+    #expect(QPACKStaticTable.entries.count == 99)
     #expect(QPACKStaticTable.exactIndex(name: ":method", value: "CONNECT") == 15)
     #expect(QPACKStaticTable.exactIndex(name: ":scheme", value: "https") == 23)
     #expect(QPACKStaticTable.exactIndex(name: ":status", value: "200") == 25)
+    #expect(QPACKStaticTable.exactIndex(name: "x-frame-options", value: "sameorigin") == 98)
     #expect(QPACKStaticTable.nameIndex(":authority") == 0)
-    #expect(QPACKStaticTable.nameIndex("origin") == nil)
+    #expect(QPACKStaticTable.nameIndex("origin") == 90)
 }
 
 @Test

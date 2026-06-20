@@ -26,7 +26,7 @@ Implemented:
 - Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
 - Release artifact smoke tests and a standalone public API compatibility sample build.
 - Public `WebTransport` package API backed by the Network.framework QUIC/TLS/HTTP/3 runtime, including sessions, bidirectional streams, datagrams, drain, and close.
-- External interoperability proof runners via `./run-third-party-interop.sh` and `./run-pywebtransport-interop.sh`. The three-endpoint runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream and QUIC DATAGRAM echo proofs in `.build/external-interop/third-party-latest.json`. Configured public endpoint probing remains available through `./run-external-interop.sh`.
+- External interoperability proof runners via `./run-third-party-interop.sh`, `./run-pywebtransport-interop.sh`, and `./run-vps-third-party-interop.sh`. The local runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream and QUIC DATAGRAM echo proofs in `.build/external-interop/third-party-latest.json`. The VPS runner tests five remote Debian 13 third-party implementations and records `.build/external-interop/vps-third-party-latest.json`; all required VPS proofs currently pass. Configured public endpoint probing remains available through `./run-external-interop.sh`.
 - macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
 - Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
 - Apple Silicon release script for reproducibility-checked production CLI binaries with `SHA256SUMS`.
@@ -65,6 +65,7 @@ swift run WebTransportClient
 swift run WebTransportServer
 ./run-pywebtransport-interop.sh
 ./run-third-party-interop.sh
+./run-vps-third-party-interop.sh
 swift run LibrarySmokeServer --port 45500
 swift run LibrarySmokeServer --port 45500 --suite
 swift run LibrarySmokeClient --host 127.0.0.1 --port 45500
@@ -87,6 +88,16 @@ The runner records per-endpoint logs plus a consolidated pass/fail report in `.b
 The aggregate gate requires stream exchange proofs against `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche`, plus a forced QUIC DATAGRAM exchange proof against `web-transport-quinn`. A pass means the Swift client completed real HTTP/3 WebTransport CONNECT and echoed both reliable stream payloads and unreliable datagrams through independent endpoints.
 
 `./run-pywebtransport-interop.sh` installs `pywebtransport==0.1.2` into `.build/external-interop/pywebtransport-venv`, starts a local independent `pywebtransport`/`aioquic` echo server, runs the Swift client against it, and records the result in `.build/external-interop/pywebtransport-latest.json`. This proof covers QUIC/TLS/HTTP/3 CONNECT and reliable WebTransport stream echo.
+
+`./run-vps-third-party-interop.sh` runs the Swift client from macOS against five third-party implementations installed under `/var/webtransport` on the Debian 13 VPS `vpn-germany.tail1c3b90.ts.net`. The test date in the current proof is `20 June 2026`.
+
+| Implementation | Version | URL | Third-party OS | Test date | Proof |
+| --- | --- | --- | --- | --- | --- |
+| pywebtransport / aioquic | pywebtransport 0.1.2, aioquic 1.3.0 | <https://pypi.org/project/pywebtransport/> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: stream echo |
+| web-transport-quinn | 0.11.9 | <https://crates.io/crates/web-transport-quinn/0.11.9> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: stream echo + DATAGRAM echo |
+| web-transport-quiche | 0.4.1 | <https://crates.io/crates/web-transport-quiche/0.4.1> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: stream echo |
+| hyperium/h3-webtransport | 0.1.2 / h3 main example | <https://github.com/hyperium/h3/tree/master/h3-webtransport> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: DATAGRAM echo |
+| erlang-webtransport | main f2d4d8dfe60c | <https://github.com/benoitc/erlang-webtransport> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: stream echo + DATAGRAM echo |
 
 `./run-external-interop.sh` runs the Swift client against a configured independent WebTransport endpoint and records the result in `.build/external-interop/latest.json`. Configure the target with:
 
