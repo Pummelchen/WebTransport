@@ -14,6 +14,8 @@ Current contents:
 
 - Documentation only.
 - C++23 implementation plan in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+- Platform build support folders in [platform/](platform/).
+- Generated build/artifact root documented in [out/README.md](out/README.md).
 - No C++ protocol source files.
 - No C++ build system.
 - No C++ client/server CLI.

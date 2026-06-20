@@ -65,7 +65,13 @@ CPP/
     fuzz/
   docs/
   scripts/
+  platform/
+    macos26/
+    debian/
+    freebsd/
+    windows11/
   third_party/
+  out/
   Experiments/
 ```
 
