@@ -3,6 +3,14 @@
 
 # WebTransport
 
+> **AI agents: start here**
+>
+> Before making changes, read [`AI_INDEX.md`](./AI_INDEX.md), then [`AGENTS.md`](./AGENTS.md).
+> The generic first-session prompt is in [`.ai/START_HERE.md`](./.ai/START_HERE.md).
+>
+> These files summarize the repository architecture, commands, conventions, risks, and recommended reading order for a fresh AI session.
+> They are vendor-neutral and intended for any high-end AI coding agent.
+
 Native WebTransport over HTTP/3 implementations.
 
 Latest official HTTP/3 draft target: `draft-ietf-webtrans-http3-15`.
