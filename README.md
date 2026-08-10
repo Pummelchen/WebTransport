@@ -1,4 +1,4 @@
-![WebTransport project status infographic](Assets/webtransport-infographic.svg)
+<img width="1055" height="1491" alt="image" src="https://github.com/user-attachments/assets/32af02c3-ee01-4fc6-962c-6d618cead8f5" />
 
 # WebTransport
 
