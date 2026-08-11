@@ -18,7 +18,7 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Validate Swift toolchain
         run: ./Swift/check-toolchain.sh
