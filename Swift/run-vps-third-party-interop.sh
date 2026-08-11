@@ -98,8 +98,8 @@ quinn_stream_json="$(run_case web-transport-quinn "web-transport-quinn" "0.11.9"
 quinn_datagram_json="$(run_case web-transport-quinn "web-transport-quinn" "0.11.9" "https://crates.io/crates/web-transport-quinn/0.11.9" 54002 datagram chromium-interop | tail -1)"
 quiche_json="$(run_case web-transport-quiche "web-transport-quiche" "0.4.1" "https://crates.io/crates/web-transport-quiche/0.4.1" 54003 stream chromium-interop | tail -1)"
 h3_json="$(run_case h3-webtransport "hyperium/h3-webtransport" "0.1.2 / hyperium h3 main example" "https://github.com/hyperium/h3/tree/master/h3-webtransport" 54005 datagram chromium-interop | tail -1)"
-erlang_stream_json="$(run_case erlang-webtransport "erlang-webtransport" "main f2d4d8dfe60c" "https://github.com/benoitc/erlang-webtransport" 54007 stream draft15-strict "echo: erlang-webtransport-stream-vps" | tail -1)"
-erlang_datagram_json="$(run_case erlang-webtransport "erlang-webtransport" "main f2d4d8dfe60c" "https://github.com/benoitc/erlang-webtransport" 54007 datagram draft15-strict "echo: erlang-webtransport-datagram-vps" | tail -1)"
+erlang_stream_json="$(run_case erlang-webtransport "erlang-webtransport" "main f2d4d8dfe60c" "https://github.com/benoitc/erlang-webtransport" 54007 stream draft16-strict "echo: erlang-webtransport-stream-vps" | tail -1)"
+erlang_datagram_json="$(run_case erlang-webtransport "erlang-webtransport" "main f2d4d8dfe60c" "https://github.com/benoitc/erlang-webtransport" 54007 datagram draft16-strict "echo: erlang-webtransport-datagram-vps" | tail -1)"
 
 python3 - "$proof_dir/vps-third-party-latest.json" "$py_json" "$quinn_stream_json" "$quinn_datagram_json" "$quiche_json" "$h3_json" "$erlang_stream_json" "$erlang_datagram_json" <<'PY'
 import json

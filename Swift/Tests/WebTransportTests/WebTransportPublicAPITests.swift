@@ -22,6 +22,21 @@ func webTransportClientServerNetworkAPIConnectsAndEchoes() async throws {
 }
 
 @Test
+func webTransportClientServerProcessesOptimisticCapsulesAfterAcceptance() async throws {
+    let (result, serverResult) = try await WebTransportProcessSupport.withExclusiveProcessExecution {
+        try await runLoopbackPublicAPIExchange(
+            protocols: ["demo.v1"],
+            message: "optimistic-draft16",
+            optimisticCapsules: [.drainSession]
+        )
+    }
+    #expect(result.sessionEstablished)
+    #expect(serverResult.sessionEstablished)
+    #expect(result.message == "optimistic-draft16")
+    #expect(serverResult.message == "optimistic-draft16")
+}
+
+@Test
 func webTransportClientServerNetworkSessionExposesCloseLifecycle() async throws {
     try await WebTransportProcessSupport.withExclusiveProcessExecution {
         try await runLoopbackPublicAPISessionCloseExchange()
@@ -73,7 +88,7 @@ func webTransportPublicAPIRejectsUnsupportedTransportConfiguration() async throw
 
 @Test
 func webTransportPublicErrorSurfaceRedactsPeerControlledDetail() {
-    let draftError = WebTransportDraft15Error(kind: .requirementsNotMet, message: "secret-origin https://internal.example")
+    let draftError = WebTransportDraft16Error(kind: .requirementsNotMet, message: "secret-origin https://internal.example")
     #expect(WebTransportErrorSurface.publicDescription(for: draftError) == "WebTransport peer requirements were not met")
 
     let codecError = QUICCodecError.malformed("secret packet bytes 010203")
@@ -82,6 +97,7 @@ func webTransportPublicErrorSurfaceRedactsPeerControlledDetail() {
 
 private func makeLoopbackPublicAPIPair(
     protocols: [String],
+    optimisticCapsules: [WebTransportFlowCapsule] = [],
     clientLogger: WebTransportLogger = .disabled,
     serverLogger: WebTransportLogger = .disabled
 ) async throws -> (WebTransportClient, WebTransportListeningServer) {
@@ -102,6 +118,7 @@ private func makeLoopbackPublicAPIPair(
             origin: "https://localhost",
             availableProtocols: protocols,
             trustPolicy: .localDevelopmentSelfSigned,
+            optimisticCapsules: optimisticCapsules,
             timeoutMilliseconds: 30_000
         ),
         logger: clientLogger
@@ -113,6 +130,7 @@ private func makeLoopbackPublicAPIPair(
 private func runLoopbackPublicAPIExchange(
     protocols: [String],
     message: String,
+    optimisticCapsules: [WebTransportFlowCapsule] = [],
     clientLogger: WebTransportLogger = .disabled,
     serverLogger: WebTransportLogger = .disabled
 ) async throws -> (WebTransportConnectionResult, WebTransportConnectionResult) {
@@ -121,6 +139,7 @@ private func runLoopbackPublicAPIExchange(
         do {
             let (client, listener) = try await makeLoopbackPublicAPIPair(
                 protocols: protocols,
+                optimisticCapsules: optimisticCapsules,
                 clientLogger: clientLogger,
                 serverLogger: serverLogger
             )
@@ -159,6 +178,27 @@ private func runLoopbackPublicAPISessionCloseExchange() async throws {
             #expect(serverSession.datagramsAvailable)
             #expect(session.remoteEndpoint.port == serverSession.localEndpoint.port)
             #expect(serverSession.remoteEndpoint.port == session.localEndpoint.port)
+
+            let exporterLabel = Data("public-api-test".utf8)
+            let exporterContext = Data([0x01, 0x02, 0x03])
+            let clientExporter = try session.exportKeyingMaterial(
+                applicationLabel: exporterLabel,
+                applicationContext: exporterContext,
+                outputByteCount: 32
+            )
+            let serverExporter = try serverSession.exportKeyingMaterial(
+                applicationLabel: exporterLabel,
+                applicationContext: exporterContext,
+                outputByteCount: 32
+            )
+            #expect(clientExporter == serverExporter)
+            #expect(clientExporter.count == 32)
+            #expect(clientExporter != Data(repeating: 0, count: 32))
+            #expect(try session.exportKeyingMaterial(
+                applicationLabel: exporterLabel,
+                applicationContext: Data([0x04]),
+                outputByteCount: 32
+            ) != clientExporter)
 
             try await session.drain()
             try await session.close(applicationErrorCode: 0, reason: "done")

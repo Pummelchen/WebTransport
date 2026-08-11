@@ -4,7 +4,7 @@ import WebTransportHTTP3Core
 import WebTransportQUICCore
 
 @Test
-func webTransportDraft15SettingsVectorIsRoundTripCompatible() throws {
+func webTransportDraft16SettingsVectorIsRoundTripCompatible() throws {
     let constants = WebTransportHTTP3DraftConstants.current
     let expectedPayload = Data([
         0x08,

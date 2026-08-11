@@ -44,6 +44,12 @@ public struct HTTP3Frame: Equatable, Sendable {
         return frames
     }
 
+    public static func decodePrefix(_ data: Data) throws -> (frame: HTTP3Frame, bytesConsumed: Int) {
+        var cursor = QUICByteCursor(data)
+        let frame = try decode(from: &cursor)
+        return (frame, data.count - cursor.remaining)
+    }
+
     public static func encodeFrames(_ frames: [HTTP3Frame]) throws -> Data {
         var output = Data()
         for frame in frames {

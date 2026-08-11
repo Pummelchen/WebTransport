@@ -5,6 +5,7 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
     case invalidEndpoint(String)
     case invalidPayload
     case invalidTransport(String)
+    case exporterUnavailable
     case unexpectedPacket
     case unexpectedFrame
     case timeout(Int32)
@@ -17,6 +18,8 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
             return "invalid WebTransport network payload"
         case .invalidTransport(let value):
             return "invalid WebTransport network transport: \(value)"
+        case .exporterUnavailable:
+            return "WebTransport TLS exporter is unavailable"
         case .unexpectedPacket:
             return "unexpected packet in WebTransport network runtime"
         case .unexpectedFrame:

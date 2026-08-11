@@ -114,7 +114,7 @@ private struct NetworkClientOptions {
         var origin: String? = "https://localhost"
         var protocols = ["demo.v1"]
         var trustPolicy: WebTransportQUICPeerTrustPolicy?
-        var settingsValidation = HTTP3WebTransportSettingsValidation.draft15Strict
+        var settingsValidation = HTTP3WebTransportSettingsValidation.draft16Strict
         var exchangeMode = WebTransportNetworkExchangeMode.auto
         var index = 0
 

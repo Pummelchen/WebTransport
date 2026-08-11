@@ -1,8 +1,8 @@
 # C99 WebTransport
 
-Protocol reference: IETF `draft-ietf-webtrans-http3-15`, dated 2026-03-02.
+Protocol reference: IETF `draft-ietf-webtrans-http3-16`, dated 2026-07-06.
 
-Draft-15 score: **0%**
+Draft-16 score: **0%**
 
 ## Current Status
 

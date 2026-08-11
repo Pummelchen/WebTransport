@@ -97,11 +97,11 @@ func reservedCodeHelpersFollowHTTP3Pattern() {
 }
 
 @Test
-func webTransportDraft15ConstantsMatchProtocolBible() {
+func webTransportDraft16ConstantsMatchProtocolBible() {
     let constants = WebTransportHTTP3DraftConstants.current
-    #expect(constants.name == "draft-ietf-webtrans-http3-15")
-    #expect(constants.revision == 15)
-    #expect(constants.lastUpdated == "2026-03-02")
+    #expect(constants.name == "draft-ietf-webtrans-http3-16")
+    #expect(constants.revision == 16)
+    #expect(constants.lastUpdated == "2026-07-06")
     #expect(constants.upgradeToken == "webtransport-h3")
     #expect(constants.settingsEnableConnectProtocol == 0x08)
     #expect(constants.settingsH3Datagram == 0x33)
@@ -114,9 +114,11 @@ func webTransportDraft15ConstantsMatchProtocolBible() {
     #expect(constants.wtDrainSessionCapsule == 0x78ae)
     #expect(constants.wtCloseSessionCapsule == 0x2843)
     #expect(constants.wtMaxDataCapsule == 0x190b_4d3d)
+    #expect(constants.wtMaxStreamDataCapsule == 0x190b_4d3e)
     #expect(constants.wtMaxStreamsBidiCapsule == 0x190b_4d3f)
     #expect(constants.wtMaxStreamsUniCapsule == 0x190b_4d40)
     #expect(constants.wtDataBlockedCapsule == 0x190b_4d41)
+    #expect(constants.wtStreamDataBlockedCapsule == 0x190b_4d42)
     #expect(constants.wtStreamsBlockedBidiCapsule == 0x190b_4d43)
     #expect(constants.wtStreamsBlockedUniCapsule == 0x190b_4d44)
     #expect(constants.wtBufferedStreamRejectedError == 0x3994_bd84)
@@ -125,4 +127,5 @@ func webTransportDraft15ConstantsMatchProtocolBible() {
     #expect(constants.wtALPNError == 0x0817_b3dd)
     #expect(constants.wtRequirementsNotMetError == 0x212c_0d48)
     #expect(constants.wtApplicationErrorRange == 0x52e4_a40f_a8db...0x52e5_ac98_3162)
+    #expect(constants.wtCloseSessionMaxMessageBytes == 1_024)
 }

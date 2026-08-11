@@ -4,15 +4,16 @@
 
 A native WebTransport over HTTP/3 implementation for Swift, with planned C99 and C++ ports.
 
-The implementation targets `draft-ietf-webtrans-http3-15`. As of 10 August 2026, the latest IETF revision is
+The Swift implementation targets
 [`draft-ietf-webtrans-http3-16`](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/),
-published on 6 July 2026. The compatibility score below applies only to draft 15.
+published on 6 July 2026. It includes draft-16 flow-control negotiation and limits,
+optimistic CONNECT capsules, close-message validation, and TLS exporter binding.
 
 Full project documentation is available in the [WebTransport Wiki](https://github.com/Pummelchen/WebTransport/wiki).
 
 ## Status
 
-| Implementation | Draft-15 compatibility | Status |
+| Implementation | Draft-16 compatibility | Status |
 | --- | ---: | --- |
 | Swift | 100% | Production SwiftPM package and CLI apps. |
 | C99 | 0% | Planned. No protocol implementation yet. |

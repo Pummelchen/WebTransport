@@ -6,6 +6,10 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+- Updated the Swift protocol target to `draft-ietf-webtrans-http3-16`.
+- Added draft-16 flow-control negotiation, directional accounting, strict limit updates, prohibited-capsule handling, and excessive-session rejection.
+- Added optimistic CONNECT capsule support, 1024-byte UTF-8 close-message enforcement, and the `EXPORTER-WebTransport` TLS exporter binding.
+- Kept deprecated draft-15 API spellings as source-compatible aliases while making draft-16 names and defaults canonical.
 - Hardened Swift runtime endpoint reporting, local self-signed trust handling, and `@unchecked Sendable` documentation.
 - Restricted the Swift UDP packet-probe helper to explicit loopback use and added IPv6 loopback coverage.
 

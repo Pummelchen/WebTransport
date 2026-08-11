@@ -33,7 +33,7 @@ public enum TLS13KeySchedule {
         context: Data = Data(),
         outputByteCount: Int
     ) throws -> Data {
-        guard outputByteCount <= UInt16.max else {
+        guard outputByteCount >= 0, outputByteCount <= UInt16.max else {
             throw QUICCodecError.valueOutOfRange("HKDF output too large")
         }
 
