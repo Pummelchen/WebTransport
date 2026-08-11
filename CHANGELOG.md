@@ -6,6 +6,8 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+## [1.1.0] - 2026-08-11
+
 - Updated the Swift protocol target to `draft-ietf-webtrans-http3-16`.
 - Added draft-16 flow-control negotiation, directional accounting, strict limit updates, prohibited-capsule handling, and excessive-session rejection.
 - Added optimistic CONNECT capsule support, 1024-byte UTF-8 close-message enforcement, and the `EXPORTER-WebTransport` TLS exporter binding.

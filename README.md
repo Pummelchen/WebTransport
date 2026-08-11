@@ -27,7 +27,7 @@ The Swift implementation is the active implementation and is exposed as a normal
 It requires macOS 26 or later, Swift 6.3, and Swift language mode 6.
 
 ```swift
-.package(url: "https://github.com/Pummelchen/WebTransport.git", exact: "1.0.0")
+.package(url: "https://github.com/Pummelchen/WebTransport.git", exact: "1.1.0")
 ```
 
 Products:
@@ -61,8 +61,7 @@ try await stream.send(Data("hello".utf8), endOfStream: true)
 let response = try await stream.receive()
 ```
 
-Release 1.0.0 was validated on 20 June 2026 against five independent WebTransport implementations.
-The complete point-in-time matrix, proof requirements, and caveats are documented in
+Release 1.1.0 was validated on 11 August 2026 against three independent local WebTransport implementations, covering four required stream and datagram proofs. The retained five-implementation VPS matrix is point-in-time evidence from 20 June 2026. The complete matrices, proof requirements, and caveats are documented in
 [Release and Interoperability](https://github.com/Pummelchen/WebTransport/wiki/Release-and-Interoperability).
 
 Generate the local third-party proof with:
