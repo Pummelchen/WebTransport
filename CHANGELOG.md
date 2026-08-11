@@ -6,6 +6,8 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+- Reworked the repository and Wiki documentation around a concise Swift reference-implementation narrative, current requirements, validation evidence, and explicit limitations.
+
 ## [1.1.0] - 2026-08-11
 
 - Updated the Swift protocol target to `draft-ietf-webtrans-http3-16`.
