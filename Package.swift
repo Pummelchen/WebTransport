@@ -1,6 +1,10 @@
 // swift-tools-version: 6.3
 import PackageDescription
 
+let strictSwiftSettings: [SwiftSetting] = [
+    .strictMemorySafety()
+]
+
 let package = Package(
     name: "WebTransport",
     platforms: [
@@ -52,7 +56,8 @@ let package = Package(
                 "WebTransportNetworkRuntime",
                 "WebTransportQUICCore"
             ],
-            path: "Swift/Sources/WebTransport"
+            path: "Swift/Sources/WebTransport",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportCLIConformance",
@@ -64,7 +69,8 @@ let package = Package(
                 "WebTransportTLSCore",
                 "WebTransportUDPApple"
             ],
-            path: "Swift/Sources/WebTransportCLIConformance"
+            path: "Swift/Sources/WebTransportCLIConformance",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportNetworkRuntime",
@@ -75,34 +81,40 @@ let package = Package(
                 "WebTransportTLSCore",
                 "WebTransportUDPApple"
             ],
-            path: "Swift/Sources/WebTransportNetworkRuntime"
+            path: "Swift/Sources/WebTransportNetworkRuntime",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportQUICCore",
-            path: "Swift/Sources/WebTransportQUICCore"
+            path: "Swift/Sources/WebTransportQUICCore",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportUDPApple",
-            path: "Swift/Sources/WebTransportUDPApple"
+            path: "Swift/Sources/WebTransportUDPApple",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportCryptoApple",
             dependencies: ["WebTransportQUICCore"],
-            path: "Swift/Sources/WebTransportCryptoApple"
+            path: "Swift/Sources/WebTransportCryptoApple",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportTLSCore",
             dependencies: [
                 "WebTransportQUICCore"
             ],
-            path: "Swift/Sources/WebTransportTLSCore"
+            path: "Swift/Sources/WebTransportTLSCore",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportHTTP3Core",
             dependencies: [
                 "WebTransportQUICCore"
             ],
-            path: "Swift/Sources/WebTransportHTTP3Core"
+            path: "Swift/Sources/WebTransportHTTP3Core",
+            swiftSettings: strictSwiftSettings
         ),
         .executableTarget(
             name: "WebTransportClient",
@@ -112,7 +124,8 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime"
             ],
-            path: "Swift/Sources/WebTransportClient"
+            path: "Swift/Sources/WebTransportClient",
+            swiftSettings: strictSwiftSettings
         ),
         .executableTarget(
             name: "WebTransportServer",
@@ -122,22 +135,26 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime"
             ],
-            path: "Swift/Sources/WebTransportServer"
+            path: "Swift/Sources/WebTransportServer",
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportTests",
             dependencies: ["WebTransport"],
-            path: "Swift/Tests/WebTransportTests"
+            path: "Swift/Tests/WebTransportTests",
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportNetworkRuntimeTests",
             dependencies: ["WebTransportNetworkRuntime"],
-            path: "Swift/Tests/WebTransportNetworkRuntimeTests"
+            path: "Swift/Tests/WebTransportNetworkRuntimeTests",
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportQUICCoreTests",
             dependencies: ["WebTransportQUICCore"],
-            path: "Swift/Tests/WebTransportQUICCoreTests"
+            path: "Swift/Tests/WebTransportQUICCoreTests",
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportUDPAppleTests",
@@ -145,7 +162,8 @@ let package = Package(
                 "WebTransportQUICCore",
                 "WebTransportUDPApple"
             ],
-            path: "Swift/Tests/WebTransportUDPAppleTests"
+            path: "Swift/Tests/WebTransportUDPAppleTests",
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportCryptoAppleTests",
@@ -153,7 +171,8 @@ let package = Package(
                 "WebTransportCryptoApple",
                 "WebTransportTLSCore"
             ],
-            path: "Swift/Tests/WebTransportCryptoAppleTests"
+            path: "Swift/Tests/WebTransportCryptoAppleTests",
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportTLSCoreTests",
@@ -161,7 +180,8 @@ let package = Package(
                 "WebTransportQUICCore",
                 "WebTransportTLSCore"
             ],
-            path: "Swift/Tests/WebTransportTLSCoreTests"
+            path: "Swift/Tests/WebTransportTLSCoreTests",
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportHTTP3CoreTests",
@@ -169,7 +189,8 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore"
             ],
-            path: "Swift/Tests/WebTransportHTTP3CoreTests"
+            path: "Swift/Tests/WebTransportHTTP3CoreTests",
+            swiftSettings: strictSwiftSettings
         )
     ],
     swiftLanguageModes: [

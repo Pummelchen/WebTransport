@@ -1,6 +1,10 @@
 // swift-tools-version: 6.3
 import PackageDescription
 
+let strictSwiftSettings: [SwiftSetting] = [
+    .strictMemorySafety()
+]
+
 let package = Package(
     name: "WebTransportSwift",
     platforms: [
@@ -59,7 +63,8 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime",
                 "WebTransportQUICCore"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportCLIConformance",
@@ -70,7 +75,8 @@ let package = Package(
                 "WebTransportQUICCore",
                 "WebTransportTLSCore",
                 "WebTransportUDPApple"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportNetworkRuntime",
@@ -80,29 +86,35 @@ let package = Package(
                 "WebTransportQUICCore",
                 "WebTransportTLSCore",
                 "WebTransportUDPApple"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .target(
-            name: "WebTransportQUICCore"
+            name: "WebTransportQUICCore",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
-            name: "WebTransportUDPApple"
+            name: "WebTransportUDPApple",
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportCryptoApple",
-            dependencies: ["WebTransportQUICCore"]
+            dependencies: ["WebTransportQUICCore"],
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportTLSCore",
             dependencies: [
                 "WebTransportQUICCore"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportHTTP3Core",
             dependencies: [
                 "WebTransportQUICCore"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportTestSupport",
@@ -110,7 +122,8 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
                 "WebTransportTLSCore"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .executableTarget(
             name: "WebTransportClient",
@@ -119,7 +132,8 @@ let package = Package(
                 "WebTransportCLIConformance",
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .executableTarget(
             name: "WebTransportServer",
@@ -128,7 +142,8 @@ let package = Package(
                 "WebTransportCLIConformance",
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .executableTarget(
             name: "LibrarySmokeServer",
@@ -137,7 +152,8 @@ let package = Package(
                 "WebTransportQUICCore",
                 "WebTransportTestSupport",
                 "WebTransportUDPApple"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .executableTarget(
             name: "LibrarySmokeClient",
@@ -146,47 +162,55 @@ let package = Package(
                 "WebTransportQUICCore",
                 "WebTransportTestSupport",
                 "WebTransportUDPApple"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportTests",
-            dependencies: ["WebTransport"]
+            dependencies: ["WebTransport"],
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportNetworkRuntimeTests",
-            dependencies: ["WebTransportNetworkRuntime"]
+            dependencies: ["WebTransportNetworkRuntime"],
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportQUICCoreTests",
-            dependencies: ["WebTransportQUICCore"]
+            dependencies: ["WebTransportQUICCore"],
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportUDPAppleTests",
             dependencies: [
                 "WebTransportQUICCore",
                 "WebTransportUDPApple"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportCryptoAppleTests",
             dependencies: [
                 "WebTransportCryptoApple",
                 "WebTransportTLSCore"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportTLSCoreTests",
             dependencies: [
                 "WebTransportQUICCore",
                 "WebTransportTLSCore"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportHTTP3CoreTests",
             dependencies: [
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore"
-            ]
+            ],
+            swiftSettings: strictSwiftSettings
         )
     ],
     swiftLanguageModes: [

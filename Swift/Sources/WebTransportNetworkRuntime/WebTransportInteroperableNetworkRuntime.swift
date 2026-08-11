@@ -592,9 +592,12 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         )
         let contextBytes = context.isEmpty ? [UInt8(0)] : [UInt8](context)
         let labelBytes = Array(WebTransportExporter.tlsLabel.utf8CString)
-        let exported = labelBytes.withUnsafeBufferPointer { labelBuffer in
-            contextBytes.withUnsafeBufferPointer { contextBuffer in
-                sec_protocol_metadata_create_secret_with_context(
+        // SAFETY: Both arrays remain alive for the synchronous Security call.
+        // The UTF-8 label includes a terminator excluded from its byte count;
+        // the context pointer is nonnil even when its declared length is zero.
+        let exported = unsafe labelBytes.withUnsafeBufferPointer { labelBuffer in
+            unsafe contextBytes.withUnsafeBufferPointer { contextBuffer in
+                unsafe sec_protocol_metadata_create_secret_with_context(
                     connection.securityProtocolMetadata,
                     labelBytes.count - 1,
                     labelBuffer.baseAddress!,
@@ -607,10 +610,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         guard let exported else {
             throw WebTransportNetworkRuntimeError.exporterUnavailable
         }
-        let dispatchData = exported as DispatchData
-        return dispatchData.withUnsafeBytes { (buffer: UnsafePointer<UInt8>) in
-            Data(bytes: buffer, count: dispatchData.count)
-        }
+        return Data(exported as DispatchData)
     }
 
     public func drain(timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil) async throws {
@@ -1523,21 +1523,29 @@ private struct InteroperableTLSIdentity {
     var certificateDER: Data
 
     static func create() throws -> InteroperableTLSIdentity {
-        var error: Unmanaged<CFError>?
         let attributes: [CFString: Any] = [
             kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits: 256,
             kSecAttrIsPermanent: false
         ]
 
-        guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw WebTransportNetworkRuntimeError.invalidTransport("server key generation failed")
+        var privateKeyError: Unmanaged<CFError>?
+        // SAFETY: Security.framework initializes the optional retained CFError
+        // out-parameter; failure transfers that ownership exactly once below.
+        guard let privateKey = unsafe SecKeyCreateRandomKey(attributes as CFDictionary, &privateKeyError) else {
+            let detail = unsafe privateKeyError?.takeRetainedValue().localizedDescription
+                ?? "unknown Security.framework error"
+            throw WebTransportNetworkRuntimeError.invalidTransport("server key generation failed: \(detail)")
         }
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
             throw WebTransportNetworkRuntimeError.invalidTransport("server public key extraction failed")
         }
-        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            throw WebTransportNetworkRuntimeError.invalidTransport("server public key export failed")
+        var publicKeyError: Unmanaged<CFError>?
+        // SAFETY: As above, the retained error is consumed only on failure.
+        guard let publicKeyData = unsafe SecKeyCopyExternalRepresentation(publicKey, &publicKeyError) as Data? else {
+            let detail = unsafe publicKeyError?.takeRetainedValue().localizedDescription
+                ?? "unknown Security.framework error"
+            throw WebTransportNetworkRuntimeError.invalidTransport("server public key export failed: \(detail)")
         }
 
         let certificateDER = try SelfSignedCertificate.make(
@@ -1623,13 +1631,17 @@ private enum SelfSignedCertificate {
         ])
 
         var signError: Unmanaged<CFError>?
-        guard let signature = SecKeyCreateSignature(
+        // SAFETY: Security.framework initializes the optional retained CFError
+        // out-parameter; failure transfers that ownership exactly once below.
+        guard let signature = unsafe SecKeyCreateSignature(
             privateKey,
             .ecdsaSignatureMessageX962SHA256,
             tbsCertificate as CFData,
             &signError
         ) as Data? else {
-            throw WebTransportNetworkRuntimeError.invalidPayload
+            let detail = unsafe signError?.takeRetainedValue().localizedDescription
+                ?? "unknown Security.framework error"
+            throw WebTransportNetworkRuntimeError.invalidTransport("server certificate signing failed: \(detail)")
         }
 
         return DER.sequence([
@@ -1641,7 +1653,9 @@ private enum SelfSignedCertificate {
 
     private static func randomSerial() -> Data {
         var bytes = [UInt8](repeating: 0, count: 16)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        // SAFETY: `bytes` owns exactly the writable byte count supplied to
+        // SecRandomCopyBytes and remains alive for the synchronous call.
+        let status = unsafe SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         if status != errSecSuccess {
             bytes = Array(UUID().uuidString.utf8.prefix(16))
         }

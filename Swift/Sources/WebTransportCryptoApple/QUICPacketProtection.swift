@@ -106,9 +106,12 @@ public enum QUICPacketProtection {
 
         var encrypted = [UInt8](repeating: 0, count: kCCBlockSizeAES128)
         var encryptedLength = 0
-        let status = headerProtectionKey.withUnsafeBytes { keyBytes in
-            sample.withUnsafeBytes { sampleBytes in
-                CCCrypt(
+        // SAFETY: Both Data values remain alive for the synchronous call, their
+        // validated 16-byte regions satisfy CCCrypt's AES-128 input bounds, and
+        // `encrypted` owns a full AES block for the output.
+        let status = unsafe headerProtectionKey.withUnsafeBytes { keyBytes in
+            unsafe sample.withUnsafeBytes { sampleBytes in
+                unsafe CCCrypt(
                     CCOperation(kCCEncrypt),
                     CCAlgorithm(kCCAlgorithmAES),
                     CCOptions(kCCOptionECBMode),

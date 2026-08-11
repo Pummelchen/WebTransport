@@ -13,21 +13,26 @@ concurrency:
 
 jobs:
   macos-swift:
-    name: macOS 26 hosted SwiftPM
+    name: macOS 26 / Swift 6.3.3+ SwiftPM
 
     runs-on: macos-26
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Swift toolchain
-        run: |
-          set -euo pipefail
-          xcodebuild -version
-          swift --version
+      - name: Validate Swift toolchain
+        run: ./Swift/check-toolchain.sh
 
-      - name: Build package
-        run: swift build
+      - name: Build both package entry points with safety diagnostics
+        run: |
+          swift build \
+            -Xswiftc -warnings-as-errors \
+            -Xswiftc -strict-concurrency=complete \
+            -Xswiftc -require-explicit-sendable
+          swift build --package-path Swift \
+            -Xswiftc -warnings-as-errors \
+            -Xswiftc -strict-concurrency=complete \
+            -Xswiftc -require-explicit-sendable
 
       - name: Validate DocC catalog
         run: |
@@ -56,7 +61,11 @@ jobs:
         env:
           WEBTRANSPORT_REQUIRE_CLI_BINARIES: "1"
           WEBTRANSPORT_REQUIRE_RELEASE_ARTIFACTS: "1"
-        run: swift test
+        run: >-
+          swift test
+          -Xswiftc -warnings-as-errors
+          -Xswiftc -strict-concurrency=complete
+          -Xswiftc -require-explicit-sendable
 
       - name: Run client CLI conformance
         run: swift run WebTransportClient --scenario all

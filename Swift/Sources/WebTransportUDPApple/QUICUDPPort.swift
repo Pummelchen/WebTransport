@@ -20,7 +20,9 @@ public enum QUICUDPError: Error, CustomStringConvertible, Sendable {
     public var description: String {
         switch self {
         case .posix(let operation, let code):
-            "\(operation) failed: \(String(cString: strerror(code)))"
+            // SAFETY: strerror returns a process-owned, NUL-terminated string
+            // for the duration of this synchronous conversion.
+            "\(operation) failed: \(unsafe String(cString: strerror(code)))"
         case .timeout:
             "UDP receive timed out"
         case .invalidAddress:
@@ -52,12 +54,17 @@ public final class QUICUDPPort: @unchecked Sendable {
         }
 
         var reuse: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        // SAFETY: The pointer references one initialized Int32 for exactly the
+        // duration and byte count passed to setsockopt.
+        unsafe setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
 
         var address = bindAddress.storage
-        let bindResult = withUnsafePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                Darwin.bind(fd, sockaddrPointer, bindAddress.length)
+        // SAFETY: sockaddr_storage is large and aligned enough for sockaddr;
+        // the rebound pointer is scoped to this synchronous bind call and the
+        // length matches the initialized address family.
+        let bindResult = unsafe withUnsafePointer(to: &address) { pointer in
+            unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                unsafe Darwin.bind(fd, sockaddrPointer, bindAddress.length)
             }
         }
         guard bindResult == 0 else {
@@ -68,9 +75,11 @@ public final class QUICUDPPort: @unchecked Sendable {
 
         var boundAddress = sockaddr_storage()
         var boundLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
-        let nameResult = withUnsafeMutablePointer(to: &boundAddress) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                getsockname(fd, sockaddrPointer, &boundLength)
+        // SAFETY: boundAddress owns a correctly aligned sockaddr_storage and
+        // boundLength advertises its full writable capacity for getsockname.
+        let nameResult = unsafe withUnsafeMutablePointer(to: &boundAddress) { pointer in
+            unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                unsafe getsockname(fd, sockaddrPointer, &boundLength)
             }
         }
         guard nameResult == 0 else {
@@ -95,10 +104,12 @@ public final class QUICUDPPort: @unchecked Sendable {
         let destination = try Self.loopbackAddress(host: endpoint.host, port: endpoint.port)
         var address = destination.storage
 
-        let sent = try data.withUnsafeBytes { bytes in
-            try withUnsafePointer(to: &address) { pointer in
-                try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                    let result = sendto(
+        // SAFETY: Data and sockaddr storage remain alive for the synchronous
+        // sendto call; the supplied byte counts are bounded by those values.
+        let sent = try unsafe data.withUnsafeBytes { bytes in
+            try unsafe withUnsafePointer(to: &address) { pointer in
+                try unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                    let result = unsafe sendto(
                         descriptor,
                         bytes.baseAddress,
                         data.count,
@@ -131,7 +142,8 @@ public final class QUICUDPPort: @unchecked Sendable {
         defer { receiveLock.unlock() }
 
         var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-        let pollResult = Darwin.poll(&pollDescriptor, 1, timeoutMilliseconds)
+        // SAFETY: poll receives one initialized pollfd for the declared count.
+        let pollResult = unsafe Darwin.poll(&pollDescriptor, 1, timeoutMilliseconds)
         guard pollResult > 0 else {
             if pollResult == 0 {
                 throw QUICUDPError.timeout
@@ -142,13 +154,15 @@ public final class QUICUDPPort: @unchecked Sendable {
         var storage = sockaddr_storage()
         var storageLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
         var buffer = [UInt8](repeating: 0, count: maximumBytes)
-        let received = try buffer.withUnsafeMutableBytes { bytes in
-            try withUnsafeMutablePointer(to: &storage) { pointer in
-                try pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        // SAFETY: Both buffers remain alive throughout recvfrom, their declared
+        // lengths match writable storage, and maximumBytes was range-checked.
+        let received = try unsafe buffer.withUnsafeMutableBytes { bytes in
+            try unsafe withUnsafeMutablePointer(to: &storage) { pointer in
+                try unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
                     guard let baseAddress = bytes.baseAddress else {
                         throw QUICUDPError.invalidReceiveConfiguration("receive buffer is empty")
                     }
-                    return recvfrom(descriptor, baseAddress, bytes.count, 0, sockaddrPointer, &storageLength)
+                    return unsafe recvfrom(descriptor, baseAddress, bytes.count, 0, sockaddrPointer, &storageLength)
                 }
             }
         }
@@ -173,7 +187,9 @@ public final class QUICUDPPort: @unchecked Sendable {
             address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
             address.sin_family = sa_family_t(AF_INET)
             address.sin_port = port.bigEndian
-            guard inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) == 1 else {
+            // SAFETY: inet_pton receives a static NUL-terminated literal and a
+            // writable in_addr value of the required size.
+            guard unsafe inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) == 1 else {
                 throw QUICUDPError.invalidAddress
             }
             return LoopbackAddress(
@@ -186,7 +202,9 @@ public final class QUICUDPPort: @unchecked Sendable {
             address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
             address.sin6_family = sa_family_t(AF_INET6)
             address.sin6_port = port.bigEndian
-            guard inet_pton(AF_INET6, "::1", &address.sin6_addr) == 1 else {
+            // SAFETY: inet_pton receives a static NUL-terminated literal and a
+            // writable in6_addr value of the required size.
+            guard unsafe inet_pton(AF_INET6, "::1", &address.sin6_addr) == 1 else {
                 throw QUICUDPError.invalidAddress
             }
             return LoopbackAddress(
@@ -201,9 +219,11 @@ public final class QUICUDPPort: @unchecked Sendable {
 
     private static func storage(from address: sockaddr_in) -> sockaddr_storage {
         var storage = sockaddr_storage()
-        withUnsafeMutablePointer(to: &storage) { storagePointer in
-            storagePointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { pointer in
-                pointer.pointee = address
+        // SAFETY: sockaddr_storage is large and aligned enough for sockaddr_in;
+        // the rebound pointer cannot escape this synchronous initialization.
+        unsafe withUnsafeMutablePointer(to: &storage) { storagePointer in
+            unsafe storagePointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { pointer in
+                unsafe pointer.pointee = address
             }
         }
         return storage
@@ -211,9 +231,11 @@ public final class QUICUDPPort: @unchecked Sendable {
 
     private static func storage(from address: sockaddr_in6) -> sockaddr_storage {
         var storage = sockaddr_storage()
-        withUnsafeMutablePointer(to: &storage) { storagePointer in
-            storagePointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { pointer in
-                pointer.pointee = address
+        // SAFETY: sockaddr_storage is large and aligned enough for sockaddr_in6;
+        // the rebound pointer cannot escape this synchronous initialization.
+        unsafe withUnsafeMutablePointer(to: &storage) { storagePointer in
+            unsafe storagePointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { pointer in
+                unsafe pointer.pointee = address
             }
         }
         return storage
@@ -222,30 +244,34 @@ public final class QUICUDPPort: @unchecked Sendable {
     private static func endpoint(from storage: sockaddr_storage) throws -> QUICUDPEndpoint {
         switch Int32(storage.ss_family) {
         case AF_INET:
-            return try withUnsafePointer(to: storage) { pointer in
-                try pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { addressPointer in
-                    var address = addressPointer.pointee.sin_addr
+            // SAFETY: The family tag proves the storage contains sockaddr_in;
+            // all rebound pointers remain scoped to this conversion.
+            return try unsafe withUnsafePointer(to: storage) { pointer in
+                try unsafe pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { addressPointer in
+                    var address = unsafe addressPointer.pointee.sin_addr
                     var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-                    guard inet_ntop(AF_INET, &address, &buffer, socklen_t(buffer.count)) != nil else {
+                    guard unsafe inet_ntop(AF_INET, &address, &buffer, socklen_t(buffer.count)) != nil else {
                         throw QUICUDPError.invalidAddress
                     }
                     return QUICUDPEndpoint(
                         host: Self.string(from: buffer),
-                        port: UInt16(bigEndian: addressPointer.pointee.sin_port)
+                        port: UInt16(bigEndian: unsafe addressPointer.pointee.sin_port)
                     )
                 }
             }
         case AF_INET6:
-            return try withUnsafePointer(to: storage) { pointer in
-                try pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { addressPointer in
-                    var address = addressPointer.pointee.sin6_addr
+            // SAFETY: The family tag proves the storage contains sockaddr_in6;
+            // all rebound pointers remain scoped to this conversion.
+            return try unsafe withUnsafePointer(to: storage) { pointer in
+                try unsafe pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { addressPointer in
+                    var address = unsafe addressPointer.pointee.sin6_addr
                     var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-                    guard inet_ntop(AF_INET6, &address, &buffer, socklen_t(buffer.count)) != nil else {
+                    guard unsafe inet_ntop(AF_INET6, &address, &buffer, socklen_t(buffer.count)) != nil else {
                         throw QUICUDPError.invalidAddress
                     }
                     return QUICUDPEndpoint(
                         host: Self.string(from: buffer),
-                        port: UInt16(bigEndian: addressPointer.pointee.sin6_port)
+                        port: UInt16(bigEndian: unsafe addressPointer.pointee.sin6_port)
                     )
                 }
             }

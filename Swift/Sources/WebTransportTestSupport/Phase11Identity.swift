@@ -75,7 +75,10 @@ public enum Phase11IdentitySupport {
         }
 
         public var certificateFingerprintHex: String {
-            certificateSHA256.map { String(format: "%02x", $0) }.joined()
+            certificateSHA256.map { byte in
+                let hexadecimal = String(byte, radix: 16)
+                return hexadecimal.count == 1 ? "0" + hexadecimal : hexadecimal
+            }.joined()
         }
 
     }

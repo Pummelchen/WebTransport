@@ -18,7 +18,7 @@ enum LibrarySmokeServer {
             try runner.run()
             print("LibrarySmokeServer: smoke test passed")
         } catch {
-            fputs("LibrarySmokeServer failed: \(error)\n", stderr)
+            FileHandle.standardError.write(Data("LibrarySmokeServer failed: \(error)\n".utf8))
             exit(1)
         }
     }

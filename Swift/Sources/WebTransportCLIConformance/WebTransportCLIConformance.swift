@@ -1065,7 +1065,12 @@ private func safe(_ value: String) -> String {
 }
 
 private func format(_ value: Double) -> String {
-    String(format: "%.4f", value)
+    value.formatted(
+        .number
+            .grouping(.never)
+            .precision(.fractionLength(4))
+            .locale(Locale(identifier: "en_US_POSIX"))
+    )
 }
 
 private func timestamp() -> String {
