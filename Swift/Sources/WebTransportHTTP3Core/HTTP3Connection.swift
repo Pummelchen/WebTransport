@@ -46,14 +46,9 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
     case chromiumInterop
     case pywebtransportStreamInterop
 
-    @available(*, deprecated, renamed: "draft16Strict")
-    public static var draft15Strict: HTTP3WebTransportSettingsValidation {
-        .draft16Strict
-    }
-
     public static func parse(_ value: String) throws -> HTTP3WebTransportSettingsValidation {
         switch value {
-        case "draft16-strict", "draft15-strict":
+        case "draft16-strict":
             return .draft16Strict
         case "chromium-interop":
             return .chromiumInterop
@@ -383,11 +378,6 @@ extension HTTP3Settings {
         guard self[constants.settingsWTEnabled] == 1 else {
             throw QUICCodecError.malformed("WebTransport over HTTP/3 requires SETTINGS_WT_ENABLE_WEBTRANSPORT = 1")
         }
-    }
-
-    @available(*, deprecated, renamed: "validateWebTransportDraft16Requirements(peerRole:)")
-    public func validateWebTransportDraft15Requirements(peerRole: HTTP3ConnectionRole? = nil) throws {
-        try validateWebTransportDraft16Requirements(peerRole: peerRole)
     }
 
     public func validateWebTransportChromiumInteropRequirements(peerRole: HTTP3ConnectionRole? = nil) throws {

@@ -76,12 +76,3 @@ public enum WebTransportDraft16ComplianceMatrix {
         definitionOfDone.allSatisfy { $0.status == .pass && !$0.evidence.isEmpty && !$0.documentedBehavior.isEmpty }
     }
 }
-
-@available(*, deprecated, renamed: "WebTransportDraft16ComplianceStatus")
-public typealias WebTransportDraft15ComplianceStatus = WebTransportDraft16ComplianceStatus
-
-@available(*, deprecated, renamed: "WebTransportDraft16ComplianceItem")
-public typealias WebTransportDraft15ComplianceItem = WebTransportDraft16ComplianceItem
-
-@available(*, deprecated, renamed: "WebTransportDraft16ComplianceMatrix")
-public typealias WebTransportDraft15ComplianceMatrix = WebTransportDraft16ComplianceMatrix

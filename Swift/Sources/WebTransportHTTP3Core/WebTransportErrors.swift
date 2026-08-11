@@ -108,15 +108,3 @@ public enum WebTransportDraft16ErrorMapper {
         ))
     }
 }
-
-@available(*, deprecated, renamed: "WebTransportDraft16ErrorKind")
-public typealias WebTransportDraft15ErrorKind = WebTransportDraft16ErrorKind
-
-@available(*, deprecated, renamed: "WebTransportDraft16Error")
-public typealias WebTransportDraft15Error = WebTransportDraft16Error
-
-@available(*, deprecated, renamed: "WebTransportDraft16StreamSignal")
-public typealias WebTransportDraft15StreamSignal = WebTransportDraft16StreamSignal
-
-@available(*, deprecated, renamed: "WebTransportDraft16ErrorMapper")
-public typealias WebTransportDraft15ErrorMapper = WebTransportDraft16ErrorMapper

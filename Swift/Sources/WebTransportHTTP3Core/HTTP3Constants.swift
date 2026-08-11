@@ -69,38 +69,6 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
     public var wtApplicationErrorRange: ClosedRange<UInt64>
     public var wtCloseSessionMaxMessageBytes: Int
 
-    public static let draft15 = WebTransportHTTP3DraftConstants(
-        name: "draft-ietf-webtrans-http3-15",
-        revision: 15,
-        lastUpdated: "2026-03-02",
-        upgradeToken: "webtransport-h3",
-        settingsEnableConnectProtocol: HTTP3SettingID.enableConnectProtocol,
-        settingsH3Datagram: HTTP3SettingID.h3Datagram,
-        settingsWTEnabled: 0x2c7c_f000,
-        settingsWTInitialMaxStreamsUni: 0x2b64,
-        settingsWTInitialMaxStreamsBidi: 0x2b65,
-        settingsWTInitialMaxData: 0x2b61,
-        wtStreamFrame: 0x41,
-        webTransportStream: 0x54,
-        wtDrainSessionCapsule: 0x78ae,
-        wtCloseSessionCapsule: 0x2843,
-        wtMaxDataCapsule: 0x190b_4d3d,
-        wtMaxStreamDataCapsule: 0x190b_4d3e,
-        wtMaxStreamsBidiCapsule: 0x190b_4d3f,
-        wtMaxStreamsUniCapsule: 0x190b_4d40,
-        wtDataBlockedCapsule: 0x190b_4d41,
-        wtStreamDataBlockedCapsule: 0x190b_4d42,
-        wtStreamsBlockedBidiCapsule: 0x190b_4d43,
-        wtStreamsBlockedUniCapsule: 0x190b_4d44,
-        wtBufferedStreamRejectedError: 0x3994_bd84,
-        wtSessionGoneError: 0x170d_7b68,
-        wtFlowControlError: 0x045d_4487,
-        wtALPNError: 0x0817_b3dd,
-        wtRequirementsNotMetError: 0x212c_0d48,
-        wtApplicationErrorRange: 0x52e4_a40f_a8db...0x52e5_ac98_3162,
-        wtCloseSessionMaxMessageBytes: 8_192
-    )
-
     public static let draft16 = WebTransportHTTP3DraftConstants(
         name: "draft-ietf-webtrans-http3-16",
         revision: 16,
