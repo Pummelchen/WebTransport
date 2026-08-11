@@ -20,7 +20,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Release | [1.1.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.1.0) |
+| Release | [1.2.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.2.0) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -33,7 +33,7 @@ The Swift conformance matrix passes in full. C99 and C++ directories contain pla
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.1.0"
+    exact: "1.2.0"
 )
 ```
 

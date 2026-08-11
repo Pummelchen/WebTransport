@@ -6,6 +6,8 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+## [1.2.0] - 2026-08-11
+
 - Raised the development baseline to Xcode 26.6 and Swift 6.3.3, enabled strict memory-safety checking for every SwiftPM target, and made complete concurrency and explicit `Sendable` diagnostics CI gates.
 - Audited Apple socket, Security, CommonCrypto, CryptoKit, and Network.framework boundaries; removed avoidable C formatting, byte-copy, and standard-I/O calls in favor of Swift-native APIs.
 - Reworked the repository and Wiki documentation around a concise Swift reference-implementation narrative, current requirements, validation evidence, and explicit limitations.
