@@ -102,6 +102,7 @@ CI validates the Swift 6.3.3 toolchain baseline, strict memory and concurrency d
 - [Development and Testing](https://github.com/Pummelchen/WebTransport/wiki/Development-and-Testing)
 - [Security and Trust](https://github.com/Pummelchen/WebTransport/wiki/Security-and-Trust)
 - [Release and Interoperability](https://github.com/Pummelchen/WebTransport/wiki/Release-and-Interoperability)
+- [Changelog](https://github.com/Pummelchen/WebTransport/wiki/Changelog)
 - [Known Limitations](https://github.com/Pummelchen/WebTransport/wiki/Known-Limitations)
 
 The [Wiki](https://github.com/Pummelchen/WebTransport/wiki) is the maintained technical reference. Public API documentation is also available through the package's DocC catalog.
