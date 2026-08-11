@@ -1,10 +1,10 @@
-<img width="1055" height="1491" alt="image" src="https://github.com/user-attachments/assets/32af02c3-ee01-4fc6-962c-6d618cead8f5" />
+<img width="1055" height="1491" alt="WebTransport project status infographic showing Swift draft-15 compatibility and planned C99 and C++ implementations" src="https://github.com/user-attachments/assets/32af02c3-ee01-4fc6-962c-6d618cead8f5" />
 
 # WebTransport
 
 A native WebTransport over HTTP/3 implementation for Swift, with planned C99 and C++ ports.
 
-The implementation targets `draft-ietf-webtrans-http3-15`. As of 10 August 2026, the latest IETF revision is
+The implementation targets `draft-ietf-webtrans-http3-15`. As of 11 August 2026, the latest IETF revision is
 [`draft-ietf-webtrans-http3-16`](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/),
 published on 6 July 2026. The compatibility score below applies only to draft 15.
 
