@@ -1,112 +1,71 @@
-# Swift WebTransport
+# Swift implementation
 
-Protocol reference: IETF `draft-ietf-webtrans-http3-16`, dated 2026-07-06.
+This directory contains the native Swift implementation and its implementation-level tools. The repository root is the supported SwiftPM integration point for applications.
 
-Draft-16 score: **100%**
+The protocol target is [draft-ietf-webtrans-http3-16](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/16/), published 6 July 2026. The implementation is actively developed as a reference-quality codebase; conformance results are engineering evidence, not a standards certification.
 
-## Current Status
+## Requirements
 
-Swift is the active implementation.
+- macOS 26 or later
+- Swift 6.3
+- Apple Silicon for release artifact generation
 
-Implemented:
+## Package structure
 
-- Public package product: `WebTransport`.
-- Network runtime package product: `WebTransportNetworkRuntime`.
-- CLI products: `WebTransportClient` and `WebTransportServer`.
-- HTTP/3 frame, SETTINGS, control stream, request stream, GOAWAY, and error mapping logic.
-- WebTransport extended CONNECT session establishment and rejection policy.
-- Draft-16 optimistic CONNECT capsules, processed after a successful response and discarded on rejection.
-- Structured Fields parsing/serialization for `WT-Protocol` and `WT-Available-Protocols`.
-- QPACK static, literal, Huffman, dynamic table, Base, and post-Base behavior covered by tests.
-- WebTransport streams, datagrams, buffering, rejection, close, drain, reset, stop-sending, and draft-16 directional flow-control behavior. Session data credit counts stream body bytes, not datagrams.
-- Draft-16 `WT_CLOSE_SESSION` validation (1024-byte UTF-8 limit), strict flow-limit increases, the `2^60` stream-limit ceiling, and rejection of HTTP/2-only per-stream capsules over HTTP/3.
-- TLS/QUIC state with application-key readiness gated on certificate trust, CertificateVerify, Finished, ALPN h3, and QUIC transport parameters; QUIC packet protection helpers, transport-parameter codecs, the draft-16 `EXPORTER-WebTransport` binding, packet-protected QUIC Initial CRYPTO flight validation including Certificate, CertificateVerify, and Finished, transcript-derived 1-RTT packet keys for protected HTTP/3 WebTransport CONNECT/DATAGRAM session signaling over UDP, UDP loopback support, and prompt-free identity/trust test paths.
-- Packet-protected QUIC Initial CRYPTO flight mode with ALPN h3, QUIC transport-parameter validation, validated Certificate/CertificateVerify/Finished handling, validated-handshake 1-RTT key derivation, and protected HTTP/3 WebTransport CONNECT/DATAGRAM session signaling for separate-process `WebTransportClient` / `WebTransportServer` networking, with raw-frame compatibility mode.
-- CLI conformance harness with 40 scenarios shared by `WebTransportClient` and `WebTransportServer`, including positive/negative interop matrices for CONNECT, streams, datagrams, GOAWAY, close/drain, malformed input, and flow-control errors.
-- Deterministic parser/property hardening tests for QPACK, HTTP/3 frames, capsules, QUIC varints, QUIC transport parameters, WebTransport stream prefixes, resource limits, malformed peers, ordering, replay, exhaustion, and close/reset races.
-- Process-level CLI tests for help/list/error/scenario exit codes, IPv4/IPv6 packet loopback, and explicit rejection of unsupported network transport modes.
-- Concurrent multi-session stress, repeatable soak, datagram load, backpressure, network impairment, and runtime security-negative tests.
-- Release artifact smoke tests and a standalone public API compatibility sample build.
-- Public `WebTransport` package API backed by the Network.framework QUIC/TLS/HTTP/3 runtime, including sessions, bidirectional streams, datagrams, drain, and close.
-- External interoperability proof runners via `./run-third-party-interop.sh`, `./run-pywebtransport-interop.sh`, and `./run-vps-third-party-interop.sh`. The local runner launches independent `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche` echo endpoints and records QUIC/TLS/HTTP/3 CONNECT plus reliable WebTransport stream and QUIC DATAGRAM echo proofs in `.build/external-interop/third-party-latest.json`. The VPS runner tests five remote Debian 13 third-party implementations and records `.build/external-interop/vps-third-party-latest.json`; all required VPS proofs currently pass. Configured public endpoint probing remains available through `./run-external-interop.sh`.
-- macOS 26 arm64 CI matrix over explicit Xcode 26 toolchains.
-- Sanitized opt-in production logging and public error descriptions that avoid TLS secrets, packet bytes, datagram payloads, raw session IDs, and close reason text.
-- Apple Silicon release script for reproducibility-checked production CLI binaries with `SHA256SUMS`.
+| Module | Responsibility |
+| --- | --- |
+| `WebTransport` | Public client, server, session, stream, datagram, drain, and close APIs |
+| `WebTransportNetworkRuntime` | Network.framework-backed QUIC/TLS/HTTP/3 runtime |
+| `WebTransportHTTP3Core` | HTTP/3, QPACK, capsules, and WebTransport framing |
+| `WebTransportQUICCore` | QUIC transport parameters, packet protection, and flow control |
+| `WebTransportTLSCore` | TLS handshake state and exporter bindings |
+| `WebTransportCryptoApple` | Apple Security and CryptoKit integration |
+| `WebTransportUDPApple` | Loopback packet-probe support used by tests |
+| `WebTransportClient` / `WebTransportServer` | Command-line conformance and packet-mode tools |
 
-Recent status:
+The nested package also includes smoke-test utilities and implementation fixtures. Product applications should depend on the package at the repository root.
 
-- The separate-process `--transport packet` path is wired to the Network.framework QUIC/TLS/HTTP/3 runtime. `--transport frame` is rejected for real `--listen/--connect` sessions and remains available only inside lower-level conformance scenarios. Platform trust is the runtime default. The `local-self-signed` trust mode is test-only, must be requested explicitly, and is rejected for non-loopback hosts.
+## Build and test
 
-## Public API Surface
-
-The high-level `WebTransport` product exposes:
-
-- `WebTransportClientConfiguration` and `WebTransportServerConfiguration` for authority, path, origin, subprotocol policy, trust policy, settings validation, and timeouts.
-- `WebTransportEndpoint` and `WebTransportConnectionResult` for network endpoint and session-result values.
-- `WebTransportClient`, `WebTransportServer`, and `WebTransportListeningServer` for Swift concurrency network session establishment over the production runtime.
-- `WebTransportSession` and `WebTransportBidirectionalStream` for app-controlled stream, datagram, drain, close, and session-bound TLS exporter operations.
-- `WebTransportLogger` and `WebTransportLogEvent` for sanitized opt-in production events.
-- `WebTransportErrorSurface.publicDescription(for:)` for user-visible/logged error text that redacts peer-controlled detail.
-
-The logger never emits TLS secrets, certificate material, QUIC connection IDs, raw session IDs, packet bytes, datagram payloads, or close reason text.
-
-Release artifacts are written to `.build/release-artifacts/` by `./build-release-apple-silicon.sh` after two clean release builds produce matching product hashes.
-
-## Commands
+From this directory:
 
 ```sh
 swift build
 swift test
 swift run WebTransportClient --scenario all
 swift run WebTransportServer --scenario all
-swift run WebTransportServer --listen 127.0.0.1:4433 --transport packet
-swift run WebTransportClient --connect 127.0.0.1:4433 --transport packet --trust local-self-signed
-swift run WebTransportServer --listen '[::1]:4433' --transport packet
-swift run WebTransportClient --connect '[::1]:4433' --transport packet --trust local-self-signed
-swift run WebTransportClient
-swift run WebTransportServer
-./run-pywebtransport-interop.sh
-./run-third-party-interop.sh
-./run-vps-third-party-interop.sh
-swift run LibrarySmokeServer --port 45500
-swift run LibrarySmokeServer --port 45500 --suite
-swift run LibrarySmokeClient --host 127.0.0.1 --port 45500
-swift run LibrarySmokeClient --host 127.0.0.1 --port 45500 --quick
-swift run LibrarySmokeClient --host 127.0.0.1 --port 45500 --suite --iterations 12 --max-datagram-frame-size 1200 --max-datagram-buffer 65536
-./build-release-apple-silicon.sh
 ./check-api-compatibility.sh
 ```
 
-## External Interop
-
-`./run-third-party-interop.sh` is the release proof for three independent WebTransport endpoints and four required exchange proofs. It installs local tool dependencies under `.build/` as needed, including a Python-wheel CMake for the Quiche/BoringSSL build when no system `cmake` exists. It then launches:
-
-- `pywebtransport==0.1.2` / `aioquic`
-- `web-transport-quinn 0.11.9`
-- `web-transport-quiche 0.4.1`
-
-The runner records per-endpoint logs plus a consolidated pass/fail report in `.build/external-interop/third-party-latest.json`.
-
-The aggregate gate requires stream exchange proofs against `pywebtransport`/`aioquic`, `web-transport-quinn`, and `web-transport-quiche`, plus a forced QUIC DATAGRAM exchange proof against `web-transport-quinn`. A pass means the Swift client completed real HTTP/3 WebTransport CONNECT and echoed both reliable stream payloads and unreliable datagrams through independent endpoints.
-
-`./run-pywebtransport-interop.sh` installs `pywebtransport==0.1.2` into `.build/external-interop/pywebtransport-venv`, starts a local independent `pywebtransport`/`aioquic` echo server, runs the Swift client against it, and records the result in `.build/external-interop/pywebtransport-latest.json`. This proof covers QUIC/TLS/HTTP/3 CONNECT and reliable WebTransport stream echo.
-
-`./run-vps-third-party-interop.sh` runs the Swift client from macOS against five third-party implementations installed under `/var/webtransport` on the Debian 13 VPS `vpn-germany.tail1c3b90.ts.net`. The test date in the current proof is `20 June 2026`.
-
-| Implementation | Version | URL | Third-party OS | Test date | Proof |
-| --- | --- | --- | --- | --- | --- |
-| pywebtransport / aioquic | pywebtransport 0.1.2, aioquic 1.3.0 | <https://pypi.org/project/pywebtransport/> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: stream echo |
-| web-transport-quinn | 0.11.9 | <https://crates.io/crates/web-transport-quinn/0.11.9> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: stream echo + DATAGRAM echo |
-| web-transport-quiche | 0.4.1 | <https://crates.io/crates/web-transport-quiche/0.4.1> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: stream echo |
-| hyperium/h3-webtransport | 0.1.2 / h3 main example | <https://github.com/hyperium/h3/tree/master/h3-webtransport> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: DATAGRAM echo |
-| erlang-webtransport | main f2d4d8dfe60c | <https://github.com/benoitc/erlang-webtransport> | Debian GNU/Linux 13 (trixie) x86_64 | 20 June 2026 | PASS: stream echo + DATAGRAM echo |
-
-`./run-external-interop.sh` runs the Swift client against a configured independent WebTransport endpoint and records the result in `.build/external-interop/latest.json`. Configure the target with:
+Run a local packet-mode session in separate terminals:
 
 ```sh
-WEBTRANSPORT_EXTERNAL_INTEROP_ENDPOINT=host:443 \
-WEBTRANSPORT_EXTERNAL_INTEROP_AUTHORITY=host \
-WEBTRANSPORT_EXTERNAL_INTEROP_PATH=/ \
-WEBTRANSPORT_EXTERNAL_INTEROP_TRUST=system \
-./run-external-interop.sh
+swift run WebTransportServer --listen 127.0.0.1:4433 --transport packet
+swift run WebTransportClient \
+  --connect 127.0.0.1:4433 \
+  --transport packet \
+  --trust local-self-signed
 ```
+
+`local-self-signed` is restricted to explicit loopback testing. Normal deployments use platform trust and application-defined authentication and authorization.
+
+## Interoperability and release checks
+
+```sh
+./run-pywebtransport-interop.sh
+./run-third-party-interop.sh
+./run-vps-third-party-interop.sh
+./build-release-apple-silicon.sh
+```
+
+Interop reports are written below `.build/external-interop/`. Release artifacts and `SHA256SUMS` are written below `.build/release-artifacts/` after two clean builds produce matching hashes.
+
+The VPS runner depends on separately provisioned infrastructure and is not part of the default local test suite.
+
+## Documentation
+
+- [Project overview](../README.md)
+- [Implementation status](https://github.com/Pummelchen/WebTransport/wiki/Implementation-Status)
+- [Development and testing](https://github.com/Pummelchen/WebTransport/wiki/Development-and-Testing)
+- [Release and interoperability](https://github.com/Pummelchen/WebTransport/wiki/Release-and-Interoperability)
+- [Security and trust](https://github.com/Pummelchen/WebTransport/wiki/Security-and-Trust)

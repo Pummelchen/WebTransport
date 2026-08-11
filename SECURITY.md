@@ -2,7 +2,13 @@
 
 ## Supported Versions
 
-Security fixes are provided for the current `main` branch until tagged releases are published. After the first stable release, supported versions will be listed here.
+Security fixes are provided for the current `main` branch and the latest tagged release line.
+
+| Version | Supported |
+| --- | --- |
+| `main` | Yes |
+| `1.1.x` | Yes |
+| Earlier releases | No |
 
 ## Reporting a Vulnerability
 
