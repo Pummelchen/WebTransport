@@ -80,6 +80,7 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
     public private(set) var handshakeSecret: Data?
     public private(set) var handshakeTrafficSecrets: TLS13HandshakeTrafficSecrets?
     public private(set) var masterSecret: Data?
+    public private(set) var exporterMasterSecret: Data?
     public private(set) var applicationTrafficSecrets: TLS13ApplicationTrafficSecrets?
     public private(set) var keyUpdateGeneration: UInt64
     public private(set) var closeState: QUICConnectionCloseState
@@ -97,6 +98,7 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
         self.handshakeSecret = nil
         self.handshakeTrafficSecrets = nil
         self.masterSecret = nil
+        self.exporterMasterSecret = nil
         self.applicationTrafficSecrets = nil
         self.keyUpdateGeneration = 0
         self.closeState = QUICConnectionCloseState(idleTimeoutMicros: idleTimeoutMicros, nowMicros: nowMicros)
@@ -149,6 +151,7 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
         handshakeTrafficSecrets = trafficSecrets
         applicationKeyReadiness = TLSQUICApplicationKeyReadiness()
         masterSecret = nil
+        exporterMasterSecret = nil
         applicationTrafficSecrets = nil
         keyUpdateGeneration = 0
         phase = .handshakeKeysReady
@@ -183,11 +186,33 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
             masterSecret: secret,
             transcriptHash: transcript.hash
         )
+        let exporterSecret = try TLS13KeyAgreement.exporterMasterSecret(
+            masterSecret: secret,
+            transcriptHash: transcript.hash
+        )
         masterSecret = secret
+        exporterMasterSecret = exporterSecret
         applicationTrafficSecrets = trafficSecrets
         keyUpdateGeneration = 0
         phase = .applicationKeysReady
         return trafficSecrets
+    }
+
+    public func exportKeyingMaterial(
+        label: String,
+        context: Data = Data(),
+        outputByteCount: Int
+    ) throws -> Data {
+        try ensureOpen()
+        guard let exporterMasterSecret else {
+            throw TLSQUICConnectionStateError.applicationKeysNotReady
+        }
+        return try TLS13KeyAgreement.exportKeyingMaterial(
+            exporterMasterSecret: exporterMasterSecret,
+            label: label,
+            context: context,
+            outputByteCount: outputByteCount
+        )
     }
 
     @discardableResult

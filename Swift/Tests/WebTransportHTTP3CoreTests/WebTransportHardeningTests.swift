@@ -54,7 +54,7 @@ func http3FrameAndCapsulePropertyCorpusRejectsMalformedPeers() throws {
         HTTP3Frame(type: HTTP3FrameType.data, payload: Data()),
         HTTP3Frame(type: HTTP3FrameType.headers, payload: QPACK.encodeFieldSection([HTTPFieldLine(name: ":status", value: "200")])),
         HTTP3Frame(type: HTTP3FrameType.goaway, varIntValue: 0),
-        HTTP3Settings.webTransportDraft15Defaults.frame(),
+        HTTP3Settings.webTransportDraft16Defaults.frame(),
         HTTP3Frame(type: 0x21, payload: Data([0x01, 0x02, 0x03]))
     ]
     let encodedFrames = try HTTP3Frame.encodeFrames(frames)
@@ -188,7 +188,7 @@ func adversarialOrderingReplayExhaustionAndCloseResetRacesAreDeterministic() thr
         _ = try serverHTTP3.receivePeerControlStream(clientControl)
     }
     #expect(throws: Error.self) {
-        try serverHTTP3.receiveControlFrame(HTTP3Settings.webTransportDraft15Defaults.frame())
+        try serverHTTP3.receiveControlFrame(HTTP3Settings.webTransportDraft16Defaults.frame())
     }
 
     var pair = try WebTransportHardeningSupport.makeReadyManagers()

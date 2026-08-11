@@ -13,8 +13,8 @@ func http3ControlStreamsExchangeAndValidateSettings() throws {
 
     #expect(clientFrames.first?.type == HTTP3FrameType.settings)
     #expect(serverFrames.first?.type == HTTP3FrameType.settings)
-    #expect(client.remoteSettings?.entries == HTTP3Settings.webTransportDraft15Defaults.entries)
-    #expect(server.remoteSettings?.entries == HTTP3Settings.webTransportDraft15Defaults.entries)
+    #expect(client.remoteSettings?.entries == HTTP3Settings.webTransportDraft16Defaults.entries)
+    #expect(server.remoteSettings?.entries == HTTP3Settings.webTransportDraft16Defaults.entries)
 
     #expect(throws: Error.self) {
         _ = try server.receivePeerControlStream(client.localControlStreamBytes())
@@ -23,12 +23,12 @@ func http3ControlStreamsExchangeAndValidateSettings() throws {
 
 @Test
 func http3SettingsValidationRejectsMissingWebTransportRequirements() throws {
-    var missingConnect = HTTP3Settings.webTransportDraft15Defaults
+    var missingConnect = HTTP3Settings.webTransportDraft16Defaults
     try missingConnect.set(0, for: WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol)
     #expect(throws: Error.self) {
-        try missingConnect.validateWebTransportDraft15Requirements()
+        try missingConnect.validateWebTransportDraft16Requirements()
     }
-    try missingConnect.validateWebTransportDraft15Requirements(peerRole: .client)
+    try missingConnect.validateWebTransportDraft16Requirements(peerRole: .client)
 
     let invalidControl = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
@@ -44,7 +44,7 @@ func http3SettingsValidationRejectsMissingWebTransportRequirements() throws {
 }
 
 @Test
-func http3ChromiumInteropValidationAcceptsMissingDraft15ClientMarker() throws {
+func http3ChromiumInteropValidationAcceptsMissingDraft16ClientMarker() throws {
     let constants = WebTransportHTTP3DraftConstants.current
     let chromiumClientSettings = try HTTP3Settings([
         constants.settingsH3Datagram: 1
@@ -92,7 +92,7 @@ func http3ServerAcceptsClientSettingsWithoutEnableConnectProtocol() throws {
 @Test
 func http3ZeroRTTSettingsCompatibilityRejectsReducedOrChangedWebTransportSettings() throws {
     let constants = WebTransportHTTP3DraftConstants.current
-    var remembered = HTTP3Settings.webTransportDraft15Defaults
+    var remembered = HTTP3Settings.webTransportDraft16Defaults
     try remembered.set(4, for: constants.settingsWTInitialMaxStreamsBidi)
     try remembered.set(8, for: constants.settingsWTInitialMaxData)
 
@@ -106,9 +106,8 @@ func http3ZeroRTTSettingsCompatibilityRejectsReducedOrChangedWebTransportSetting
     do {
         try reduced.validateWebTransportZeroRTTCompatibility(remembered: remembered)
         Issue.record("reduced remembered 0-RTT limit should throw")
-    } catch let error as WebTransportDraft15Error {
-        #expect(error.kind == .requirementsNotMet)
-        #expect(error.code == constants.wtRequirementsNotMetError)
+    } catch let error as HTTP3ConnectionError {
+        #expect(error.code == .settingsError)
     }
 
     var changedDatagram = compatible
@@ -121,10 +120,10 @@ func http3ZeroRTTSettingsCompatibilityRejectsReducedOrChangedWebTransportSetting
 @Test
 func http3ControlStreamCanValidateRememberedZeroRTTSettings() throws {
     let constants = WebTransportHTTP3DraftConstants.current
-    var remembered = HTTP3Settings.webTransportDraft15Defaults
+    var remembered = HTTP3Settings.webTransportDraft16Defaults
     try remembered.set(8, for: constants.settingsWTInitialMaxData)
 
-    var current = HTTP3Settings.webTransportDraft15Defaults
+    var current = HTTP3Settings.webTransportDraft16Defaults
     try current.set(1, for: constants.settingsWTInitialMaxData)
     let controlBytes = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
@@ -132,7 +131,7 @@ func http3ControlStreamCanValidateRememberedZeroRTTSettings() throws {
     )
 
     var connection = HTTP3ConnectionState(role: .client)
-    #expect(throws: WebTransportDraft15Error.self) {
+    #expect(throws: HTTP3ConnectionError.self) {
         _ = try connection.receivePeerControlStream(controlBytes, zeroRTTRememberedSettings: remembered)
     }
     #expect(connection.remoteSettings == nil)
@@ -145,20 +144,20 @@ func http3ControlStreamRejectsRequestFramesAndProcessesGoaway() throws {
     let controlBytes = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
         payload: try HTTP3Frame.encodeFrames([
-            HTTP3Settings.webTransportDraft15Defaults.frame(),
+            HTTP3Settings.webTransportDraft16Defaults.frame(),
             goaway
         ])
     )
 
     let frames = try connection.receivePeerControlStream(controlBytes)
-    #expect(frames == [try HTTP3Settings.webTransportDraft15Defaults.frame(), goaway])
+    #expect(frames == [try HTTP3Settings.webTransportDraft16Defaults.frame(), goaway])
     #expect(connection.receivedGoawayID == 4)
 
     var badConnection = HTTP3ConnectionState(role: .client)
     let badControlBytes = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
         payload: try HTTP3Frame.encodeFrames([
-            HTTP3Settings.webTransportDraft15Defaults.frame(),
+            HTTP3Settings.webTransportDraft16Defaults.frame(),
             try HTTP3Frame(type: HTTP3FrameType.headers)
         ])
     )

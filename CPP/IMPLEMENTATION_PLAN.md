@@ -2,7 +2,7 @@
 
 This plan describes how to build the portable C++ implementation from the completed Swift implementation.
 
-Target protocol: `draft-ietf-webtrans-http3-15`  
+Target protocol: `draft-ietf-webtrans-http3-16`
 Language standard: ISO C++23  
 Supported platforms: macOS 26, Debian Linux, FreeBSD, Windows 11  
 Build system: CMake  
@@ -10,7 +10,7 @@ License: MIT
 
 ## Goal
 
-Build a pure C++23 WebTransport over HTTP/3 implementation that reaches the same draft-15 behavior and interop evidence as the Swift implementation.
+Build a pure C++23 WebTransport over HTTP/3 implementation that reaches the same draft-16 behavior and interop evidence as the Swift implementation.
 
 Required outputs:
 
@@ -291,7 +291,7 @@ Completion criteria:
 
 - QPACK static, literal, Huffman, dynamic, Base, and post-Base tests pass.
 
-## Phase 7: WebTransport Draft-15 Core
+## Phase 7: WebTransport Draft-16 Core
 
 Port the Swift WebTransport session layer.
 
@@ -311,11 +311,11 @@ Tasks:
 - Implement flow-control capsules and monotonic update validation.
 - Implement GOAWAY interaction.
 - Implement 0-RTT CONNECT restrictions.
-- Implement complete draft-15 error mapping.
+- Implement complete draft-16 error mapping.
 
 Completion criteria:
 
-- C++ conformance matrix matches the Swift draft-15 matrix.
+- C++ conformance matrix matches the Swift draft-16 matrix.
 - All required session, stream, datagram, close, drain, flow-control, and error paths are covered by passing tests.
 
 ## Phase 8: Public C++ API
@@ -523,7 +523,7 @@ Completion criteria:
 
 The C++ implementation can be marked 100% only when all of the following are true:
 
-- Full draft-15 spec matrix is implemented.
+- Full draft-16 spec matrix is implemented.
 - All Swift-equivalent conformance tests pass in C++.
 - C++ client/server CLI passes local IPv4 and IPv6.
 - C++ passes the five-implementation VPS interop matrix.

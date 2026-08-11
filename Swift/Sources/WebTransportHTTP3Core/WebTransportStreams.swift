@@ -73,7 +73,7 @@ public enum WebTransportStreamSignaling {
         do {
             sessionID = try WebTransportSessionID.fromRequestStreamID(sessionRaw)
         } catch {
-            throw WebTransportDraft15Error(
+            throw WebTransportDraft16Error(
                 kind: .h3ID,
                 message: "invalid WebTransport stream session ID"
             )
@@ -145,6 +145,10 @@ public struct WebTransportStreamState: Equatable, Sendable {
         _ = try quicStream.receive(frame)
         bufferedPayloads.append(data)
         bufferedPayloadBytes += data.count
+    }
+
+    public mutating func sendPayload(_ data: Data, fin: Bool = false) throws -> QUICFrame {
+        try quicStream.send(data: data, fin: fin)
     }
 
     public mutating func popPayload() -> Data? {

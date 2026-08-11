@@ -26,20 +26,30 @@ public enum HTTP3ApplicationErrorCode: UInt64, Equatable, Sendable {
     case versionFallback = 0x110
 }
 
+public struct HTTP3ConnectionError: Error, Equatable, Sendable {
+    public let code: HTTP3ApplicationErrorCode
+    public let reason: String
+
+    public init(code: HTTP3ApplicationErrorCode, reason: String) {
+        self.code = code
+        self.reason = reason
+    }
+}
+
 public enum HTTP3DataFramePolicy: Equatable, Sendable {
     case reject
     case buffer
 }
 
 public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
-    case draft15Strict
+    case draft16Strict
     case chromiumInterop
     case pywebtransportStreamInterop
 
     public static func parse(_ value: String) throws -> HTTP3WebTransportSettingsValidation {
         switch value {
-        case "draft15-strict":
-            return .draft15Strict
+        case "draft16-strict":
+            return .draft16Strict
         case "chromium-interop":
             return .chromiumInterop
         case "pywebtransport-stream-interop":
@@ -51,8 +61,8 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
 
     public var localSettings: HTTP3Settings {
         switch self {
-        case .draft15Strict:
-            return .webTransportDraft15Defaults
+        case .draft16Strict:
+            return .webTransportDraft16Defaults
         case .chromiumInterop:
             return .webTransportChromiumInteropDefaults
         case .pywebtransportStreamInterop:
@@ -62,7 +72,7 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
 
     public var upgradeToken: String {
         switch self {
-        case .draft15Strict:
+        case .draft16Strict:
             return WebTransportHTTP3DraftConstants.current.upgradeToken
         case .chromiumInterop, .pywebtransportStreamInterop:
             return "webtransport"
@@ -71,7 +81,7 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
 
     public var acceptedUpgradeTokens: Set<String> {
         switch self {
-        case .draft15Strict:
+        case .draft16Strict:
             return [WebTransportHTTP3DraftConstants.current.upgradeToken]
         case .chromiumInterop, .pywebtransportStreamInterop:
             return [WebTransportHTTP3DraftConstants.current.upgradeToken, "webtransport"]
@@ -212,7 +222,7 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
     public private(set) var receivedGoawayID: UInt64?
     public private(set) var requestStreams: [UInt64: HTTP3RequestStream]
 
-    public init(role: HTTP3ConnectionRole, localSettings: HTTP3Settings = HTTP3Settings.webTransportDraft15Defaults) {
+    public init(role: HTTP3ConnectionRole, localSettings: HTTP3Settings = HTTP3Settings.webTransportDraft16Defaults) {
         self.role = role
         self.localSettings = localSettings
         self.remoteSettings = nil
@@ -232,7 +242,7 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
     public mutating func receivePeerControlStream(
         _ bytes: Data,
         zeroRTTRememberedSettings: HTTP3Settings? = nil,
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict
     ) throws -> [HTTP3Frame] {
         guard !receivedPeerControlStream else {
             throw QUICCodecError.malformed("duplicate HTTP/3 control stream")
@@ -249,8 +259,8 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
         let peerRole: HTTP3ConnectionRole = role == .client ? .server : .client
         let decodedSettings = try HTTP3Settings.decodeFrame(firstFrame)
         switch settingsValidation {
-        case .draft15Strict:
-            try decodedSettings.validateWebTransportDraft15Requirements(peerRole: peerRole)
+        case .draft16Strict:
+            try decodedSettings.validateWebTransportDraft16Requirements(peerRole: peerRole)
         case .chromiumInterop:
             try decodedSettings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
         case .pywebtransportStreamInterop:
@@ -349,8 +359,14 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
 }
 
 extension HTTP3Settings {
-    public func validateWebTransportDraft15Requirements(peerRole: HTTP3ConnectionRole? = nil) throws {
+    public func validateWebTransportDraft16Requirements(peerRole: HTTP3ConnectionRole? = nil) throws {
         let constants = WebTransportHTTP3DraftConstants.current
+        if let value = self[constants.settingsWTEnabled], value > 1 {
+            throw HTTP3ConnectionError(
+                code: .settingsError,
+                reason: "SETTINGS_WT_ENABLED values greater than 1 are invalid"
+            )
+        }
         if peerRole != .client {
             guard self[constants.settingsEnableConnectProtocol] == 1 else {
                 throw QUICCodecError.malformed("WebTransport over HTTP/3 requires server SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")
@@ -396,8 +412,8 @@ extension HTTP3Settings {
     }
 
     public func validateWebTransportZeroRTTCompatibility(remembered: HTTP3Settings) throws {
-        try remembered.validateWebTransportDraft15Requirements()
-        try validateWebTransportDraft15Requirements()
+        try remembered.validateWebTransportDraft16Requirements()
+        try validateWebTransportDraft16Requirements()
 
         let constants = WebTransportHTTP3DraftConstants.current
         try requireUnchanged(constants.settingsEnableConnectProtocol, remembered: remembered, label: "SETTINGS_ENABLE_CONNECT_PROTOCOL")
@@ -418,7 +434,7 @@ extension HTTP3Settings {
         label: String
     ) throws {
         guard effectiveValue(identifier) == remembered.effectiveValue(identifier) else {
-            throw WebTransportDraft15Error(
+            throw WebTransportDraft16Error(
                 kind: .requirementsNotMet,
                 message: "\(label) is not compatible with accepted 0-RTT WebTransport data"
             )
@@ -432,15 +448,15 @@ extension HTTP3Settings {
     ) throws {
         let rememberedValue = remembered.effectiveValue(identifier)
         if rememberedValue != 0, entries[identifier] == nil {
-            throw WebTransportDraft15Error(
-                kind: .requirementsNotMet,
-                message: "\(label) was previously non-default and is missing from accepted 0-RTT settings"
+            throw HTTP3ConnectionError(
+                code: .settingsError,
+                reason: "\(label) was previously non-default and is missing from accepted 0-RTT settings"
             )
         }
         guard effectiveValue(identifier) >= rememberedValue else {
-            throw WebTransportDraft15Error(
-                kind: .requirementsNotMet,
-                message: "\(label) reduces a remembered limit for accepted 0-RTT WebTransport data"
+            throw HTTP3ConnectionError(
+                code: .settingsError,
+                reason: "\(label) reduces a remembered limit for accepted 0-RTT WebTransport data"
             )
         }
     }

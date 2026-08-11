@@ -19,6 +19,8 @@ public struct WebTransportClientConfiguration: Equatable, Sendable {
     public var trustPolicy: WebTransportQUICPeerTrustPolicy
     /// HTTP/3 WebTransport settings validation profile.
     public var settingsValidation: HTTP3WebTransportSettingsValidation
+    /// Capsules sent with the CONNECT request before the server response.
+    public var optimisticCapsules: [WebTransportFlowCapsule]
     /// End-to-end connect timeout in milliseconds.
     public var timeoutMilliseconds: Int32
 
@@ -29,7 +31,8 @@ public struct WebTransportClientConfiguration: Equatable, Sendable {
         availableProtocols: [String] = [],
         transport: WebTransportNetworkTransport = .packet,
         trustPolicy: WebTransportQUICPeerTrustPolicy = .systemTrust,
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
+        optimisticCapsules: [WebTransportFlowCapsule] = [],
         timeoutMilliseconds: Int32 = 15_000
     ) {
         self.authority = authority
@@ -39,6 +42,7 @@ public struct WebTransportClientConfiguration: Equatable, Sendable {
         self.transport = transport
         self.trustPolicy = trustPolicy
         self.settingsValidation = settingsValidation
+        self.optimisticCapsules = optimisticCapsules
         self.timeoutMilliseconds = timeoutMilliseconds
     }
 }
@@ -65,7 +69,7 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         path: String = "/wt",
         origin: String? = nil,
         supportedProtocols: [String] = [],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         timeoutMilliseconds: Int32 = 15_000,
         localOnly: Bool = false
     ) {
@@ -133,7 +137,7 @@ public struct WebTransportLogger: Sendable {
 /// carry peer input, close messages, packet bytes, or transport identifiers.
 public enum WebTransportErrorSurface {
     public static func publicDescription(for error: Error) -> String {
-        if let draftError = error as? WebTransportDraft15Error {
+        if let draftError = error as? WebTransportDraft16Error {
             switch draftError.kind {
             case .sessionGone:
                 return "WebTransport session is gone"
@@ -147,6 +151,8 @@ public enum WebTransportErrorSurface {
                 return "WebTransport ALPN negotiation failed"
             case .h3ID:
                 return "WebTransport session identifier was invalid"
+            case .requestRejected:
+                return "WebTransport request was rejected"
             }
         }
         if error is QUICCodecError {
@@ -272,6 +278,20 @@ public final class WebTransportSession: @unchecked Sendable {
         return data
     }
 
+    /// Exports session-bound TLS keying material using the draft-16
+    /// `EXPORTER-WebTransport` label and context construction.
+    public func exportKeyingMaterial(
+        applicationLabel: Data,
+        applicationContext: Data = Data(),
+        outputByteCount: Int
+    ) throws -> Data {
+        try runtime.exportKeyingMaterial(
+            applicationLabel: applicationLabel,
+            applicationContext: applicationContext,
+            outputByteCount: outputByteCount
+        )
+    }
+
     public func drain() async throws {
         try await runtime.drain()
     }
@@ -312,6 +332,7 @@ public actor WebTransportClient {
             path: configuration.path,
             origin: configuration.origin,
             protocols: configuration.availableProtocols,
+            optimisticCapsules: configuration.optimisticCapsules,
             settingsValidation: configuration.settingsValidation,
             timeoutMilliseconds: configuration.timeoutMilliseconds
         )
@@ -337,6 +358,7 @@ public actor WebTransportClient {
         guard let responseMessage = String(data: response, encoding: .utf8) else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
+        try await session.close()
         return WebTransportConnectionResult(
             localEndpoint: session.localEndpoint,
             remoteEndpoint: session.remoteEndpoint,

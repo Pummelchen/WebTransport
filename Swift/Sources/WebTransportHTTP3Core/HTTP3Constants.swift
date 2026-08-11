@@ -54,9 +54,11 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
     public var wtDrainSessionCapsule: UInt64
     public var wtCloseSessionCapsule: UInt64
     public var wtMaxDataCapsule: UInt64
+    public var wtMaxStreamDataCapsule: UInt64
     public var wtMaxStreamsBidiCapsule: UInt64
     public var wtMaxStreamsUniCapsule: UInt64
     public var wtDataBlockedCapsule: UInt64
+    public var wtStreamDataBlockedCapsule: UInt64
     public var wtStreamsBlockedBidiCapsule: UInt64
     public var wtStreamsBlockedUniCapsule: UInt64
     public var wtBufferedStreamRejectedError: UInt64
@@ -67,10 +69,10 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
     public var wtApplicationErrorRange: ClosedRange<UInt64>
     public var wtCloseSessionMaxMessageBytes: Int
 
-    public static let draft15 = WebTransportHTTP3DraftConstants(
-        name: "draft-ietf-webtrans-http3-15",
-        revision: 15,
-        lastUpdated: "2026-03-02",
+    public static let draft16 = WebTransportHTTP3DraftConstants(
+        name: "draft-ietf-webtrans-http3-16",
+        revision: 16,
+        lastUpdated: "2026-07-06",
         upgradeToken: "webtransport-h3",
         settingsEnableConnectProtocol: HTTP3SettingID.enableConnectProtocol,
         settingsH3Datagram: HTTP3SettingID.h3Datagram,
@@ -83,9 +85,11 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
         wtDrainSessionCapsule: 0x78ae,
         wtCloseSessionCapsule: 0x2843,
         wtMaxDataCapsule: 0x190b_4d3d,
+        wtMaxStreamDataCapsule: 0x190b_4d3e,
         wtMaxStreamsBidiCapsule: 0x190b_4d3f,
         wtMaxStreamsUniCapsule: 0x190b_4d40,
         wtDataBlockedCapsule: 0x190b_4d41,
+        wtStreamDataBlockedCapsule: 0x190b_4d42,
         wtStreamsBlockedBidiCapsule: 0x190b_4d43,
         wtStreamsBlockedUniCapsule: 0x190b_4d44,
         wtBufferedStreamRejectedError: 0x3994_bd84,
@@ -94,8 +98,8 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
         wtALPNError: 0x0817_b3dd,
         wtRequirementsNotMetError: 0x212c_0d48,
         wtApplicationErrorRange: 0x52e4_a40f_a8db...0x52e5_ac98_3162,
-        wtCloseSessionMaxMessageBytes: 8_192
+        wtCloseSessionMaxMessageBytes: 1_024
     )
 
-    public static let current = draft15
+    public static let current = draft16
 }

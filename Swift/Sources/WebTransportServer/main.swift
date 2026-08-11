@@ -110,7 +110,7 @@ private struct NetworkServerOptions {
         var path = "/wt"
         var allowedOrigin: String? = "https://localhost"
         var protocols = ["demo.v1"]
-        var settingsValidation = HTTP3WebTransportSettingsValidation.draft15Strict
+        var settingsValidation = HTTP3WebTransportSettingsValidation.draft16Strict
         var index = 0
 
         while index < arguments.count {

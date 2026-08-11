@@ -108,6 +108,36 @@ public enum TLS13KeyAgreement {
         )
     }
 
+    public static func exporterMasterSecret(
+        masterSecret: Data,
+        transcriptHash: Data
+    ) throws -> Data {
+        try TLS13KeySchedule.deriveSecret(
+            secret: masterSecret,
+            label: "exp master",
+            transcriptHash: transcriptHash
+        )
+    }
+
+    public static func exportKeyingMaterial(
+        exporterMasterSecret: Data,
+        label: String,
+        context: Data,
+        outputByteCount: Int
+    ) throws -> Data {
+        let derivedSecret = try TLS13KeySchedule.deriveSecret(
+            secret: exporterMasterSecret,
+            label: label,
+            transcriptHash: TLS13KeySchedule.transcriptHash(Data())
+        )
+        return try TLS13KeySchedule.hkdfExpandLabel(
+            secret: derivedSecret,
+            label: "exporter",
+            context: TLS13KeySchedule.transcriptHash(context),
+            outputByteCount: outputByteCount
+        )
+    }
+
     public static func nextApplicationTrafficSecret(_ trafficSecret: Data) throws -> Data {
         try TLS13KeySchedule.hkdfExpandLabel(
             secret: trafficSecret,

@@ -153,9 +153,10 @@ func webTransportFlowControlDataLimitsEmitDataBlockedCapsules() throws {
         server: &pair.server
     )
 
-    _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data([0x01, 0x02, 0x03]))
+    _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+    _ = try pair.client.sendStreamPayload(streamID: 4, payload: Data([0x01, 0x02, 0x03]))
     #expect(throws: Error.self) {
-        _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data([0x04, 0x05]))
+        _ = try pair.client.sendStreamPayload(streamID: 4, payload: Data([0x04, 0x05]))
     }
     guard let blocked = try pair.client.popFlowControlCapsule(sessionID: sessionID) else {
         throw URLError(.badServerResponse)
@@ -172,14 +173,11 @@ func webTransportFlowControlDataLimitsEmitDataBlockedCapsules() throws {
         bytes: try WebTransportFlowCapsuleCodec.serialize(.maxData(limit: 6))
     )
 
-    let updatedDatagram = try pair.client.makeDatagramFrame(
-        sessionID: sessionID,
+    let updatedStreamFrame = try pair.client.sendStreamPayload(
+        streamID: 4,
         payload: Data([0x04, 0x05])
     )
-    #expect(updatedDatagram == .datagram(try WebTransportDatagramSignaling.serialize(
-        sessionID: sessionID.rawValue,
-        payload: Data([0x04, 0x05])
-    )))
+    #expect(updatedStreamFrame == .stream(id: 4, offset: 3, fin: false, data: Data([0x04, 0x05])))
 }
 
 @Test
@@ -190,12 +188,13 @@ func webTransportFlowControlRepeatedDataBlockedDoesNotAdvanceUsageOrDuplicateCap
         server: &pair.server
     )
 
-    _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data([0x01, 0x02, 0x03]))
+    _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+    _ = try pair.client.sendStreamPayload(streamID: 4, payload: Data([0x01, 0x02, 0x03]))
     #expect(pair.client.flowState(for: sessionID)?.usedData == 3)
 
     for _ in 0..<3 {
         #expect(throws: Error.self) {
-            _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data([0x04, 0x05]))
+            _ = try pair.client.sendStreamPayload(streamID: 4, payload: Data([0x04, 0x05]))
         }
         #expect(pair.client.flowState(for: sessionID)?.usedData == 3)
     }
@@ -283,18 +282,18 @@ func webTransportFlowControlRejectsDecreasingMaxUpdates() throws {
             bytes: try WebTransportFlowCapsuleCodec.serialize(.maxData(limit: 4))
         )
         Issue.record("decreasing WT_MAX_DATA should throw")
-    } catch let error as WebTransportDraft15Error {
+    } catch let error as WebTransportDraft16Error {
         #expect(error.kind == .flowControl)
         #expect(error.code == WebTransportHTTP3DraftConstants.current.wtFlowControlError)
     }
 
-    #expect(throws: WebTransportDraft15Error.self) {
+    #expect(throws: WebTransportDraft16Error.self) {
         _ = try pair.client.receiveFlowControlCapsule(
             sessionID: sessionID,
             bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 1))
         )
     }
-    #expect(throws: WebTransportDraft15Error.self) {
+    #expect(throws: WebTransportDraft16Error.self) {
         _ = try pair.client.receiveFlowControlCapsule(
             sessionID: sessionID,
             bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsUni(limit: 1))
@@ -333,7 +332,7 @@ func webTransportFlowControlRejectsMaliciousOrderUpdatesWithoutMutatingState() t
         .maxStreamsBidi(limit: 3),
         .maxStreamsUni(limit: 4)
     ] {
-        #expect(throws: WebTransportDraft15Error.self) {
+        #expect(throws: WebTransportDraft16Error.self) {
             _ = try pair.client.receiveFlowControlCapsule(
                 sessionID: sessionID,
                 bytes: try WebTransportFlowCapsuleCodec.serialize(capsule)
@@ -358,16 +357,16 @@ func webTransportFlowControlClosedSessionRejectsPostCloseAccounting() throws {
         bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: "closed"))
     )
 
-    #expect(throws: WebTransportDraft15Error.self) {
+    #expect(throws: WebTransportDraft16Error.self) {
         try pair.server.receiveStreamPayload(streamID: 4, payload: Data("x".utf8))
     }
-    #expect(throws: WebTransportDraft15Error.self) {
+    #expect(throws: WebTransportDraft16Error.self) {
         _ = try pair.server.receiveDatagramFrame(.datagram(
             try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8))
         ))
     }
-    #expect(pair.server.flowState(for: sessionID)?.usedData == 0)
-    #expect(pair.server.flowState(for: sessionID)?.openedBidiStreams == 1)
+    #expect(pair.server.receiveFlowState(for: sessionID)?.usedData == 0)
+    #expect(pair.server.receiveFlowState(for: sessionID)?.openedBidiStreams == 1)
     #expect(try pair.server.popFlowControlCapsule(sessionID: sessionID) == nil)
 }
 
@@ -381,18 +380,30 @@ private enum WebTransportFlowControlTestSupport {
         maxStreamReceiveBufferBytes: Int = 64 * 1024
     ) throws -> (client: WebTransportSessionManager, server: WebTransportSessionManager) {
         let constants = WebTransportHTTP3DraftConstants.current
-        var clientSettings = HTTP3Settings.webTransportDraft15Defaults
-        var serverSettings = HTTP3Settings.webTransportDraft15Defaults
+        var clientSettings = HTTP3Settings.webTransportDraft16Defaults
+        var serverSettings = HTTP3Settings.webTransportDraft16Defaults
 
-        if let maxStreamsBidi {
+        let enablesFlowControl = (maxStreamsBidi ?? 0) > 0
+            || (maxStreamsUni ?? 0) > 0
+            || (maxData ?? 0) > 0
+        if enablesFlowControl {
+            try clientSettings.set(maxStreamsBidi ?? 64, for: constants.settingsWTInitialMaxStreamsBidi)
+            try serverSettings.set(maxStreamsBidi ?? 64, for: constants.settingsWTInitialMaxStreamsBidi)
+            try clientSettings.set(maxStreamsUni ?? 64, for: constants.settingsWTInitialMaxStreamsUni)
+            try serverSettings.set(maxStreamsUni ?? 64, for: constants.settingsWTInitialMaxStreamsUni)
+            try clientSettings.set(maxData ?? QUICVarInt.maximum, for: constants.settingsWTInitialMaxData)
+            try serverSettings.set(maxData ?? QUICVarInt.maximum, for: constants.settingsWTInitialMaxData)
+        }
+
+        if let maxStreamsBidi, !enablesFlowControl {
             try clientSettings.set(maxStreamsBidi, for: constants.settingsWTInitialMaxStreamsBidi)
             try serverSettings.set(maxStreamsBidi, for: constants.settingsWTInitialMaxStreamsBidi)
         }
-        if let maxStreamsUni {
+        if let maxStreamsUni, !enablesFlowControl {
             try clientSettings.set(maxStreamsUni, for: constants.settingsWTInitialMaxStreamsUni)
             try serverSettings.set(maxStreamsUni, for: constants.settingsWTInitialMaxStreamsUni)
         }
-        if let maxData {
+        if let maxData, !enablesFlowControl {
             try clientSettings.set(maxData, for: constants.settingsWTInitialMaxData)
             try serverSettings.set(maxData, for: constants.settingsWTInitialMaxData)
         }

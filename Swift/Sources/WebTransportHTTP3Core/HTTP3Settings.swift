@@ -78,7 +78,7 @@ public struct HTTP3Settings: Equatable, Sendable {
         }
     }
 
-    public static let webTransportDraft15Defaults = HTTP3Settings(unchecked: [
+    public static let webTransportDraft16Defaults = HTTP3Settings(unchecked: [
         WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
         WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
         WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1

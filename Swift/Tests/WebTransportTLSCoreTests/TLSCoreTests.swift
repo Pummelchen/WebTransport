@@ -568,6 +568,22 @@ func tlsQUICConnectionStateRunsHandshakeKeysAndKeyUpdateLifecycle() throws {
     #expect(state.phase == .applicationKeysReady)
     #expect(state.applicationKeyReadiness.isReady)
     #expect(state.keyUpdateGeneration == 0)
+    let exported = try state.exportKeyingMaterial(
+        label: "EXPORTER-WebTransport",
+        context: Data("session-context".utf8),
+        outputByteCount: 32
+    )
+    #expect(exported.count == 32)
+    #expect(exported == (try state.exportKeyingMaterial(
+        label: "EXPORTER-WebTransport",
+        context: Data("session-context".utf8),
+        outputByteCount: 32
+    )))
+    #expect(exported != (try state.exportKeyingMaterial(
+        label: "EXPORTER-WebTransport",
+        context: Data("different-context".utf8),
+        outputByteCount: 32
+    )))
 
     let updatedSecrets = try state.updateApplicationTrafficSecrets()
     #expect(state.keyUpdateGeneration == 1)
@@ -578,6 +594,7 @@ func tlsQUICConnectionStateRunsHandshakeKeysAndKeyUpdateLifecycle() throws {
     #expect(state.phase == .handshakeKeysReady)
     #expect(state.applicationKeyReadiness.isReady == false)
     #expect(state.applicationTrafficSecrets == nil)
+    #expect(state.exporterMasterSecret == nil)
     #expect(state.keyUpdateGeneration == 0)
 }
 

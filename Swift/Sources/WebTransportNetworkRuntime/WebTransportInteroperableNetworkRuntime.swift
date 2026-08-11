@@ -85,7 +85,8 @@ public struct WebTransportQUICClient: Sendable {
         path: String = "/wt",
         origin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        optimisticCapsules: [WebTransportFlowCapsule] = [],
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSession {
         let trustConfiguration = try trustPolicy.runtimeConfiguration(endpoint: endpoint)
@@ -183,12 +184,20 @@ public struct WebTransportQUICClient: Sendable {
             availableProtocols: protocols
         )
         let requestFrame = try manager.makeClientSessionRequest(streamID: requestStreamID, request: request)
-        let connectPayload = try InteroperableQUICHelpers.makeRequestStreamPayload(
+        var connectPayload = try InteroperableQUICHelpers.makeRequestStreamPayload(
             streamID: requestStreamID,
             requestFrame: requestFrame
         )
+        let pendingSessionID = try WebTransportSessionID.fromRequestStreamID(requestStreamID)
+        for capsule in optimisticCapsules {
+            connectPayload.append(try manager.makeOptimisticConnectStreamCapsule(
+                sessionID: pendingSessionID,
+                capsule: capsule
+            ))
+        }
+        let requestPayload = connectPayload
         try await runWithTimeout {
-            try await requestStream.send(connectPayload, endOfStream: false)
+            try await requestStream.send(requestPayload, endOfStream: false)
         }
         InteroperableQUICDebug.log("client sent connect payload")
 
@@ -197,15 +206,15 @@ public struct WebTransportQUICClient: Sendable {
             timeoutMilliseconds: remainingTimeout()
         )
         InteroperableQUICDebug.log("client got response bytes=\(responseData.count)")
-        let responseFrames = try HTTP3Frame.decodeFrames(responseData)
-        guard let responseFrame = responseFrames.first(where: { $0.type == HTTP3FrameType.headers }) else {
+        let responsePrefix = try HTTP3Frame.decodePrefix(responseData)
+        guard responsePrefix.frame.type == HTTP3FrameType.headers else {
             throw WebTransportNetworkRuntimeError.unexpectedFrame
         }
 
-        let session = try manager.receiveServerSessionResponse(streamID: requestStreamID, frame: responseFrame)
+        let session = try manager.receiveServerSessionResponse(streamID: requestStreamID, frame: responsePrefix.frame)
         guard session.state == .accepted else {
             inboundTask.cancel()
-            throw WebTransportDraft15Error(
+            throw WebTransportDraft16Error(
                 kind: .requirementsNotMet,
                 message: "WebTransport session was rejected"
             )
@@ -227,7 +236,8 @@ public struct WebTransportQUICClient: Sendable {
             ),
             remoteEndpoint: InteroperableQUICRuntime.networkEndpoint(from: connection.remoteEndpoint, fallback: endpoint),
             datagramsAvailable: useDatagrams,
-            timeoutMilliseconds: timeoutMilliseconds
+            timeoutMilliseconds: timeoutMilliseconds,
+            initialConnectCapsuleBytes: Data(responseData.dropFirst(responsePrefix.bytesConsumed))
         )
     }
 
@@ -239,7 +249,7 @@ public struct WebTransportQUICClient: Sendable {
         path: String = "/wt",
         origin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         exchangeMode: WebTransportNetworkExchangeMode = .auto,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSessionResult {
@@ -312,18 +322,21 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
     private let timeoutMilliseconds: Int32
     private let prefix: Data?
     private let state: WebTransportNetworkStreamState
+    private let manager: WebTransportNetworkSessionManagerState?
 
-    init(
+    fileprivate init(
         stream: QUIC.Stream<QUICStream>,
         timeoutMilliseconds: Int32,
         prefix: Data? = nil,
-        initialPayload: Data = Data()
+        initialPayload: Data = Data(),
+        manager: WebTransportNetworkSessionManagerState? = nil
     ) {
         self.streamID = stream.streamID
         self.stream = stream
         self.timeoutMilliseconds = timeoutMilliseconds
         self.prefix = prefix
         self.state = WebTransportNetworkStreamState(prefix: prefix, initialPayload: initialPayload)
+        self.manager = manager
     }
 
     public func send(
@@ -331,6 +344,15 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
         endOfStream: Bool = false,
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
     ) async throws {
+        if let manager {
+            _ = try await manager.withManager { manager in
+                try manager.sendStreamPayload(
+                    streamID: self.streamID,
+                    payload: data,
+                    fin: endOfStream
+                )
+            }
+        }
         var mutablePayload = Data()
         if let prefix = await state.consumeOutboundPrefix() {
             mutablePayload.append(prefix)
@@ -347,13 +369,25 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
     ) async throws -> Data {
         if let initialPayload = await state.consumeInitialPayload(), !initialPayload.isEmpty {
+            if let manager {
+                _ = await manager.withManager { manager in
+                    manager.popStreamPayload(streamID: self.streamID)
+                }
+            }
             return initialPayload
         }
-        return try await InteroperableQUICHelpers.readStream(
+        let payload = try await InteroperableQUICHelpers.readStream(
             stream,
             timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
             maxBytes: maximumBytes
         )
+        if let manager {
+            return try await manager.withManager { manager in
+                try manager.receiveStreamPayload(streamID: self.streamID, payload: payload)
+                return manager.popStreamPayload(streamID: self.streamID) ?? Data()
+            }
+        }
+        return payload
     }
 }
 
@@ -375,6 +409,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     private let localControlStream: QUIC.Stream<QUICStream>
     private let connectStream: QUIC.Stream<QUICStream>
     private let timeoutMilliseconds: Int32
+    private let connectCapsuleTask: Task<Void, Never>
 
     fileprivate init(
         connection: NetworkConnection<QUIC>,
@@ -388,12 +423,14 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         localEndpoint: WebTransportNetworkEndpoint,
         remoteEndpoint: WebTransportNetworkEndpoint,
         datagramsAvailable: Bool,
-        timeoutMilliseconds: Int32
+        timeoutMilliseconds: Int32,
+        initialConnectCapsuleBytes: Data = Data()
     ) {
         self.connection = connection
         self.inboundStreams = inboundStreams
         self.inboundTask = inboundTask
-        self.manager = WebTransportNetworkSessionManagerState(manager: manager)
+        let managerState = WebTransportNetworkSessionManagerState(manager: manager)
+        self.manager = managerState
         self.sessionID = sessionID.rawValue
         self.selectedProtocol = selectedProtocol
         self.localControlStream = localControlStream
@@ -402,9 +439,18 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         self.remoteEndpoint = remoteEndpoint
         self.datagramsAvailable = datagramsAvailable
         self.timeoutMilliseconds = timeoutMilliseconds
+        self.connectCapsuleTask = Task {
+            await Self.receiveConnectCapsules(
+                from: connectStream,
+                manager: managerState,
+                streamID: sessionID.rawValue,
+                initialBytes: initialConnectCapsuleBytes
+            )
+        }
     }
 
     deinit {
+        connectCapsuleTask.cancel()
         inboundTask.cancel()
     }
 
@@ -424,11 +470,17 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
                 ) {
                     try await self.connection.openStream(directionality: .bidirectional)
                 }
-                let prefix = try WebTransportStreamSignaling.serializeBidirectionalPrefix(sessionID: sessionID)
+                let prefix = try await manager.withManager { manager in
+                    try manager.openBidirectionalStream(
+                        streamID: stream.streamID,
+                        sessionID: WebTransportSessionID(rawValue: self.sessionID)
+                    )
+                }
                 return WebTransportNetworkBidirectionalStream(
                     stream: stream,
                     timeoutMilliseconds: timeout,
-                    prefix: prefix
+                    prefix: prefix,
+                    manager: manager
                 )
             } catch {
                 guard InteroperableQUICHelpers.isTransientNotConnected(error) else {
@@ -460,14 +512,23 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
             maxBytes: maximumInitialBytes
         )
-        let prefix = try WebTransportStreamSignaling.parsePrefix(firstChunk)
-        guard prefix.form == .bidirectional, prefix.sessionID.rawValue == sessionID else {
+        let accepted = try await manager.withManager { manager in
+            try manager.acceptBidirectionalStreamWithActions(
+                streamID: stream.streamID,
+                firstBytes: firstChunk
+            )
+        }
+        guard let prefix = accepted.prefix,
+              accepted.rejectionFrame == nil,
+              prefix.form == .bidirectional,
+              prefix.sessionID.rawValue == sessionID else {
             throw WebTransportNetworkRuntimeError.unexpectedFrame
         }
         return WebTransportNetworkBidirectionalStream(
             stream: stream,
             timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
-            initialPayload: prefix.remainingPayload
+            initialPayload: prefix.remainingPayload,
+            manager: manager
         )
     }
 
@@ -516,6 +577,42 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
     }
 
+    public func exportKeyingMaterial(
+        applicationLabel: Data,
+        applicationContext: Data = Data(),
+        outputByteCount: Int
+    ) throws -> Data {
+        guard outputByteCount >= 0 else {
+            throw QUICCodecError.valueOutOfRange("negative WebTransport exporter output length")
+        }
+        let context = try WebTransportExporter.context(
+            sessionID: WebTransportSessionID(rawValue: sessionID),
+            applicationLabel: applicationLabel,
+            applicationContext: applicationContext
+        )
+        let contextBytes = context.isEmpty ? [UInt8(0)] : [UInt8](context)
+        let labelBytes = Array(WebTransportExporter.tlsLabel.utf8CString)
+        let exported = labelBytes.withUnsafeBufferPointer { labelBuffer in
+            contextBytes.withUnsafeBufferPointer { contextBuffer in
+                sec_protocol_metadata_create_secret_with_context(
+                    connection.securityProtocolMetadata,
+                    labelBytes.count - 1,
+                    labelBuffer.baseAddress!,
+                    context.count,
+                    contextBuffer.baseAddress!,
+                    outputByteCount
+                )
+            }
+        }
+        guard let exported else {
+            throw WebTransportNetworkRuntimeError.exporterUnavailable
+        }
+        let dispatchData = exported as DispatchData
+        return dispatchData.withUnsafeBytes { (buffer: UnsafePointer<UInt8>) in
+            Data(bytes: buffer, count: dispatchData.count)
+        }
+    }
+
     public func drain(timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil) async throws {
         let capsule = try await manager.withManager { manager in
             try manager.makeDrainSessionCapsule(sessionID: WebTransportSessionID(rawValue: self.sessionID))
@@ -539,6 +636,100 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
         try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
             try await self.connectStream.send(capsule, endOfStream: true)
+        }
+    }
+
+    fileprivate func waitForPeerClosure(timeoutMilliseconds: Int32) async {
+        let started = Date()
+        while InteroperableQUICHelpers.remainingTimeout(
+            timeoutMilliseconds: timeoutMilliseconds,
+            started: started
+        ) > 0 {
+            let isClosed = await manager.withManager { manager in
+                guard let state = manager.sessionsByID[WebTransportSessionID(rawValue: self.sessionID)]?.state else {
+                    return true
+                }
+                if case .closed = state {
+                    return true
+                }
+                return false
+            }
+            if isClosed {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private static func receiveConnectCapsules(
+        from stream: QUIC.Stream<QUICStream>,
+        manager: WebTransportNetworkSessionManagerState,
+        streamID: UInt64,
+        initialBytes: Data
+    ) async {
+        var buffered = initialBytes
+        do {
+            while !Task.isCancelled {
+                while let capsule = try popCompleteCapsule(from: &buffered) {
+                    let result = try await manager.withManager { manager in
+                        try manager.receiveConnectStreamCapsulesWithActions(
+                            streamID: streamID,
+                            bytes: capsule
+                        )
+                    }
+                    if result.connectResetFrame != nil {
+                        stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+                        try? await stream.send(Data(), endOfStream: true)
+                        return
+                    }
+                }
+
+                let received = try await stream.receive(atMost: 8_192)
+                buffered.append(received.content)
+                if received.metadata.endOfStream {
+                    if !buffered.isEmpty {
+                        stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+                        try? await stream.send(Data(), endOfStream: true)
+                    } else {
+                        _ = try? await manager.withManager { manager in
+                            try manager.finishConnectStream(streamID: streamID)
+                        }
+                    }
+                    return
+                }
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+            try? await stream.send(Data(), endOfStream: true)
+        }
+    }
+
+    private static func popCompleteCapsule(from buffer: inout Data) throws -> Data? {
+        guard !buffer.isEmpty else {
+            return nil
+        }
+        var cursor = QUICByteCursor(buffer)
+        do {
+            _ = try QUICVarInt.decode(from: &cursor)
+            let payloadLength = try QUICVarInt.decode(from: &cursor)
+            guard payloadLength <= UInt64(Int.max) else {
+                throw QUICCodecError.valueOutOfRange("CONNECT capsule length exceeds Int.max")
+            }
+            let headerLength = buffer.count - cursor.remaining
+            let (capsuleLength, overflow) = headerLength.addingReportingOverflow(Int(payloadLength))
+            guard !overflow else {
+                throw QUICCodecError.valueOutOfRange("CONNECT capsule length overflow")
+            }
+            guard buffer.count >= capsuleLength else {
+                return nil
+            }
+            let capsule = Data(buffer.prefix(capsuleLength))
+            buffer.removeFirst(capsuleLength)
+            return capsule
+        } catch QUICCodecError.truncated {
+            return nil
         }
     }
 }
@@ -601,7 +792,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         localOnly: Bool = false
     ) throws {
         try self.init(
@@ -623,7 +814,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft15Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         localOnly: Bool = false
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
@@ -725,6 +916,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             echoed = try await stream.receive(timeoutMilliseconds: timeoutMilliseconds)
             try await stream.send(echoed, endOfStream: true, timeoutMilliseconds: timeoutMilliseconds)
         }
+        await session.waitForPeerClosure(timeoutMilliseconds: min(timeoutMilliseconds, 250))
         guard let echoedMessage = String(data: echoed, encoding: .utf8) else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
@@ -836,10 +1028,11 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         } else {
             requestFramePayload = requestPayload
         }
-        let requestFrames = try HTTP3Frame.decodeFrames(requestFramePayload)
-        guard let requestFrame = requestFrames.first(where: { $0.type == HTTP3FrameType.headers }) else {
+        let requestPrefix = try HTTP3Frame.decodePrefix(requestFramePayload)
+        guard requestPrefix.frame.type == HTTP3FrameType.headers else {
             throw WebTransportNetworkRuntimeError.unexpectedFrame
         }
+        let optimisticCapsuleBytes = Data(requestFramePayload.dropFirst(requestPrefix.bytesConsumed))
 
         var allowedAuthorities = Set([authority])
         allowedAuthorities.insert("\(authority):\(localEndpoint.port)")
@@ -855,7 +1048,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
         let decision = try manager.receiveClientSessionRequest(
             streamID: requestStream.streamID,
-            frame: requestFrame,
+            frame: requestPrefix.frame,
             policy: policy
         )
         let responsePayload = try decision.responseFrame.encode()
@@ -866,7 +1059,6 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             inboundTask.cancel()
             throw rejectionError
         }
-
         return WebTransportNetworkSession(
             connection: connection,
             inboundStreams: inboundStreams,
@@ -882,7 +1074,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                 fallback: WebTransportNetworkEndpoint(host: "unknown", port: 0)
             ),
             datagramsAvailable: useDatagrams,
-            timeoutMilliseconds: timeoutMilliseconds
+            timeoutMilliseconds: timeoutMilliseconds,
+            initialConnectCapsuleBytes: optimisticCapsuleBytes
         )
     }
 
@@ -1114,10 +1307,26 @@ private enum InteroperableQUICHelpers {
                 return bytes
             case HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
                 InteroperableQUICDebug.log("\(role) ignoring peer QPACK stream type=\(prefix.type)")
+                Task {
+                    await drainPeerCriticalStream(stream)
+                }
                 continue
             default:
                 throw WebTransportNetworkRuntimeError.unexpectedFrame
             }
+        }
+    }
+
+    private static func drainPeerCriticalStream(_ stream: QUIC.Stream<QUICStream>) async {
+        do {
+            while !Task.isCancelled {
+                let received = try await stream.receive(atMost: 8_192)
+                if received.metadata.endOfStream {
+                    return
+                }
+            }
+        } catch {
+            return
         }
     }
 

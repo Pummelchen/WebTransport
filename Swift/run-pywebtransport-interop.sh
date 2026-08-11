@@ -16,7 +16,7 @@ if [ ! -x "$venv_dir/bin/python" ]; then
   python3 -m venv "$venv_dir"
   "$venv_dir/bin/python" -m pip install --upgrade pip >/dev/null
 fi
-"$venv_dir/bin/python" -m pip install pywebtransport==0.1.2 >/dev/null
+"$venv_dir/bin/python" -m pip install pywebtransport==0.1.2 typing_extensions >/dev/null
 
 swift build --product WebTransportClient
 
@@ -134,7 +134,7 @@ attempts_used=0
 status=1
 : >"$stdout_file"
 : >"$stderr_file"
-while [ "$attempt" -le 3 ]; do
+while [ "$attempt" -le 5 ]; do
   attempt_stdout="$work_dir/client-$attempt.stdout"
   attempt_stderr="$work_dir/client-$attempt.stderr"
   set +e

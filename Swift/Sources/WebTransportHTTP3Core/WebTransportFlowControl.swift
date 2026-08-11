@@ -86,6 +86,11 @@ public enum WebTransportFlowCapsuleCodec {
                 label: "wt-data-blocked"
             )
             capsule = .dataBlocked(limit: limit)
+        case constants.wtMaxStreamDataCapsule, constants.wtStreamDataBlockedCapsule:
+            throw WebTransportDraft16Error(
+                kind: .flowControl,
+                message: "per-stream flow-control capsules are prohibited over HTTP/3"
+            )
         case constants.wtStreamsBlockedBidiCapsule:
             let limit = try readSingleVarInt(
                 from: &payloadCursor,
@@ -179,9 +184,15 @@ public enum WebTransportFlowCapsuleCodec {
         guard cursor.isAtEnd else {
             throw QUICCodecError.malformed("flow control capsule payload has trailing bytes for \(label)")
         }
-        if label == "wt-max-streams-bidi" || label == "wt-max-streams-uni" {
+        if label == "wt-max-streams-bidi"
+            || label == "wt-max-streams-uni"
+            || label == "wt-streams-blocked-bidi"
+            || label == "wt-streams-blocked-uni" {
             guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
-                throw QUICCodecError.valueOutOfRange("\(label) exceeds the draft-15 2^60 maximum")
+                throw WebTransportDraft16Error(
+                    kind: .flowControl,
+                    message: "\(label) exceeds the draft-16 2^60 maximum"
+                )
             }
         }
         return value
@@ -242,9 +253,17 @@ extension HTTP3Settings {
     public func webTransportFlowControlEnabled(
         constants: WebTransportHTTP3DraftConstants = .current
     ) -> Bool {
-        entries.keys.contains(constants.settingsWTInitialMaxData)
-            || entries.keys.contains(constants.settingsWTInitialMaxStreamsBidi)
-            || entries.keys.contains(constants.settingsWTInitialMaxStreamsUni)
+        (self[constants.settingsWTInitialMaxData] ?? 0) > 0
+            || (self[constants.settingsWTInitialMaxStreamsBidi] ?? 0) > 0
+            || (self[constants.settingsWTInitialMaxStreamsUni] ?? 0) > 0
+    }
+
+    public func webTransportFlowControlEnabled(
+        with peer: HTTP3Settings,
+        constants: WebTransportHTTP3DraftConstants = .current
+    ) -> Bool {
+        webTransportFlowControlEnabled(constants: constants)
+            && peer.webTransportFlowControlEnabled(constants: constants)
     }
 }
 
@@ -284,11 +303,15 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         self.openedUniStreams = 0
     }
 
-    public init(settings: HTTP3Settings, constants: WebTransportHTTP3DraftConstants = .current) {
-        self.isEnabled = settings.webTransportFlowControlEnabled(constants: constants)
-        self.maxDataState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxData], isEnabled: isEnabled)
-        self.maxStreamsBidiState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxStreamsBidi], isEnabled: isEnabled)
-        self.maxStreamsUniState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxStreamsUni], isEnabled: isEnabled)
+    public init(
+        settings: HTTP3Settings,
+        isEnabled: Bool? = nil,
+        constants: WebTransportHTTP3DraftConstants = .current
+    ) {
+        self.isEnabled = isEnabled ?? settings.webTransportFlowControlEnabled(constants: constants)
+        self.maxDataState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxData] ?? 0, isEnabled: self.isEnabled)
+        self.maxStreamsBidiState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxStreamsBidi] ?? 0, isEnabled: self.isEnabled)
+        self.maxStreamsUniState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxStreamsUni] ?? 0, isEnabled: self.isEnabled)
         self.usedData = 0
         self.openedBidiStreams = 0
         self.openedUniStreams = 0
@@ -306,7 +329,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     public mutating func setMaxStreamsBidi(_ value: UInt64) throws {
         guard isEnabled else { return }
         guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
-            throw QUICCodecError.valueOutOfRange("WT_MAX_STREAMS_BIDI exceeds the draft-15 2^60 maximum")
+            throw WebTransportDraft16Error(kind: .flowControl, message: "WT_MAX_STREAMS_BIDI exceeds the draft-16 2^60 maximum")
         }
         try setMonotonicLimit(&maxStreamsBidiState, value: value, label: "WT_MAX_STREAMS_BIDI")
     }
@@ -314,7 +337,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     public mutating func setMaxStreamsUni(_ value: UInt64) throws {
         guard isEnabled else { return }
         guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
-            throw QUICCodecError.valueOutOfRange("WT_MAX_STREAMS_UNI exceeds the draft-15 2^60 maximum")
+            throw WebTransportDraft16Error(kind: .flowControl, message: "WT_MAX_STREAMS_UNI exceeds the draft-16 2^60 maximum")
         }
         try setMonotonicLimit(&maxStreamsUniState, value: value, label: "WT_MAX_STREAMS_UNI")
     }
@@ -386,10 +409,10 @@ private func setMonotonicLimit(
     let normalized = WebTransportFlowControlLimitState(value, isEnabled: true)
     if let currentValue = current.asUInt64,
        let newValue = normalized.asUInt64,
-       newValue < currentValue {
-        throw WebTransportDraft15Error(
+       newValue <= currentValue {
+        throw WebTransportDraft16Error(
             kind: .flowControl,
-            message: "\(label) must not decrease"
+            message: "\(label) must strictly increase"
         )
     }
     current = normalized

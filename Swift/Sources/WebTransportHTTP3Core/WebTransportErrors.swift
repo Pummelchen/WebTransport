@@ -1,35 +1,36 @@
 import Foundation
 import WebTransportQUICCore
 
-public enum WebTransportDraft15ErrorKind: Equatable, Sendable {
+public enum WebTransportDraft16ErrorKind: Equatable, Sendable {
     case bufferedStreamRejected
     case sessionGone
     case flowControl
     case alpn
     case requirementsNotMet
     case h3ID
+    case requestRejected
 }
 
-public struct WebTransportDraft15Error: Error, Equatable, Sendable {
-    public let kind: WebTransportDraft15ErrorKind
+public struct WebTransportDraft16Error: Error, Equatable, Sendable {
+    public let kind: WebTransportDraft16ErrorKind
     public let message: String
 
-    public init(kind: WebTransportDraft15ErrorKind, message: String) {
+    public init(kind: WebTransportDraft16ErrorKind, message: String) {
         self.kind = kind
         self.message = message
     }
 
     public var code: UInt64 {
-        WebTransportDraft15ErrorMapper.code(for: kind)
+        WebTransportDraft16ErrorMapper.code(for: kind)
     }
 }
 
-public enum WebTransportDraft15StreamSignal: Equatable, Sendable {
+public enum WebTransportDraft16StreamSignal: Equatable, Sendable {
     case resetStream(streamID: UInt64, finalSize: UInt64)
     case stopSending(streamID: UInt64)
 }
 
-public enum WebTransportDraft15ErrorMapper {
+public enum WebTransportDraft16ErrorMapper {
     public static func httpErrorCode(forApplicationErrorCode code: UInt32) -> UInt64 {
         let first = WebTransportHTTP3DraftConstants.current.wtApplicationErrorRange.lowerBound
         return first + UInt64(code) + (UInt64(code) / 0x1e)
@@ -49,7 +50,7 @@ public enum WebTransportDraft15ErrorMapper {
     }
 
     public static func code(
-        for kind: WebTransportDraft15ErrorKind,
+        for kind: WebTransportDraft16ErrorKind,
         constants: WebTransportHTTP3DraftConstants = .current
     ) -> UInt64 {
         switch kind {
@@ -65,11 +66,13 @@ public enum WebTransportDraft15ErrorMapper {
             return constants.wtRequirementsNotMetError
         case .h3ID:
             return HTTP3ApplicationErrorCode.idError.rawValue
+        case .requestRejected:
+            return HTTP3ApplicationErrorCode.requestRejected.rawValue
         }
     }
 
     public static func connectionCloseFrame(
-        for kind: WebTransportDraft15ErrorKind,
+        for kind: WebTransportDraft16ErrorKind,
         reason: String
     ) -> QUICFrame {
         .connectionClose(
@@ -80,8 +83,8 @@ public enum WebTransportDraft15ErrorMapper {
     }
 
     public static func streamFrame(
-        for kind: WebTransportDraft15ErrorKind,
-        signal: WebTransportDraft15StreamSignal
+        for kind: WebTransportDraft16ErrorKind,
+        signal: WebTransportDraft16StreamSignal
     ) -> QUICFrame {
         switch signal {
         case .resetStream(let streamID, let finalSize):
@@ -92,7 +95,7 @@ public enum WebTransportDraft15ErrorMapper {
     }
 
     public static func closeSessionCapsule(
-        for kind: WebTransportDraft15ErrorKind,
+        for kind: WebTransportDraft16ErrorKind,
         message: String
     ) throws -> Data {
         let errorCode = code(for: kind)

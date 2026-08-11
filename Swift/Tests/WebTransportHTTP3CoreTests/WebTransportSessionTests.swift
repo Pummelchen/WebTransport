@@ -69,8 +69,8 @@ func webTransportServerRejectsByPathOriginAndProtocolPolicy() throws {
         frame: badPathFrame,
         policy: pathPolicy
     )
-    #expect(pathDecision.session.state == .rejected(status: 404))
-    #expect(try WebTransportSessionTestSupport.responseStatus(pathDecision.responseFrame) == 404)
+    #expect(pathDecision.session.state == .rejected(status: 405))
+    #expect(try WebTransportSessionTestSupport.responseStatus(pathDecision.responseFrame) == 405)
 
     pair = try makeReadyManagers()
     let badOriginFrame = try pair.client.makeClientSessionRequest(
@@ -156,7 +156,7 @@ func webTransportDisabledFlowControlRejectsMultipleSimultaneousSessions() throws
     )
     _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: firstDecision.responseFrame)
 
-    #expect(throws: WebTransportDraft15Error.self) {
+    #expect(throws: WebTransportDraft16Error.self) {
         _ = try pair.client.makeClientSessionRequest(
             streamID: 4,
             request: try WebTransportSessionRequest(authority: "example.com", path: "/two")
@@ -167,10 +167,12 @@ func webTransportDisabledFlowControlRejectsMultipleSimultaneousSessions() throws
 @Test
 func webTransportExplicitZeroFlowControlLimitIsEnforced() throws {
     let constants = WebTransportHTTP3DraftConstants.current
-    var clientSettings = HTTP3Settings.webTransportDraft15Defaults
-    var serverSettings = HTTP3Settings.webTransportDraft15Defaults
+    var clientSettings = HTTP3Settings.webTransportDraft16Defaults
+    var serverSettings = HTTP3Settings.webTransportDraft16Defaults
     try clientSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
     try serverSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
+    try clientSettings.set(1, for: constants.settingsWTInitialMaxData)
+    try serverSettings.set(1, for: constants.settingsWTInitialMaxData)
 
     var clientHTTP3 = HTTP3ConnectionState(role: .client, localSettings: clientSettings)
     var serverHTTP3 = HTTP3ConnectionState(role: .server, localSettings: serverSettings)

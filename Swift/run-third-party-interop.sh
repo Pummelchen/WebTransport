@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 proof_dir=".build/external-interop"
 tools_dir=".build/external-tools"
 mkdir -p "$proof_dir" "$tools_dir"
+cargo_target_dir="$(pwd)/$tools_dir/cargo-target"
 
 timeout_ms="${WEBTRANSPORT_THIRD_PARTY_INTEROP_TIMEOUT_MS:-25000}"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -35,21 +36,29 @@ PY
 crate_source_dir() {
   crate="$1"
   version="$2"
-  for path in "$HOME"/.cargo/registry/src/*/"$crate-$version"; do
-    if [ -d "$path" ]; then
-      echo "$path"
-      return 0
+  archive=""
+  for candidate in "$HOME"/.cargo/registry/cache/*/"$crate-$version.crate"; do
+    if [ -f "$candidate" ]; then
+      archive="$candidate"
+      break
     fi
   done
-  cargo info "$crate" >/dev/null
-  for path in "$HOME"/.cargo/registry/src/*/"$crate-$version"; do
-    if [ -d "$path" ]; then
-      echo "$path"
-      return 0
-    fi
-  done
-  echo "could not locate Cargo source for $crate $version" >&2
-  return 1
+  if [ -z "$archive" ]; then
+    cargo info "$crate@$version" >/dev/null
+    for candidate in "$HOME"/.cargo/registry/cache/*/"$crate-$version.crate"; do
+      if [ -f "$candidate" ]; then
+        archive="$candidate"
+        break
+      fi
+    done
+  fi
+  if [ -z "$archive" ]; then
+    echo "could not locate Cargo archive for $crate $version" >&2
+    return 1
+  fi
+  mkdir -p "$work_dir/crates"
+  tar -xzf "$archive" -C "$work_dir/crates"
+  echo "$work_dir/crates/$crate-$version"
 }
 
 ensure_cmake() {
@@ -191,6 +200,7 @@ run_rust_endpoint() {
     (
       cd "$crate_dir"
       RUST_LOG="${WEBTRANSPORT_THIRD_PARTY_RUST_LOG:-info}" \
+        CARGO_TARGET_DIR="$cargo_target_dir" \
         cargo run --example echo-server -- "$bind_flag" "$endpoint" --tls-cert "$cert_file" --tls-key "$key_file"
     ) >"$attempt_server_stdout" 2>"$attempt_server_stderr" &
     server_pid=$!
@@ -277,6 +287,8 @@ swift build --product WebTransportClient
 ensure_cmake
 quinn_dir="$(crate_source_dir web-transport-quinn 0.11.9)"
 quiche_dir="$(crate_source_dir web-transport-quiche 0.4.1)"
+CARGO_TARGET_DIR="$cargo_target_dir" cargo build --manifest-path "$quinn_dir/Cargo.toml" --example echo-server
+CARGO_TARGET_DIR="$cargo_target_dir" cargo build --manifest-path "$quiche_dir/Cargo.toml" --example echo-server
 
 py_json="$(run_pywebtransport)"
 quinn_json="$(run_rust_endpoint \
