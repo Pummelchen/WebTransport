@@ -50,7 +50,12 @@ public enum TLS13KeyAgreement {
 
         let peerPublicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: peerShare.keyExchange)
         let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: peerPublicKey)
-        return sharedSecret.withUnsafeBytes { Data($0) }
+        // SAFETY: CryptoKit lends the shared secret's initialized contiguous
+        // storage only for this nonescaping closure, and Data copies all bytes
+        // before that storage is released.
+        return unsafe sharedSecret.withUnsafeBytes { buffer in
+            unsafe Data(buffer)
+        }
     }
 
     public static func handshakeSecret(sharedSecret: Data, earlySecret: Data? = nil) throws -> Data {

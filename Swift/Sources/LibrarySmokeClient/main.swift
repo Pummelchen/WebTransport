@@ -4,6 +4,15 @@ import WebTransportQUICCore
 import WebTransportTestSupport
 import WebTransportUDPApple
 
+private func formatDuration(_ seconds: TimeInterval) -> String {
+    seconds.formatted(
+        .number
+            .grouping(.never)
+            .precision(.fractionLength(3))
+            .locale(Locale(identifier: "en_US_POSIX"))
+    )
+}
+
 #if !arch(arm64)
 #error("WebTransport Swift supports Apple Silicon arm64 only. Intel/x86_64 builds are unsupported.")
 #endif
@@ -18,7 +27,7 @@ enum LibrarySmokeClient {
             try runner.run()
             print("LibrarySmokeClient: smoke test passed")
         } catch {
-            fputs("LibrarySmokeClient failed: \(error)\n", stderr)
+            FileHandle.standardError.write(Data("LibrarySmokeClient failed: \(error)\n".utf8))
             exit(1)
         }
     }
@@ -228,7 +237,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running echo streams (multi-stream)")
                 try runEchoStreamsScenario()
-                print("client: ✓ echo streams (multi-stream) in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ echo streams (multi-stream) in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step echo streams (multi-stream) failed: \(error)")
             }
@@ -237,7 +246,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running control stream reuse")
                 try runControlStreamReuseScenario()
-                print("client: ✓ control stream reuse in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ control stream reuse in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step control stream reuse failed: \(error)")
             }
@@ -246,7 +255,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running datagram burst")
                 try runEchoDatagramBurst()
-                print("client: ✓ datagram burst in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ datagram burst in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step datagram burst failed: \(error)")
             }
@@ -255,7 +264,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running datagram ordering and buffer boundary")
                 try runDatagramOrderingScenario()
-                print("client: ✓ datagram ordering in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ datagram ordering in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step datagram ordering failed: \(error)")
             }
@@ -264,7 +273,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running interleaved stream flow")
                 try runInterleavedStreamScenario()
-                print("client: ✓ interleaved stream flow in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ interleaved stream flow in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step interleaved stream flow failed: \(error)")
             }
@@ -273,7 +282,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running concurrent sessions")
                 try runConcurrentSessionsScenario()
-                print("client: ✓ concurrent sessions in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ concurrent sessions in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step concurrent sessions failed: \(error)")
             }
@@ -282,7 +291,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running protocol negotiation")
                 try runProtocolNegotiationScenario()
-                print("client: ✓ protocol negotiation in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ protocol negotiation in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step protocol negotiation failed: \(error)")
             }
@@ -291,7 +300,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running flow-control capsules")
                 try runFlowControlCapsuleScenario()
-                print("client: ✓ flow-control capsules in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ flow-control capsules in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step flow-control capsules failed: \(error)")
             }
@@ -300,7 +309,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running stream identity + duplicate open")
                 try runStreamIdentityAndDuplicateOpenScenario()
-                print("client: ✓ stream identity + duplicate open in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ stream identity + duplicate open in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step stream identity + duplicate open failed: \(error)")
             }
@@ -309,7 +318,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running malformed stream open")
                 try runMalformedStreamScenario()
-                print("client: ✓ malformed stream open in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ malformed stream open in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step malformed stream open failed: \(error)")
             }
@@ -318,7 +327,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running datagram/session integrity")
                 try runDatagramIntegrityScenario()
-                print("client: ✓ datagram/session integrity in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ datagram/session integrity in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step datagram/session integrity failed: \(error)")
             }
@@ -327,7 +336,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running malformed datagram frame")
                 try runMalformedDatagramScenario()
-                print("client: ✓ malformed datagram frame in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ malformed datagram frame in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step malformed datagram frame failed: \(error)")
             }
@@ -336,7 +345,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running duplicate session request")
                 try runDuplicateSessionRequestScenario()
-                print("client: ✓ duplicate session request in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ duplicate session request in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step duplicate session request failed: \(error)")
             }
@@ -345,7 +354,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running malformed session request")
                 try runMalformedSessionRequestScenario()
-                print("client: ✓ malformed session request in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ malformed session request in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step malformed session request failed: \(error)")
             }
@@ -354,7 +363,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running close/reset path")
                 try runCloseAndResetScenario()
-                print("client: ✓ close/reset path in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ close/reset path in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step close/reset path failed: \(error)")
             }
@@ -363,7 +372,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running session rejection")
                 try runRejectedSessionScenario()
-                print("client: ✓ session rejection in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ session rejection in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step session rejection failed: \(error)")
             }
@@ -372,7 +381,7 @@ enum LibrarySmokeClient {
             do {
                 print("client: running oversized datagram rejection")
                 try runOversizedDatagramScenario()
-                print("client: ✓ oversized datagram rejection in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ oversized datagram rejection in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step oversized datagram rejection failed: \(error)")
             }
@@ -381,13 +390,13 @@ enum LibrarySmokeClient {
             do {
                 print("client: running malformed stream open")
                 try runMalformedFrameScenario()
-                print("client: ✓ malformed frame path in \(String(format: "%.3f", Date().timeIntervalSince(start)))s")
+                print("client: ✓ malformed frame path in \(formatDuration(Date().timeIntervalSince(start)))s")
             } catch {
                 throw Error.runtime("suite step malformed frame failed: \(error)")
             }
 
             let elapsed = Date().timeIntervalSince(suiteStart)
-            print("client: full suite checks passed in \(String(format: "%.3f", elapsed))s")
+            print("client: full suite checks passed in \(formatDuration(elapsed))s")
         }
 
 

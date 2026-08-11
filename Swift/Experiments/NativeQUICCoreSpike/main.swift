@@ -13,8 +13,6 @@ import WebTransportUDPApple
 @main
 enum NativeQUICCoreSpike {
     static func main() {
-        setbuf(stdout, nil)
-
         do {
             let server = try QUICUDPPort()
             let client = try QUICUDPPort()
@@ -57,7 +55,7 @@ enum NativeQUICCoreSpike {
             try proveWebTransportComplianceMatrix()
             print("phase1b: native QUIC core frame exchange over Apple UDP passed without security prompts")
         } catch {
-            fputs("NativeQUICCoreSpike failed: \(error)\n", stderr)
+            FileHandle.standardError.write(Data("NativeQUICCoreSpike failed: \(error)\n".utf8))
             Foundation.exit(1)
         }
     }

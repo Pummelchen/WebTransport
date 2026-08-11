@@ -34,7 +34,7 @@ struct WebTransportClientCLI {
                 print("network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) exchange=\(options.exchangeMode.rawValue) message=\"\(result.message)\"")
                 return
             } catch {
-                fputs("\(executable) network session failed: \(error)\n", stderr)
+                writeStandardError("\(executable) network session failed: \(error)\n")
                 Foundation.exit(1)
             }
         }
@@ -54,11 +54,11 @@ struct WebTransportClientCLI {
             print(WebTransportCLIConformance.listText())
             return
         } catch WebTransportCLIConformanceExit.invalidArguments(let message) {
-            fputs("\(executable) argument error: \(message)\n", stderr)
-            fputs(WebTransportCLIConformance.helpText(executableName: executable) + "\n", stderr)
+            writeStandardError("\(executable) argument error: \(message)\n")
+            writeStandardError(WebTransportCLIConformance.helpText(executableName: executable) + "\n")
             Foundation.exit(2)
         } catch {
-            fputs("\(executable) argument error: \(error)\n", stderr)
+            writeStandardError("\(executable) argument error: \(error)\n")
             Foundation.exit(2)
         }
 
@@ -85,10 +85,14 @@ struct WebTransportClientCLI {
             print("client received reliable stream echo path: \(result.message)")
             print("WebTransportClient demo completed")
         } catch {
-            fputs("WebTransportClient failed: \(error)\n", stderr)
+            writeStandardError("WebTransportClient failed: \(error)\n")
             Foundation.exit(1)
         }
     }
+}
+
+private func writeStandardError(_ message: String) {
+    FileHandle.standardError.write(Data(message.utf8))
 }
 
 private struct NetworkClientOptions {

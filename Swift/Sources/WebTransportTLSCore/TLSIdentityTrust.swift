@@ -48,9 +48,12 @@ public struct TLSPromptFreeServerIdentity {
             kSecAttrIsPermanent: false
         ]
         var error: Unmanaged<CFError>?
-        guard let key = SecKeyCreateWithData(privateKeyDER as CFData, attributes as CFDictionary, &error) else {
+        // SAFETY: Security.framework initializes the optional retained CFError
+        // out-parameter before returning failure; its ownership is transferred
+        // exactly once below.
+        guard let key = unsafe SecKeyCreateWithData(privateKeyDER as CFData, attributes as CFDictionary, &error) else {
             throw QUICCodecError.malformed(
-                error?.takeRetainedValue().localizedDescription ?? "SecKeyCreateWithData rejected private key"
+                unsafe error?.takeRetainedValue().localizedDescription ?? "SecKeyCreateWithData rejected private key"
             )
         }
         return key

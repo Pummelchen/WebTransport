@@ -486,7 +486,9 @@ private enum WebTransportRuntimeLoopbackGate {
     private static func acquireBlocking(label: String) throws {
         let deadline = Date().addingTimeInterval(maximumWait)
         while true {
-            if Darwin.mkdir(lockPath, S_IRWXU) == 0 {
+            // SAFETY: Swift supplies a temporary NUL-terminated representation
+            // of this immutable path for the synchronous POSIX call.
+            if unsafe Darwin.mkdir(lockPath, S_IRWXU) == 0 {
                 try writeOwner(label)
                 return
             }
@@ -518,7 +520,9 @@ private enum WebTransportRuntimeLoopbackGate {
     }
 
     private static func release() {
-        _ = Darwin.unlink("\(lockPath)/\(ownerFile)")
-        _ = Darwin.rmdir(lockPath)
+        // SAFETY: Swift supplies temporary NUL-terminated representations of
+        // both immutable paths for these synchronous POSIX calls.
+        _ = unsafe Darwin.unlink("\(lockPath)/\(ownerFile)")
+        _ = unsafe Darwin.rmdir(lockPath)
     }
 }

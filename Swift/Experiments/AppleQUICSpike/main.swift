@@ -10,7 +10,6 @@ import Security
 @main
 enum AppleQUICSpike {
     static func main() async {
-        setbuf(stdout, nil)
         do {
             let arguments = CommandLine.arguments.dropFirst()
             if arguments.contains("--loopback") {
@@ -21,7 +20,7 @@ enum AppleQUICSpike {
                 print("Run `swift run AppleQUICSpike --loopback` to execute the prompt-free localhost QUIC proof.")
             }
         } catch {
-            fputs("AppleQUICSpike failed: \(error)\n", stderr)
+            FileHandle.standardError.write(Data("AppleQUICSpike failed: \(error)\n".utf8))
             Foundation.exit(1)
         }
     }
@@ -411,21 +410,31 @@ private enum HTTP3Varint {
 
 private enum InMemoryTLSIdentity {
     static func make() throws -> sec_identity_t {
-        var error: Unmanaged<CFError>?
         let attributes: [CFString: Any] = [
             kSecAttrKeyType: kSecAttrKeyTypeRSA,
             kSecAttrKeySizeInBits: 2_048,
             kSecAttrIsPermanent: false
         ]
 
-        guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw ProbeError.securityFailed(error?.takeRetainedValue().localizedDescription ?? "SecKeyCreateRandomKey failed")
+        var privateKeyError: Unmanaged<CFError>?
+        // SAFETY: Security.framework initializes the retained CFError
+        // out-parameter, whose ownership is consumed exactly once on failure.
+        guard let privateKey = unsafe SecKeyCreateRandomKey(attributes as CFDictionary, &privateKeyError) else {
+            throw ProbeError.securityFailed(
+                unsafe privateKeyError?.takeRetainedValue().localizedDescription ?? "SecKeyCreateRandomKey failed"
+            )
         }
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
             throw ProbeError.securityFailed("SecKeyCopyPublicKey failed")
         }
-        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            throw ProbeError.securityFailed(error?.takeRetainedValue().localizedDescription ?? "SecKeyCopyExternalRepresentation failed")
+        var publicKeyError: Unmanaged<CFError>?
+        // SAFETY: The returned CFData is ARC-managed; the retained error
+        // out-parameter is consumed exactly once only on failure.
+        guard let publicKeyData = unsafe SecKeyCopyExternalRepresentation(publicKey, &publicKeyError) as Data? else {
+            throw ProbeError.securityFailed(
+                unsafe publicKeyError?.takeRetainedValue().localizedDescription
+                    ?? "SecKeyCopyExternalRepresentation failed"
+            )
         }
 
         let certificateDER = try SelfSignedCertificate.make(privateKey: privateKey, rsaPublicKeyDER: publicKeyData)
@@ -505,13 +514,17 @@ private enum SelfSignedCertificate {
         ])
 
         var error: Unmanaged<CFError>?
-        guard let signature = SecKeyCreateSignature(
+        // SAFETY: Security.framework consumes the immutable certificate bytes
+        // synchronously and initializes the retained error out-parameter.
+        guard let signature = unsafe SecKeyCreateSignature(
             privateKey,
             .rsaSignatureMessagePKCS1v15SHA256,
             tbsCertificate as CFData,
             &error
         ) as Data? else {
-            throw ProbeError.securityFailed(error?.takeRetainedValue().localizedDescription ?? "SecKeyCreateSignature failed")
+            throw ProbeError.securityFailed(
+                unsafe error?.takeRetainedValue().localizedDescription ?? "SecKeyCreateSignature failed"
+            )
         }
 
         return DER.sequence([
@@ -523,7 +536,9 @@ private enum SelfSignedCertificate {
 
     private static func randomSerial() -> Data {
         var bytes = [UInt8](repeating: 0, count: 16)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        // SAFETY: `bytes` owns exactly the writable byte count supplied to
+        // SecRandomCopyBytes and remains alive for the synchronous call.
+        let status = unsafe SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         if status != errSecSuccess {
             bytes = Array(UUID().uuidString.utf8.prefix(16))
         }

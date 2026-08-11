@@ -22,7 +22,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | --- | --- |
 | Release | [1.1.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.1.0) |
 | Platform | macOS 26 or later |
-| Toolchain | Swift 6.3, Swift language mode 6 |
+| Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
@@ -92,7 +92,7 @@ cd Swift
 ./run-third-party-interop.sh
 ```
 
-CI validates the build, DocC catalog, public API sample, reproducible artifacts, package tests, and both command-line conformance suites.
+CI validates the Swift 6.3.3 toolchain baseline, strict memory and concurrency diagnostics, the build, DocC catalog, public API sample, reproducible artifacts, package tests, and both command-line conformance suites.
 
 ## Documentation
 

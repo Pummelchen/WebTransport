@@ -48,7 +48,10 @@ public enum TLSCertificateVerifier {
         }
 
         var error: Unmanaged<CFError>?
-        let result = SecKeyVerifySignature(
+        // SAFETY: Security.framework initializes the optional retained CFError
+        // out-parameter before returning failure; its ownership is consumed at
+        // most once below.
+        let result = unsafe SecKeyVerifySignature(
             publicKey,
             algorithm,
             signedContent(role: role, transcriptHash: transcriptHash) as CFData,
@@ -58,7 +61,7 @@ public enum TLSCertificateVerifier {
         if result {
             return true
         }
-        _ = error?.takeRetainedValue()
+        _ = unsafe error?.takeRetainedValue()
         return false
     }
 }

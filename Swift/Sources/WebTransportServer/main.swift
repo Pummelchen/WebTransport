@@ -28,9 +28,10 @@ struct WebTransportServerCLI {
                     settingsValidation: options.settingsValidation
                 )
                 let local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
-                print("network packet session listening: \(local.commandLineValue)")
-                print("network packet session certificate-sha256: \(server.certificateSHA256.base64EncodedString())")
-                fflush(stdout)
+                writeStandardOutput(
+                    "network packet session listening: \(local.commandLineValue)\n"
+                    + "network packet session certificate-sha256: \(server.certificateSHA256.base64EncodedString())\n"
+                )
                 let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
                     Task {
                         try await server.serveOne(timeoutMilliseconds: options.timeoutMilliseconds)
@@ -41,7 +42,7 @@ struct WebTransportServerCLI {
                         let result = try await task.value
                         results.append(result)
                     } catch {
-                        fputs("network packet session serve error: \(error)\n", stderr)
+                        writeStandardError("network packet session serve error: \(error)\n")
                     }
                 }
                 for result in results {
@@ -50,7 +51,7 @@ struct WebTransportServerCLI {
                 }
                 return
             } catch {
-                fputs("\(executable) network session failed: \(error)\n", stderr)
+                writeStandardError("\(executable) network session failed: \(error)\n")
                 Foundation.exit(1)
             }
         }
@@ -70,11 +71,11 @@ struct WebTransportServerCLI {
             print(WebTransportCLIConformance.listText())
             return
         } catch WebTransportCLIConformanceExit.invalidArguments(let message) {
-            fputs("\(executable) argument error: \(message)\n", stderr)
-            fputs(WebTransportCLIConformance.helpText(executableName: executable) + "\n", stderr)
+            writeStandardError("\(executable) argument error: \(message)\n")
+            writeStandardError(WebTransportCLIConformance.helpText(executableName: executable) + "\n")
             Foundation.exit(2)
         } catch {
-            fputs("\(executable) argument error: \(error)\n", stderr)
+            writeStandardError("\(executable) argument error: \(error)\n")
             Foundation.exit(2)
         }
 
@@ -88,6 +89,14 @@ struct WebTransportServerCLI {
         print("WebTransportServer local demo endpoint ready: authority=\(configuration.authority) path=\(configuration.path)")
         print("Use `swift run WebTransportClient --connect HOST:PORT` with a listening server for the Network.framework QUIC session path.")
     }
+}
+
+private func writeStandardOutput(_ message: String) {
+    FileHandle.standardOutput.write(Data(message.utf8))
+}
+
+private func writeStandardError(_ message: String) {
+    FileHandle.standardError.write(Data(message.utf8))
 }
 
 private struct NetworkServerOptions {

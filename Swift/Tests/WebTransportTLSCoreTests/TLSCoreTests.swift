@@ -282,13 +282,8 @@ func promptFreeServerIdentityImportsPrivateKeyWithoutKeychain() throws {
         kSecAttrKeySizeInBits: 2_048,
         kSecAttrIsPermanent: false
     ]
-    var error: Unmanaged<CFError>?
-    guard let generatedKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-        throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
-    }
-    guard let privateKeyDER = SecKeyCopyExternalRepresentation(generatedKey, &error) as Data? else {
-        throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
-    }
+    let generatedKey = try SecurityFixture.makeRandomKey(attributes: attributes)
+    let privateKeyDER = try SecurityFixture.externalRepresentation(of: generatedKey)
 
     let identity = try TLSPromptFreeServerIdentity(
         certificateChainDER: [Data([0x30, 0x00])],
@@ -415,10 +410,7 @@ func certificateVerifySignatureVerifiesWithInMemorySecKey() throws {
         kSecAttrKeySizeInBits: 2_048,
         kSecAttrIsPermanent: false
     ]
-    var error: Unmanaged<CFError>?
-    guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-        throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
-    }
+    let privateKey = try SecurityFixture.makeRandomKey(attributes: attributes)
     guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
         throw ExpectedThrowError.missingThrow
     }
@@ -426,14 +418,11 @@ func certificateVerifySignatureVerifiesWithInMemorySecKey() throws {
     let transcriptHash = TLS13KeySchedule.transcriptHash(Data("certificate-verify-transcript".utf8))
     let algorithm = try TLSCertificateVerifier.secKeyAlgorithm(for: TLSSignatureScheme.rsaPSSRSAESHA256)
     let signedContent = TLSCertificateVerifier.signedContent(role: .server, transcriptHash: transcriptHash)
-    guard let signature = SecKeyCreateSignature(
-        privateKey,
-        algorithm,
-        signedContent as CFData,
-        &error
-    ) as Data? else {
-        throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
-    }
+    let signature = try SecurityFixture.signature(
+        privateKey: privateKey,
+        algorithm: algorithm,
+        data: signedContent
+    )
 
     let certificateVerify = try TLSCertificateVerify(
         algorithm: TLSSignatureScheme.rsaPSSRSAESHA256,
@@ -673,16 +662,11 @@ private enum PromptFreeCertificateFixture {
             kSecAttrKeySizeInBits: 2_048,
             kSecAttrIsPermanent: false
         ]
-        var error: Unmanaged<CFError>?
-        guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
-        }
+        let privateKey = try SecurityFixture.makeRandomKey(attributes: attributes)
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
             throw ExpectedThrowError.missingThrow
         }
-        guard let publicKeyDER = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
-        }
+        let publicKeyDER = try SecurityFixture.externalRepresentation(of: publicKey)
 
         let signatureAlgorithm = try DERFixture.sequence([
             DERFixture.objectIdentifier([1, 2, 840, 113_549, 1, 1, 11]),
@@ -732,20 +716,54 @@ private enum PromptFreeCertificateFixture {
             subjectPublicKeyInfo,
             extensions
         ])
-        guard let signature = SecKeyCreateSignature(
-            privateKey,
-            .rsaSignatureMessagePKCS1v15SHA256,
-            tbsCertificate as CFData,
-            &error
-        ) as Data? else {
-            throw error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
-        }
+        let signature = try SecurityFixture.signature(
+            privateKey: privateKey,
+            algorithm: .rsaSignatureMessagePKCS1v15SHA256,
+            data: tbsCertificate
+        )
 
         return DERFixture.sequence([
             tbsCertificate,
             signatureAlgorithm,
             DERFixture.bitString(signature)
         ])
+    }
+}
+
+private enum SecurityFixture {
+    static func makeRandomKey(attributes: [CFString: Any]) throws -> SecKey {
+        var error: Unmanaged<CFError>?
+        // SAFETY: Security.framework initializes the retained CFError
+        // out-parameter, whose ownership is consumed exactly once on failure.
+        guard let key = unsafe SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
+            throw unsafe error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+        }
+        return key
+    }
+
+    static func externalRepresentation(of key: SecKey) throws -> Data {
+        var error: Unmanaged<CFError>?
+        // SAFETY: The returned CFData is ARC-managed; the retained error
+        // out-parameter is consumed exactly once only on failure.
+        guard let data = unsafe SecKeyCopyExternalRepresentation(key, &error) as Data? else {
+            throw unsafe error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+        }
+        return data
+    }
+
+    static func signature(privateKey: SecKey, algorithm: SecKeyAlgorithm, data: Data) throws -> Data {
+        var error: Unmanaged<CFError>?
+        // SAFETY: Security.framework consumes the immutable CFData during this
+        // synchronous call and initializes the retained error out-parameter.
+        guard let signature = unsafe SecKeyCreateSignature(
+            privateKey,
+            algorithm,
+            data as CFData,
+            &error
+        ) as Data? else {
+            throw unsafe error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
+        }
+        return signature
     }
 }
 
