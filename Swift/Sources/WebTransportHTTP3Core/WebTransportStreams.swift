@@ -52,6 +52,29 @@ public enum WebTransportStreamSignaling {
         try serializePrefix(form: .unidirectional, sessionID: sessionID, constants: constants)
     }
 
+    /// Reports whether `bytes` begins with a WebTransport stream marker.
+    ///
+    /// Callers use this to separate two outcomes that ``parsePrefix(_:constants:)``
+    /// reports identically as a thrown error: a stream that simply is not
+    /// prefixed — the normal shape of an HTTP/3 extended CONNECT request stream —
+    /// and a stream that *is* prefixed but carries malformed contents, which is a
+    /// protocol violation. Treating the second as the first would let a peer
+    /// steer the receiver onto a non-error path with invalid input.
+    ///
+    /// This inspects only the leading marker and never throws; a truncated or
+    /// undecodable varint reports `false`, leaving the payload to be rejected by
+    /// whichever parser owns it.
+    public static func hasStreamPrefix(
+        _ bytes: Data,
+        constants: WebTransportHTTP3DraftConstants = .current
+    ) -> Bool {
+        var cursor = QUICByteCursor(bytes)
+        guard let marker = try? QUICVarInt.decode(from: &cursor) else {
+            return false
+        }
+        return marker == constants.wtStreamFrame || marker == constants.webTransportStream
+    }
+
     public static func parsePrefix(
         _ bytes: Data,
         constants: WebTransportHTTP3DraftConstants = .current

@@ -63,6 +63,13 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
     public var timeoutMilliseconds: Int32
     /// Restrict the listener to local traffic only. Defaults to false for deployable server bindings.
     public var localOnly: Bool
+    /// TLS identity the listener presents to peers.
+    ///
+    /// Defaults to an ephemeral development certificate, which is **refused on
+    /// any non-loopback bind address**. Production deployments must supply a
+    /// CA-issued identity through `.pkcs12(data:passphrase:)` or
+    /// `.certificateChain(chainDER:privateKeyDER:keyKind:)`.
+    public var identity: WebTransportServerIdentity
 
     public init(
         authority: String = "localhost",
@@ -71,7 +78,8 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         supportedProtocols: [String] = [],
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         timeoutMilliseconds: Int32 = 15_000,
-        localOnly: Bool = false
+        localOnly: Bool = false,
+        identity: WebTransportServerIdentity = .developmentSelfSigned
     ) {
         self.authority = authority
         self.path = path
@@ -80,6 +88,7 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         self.settingsValidation = settingsValidation
         self.timeoutMilliseconds = timeoutMilliseconds
         self.localOnly = localOnly
+        self.identity = identity
     }
 }
 
@@ -393,7 +402,8 @@ public actor WebTransportServer {
             allowedOrigin: configuration.origin,
             protocols: configuration.supportedProtocols,
             settingsValidation: configuration.settingsValidation,
-            localOnly: configuration.localOnly
+            localOnly: configuration.localOnly,
+            identity: configuration.identity
         )
         let local = try await server.waitForListening(timeoutMilliseconds: configuration.timeoutMilliseconds)
         logger.record(.serverControlAccepted)
@@ -415,6 +425,12 @@ public final class WebTransportListeningServer: @unchecked Sendable {
     public let localEndpoint: WebTransportEndpoint
     public let certificateSHA256: Data
 
+    /// True when the listener presents the ephemeral development certificate.
+    ///
+    /// In that mode ``certificateSHA256`` changes on every restart, so it cannot
+    /// be used as a stable pin.
+    public let usesDevelopmentCertificate: Bool
+
     private let runtime: WebTransportQUICServer
     private let logger: WebTransportLogger
     private let timeoutMilliseconds: Int32
@@ -428,6 +444,7 @@ public final class WebTransportListeningServer: @unchecked Sendable {
         self.runtime = runtime
         self.localEndpoint = localEndpoint
         self.certificateSHA256 = runtime.certificateSHA256
+        self.usesDevelopmentCertificate = runtime.usesDevelopmentCertificate
         self.logger = logger
         self.timeoutMilliseconds = timeoutMilliseconds
     }

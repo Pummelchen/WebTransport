@@ -23,6 +23,16 @@ jobs:
       - name: Validate Swift toolchain
         run: ./Swift/check-toolchain.sh
 
+      - name: Verify package manifests agree on shared targets
+        run: ./Swift/check-manifest-sync.sh
+
+      # Informational. The codebase predates a formatter, so a blocking gate
+      # would require a repo-wide reformat; this surfaces drift without holding
+      # up a merge. Promote to blocking once the tree is formatted once.
+      - name: Lint formatting
+        continue-on-error: true
+        run: swift format lint --recursive --parallel Swift/Sources Swift/Tests
+
       - name: Build both package entry points with safety diagnostics
         run: |
           swift build \
@@ -72,3 +82,21 @@ jobs:
 
       - name: Run server CLI conformance
         run: swift run WebTransportServer --scenario all
+
+  thread-sanitizer:
+    name: Thread Sanitizer / in-process tests
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Excludes the CLI process and release-artifact suites: those orchestrate
+      # subprocesses against wall-clock timeouts that TSan's ~20x slowdown blows
+      # through, which reports as a timeout rather than a race. The in-process
+      # runtime, protocol, and crypto tests are where the shared mutable state
+      # actually lives, and they are what TSan can meaningfully check.
+      - name: Run tests under Thread Sanitizer
+        run: >-
+          swift test --sanitize=thread
+          --skip CLIProcess
+          --skip ReleaseArtifacts

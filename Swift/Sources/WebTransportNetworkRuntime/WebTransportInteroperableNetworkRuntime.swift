@@ -2,20 +2,43 @@ import Foundation
 import CryptoKit
 import Network
 import Security
+import Synchronization
 
 import WebTransportCryptoApple
 import WebTransportHTTP3Core
 import WebTransportQUICCore
 import WebTransportTLSCore
 
+/// Opt-in diagnostic channel for interoperability debugging.
+///
+/// This is **not** covered by the redaction guarantees that `WebTransportLogger`
+/// enforces. It emits transport identifiers — stream IDs, connection states, and
+/// bound endpoints — which the project's public logging policy excludes. It does
+/// not emit secrets, key material, packet or datagram payloads, or peer close
+/// text, and it is disabled unless `WEBTRANSPORT_INTEROP_DEBUG=1` is set.
+///
+/// Enabling it announces itself once on stderr so an operator who turns it on in
+/// a deployed process is told that the output is unredacted rather than having
+/// to infer it.
 private enum InteroperableQUICDebug {
     static let enabled = ProcessInfo.processInfo.environment["WEBTRANSPORT_INTEROP_DEBUG"] == "1"
+
+    private static let announceOnce: Void = {
+        write(
+            "[interoperable-quic] diagnostic logging is enabled and is NOT redacted; "
+            + "it emits transport identifiers and must not be used in production\n"
+        )
+    }()
 
     static func log(_ message: @autoclosure () -> String) {
         guard enabled else {
             return
         }
-        let text = "[interoperable-quic] \(message())\n"
+        _ = announceOnce
+        write("[interoperable-quic] \(message())\n")
+    }
+
+    private static func write(_ text: String) {
         if let data = text.data(using: .utf8) {
             FileHandle.standardError.write(data)
         }
@@ -657,7 +680,14 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             if isClosed {
                 return
             }
-            try? await Task.sleep(for: .milliseconds(5))
+            do {
+                try await Task.sleep(for: .milliseconds(5))
+            } catch {
+                // Cancelled: stop waiting rather than polling out the full
+                // deadline. `try?` here would swallow cancellation and keep the
+                // loop running after the caller has gone away.
+                return
+            }
         }
     }
 
@@ -768,13 +798,30 @@ private actor WebTransportNetworkSessionManagerState {
     }
 }
 
-// SAFETY: Listener configuration is immutable after initialization apart from
-// `localEndpoint`, which is set during startup before serving. Accepted
-// connections are handed through an actor queue, and shutdown only cancels the
-// listener task.
+// SAFETY: Every stored property is immutable after initialization except the
+// bound endpoint, which is held in a `Mutex` because `waitForListening` may
+// rewrite it concurrently with readers on the accept path. Accepted connections
+// are handed through an actor queue, and shutdown only cancels the listener task.
 public final class WebTransportQUICServer: @unchecked Sendable {
-    public private(set) var localEndpoint: WebTransportNetworkEndpoint
+    private let localEndpointStorage: Mutex<WebTransportNetworkEndpoint>
+
+    /// The endpoint the listener is bound to.
+    ///
+    /// Reads are synchronized: the port is not known until the listener binds,
+    /// so `waitForListening` rewrites this after construction and callers on the
+    /// accept path may observe it from another thread.
+    public var localEndpoint: WebTransportNetworkEndpoint {
+        localEndpointStorage.withLock { $0 }
+    }
+
     public let certificateSHA256: Data
+
+    /// True when the listener is presenting the ephemeral development
+    /// certificate rather than an injected, CA-issued identity.
+    ///
+    /// The development certificate is regenerated per construction, so
+    /// ``certificateSHA256`` is not stable across restarts when this is true.
+    public let usesDevelopmentCertificate: Bool
 
     private let listener: NetworkListener<QUIC>
     private let acceptedConnections: InteroperableQUICConnectionQueue
@@ -793,7 +840,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         allowedOrigin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
-        localOnly: Bool = false
+        localOnly: Bool = false,
+        identity: WebTransportServerIdentity = .developmentSelfSigned
     ) throws {
         try self.init(
             endpoint: WebTransportNetworkEndpoint(port: bindPort),
@@ -803,7 +851,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             allowedOrigin: allowedOrigin,
             protocols: protocols,
             settingsValidation: settingsValidation,
-            localOnly: localOnly
+            localOnly: localOnly,
+            identity: identity
         )
     }
 
@@ -815,13 +864,20 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         allowedOrigin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
-        localOnly: Bool = false
+        localOnly: Bool = false,
+        identity: WebTransportServerIdentity = .developmentSelfSigned
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
-        let identity = try InteroperableTLSIdentity.create()
-        certificateSHA256 = Data(SHA256.hash(data: identity.certificateDER))
+        let resolvedIdentity = try ServerIdentityResolver.resolve(
+            identity,
+            endpoint: endpoint,
+            authority: authority,
+            localOnly: localOnly
+        )
+        certificateSHA256 = resolvedIdentity.certificateSHA256
+        usesDevelopmentCertificate = identity.isDevelopmentSelfSigned
         let baseParameters = NWParametersBuilder(auto: {
-            InteroperableQUICRuntime.makeServerQUIC(identity: identity.networkIdentity)
+            InteroperableQUICRuntime.makeServerQUIC(identity: resolvedIdentity.networkIdentity)
         })
         .localEndpoint(
             .hostPort(
@@ -834,7 +890,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         listener = try NetworkListener<QUIC>(using: parameters)
             .newConnectionLimit(max(1, max(16, maxConcurrentConnections * 2)))
         acceptedConnections = InteroperableQUICConnectionQueue()
-        localEndpoint = endpoint
+        localEndpointStorage = Mutex(endpoint)
         self.authority = authority
         self.path = path
         self.allowedOrigin = allowedOrigin
@@ -864,8 +920,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             self.listener,
             timeoutMilliseconds: timeoutMilliseconds
         )
-        localEndpoint = WebTransportNetworkEndpoint(host: localEndpoint.host, port: port.rawValue)
-        return localEndpoint
+        return localEndpointStorage.withLock { endpoint in
+            endpoint = WebTransportNetworkEndpoint(host: endpoint.host, port: port.rawValue)
+            return endpoint
+        }
     }
 
     public func shutdown() {
@@ -1022,10 +1080,21 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         }
         InteroperableQUICDebug.log("server request payload bytes=\(requestPayload.count)")
         let requestFramePayload: Data
-        if let prefixed = try? WebTransportStreamSignaling.parsePrefix(requestPayload),
-           prefixed.form == .bidirectional {
+        if WebTransportStreamSignaling.hasStreamPrefix(requestPayload) {
+            // The peer asserted a WebTransport stream prefix, so a malformed one
+            // is a protocol violation and must propagate. Swallowing it here
+            // would silently reinterpret invalid bytes as an unprefixed CONNECT
+            // request and continue.
+            let prefixed = try WebTransportStreamSignaling.parsePrefix(requestPayload)
+            guard prefixed.form == .bidirectional else {
+                throw WebTransportDraft16Error(
+                    kind: .h3ID,
+                    message: "WebTransport CONNECT request stream carried a unidirectional stream marker"
+                )
+            }
             requestFramePayload = prefixed.remainingPayload
         } else {
+            // No marker: an ordinary HTTP/3 extended CONNECT request stream.
             requestFramePayload = requestPayload
         }
         let requestPrefix = try HTTP3Frame.decodePrefix(requestFramePayload)
@@ -1228,42 +1297,21 @@ private enum InteroperableQUICHelpers {
                 }
 
                 InteroperableQUICDebug.log("\(role) connection state monitor start=\(connection.state)")
-                handleState(connection.state)
+
+                // Register the observer before sampling the current state. A
+                // transition that lands between the two is then delivered twice
+                // rather than missed, and `completion` is one-shot so the
+                // duplicate is discarded. Sampling first would leave a window
+                // where a terminal transition is observed by nobody.
                 connection.onStateUpdate { _, state in
                     InteroperableQUICDebug.log("connection state update: \(state)")
                     handleState(state)
                 }
+                handleState(connection.state)
 
                 if let start {
                     InteroperableQUICDebug.log("\(role) connection start requested")
                     start()
-                }
-
-                Task {
-                    while true {
-                        try? await Task.sleep(for: .milliseconds(50))
-                        let polled = connection.state
-                        InteroperableQUICDebug.log("\(role) connection state poll: \(polled)")
-                        switch polled {
-                        case .ready:
-                            await completion.complete {
-                                continuation.resume()
-                            }
-                            return
-                        case .failed(let error):
-                            await completion.complete {
-                                continuation.resume(throwing: error)
-                            }
-                            return
-                        case .cancelled:
-                            await completion.complete {
-                                continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
-                            }
-                            return
-                        default:
-                            break
-                        }
-                    }
                 }
             }
         }
@@ -1343,34 +1391,31 @@ private enum InteroperableQUICHelpers {
             throw WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds)
         }
 
+        // Deliberately unstructured. Several operations wrapped here bottom out
+        // in Network.framework calls that do not observe cancellation, so a
+        // structured group would block on draining a stuck child after the
+        // deadline fired. This races the work against the timer and abandons
+        // the loser; `gate` guarantees the continuation resumes exactly once.
         return try await withCheckedThrowingContinuation { continuation in
-            let gate = TimeoutCompletion()
+            let gate = OneShotContinuation()
+
             let operationTask = Task { @Sendable in
                 do {
                     let value = try await operation()
-                    if await gate.tryFinish() {
-                        continuation.resume(returning: value)
-                    }
+                    await gate.complete { continuation.resume(returning: value) }
                 } catch {
-                    if await gate.tryFinish() {
-                        continuation.resume(throwing: error)
-                    }
+                    await gate.complete { continuation.resume(throwing: error) }
                 }
             }
 
-            let timeoutTask = Task { @Sendable in
-                let nanoseconds = UInt64(max(1, timeoutMilliseconds)) * 1_000_000
-                try? await Task.sleep(for: .nanoseconds(nanoseconds))
-                if await gate.tryFinish() {
+            // Self-retiring: after the sleep it either wins the gate or no-ops,
+            // then exits. No third task is needed to reap it.
+            Task { @Sendable in
+                try? await Task.sleep(for: .milliseconds(Int(timeoutMilliseconds)))
+                await gate.complete {
                     operationTask.cancel()
                     continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
                 }
-            }
-
-            Task { @Sendable in
-                await gate.waitUntilFinished()
-                operationTask.cancel()
-                timeoutTask.cancel()
             }
         }
     }
@@ -1381,24 +1426,6 @@ private enum InteroperableQUICHelpers {
         }
         let nsError = error as NSError
         return nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ENOTCONN)
-    }
-}
-
-private actor TimeoutCompletion {
-    private var completed = false
-
-    func tryFinish() -> Bool {
-        if completed {
-            return false
-        }
-        completed = true
-        return true
-    }
-
-    func waitUntilFinished() async {
-        while !completed {
-            try? await Task.sleep(for: .milliseconds(1))
-        }
     }
 }
 
@@ -1515,246 +1542,5 @@ private actor OneShotContinuation {
         }
         resumed = true
         operation()
-    }
-}
-
-private struct InteroperableTLSIdentity {
-    var networkIdentity: sec_identity_t
-    var certificateDER: Data
-
-    static func create() throws -> InteroperableTLSIdentity {
-        let attributes: [CFString: Any] = [
-            kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
-            kSecAttrKeySizeInBits: 256,
-            kSecAttrIsPermanent: false
-        ]
-
-        var privateKeyError: Unmanaged<CFError>?
-        // SAFETY: Security.framework initializes the optional retained CFError
-        // out-parameter; failure transfers that ownership exactly once below.
-        guard let privateKey = unsafe SecKeyCreateRandomKey(attributes as CFDictionary, &privateKeyError) else {
-            let detail = unsafe privateKeyError?.takeRetainedValue().localizedDescription
-                ?? "unknown Security.framework error"
-            throw WebTransportNetworkRuntimeError.invalidTransport("server key generation failed: \(detail)")
-        }
-        guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
-            throw WebTransportNetworkRuntimeError.invalidTransport("server public key extraction failed")
-        }
-        var publicKeyError: Unmanaged<CFError>?
-        // SAFETY: As above, the retained error is consumed only on failure.
-        guard let publicKeyData = unsafe SecKeyCopyExternalRepresentation(publicKey, &publicKeyError) as Data? else {
-            let detail = unsafe publicKeyError?.takeRetainedValue().localizedDescription
-                ?? "unknown Security.framework error"
-            throw WebTransportNetworkRuntimeError.invalidTransport("server public key export failed: \(detail)")
-        }
-
-        let certificateDER = try SelfSignedCertificate.make(
-            privateKey: privateKey,
-            p256PublicKeyDER: publicKeyData
-        )
-        guard let certificate = SecCertificateCreateWithData(nil, certificateDER as CFData) else {
-            throw WebTransportNetworkRuntimeError.invalidTransport("server certificate generation produced invalid DER")
-        }
-        guard let identity = SecIdentityCreate(nil, certificate, privateKey) else {
-            throw WebTransportNetworkRuntimeError.invalidTransport("server identity creation failed")
-        }
-        guard let networkIdentity = sec_identity_create_with_certificates(identity, [certificate] as CFArray) else {
-            throw WebTransportNetworkRuntimeError.invalidTransport("server QUIC identity conversion failed")
-        }
-        return InteroperableTLSIdentity(
-            networkIdentity: networkIdentity,
-            certificateDER: certificateDER
-        )
-    }
-}
-
-private enum SelfSignedCertificate {
-    static func make(privateKey: SecKey, p256PublicKeyDER: Data) throws -> Data {
-        let signatureAlgorithm = DER.sequence([
-            try DER.objectIdentifier([1, 2, 840, 10045, 4, 3, 2])
-        ])
-        let ecPublicKeyAlgorithm = DER.sequence([
-            try DER.objectIdentifier([1, 2, 840, 10045, 2, 1]),
-            try DER.objectIdentifier([1, 2, 840, 10045, 3, 1, 7])
-        ])
-        let name = DER.sequence([
-            DER.set([
-                DER.sequence([
-                    try DER.objectIdentifier([2, 5, 4, 3]),
-                    DER.utf8String("localhost")
-                ])
-            ])
-        ])
-        let validity = DER.sequence([
-            DER.utcTime(Date(timeIntervalSinceNow: -60)),
-            DER.utcTime(Date(timeIntervalSinceNow: 86_400))
-        ])
-        let subjectPublicKeyInfo = DER.sequence([
-            ecPublicKeyAlgorithm,
-            DER.bitString(p256PublicKeyDER)
-        ])
-        let extensions = DER.explicit(3, DER.sequence([
-            DER.sequence([
-                try DER.objectIdentifier([2, 5, 29, 19]),
-                DER.boolean(true),
-                DER.octetString(DER.sequence([DER.boolean(false)]))
-            ]),
-            DER.sequence([
-                try DER.objectIdentifier([2, 5, 29, 15]),
-                DER.boolean(true),
-                DER.octetString(DER.bitString(Data([0x80]), unusedBits: 7))
-            ]),
-            DER.sequence([
-                try DER.objectIdentifier([2, 5, 29, 37]),
-                DER.octetString(DER.sequence([
-                    try DER.objectIdentifier([1, 3, 6, 1, 5, 5, 7, 3, 1])
-                ]))
-            ]),
-            DER.sequence([
-                try DER.objectIdentifier([2, 5, 29, 17]),
-                DER.octetString(DER.sequence([
-                    DER.contextSpecificPrimitive(2, Data("localhost".utf8)),
-                    DER.contextSpecificPrimitive(7, Data([127, 0, 0, 1]))
-                ]))
-            ])
-        ]))
-
-        let tbsCertificate = DER.sequence([
-            DER.explicit(0, DER.integer(Data([0x02]))),
-            DER.integer(randomSerial()),
-            signatureAlgorithm,
-            name,
-            validity,
-            name,
-            subjectPublicKeyInfo,
-            extensions
-        ])
-
-        var signError: Unmanaged<CFError>?
-        // SAFETY: Security.framework initializes the optional retained CFError
-        // out-parameter; failure transfers that ownership exactly once below.
-        guard let signature = unsafe SecKeyCreateSignature(
-            privateKey,
-            .ecdsaSignatureMessageX962SHA256,
-            tbsCertificate as CFData,
-            &signError
-        ) as Data? else {
-            let detail = unsafe signError?.takeRetainedValue().localizedDescription
-                ?? "unknown Security.framework error"
-            throw WebTransportNetworkRuntimeError.invalidTransport("server certificate signing failed: \(detail)")
-        }
-
-        return DER.sequence([
-            tbsCertificate,
-            signatureAlgorithm,
-            DER.bitString(signature)
-        ])
-    }
-
-    private static func randomSerial() -> Data {
-        var bytes = [UInt8](repeating: 0, count: 16)
-        // SAFETY: `bytes` owns exactly the writable byte count supplied to
-        // SecRandomCopyBytes and remains alive for the synchronous call.
-        let status = unsafe SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        if status != errSecSuccess {
-            bytes = Array(UUID().uuidString.utf8.prefix(16))
-        }
-        bytes[0] &= 0x7f
-        if bytes.allSatisfy({ $0 == 0 }) {
-            bytes[0] = 1
-        }
-        return Data(bytes)
-    }
-}
-
-private enum DER {
-    static func sequence(_ parts: [Data]) -> Data {
-        tagged(0x30, parts.reduce(into: Data()) { $0.append($1) })
-    }
-
-    static func set(_ parts: [Data]) -> Data {
-        tagged(0x31, parts.reduce(into: Data()) { $0.append($1) })
-    }
-
-    static func explicit(_ tag: UInt8, _ content: Data) -> Data {
-        tagged(0xa0 + tag, content)
-    }
-
-    static func contextSpecificPrimitive(_ tag: UInt8, _ value: Data) -> Data {
-        tagged(0x80 + tag, value)
-    }
-
-    static func integer(_ value: Data) -> Data {
-        var bytes = Array(value)
-        while bytes.count > 1 && bytes[0] == 0 && bytes[1] < 0x80 {
-            bytes.removeFirst()
-        }
-        if let first = bytes.first, first >= 0x80 {
-            bytes.insert(0, at: 0)
-        }
-        return tagged(0x02, Data(bytes))
-    }
-
-    static func boolean(_ value: Bool) -> Data {
-        tagged(0x01, Data([value ? 0xff : 0x00]))
-    }
-
-    static func bitString(_ value: Data, unusedBits: UInt8 = 0) -> Data {
-        tagged(0x03, Data([unusedBits]) + value)
-    }
-
-    static func octetString(_ value: Data) -> Data {
-        tagged(0x04, value)
-    }
-
-    static func null() -> Data {
-        Data([0x05, 0x00])
-    }
-
-    static func objectIdentifier(_ components: [UInt64]) throws -> Data {
-        guard components.count >= 2 else {
-            throw WebTransportNetworkRuntimeError.invalidPayload
-        }
-        let firstTwo = components[0] * 40 + components[1]
-        var bytes = [UInt8(firstTwo)]
-        for component in components.dropFirst(2) {
-            var section = [UInt8(component & 0x7f)]
-            var remaining = component >> 7
-            while remaining > 0 {
-                section.insert(UInt8(remaining & 0x7f) | 0x80, at: 0)
-                remaining >>= 7
-            }
-            bytes.append(contentsOf: section)
-        }
-        return tagged(0x06, Data(bytes))
-    }
-
-    static func utf8String(_ value: String) -> Data {
-        tagged(0x0c, Data(value.utf8))
-    }
-
-    static func utcTime(_ value: Date) -> Data {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyMMddHHmmss'Z'"
-        return tagged(0x17, Data(formatter.string(from: value).utf8))
-    }
-
-    fileprivate static func tagged(_ tag: UInt8, _ content: Data) -> Data {
-        Data([tag]) + encodeLength(content.count) + content
-    }
-
-    private static func encodeLength(_ value: Int) -> Data {
-        if value < 128 {
-            return Data([UInt8(value)])
-        }
-        var remaining = value
-        var bytes: [UInt8] = []
-        while remaining > 0 {
-            bytes.insert(UInt8(remaining & 0xff), at: 0)
-            remaining >>= 8
-        }
-        return Data([0x80 | UInt8(bytes.count)] + bytes)
     }
 }
