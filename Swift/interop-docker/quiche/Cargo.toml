@@ -1,0 +1,11 @@
+[package]
+name = "wt-echo-quiche"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+web-transport-quiche = "0.4.1"
+tokio = { version = "1", features = ["full"] }
+rcgen = "0.13"
+bytes = "1"
+anyhow = "1"

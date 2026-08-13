@@ -35,6 +35,9 @@ fi
 IMPLEMENTATIONS=(
     "pywebtransport|54001|wt-interop-pywebtransport|interop-docker/pywebtransport|pywebtransport-stream-interop|stream datagram"
     "quinn|54002|wt-interop-quinn|interop-docker/quinn|chromium-interop|stream datagram"
+    # quiche is stream-only: the upstream crate's own echo example marks datagram
+    # support as unimplemented, and the VPS matrix runs it for stream alone.
+    "quiche|54003|wt-interop-quiche|interop-docker/quiche|chromium-interop|stream"
 )
 
 selected=("$@")
