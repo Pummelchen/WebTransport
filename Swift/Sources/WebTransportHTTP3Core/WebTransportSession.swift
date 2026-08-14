@@ -1722,7 +1722,13 @@ enum WebTransportSessionHeaders {
         guard let value = try optionalUniqueField(WebTransportHeaderName.selectedProtocol, from: fields) else {
             return nil
         }
-        return try? WebTransportProtocolNegotiation.decodeItem(value)
+        // A malformed wt-protocol is a protocol error, not "no protocol
+        // selected". Swallowing it left the peers disagreeing about which
+        // subprotocol was negotiated: the server believes it selected one and
+        // the application here believes none was chosen. For WebTransport that
+        // decides application semantics, so the two sides would then speak
+        // different protocols over the same session.
+        return try WebTransportProtocolNegotiation.decodeItem(value)
     }
 
     static func selectProtocol(
@@ -1758,7 +1764,11 @@ enum WebTransportSessionHeaders {
         guard let value = try optionalUniqueField(WebTransportHeaderName.availableProtocols, from: fields) else {
             return []
         }
-        return (try? WebTransportProtocolNegotiation.decodeList(value)) ?? []
+        // As above: a peer that sent the header and got it wrong is not a peer
+        // that offered nothing. An absent header means no protocols offered; a
+        // malformed one is a malformed CONNECT, which is how every other
+        // malformed field in this request is already treated.
+        return try WebTransportProtocolNegotiation.decodeList(value)
     }
 
     private static func requiredField(_ name: String, from fields: [HTTPFieldLine]) throws -> String {

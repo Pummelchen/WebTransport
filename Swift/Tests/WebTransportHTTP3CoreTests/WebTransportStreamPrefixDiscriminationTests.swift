@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import WebTransportHTTP3Core
+@testable import WebTransportHTTP3Core
 import WebTransportQUICCore
 
 /// A WebTransport stream prefix that the peer asserted but built incorrectly
@@ -226,4 +226,80 @@ func closedStreamTombstonesAreBounded() throws {
     #expect(clamped.maxRetainedClosedSessions == 0)
     #expect(clamped.maxRetainedClosedStreams == 0)
     _ = manager
+}
+
+// MARK: - Protocol negotiation must not silently downgrade
+
+/// A malformed subprotocol header is a protocol error, not an absent one.
+///
+/// Both negotiation headers were parsed with `try?`, so a peer that sent the
+/// header and got it wrong was treated as a peer that had said nothing. That
+/// leaves the two ends disagreeing about which subprotocol is in force, and for
+/// WebTransport the subprotocol decides application semantics — so the peers
+/// would go on to speak different protocols over the same session.
+///
+/// The decoder was already strict; only these call sites were not, which is why
+/// the conformance suite's own "decodeList rejects bad input" check passed
+/// while the behaviour was still wrong.
+@Test
+func malformedSelectedProtocolIsRejectedRatherThanTreatedAsNoneSelected() throws {
+    // Well-formed still works.
+    let good = try QPACK.headersFrame(fields: [
+        try HTTPFieldLine(name: ":status", value: "200"),
+        try HTTPFieldLine(name: "wt-protocol", value: WebTransportProtocolNegotiation.encodeItem("chat.v1"))
+    ])
+    let goodFields = try QPACK.decodeHeadersFrame(good)
+    #expect(try WebTransportSessionHeaders.selectedProtocol(from: goodFields) == "chat.v1")
+
+    // Absent means none selected, which is legitimate.
+    let absent = try QPACK.headersFrame(fields: [try HTTPFieldLine(name: ":status", value: "200")])
+    #expect(try WebTransportSessionHeaders.selectedProtocol(from: QPACK.decodeHeadersFrame(absent)) == nil)
+
+    // Present but malformed must throw, not report nil.
+    for bad in ["\"unterminated", "not-a-quoted-string", "\"bad\\n\""] {
+        let frame = try QPACK.headersFrame(fields: [
+            try HTTPFieldLine(name: ":status", value: "200"),
+            try HTTPFieldLine(name: "wt-protocol", value: bad)
+        ])
+        let fields = try QPACK.decodeHeadersFrame(frame)
+        #expect(throws: Error.self, "malformed wt-protocol \(bad) must be rejected") {
+            _ = try WebTransportSessionHeaders.selectedProtocol(from: fields)
+        }
+    }
+}
+
+@Test
+func malformedAvailableProtocolsIsRejectedRatherThanTreatedAsNoneOffered() throws {
+    func connectFields(availableProtocols: String?) throws -> [HTTPFieldLine] {
+        var fields = try WebTransportHTTP3Headers.connectRequest(
+            authority: "example.com",
+            path: "/wt",
+            origin: nil,
+            upgradeToken: WebTransportHTTP3DraftConstants.current.upgradeToken
+        )
+        if let availableProtocols {
+            fields.append(try HTTPFieldLine(
+                name: "wt-available-protocols",
+                value: availableProtocols
+            ))
+        }
+        return fields
+    }
+
+    // Absent is fine and means nothing was offered.
+    let none = try WebTransportSessionHeaders.request(from: try connectFields(availableProtocols: nil))
+    #expect(none.availableProtocols.isEmpty)
+
+    // Well-formed round-trips.
+    let listed = try WebTransportSessionHeaders.request(
+        from: try connectFields(availableProtocols: try WebTransportProtocolNegotiation.encodeList(["chat.v1"]))
+    )
+    #expect(listed.availableProtocols == ["chat.v1"])
+
+    // Malformed must be rejected rather than silently becoming "no protocols".
+    for bad in ["\"bad\\n\"", "\"unterminated", "chat.v1"] {
+        #expect(throws: Error.self, "malformed wt-available-protocols \(bad) must be rejected") {
+            _ = try WebTransportSessionHeaders.request(from: try connectFields(availableProtocols: bad))
+        }
+    }
 }
