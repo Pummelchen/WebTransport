@@ -61,7 +61,23 @@ let response = try await stream.receive()
 try await session.close()
 ```
 
-Platform certificate trust is the default. The local self-signed mode is explicit and restricted to loopback development endpoints.
+Platform certificate trust is the client default. The local self-signed mode is explicit and restricted to loopback development endpoints.
+
+A server needs a real identity. The default development certificate is refused on
+any non-loopback bind address, because a self-signed certificate cannot be
+validated by a peer for a routable name:
+
+```swift
+let server = WebTransportServer(configuration: WebTransportServerConfiguration(
+    authority: "example.com",
+    identity: .pkcs12(data: bundle, passphrase: passphrase),
+    admission: .publicFacing
+))
+```
+
+Serving browsers additionally requires `settingsValidation: .interoperable`. The
+default is `.draft16Strict`, which is the point of this implementation but
+rejects peers still on earlier revisions — browsers among them.
 
 ## What is implemented
 
@@ -69,8 +85,9 @@ Platform certificate trust is the default. The local self-signed mode is explici
 - Draft-16 optimistic capsules, directional flow control, close-message limits, and TLS exporter binding.
 - HTTP/3 settings and frames, QPACK, QUIC wire/state primitives, and TLS 1.3 handshake support.
 - A Network.framework-backed client/server runtime with sanitized logging and public error surfaces.
-- Deterministic protocol tests, malformed-input and resource-limit coverage, CLI conformance, and reproducible release builds.
-- Independent stream and datagram interoperability checks against pywebtransport/aioquic, Quinn, and Quiche implementations.
+- Server TLS identity injection (PKCS#12 or DER chain), graceful shutdown with GOAWAY and drain, connection admission limits, and tunable QUIC transport parameters.
+- Deterministic protocol tests, malformed-input and resource-limit coverage, parser fuzzing, sanitizer and soak runs, CLI conformance, and reproducible release builds.
+- Independent stream and datagram interoperability against pywebtransport/aioquic, Quinn, and Quiche, plus verified browser sessions with Chrome.
 
 See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Implementation-Status) for the precise coverage boundary.
 
@@ -81,6 +98,13 @@ swift build
 swift test
 swift run WebTransportClient --scenario all
 swift run WebTransportServer --scenario all
+```
+
+Interoperability against independent implementations, and a connection-churn soak:
+
+```sh
+./Swift/run-docker-interop.sh
+./Swift/run-soak.sh
 ```
 
 Release and interoperability checks live under `Swift/`:
