@@ -74,9 +74,32 @@ public enum WebTransportServerIdentity: Equatable, Sendable {
 struct ResolvedServerIdentity {
     var networkIdentity: sec_identity_t
     var leafCertificateDER: Data
+    /// Expiry of the leaf certificate, when it could be read.
+    ///
+    /// Surfaced because Network.framework fixes the identity in the listener's
+    /// parameters at construction, so an expiring certificate cannot be swapped
+    /// in place — an operator has to schedule a rebind, and needs the deadline
+    /// to do it before peers start failing validation.
+    var notAfter: Date?
 
     var certificateSHA256: Data {
         Data(SHA256.hash(data: leafCertificateDER))
+    }
+
+    /// Reads the leaf certificate's `notAfter`.
+    ///
+    /// Returns nil rather than throwing: a certificate whose expiry cannot be
+    /// read is still perfectly usable, and refusing to serve over a missing
+    /// convenience value would be worse than serving without it.
+    static func expiry(of certificate: SecCertificate) -> Date? {
+        guard let values = SecCertificateCopyValues(certificate, [kSecOIDX509V1ValidityNotAfter] as CFArray, nil)
+            as? [CFString: Any],
+            let entry = values[kSecOIDX509V1ValidityNotAfter] as? [CFString: Any],
+            let raw = entry[kSecPropertyKeyValue] as? NSNumber else {
+            return nil
+        }
+        // Security reports this as seconds since the Apple absolute reference date.
+        return Date(timeIntervalSinceReferenceDate: raw.doubleValue)
     }
 }
 
@@ -247,7 +270,11 @@ enum ServerIdentityResolver {
         guard let networkIdentity = sec_identity_create_with_certificates(identity, presentedChain as CFArray) else {
             throw WebTransportNetworkRuntimeError.invalidTransport("server QUIC identity conversion failed")
         }
-        return ResolvedServerIdentity(networkIdentity: networkIdentity, leafCertificateDER: leafDER)
+        return ResolvedServerIdentity(
+            networkIdentity: networkIdentity,
+            leafCertificateDER: leafDER,
+            notAfter: ResolvedServerIdentity.expiry(of: leaf)
+        )
     }
 }
 

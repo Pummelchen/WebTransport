@@ -440,6 +440,39 @@ public actor WebTransportServer {
             timeoutMilliseconds: configuration.timeoutMilliseconds
         )
     }
+
+    /// Replaces a running listener with one presenting a new TLS identity.
+    ///
+    /// Network.framework fixes the identity in the listener's parameters when
+    /// the listener is constructed — the parameters are built once per listener,
+    /// not once per connection — so a certificate cannot be swapped on a live
+    /// listener. Rotation is therefore a handover: the old listener is drained
+    /// and stopped, then a new one binds with the new identity.
+    ///
+    /// The old listener is drained *first*, so its peers are told the server is
+    /// going away rather than being cut off. That ordering also means the port
+    /// is unbound for a short window, and connections arriving in it are
+    /// refused. A deployment that cannot tolerate that gap should rotate behind
+    /// a load balancer instead, taking one instance out at a time.
+    ///
+    /// The returned listener replaces the old one; the caller must not keep
+    /// using the previous value.
+    public func rotateIdentity(
+        of existing: WebTransportListeningServer,
+        to identity: WebTransportServerIdentity,
+        on endpoint: WebTransportEndpoint,
+        gracePeriodMilliseconds: Int32 = 5_000
+    ) async throws -> WebTransportListeningServer {
+        await existing.shutdown(gracePeriodMilliseconds: gracePeriodMilliseconds)
+
+        var rotated = configuration
+        rotated.identity = identity
+        let replacement = WebTransportServer(configuration: rotated, logger: logger)
+        return try await replacement.listen(
+            on: endpoint,
+            maxConcurrentConnections: rotated.admission.maxConcurrentConnections
+        )
+    }
 }
 
 /// Active network WebTransport listener returned by `WebTransportServer.listen`.
@@ -450,6 +483,17 @@ public actor WebTransportServer {
 public final class WebTransportListeningServer: @unchecked Sendable {
     public let localEndpoint: WebTransportEndpoint
     public let certificateSHA256: Data
+
+    /// Expiry of the certificate this listener presents, when it could be read.
+    ///
+    /// The TLS identity is fixed in the listener's parameters when the listener
+    /// is created — Network.framework builds those once per listener, not once
+    /// per connection — so a renewed certificate cannot be swapped in on a live
+    /// listener. Rotation means replacing the listener, which is what
+    /// ``WebTransportServer/rotateIdentity(of:to:on:gracePeriodMilliseconds:)``
+    /// does. Schedule against this date: with a 90-day certificate renewed at 60
+    /// days, a rebind is due roughly every two months.
+    public let certificateNotAfter: Date?
 
     /// True when the listener presents the ephemeral development certificate.
     ///
@@ -470,6 +514,7 @@ public final class WebTransportListeningServer: @unchecked Sendable {
         self.runtime = runtime
         self.localEndpoint = localEndpoint
         self.certificateSHA256 = runtime.certificateSHA256
+        self.certificateNotAfter = runtime.certificateNotAfter
         self.usesDevelopmentCertificate = runtime.usesDevelopmentCertificate
         self.logger = logger
         self.timeoutMilliseconds = timeoutMilliseconds

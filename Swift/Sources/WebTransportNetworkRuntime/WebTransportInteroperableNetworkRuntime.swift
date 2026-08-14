@@ -886,6 +886,15 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
     public let certificateSHA256: Data
 
+    /// Expiry of the certificate this listener presents, when it could be read.
+    ///
+    /// Network.framework fixes the identity in the listener's parameters at
+    /// construction — measured: the parameters are built once per listener, not
+    /// once per connection — so the certificate cannot be replaced on a live
+    /// listener. Rotation means standing up a new listener, which an operator
+    /// has to schedule against this date.
+    public let certificateNotAfter: Date?
+
     /// True when the listener is presenting the ephemeral development
     /// certificate rather than an injected, CA-issued identity.
     ///
@@ -961,6 +970,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             localOnly: localOnly
         )
         certificateSHA256 = resolvedIdentity.certificateSHA256
+        certificateNotAfter = resolvedIdentity.notAfter
         usesDevelopmentCertificate = identity.isDevelopmentSelfSigned
         let baseParameters = NWParametersBuilder(auto: {
             InteroperableQUICRuntime.makeServerQUIC(
