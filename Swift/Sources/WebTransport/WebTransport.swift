@@ -58,6 +58,12 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
     /// Server-supported WebTransport subprotocol tokens.
     public var supportedProtocols: [String]
     /// HTTP/3 WebTransport settings validation profile.
+    ///
+    /// Defaults to `.interoperable` rather than `.draft16Strict`: browsers send
+    /// `:protocol = webtransport` instead of the draft-16 `webtransport-h3`
+    /// token, so a strict server rejects every browser client. Set
+    /// `.draft16Strict` explicitly when the point is to assert draft-16
+    /// conformance rather than to serve arbitrary peers.
     public var settingsValidation: HTTP3WebTransportSettingsValidation
     /// Listener/session timeout in milliseconds.
     public var timeoutMilliseconds: Int32
@@ -76,7 +82,7 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         path: String = "/wt",
         origin: String? = nil,
         supportedProtocols: [String] = [],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .interoperable,
         timeoutMilliseconds: Int32 = 15_000,
         localOnly: Bool = false,
         identity: WebTransportServerIdentity = .developmentSelfSigned

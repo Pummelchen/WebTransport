@@ -1060,6 +1060,13 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             controlPayload,
             settingsValidation: settingsValidation
         )
+        // Peer SETTINGS identify which WebTransport revision the client speaks.
+        // Logging the decoded ids is what makes a "handshake failed" from an
+        // opaque peer such as a browser diagnosable at all.
+        InteroperableQUICDebug.log("server local settings: \(Self.renderSettings(http3.localSettings))")
+        if let peerSettings = http3.remoteSettings {
+            InteroperableQUICDebug.log("server peer settings: \(Self.renderSettings(peerSettings))")
+        }
         var manager = WebTransportSessionManager(
             http3: http3,
             settingsValidation: settingsValidation
@@ -1115,10 +1122,24 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             requireProtocolSelection: !protocols.isEmpty
         )
 
-        let decision = try manager.receiveClientSessionRequest(
-            streamID: requestStream.streamID,
-            frame: requestPrefix.frame,
-            policy: policy
+        let decision: WebTransportServerSessionDecision
+        do {
+            decision = try manager.receiveClientSessionRequest(
+                streamID: requestStream.streamID,
+                frame: requestPrefix.frame,
+                policy: policy
+            )
+        } catch {
+            // Without this the reason a peer's CONNECT was refused is lost: the
+            // throw propagates as a transport error once the peer has already
+            // gone, which is what makes browser handshake failures opaque.
+            InteroperableQUICDebug.log("server CONNECT rejected before response: \(error)")
+            throw error
+        }
+        InteroperableQUICDebug.log(
+            "server CONNECT decision: session=\(decision.session.id) "
+            + "protocol=\(decision.session.selectedProtocol ?? "none") "
+            + "rejection=\(decision.rejectionError.map { "\($0)" } ?? "none")"
         )
         let responsePayload = try decision.responseFrame.encode()
         try await runWithTimeout {
@@ -1146,6 +1167,15 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             timeoutMilliseconds: timeoutMilliseconds,
             initialConnectCapsuleBytes: optimisticCapsuleBytes
         )
+    }
+
+    /// Renders HTTP/3 SETTINGS as sorted `0xid=value` pairs for the diagnostic
+    /// channel. Setting identifiers and counts only — no peer payload.
+    private static func renderSettings(_ settings: HTTP3Settings) -> String {
+        settings.entries
+            .sorted { $0.key < $1.key }
+            .map { "0x\(String($0.key, radix: 16))=\($0.value)" }
+            .joined(separator: " ")
     }
 
     private static func resolveListenerPort(

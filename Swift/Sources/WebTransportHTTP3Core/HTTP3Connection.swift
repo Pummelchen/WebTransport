@@ -41,8 +41,22 @@ public enum HTTP3DataFramePolicy: Equatable, Sendable {
     case buffer
 }
 
+/// Which peer WebTransport settings and `:protocol` tokens are acceptable.
+///
+/// The distinction that matters operationally is between *conformance* and
+/// *serving*. `draft16Strict` asserts the peer speaks draft-16 exactly, which is
+/// what the conformance suite needs and what a client should send. A server
+/// exposed to arbitrary clients needs the opposite posture: browsers send
+/// `:protocol = webtransport`, not the draft-16 `webtransport-h3` token, so a
+/// strict server rejects every browser. Use ``interoperable`` there.
 public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
+    /// Draft-16 exactly. Correct for conformance testing and for what a client sends.
     case draft16Strict
+    /// Superset profile: accepts the draft-16 token and the bare `webtransport`
+    /// token, and advertises the legacy WebTransport setting alongside the
+    /// draft-16 ones. This is the profile a publicly reachable server wants,
+    /// because it is liberal in what it accepts without weakening what it sends.
+    case interoperable
     case chromiumInterop
     case pywebtransportStreamInterop
 
@@ -50,6 +64,8 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
         switch value {
         case "draft16-strict":
             return .draft16Strict
+        case "interoperable":
+            return .interoperable
         case "chromium-interop":
             return .chromiumInterop
         case "pywebtransport-stream-interop":
@@ -63,16 +79,20 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
         switch self {
         case .draft16Strict:
             return .webTransportDraft16Defaults
-        case .chromiumInterop:
+        case .interoperable, .chromiumInterop:
             return .webTransportChromiumInteropDefaults
         case .pywebtransportStreamInterop:
             return .webTransportPyWebTransportStreamInteropDefaults
         }
     }
 
+    /// The token this endpoint sends on its own CONNECT request.
+    ///
+    /// `interoperable` still *sends* the draft-16 token: broadening what a
+    /// server accepts should not change what it claims to speak.
     public var upgradeToken: String {
         switch self {
-        case .draft16Strict:
+        case .draft16Strict, .interoperable:
             return WebTransportHTTP3DraftConstants.current.upgradeToken
         case .chromiumInterop, .pywebtransportStreamInterop:
             return "webtransport"
@@ -83,7 +103,7 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
         switch self {
         case .draft16Strict:
             return [WebTransportHTTP3DraftConstants.current.upgradeToken]
-        case .chromiumInterop, .pywebtransportStreamInterop:
+        case .interoperable, .chromiumInterop, .pywebtransportStreamInterop:
             return [WebTransportHTTP3DraftConstants.current.upgradeToken, "webtransport"]
         }
     }
@@ -261,7 +281,12 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
         switch settingsValidation {
         case .draft16Strict:
             try decodedSettings.validateWebTransportDraft16Requirements(peerRole: peerRole)
-        case .chromiumInterop:
+        case .interoperable, .chromiumInterop:
+            // The strict validator demands SETTINGS_WT_ENABLE_WEBTRANSPORT = 1
+            // from a client peer as well. Browsers do not send that setting —
+            // they send the legacy SETTINGS_WEBTRANSPORT_MAX_SESSIONS — so a
+            // strict server rejects browser SETTINGS on top of rejecting the
+            // browser's `:protocol` token. This validator accepts either.
             try decodedSettings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
         case .pywebtransportStreamInterop:
             try decodedSettings.validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: peerRole)

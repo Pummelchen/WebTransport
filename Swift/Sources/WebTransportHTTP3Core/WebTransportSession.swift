@@ -1379,7 +1379,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         switch settingsValidation {
         case .draft16Strict:
             try http3.localSettings.validateWebTransportDraft16Requirements()
-        case .chromiumInterop:
+        case .interoperable, .chromiumInterop:
             try http3.localSettings.validateWebTransportChromiumInteropRequirements()
         case .pywebtransportStreamInterop:
             try http3.localSettings.validateWebTransportPyWebTransportStreamInteropRequirements()
@@ -1391,7 +1391,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         switch settingsValidation {
         case .draft16Strict:
             try remoteSettings.validateWebTransportDraft16Requirements(peerRole: peerRole)
-        case .chromiumInterop:
+        case .interoperable, .chromiumInterop:
             try remoteSettings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
         case .pywebtransportStreamInterop:
             try remoteSettings.validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: peerRole)
