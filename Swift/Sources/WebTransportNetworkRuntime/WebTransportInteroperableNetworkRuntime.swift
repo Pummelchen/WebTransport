@@ -989,14 +989,22 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     @discardableResult
     public func serveOne(timeoutMilliseconds: Int32 = 1_000) async throws -> WebTransportNetworkSessionResult {
         let session = try await acceptSession(timeoutMilliseconds: timeoutMilliseconds)
+
+        // The peer picks the transport, so the server cannot. `datagramsAvailable`
+        // is reported optimistically — Network.framework does not confirm datagram
+        // support until the channel is first used, so the runtime always answers
+        // true — which meant this waited for a datagram even when the peer had
+        // opened a stream. A browser opens a stream by default, so it hung here
+        // after a successful handshake. Wait for both and echo on whichever the
+        // peer actually used.
         let echoed: Data
         if session.datagramsAvailable {
-            echoed = try await session.receiveDatagram(timeoutMilliseconds: timeoutMilliseconds)
-            try await session.sendDatagram(echoed, timeoutMilliseconds: timeoutMilliseconds)
+            echoed = try await InteroperableQUICHelpers.raceFirstSuccess([
+                { try await Self.echoOneDatagram(on: session, timeoutMilliseconds: timeoutMilliseconds) },
+                { try await Self.echoOneStream(on: session, timeoutMilliseconds: timeoutMilliseconds) }
+            ])
         } else {
-            let stream = try await session.acceptBidirectionalStream(timeoutMilliseconds: timeoutMilliseconds)
-            echoed = try await stream.receive(timeoutMilliseconds: timeoutMilliseconds)
-            try await stream.send(echoed, endOfStream: true, timeoutMilliseconds: timeoutMilliseconds)
+            echoed = try await Self.echoOneStream(on: session, timeoutMilliseconds: timeoutMilliseconds)
         }
         await session.waitForPeerClosure(timeoutMilliseconds: min(timeoutMilliseconds, 250))
         guard let echoedMessage = String(data: echoed, encoding: .utf8) else {
@@ -1009,6 +1017,27 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             transport: session.transport,
             sessionEstablished: true
         )
+    }
+
+    /// Receives one datagram and echoes it back verbatim.
+    private static func echoOneDatagram(
+        on session: WebTransportNetworkSession,
+        timeoutMilliseconds: Int32
+    ) async throws -> Data {
+        let payload = try await session.receiveDatagram(timeoutMilliseconds: timeoutMilliseconds)
+        try await session.sendDatagram(payload, timeoutMilliseconds: timeoutMilliseconds)
+        return payload
+    }
+
+    /// Accepts one bidirectional stream and echoes its payload back verbatim.
+    private static func echoOneStream(
+        on session: WebTransportNetworkSession,
+        timeoutMilliseconds: Int32
+    ) async throws -> Data {
+        let stream = try await session.acceptBidirectionalStream(timeoutMilliseconds: timeoutMilliseconds)
+        let payload = try await stream.receive(timeoutMilliseconds: timeoutMilliseconds)
+        try await stream.send(payload, endOfStream: true, timeoutMilliseconds: timeoutMilliseconds)
+        return payload
     }
 
     private func acceptSession(
@@ -1523,6 +1552,44 @@ private enum InteroperableQUICHelpers {
         }
     }
 
+    /// Runs `operations` concurrently and returns the first one to succeed.
+    ///
+    /// An operation that fails does not end the race; the error surfaces only if
+    /// every operation fails, in which case the first error is thrown. Losers are
+    /// cancelled but never awaited, for the same reason `withTimeout` abandons
+    /// rather than drains: these operations bottom out in Network.framework calls
+    /// that may not observe cancellation. Each is independently bounded by its
+    /// own timeout, so an abandoned loser retires on its own.
+    static func raceFirstSuccess<T: Sendable>(
+        _ operations: [@Sendable () async throws -> T]
+    ) async throws -> T {
+        guard !operations.isEmpty else {
+            throw WebTransportNetworkRuntimeError.invalidPayload
+        }
+        let total = operations.count
+        return try await withCheckedThrowingContinuation { continuation in
+            let state = RaceCompletion()
+            let tasks = Mutex<[Task<Void, Never>]>([])
+            for operation in operations {
+                let task = Task { @Sendable in
+                    do {
+                        let value = try await operation()
+                        let won = await state.succeed()
+                        if won {
+                            continuation.resume(returning: value)
+                            tasks.withLock { $0.forEach { $0.cancel() } }
+                        }
+                    } catch {
+                        if let final = await state.fail(error, total: total) {
+                            continuation.resume(throwing: final)
+                        }
+                    }
+                }
+                tasks.withLock { $0.append(task) }
+            }
+        }
+    }
+
     static func isTransientNotConnected(_ error: Error) -> Bool {
         if let posix = error as? POSIXError {
             return posix.code == .ENOTCONN
@@ -1647,6 +1714,42 @@ private actor InteroperableQUICInboundStreamCollector {
             }
             waiting[direction, default: []].append(continuation)
         }
+    }
+}
+
+/// Tracks a race between several ways of receiving the same thing.
+///
+/// Distinct from ``OneShotContinuation`` because a loss is not a result: only the
+/// first success resumes the caller, and an error is surfaced solely when every
+/// entrant has failed.
+private actor RaceCompletion {
+    private var finished = false
+    private var failures = 0
+    private var firstError: Error?
+
+    func succeed() -> Bool {
+        guard !finished else {
+            return false
+        }
+        finished = true
+        return true
+    }
+
+    /// Returns the error to surface when this failure was the last one, and nil
+    /// while another entrant could still win.
+    func fail(_ error: Error, total: Int) -> Error? {
+        guard !finished else {
+            return nil
+        }
+        failures += 1
+        if firstError == nil {
+            firstError = error
+        }
+        guard failures >= total else {
+            return nil
+        }
+        finished = true
+        return firstError
     }
 }
 
