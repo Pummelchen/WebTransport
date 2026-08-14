@@ -186,7 +186,7 @@ public struct WebTransportQUICClient: Sendable {
             try await localControlStream.send(localControlPayload, endOfStream: false)
         }
         InteroperableQUICDebug.log("client sent local control payload")
-        try await InteroperableQUICHelpers.openQPACKStreams(
+        let qpackStreams = try await InteroperableQUICHelpers.openQPACKStreams(
             on: connection,
             role: "client",
             timeoutMilliseconds: remainingTimeout()
@@ -271,6 +271,7 @@ public struct WebTransportQUICClient: Sendable {
             selectedProtocol: session.selectedProtocol,
             localControlStream: localControlStream,
             connectStream: requestStream,
+            qpackStreams: qpackStreams,
             localEndpoint: InteroperableQUICRuntime.networkEndpoint(
                 from: connection.localEndpoint,
                 fallback: WebTransportNetworkEndpoint(host: "unknown", port: 0)
@@ -449,6 +450,9 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     private let manager: WebTransportNetworkSessionManagerState
     private let localControlStream: QUIC.Stream<QUICStream>
     private let connectStream: QUIC.Stream<QUICStream>
+    /// Held only to keep the QPACK critical streams open; never read or written
+    /// after their type prefix. Releasing them would FIN a critical stream.
+    private let qpackStreams: [QUIC.Stream<QUICStream>]
     private let timeoutMilliseconds: Int32
     private let connectCapsuleTask: Task<Void, Never>
 
@@ -461,6 +465,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         selectedProtocol: String?,
         localControlStream: QUIC.Stream<QUICStream>,
         connectStream: QUIC.Stream<QUICStream>,
+        qpackStreams: [QUIC.Stream<QUICStream>],
         localEndpoint: WebTransportNetworkEndpoint,
         remoteEndpoint: WebTransportNetworkEndpoint,
         datagramsAvailable: Bool,
@@ -476,6 +481,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         self.selectedProtocol = selectedProtocol
         self.localControlStream = localControlStream
         self.connectStream = connectStream
+        self.qpackStreams = qpackStreams
         self.localEndpoint = localEndpoint
         self.remoteEndpoint = remoteEndpoint
         self.datagramsAvailable = datagramsAvailable
@@ -1065,7 +1071,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             try await localControlStream.send(localControlPayload, endOfStream: false)
         }
         InteroperableQUICDebug.log("server sent local control payload")
-        try await InteroperableQUICHelpers.openQPACKStreams(
+        let qpackStreams = try await InteroperableQUICHelpers.openQPACKStreams(
             on: connection,
             role: "server",
             timeoutMilliseconds: remainingTimeout()
@@ -1181,6 +1187,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             selectedProtocol: decision.session.selectedProtocol,
             localControlStream: localControlStream,
             connectStream: requestStream,
+            qpackStreams: qpackStreams,
             localEndpoint: localEndpoint,
             remoteEndpoint: InteroperableQUICRuntime.networkEndpoint(
                 from: connection.remoteEndpoint,
@@ -1304,11 +1311,19 @@ private enum InteroperableQUICHelpers {
     ///
     /// Only the stream type prefix is written; no instructions follow, which is
     /// valid for an endpoint that never populates a dynamic table.
+    /// The returned streams MUST be retained for the lifetime of the
+    /// connection. QPACK encoder and decoder streams are critical streams: RFC
+    /// 9204 section 4.2 forbids either peer from closing them, and a peer that
+    /// observes a FIN on one closes the connection with H3_CLOSED_CRITICAL_STREAM.
+    /// Dropping the handle lets the transport finish the stream, which is
+    /// indistinguishable from closing it on purpose.
+    @discardableResult
     static func openQPACKStreams(
         on connection: NetworkConnection<QUIC>,
         role: String,
         timeoutMilliseconds: Int32
-    ) async throws {
+    ) async throws -> [QUIC.Stream<QUICStream>] {
+        var opened: [QUIC.Stream<QUICStream>] = []
         for (label, type) in [
             ("encoder", HTTP3StreamType.qpackEncoder),
             ("decoder", HTTP3StreamType.qpackDecoder)
@@ -1321,7 +1336,9 @@ private enum InteroperableQUICHelpers {
                 try await stream.send(prefix, endOfStream: false)
             }
             InteroperableQUICDebug.log("\(role) opened QPACK \(label) stream \(stream.streamID)")
+            opened.append(stream)
         }
+        return opened
     }
 
     static func waitForReady(
@@ -1436,9 +1453,11 @@ private enum InteroperableQUICHelpers {
             let prefix = try HTTP3StreamTypeParser.parsePrefix(bytes)
             switch prefix.type {
             case HTTP3StreamType.control:
+                await inboundStreams.retainCritical(stream)
                 return bytes
             case HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
                 InteroperableQUICDebug.log("\(role) ignoring peer QPACK stream type=\(prefix.type)")
+                await inboundStreams.retainCritical(stream)
                 Task {
                     await drainPeerCriticalStream(stream)
                 }
@@ -1557,6 +1576,20 @@ private actor InteroperableQUICInboundStreamCollector {
     private var queued: [Int: [QUIC.Stream<QUICStream>]] = [:]
     private var waiting: [Int: [CheckedContinuation<QUIC.Stream<QUICStream>, Error>]] = [:]
     private var failure: Error?
+
+    /// Peer control and QPACK streams, held for the lifetime of the connection.
+    ///
+    /// These are critical streams: RFC 9114 section 6.2.1 and RFC 9204 section
+    /// 4.2 forbid closing them, and a peer that receives STOP_SENDING on one
+    /// closes the connection with H3_CLOSED_CRITICAL_STREAM. Releasing the
+    /// handle after reading lets the transport cancel the receive side, which
+    /// the peer sees as exactly that. This collector is owned by the session, so
+    /// anything parked here lives as long as the connection does.
+    private var retainedCriticalStreams: [QUIC.Stream<QUICStream>] = []
+
+    func retainCritical(_ stream: QUIC.Stream<QUICStream>) {
+        retainedCriticalStreams.append(stream)
+    }
 
     func enqueue(_ stream: QUIC.Stream<QUICStream>, direction: Int) {
         guard failure == nil else {

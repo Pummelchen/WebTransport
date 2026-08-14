@@ -59,11 +59,15 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
     public var supportedProtocols: [String]
     /// HTTP/3 WebTransport settings validation profile.
     ///
-    /// Defaults to `.interoperable` rather than `.draft16Strict`: browsers send
-    /// `:protocol = webtransport` instead of the draft-16 `webtransport-h3`
-    /// token, so a strict server rejects every browser client. Set
-    /// `.draft16Strict` explicitly when the point is to assert draft-16
-    /// conformance rather than to serve arbitrary peers.
+    /// Defaults to `.draft16Strict`, which is this implementation's reason for
+    /// existing: out of the box the server is the draft-16 truth and accepts
+    /// only peers that speak it.
+    ///
+    /// Deployed peers — browsers in particular — still implement earlier
+    /// revisions: they send `:protocol = webtransport` rather than the draft-16
+    /// `webtransport-h3` token, and they look for pre-draft-16 SETTINGS
+    /// identifiers. Serving those peers is a deliberate, explicit choice, so set
+    /// `.interoperable` rather than having leniency applied silently.
     public var settingsValidation: HTTP3WebTransportSettingsValidation
     /// Listener/session timeout in milliseconds.
     public var timeoutMilliseconds: Int32
@@ -82,7 +86,7 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         path: String = "/wt",
         origin: String? = nil,
         supportedProtocols: [String] = [],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .interoperable,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         timeoutMilliseconds: Int32 = 15_000,
         localOnly: Bool = false,
         identity: WebTransportServerIdentity = .developmentSelfSigned
