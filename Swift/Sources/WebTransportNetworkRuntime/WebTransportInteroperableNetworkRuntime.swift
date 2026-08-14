@@ -486,6 +486,12 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         self.remoteEndpoint = remoteEndpoint
         self.datagramsAvailable = datagramsAvailable
         self.timeoutMilliseconds = timeoutMilliseconds
+        // Lifecycle markers for the diagnostic channel. Session leaks are the
+        // failure this runtime is most exposed to — abandoned work can hold a
+        // session past its connection — and resident memory cannot answer the
+        // question, because a freed session's pages are not returned to the OS.
+        // Counting these two lines can.
+        InteroperableQUICDebug.log("session established")
         self.connectCapsuleTask = Task {
             await Self.receiveConnectCapsules(
                 from: connectStream,
@@ -497,6 +503,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     }
 
     deinit {
+        InteroperableQUICDebug.log("session released")
         connectCapsuleTask.cancel()
         inboundTask.cancel()
     }
@@ -1145,11 +1152,22 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         // opened a stream. A browser opens a stream by default, so it hung here
         // after a successful handshake. Wait for both and echo on whichever the
         // peer actually used.
+        // Racing means one entrant loses and is abandoned, and an abandoned
+        // entrant keeps the session alive until its own wait expires. Handing it
+        // the caller's full timeout makes that window arbitrarily long: with a
+        // ten-minute timeout under sustained churn, sessions accumulate at the
+        // churn rate for ten minutes. Measured as resident growth that scales
+        // with the configured timeout and vanishes at short ones.
+        //
+        // The wait is therefore capped. A peer that has established a session
+        // and then sent nothing for this long is not mid-exchange, so the cap
+        // costs nothing real while bounding what an abandoned entrant can hold.
         let echoed: Data
         if session.datagramsAvailable {
+            let raceTimeout = min(timeoutMilliseconds, Self.firstMessageWaitMilliseconds)
             echoed = try await InteroperableQUICHelpers.raceFirstSuccess([
-                { try await Self.echoOneDatagram(on: session, timeoutMilliseconds: timeoutMilliseconds) },
-                { try await Self.echoOneStream(on: session, timeoutMilliseconds: timeoutMilliseconds) }
+                { try await Self.echoOneDatagram(on: session, timeoutMilliseconds: raceTimeout) },
+                { try await Self.echoOneStream(on: session, timeoutMilliseconds: raceTimeout) }
             ])
         } else {
             echoed = try await Self.echoOneStream(on: session, timeoutMilliseconds: timeoutMilliseconds)
@@ -1166,6 +1184,12 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             sessionEstablished: true
         )
     }
+
+    /// Longest the sample echo server waits for a peer's first message.
+    ///
+    /// Bounds how long an abandoned race entrant can keep a session alive,
+    /// independently of how generous the caller's session timeout is.
+    static let firstMessageWaitMilliseconds: Int32 = 15_000
 
     /// Receives one datagram and echoes it back verbatim.
     private static func echoOneDatagram(
@@ -1681,6 +1705,7 @@ private enum InteroperableQUICHelpers {
         // the loser; `gate` guarantees the continuation resumes exactly once.
         return try await withCheckedThrowingContinuation { continuation in
             let gate = OneShotContinuation()
+            let timer = PendingTimer()
 
             let operationTask = Task { @Sendable in
                 do {
@@ -1689,17 +1714,24 @@ private enum InteroperableQUICHelpers {
                 } catch {
                     await gate.complete { continuation.resume(throwing: error) }
                 }
+                // Retire the timer as soon as the work is done. Letting it sleep
+                // out the full timeout is not free: it holds its captures for
+                // the whole window, and with a long configured timeout and many
+                // timed operations per connection those sleeping tasks
+                // accumulate into real memory growth under sustained churn.
+                timer.operationFinished()
             }
 
-            // Self-retiring: after the sleep it either wins the gate or no-ops,
-            // then exits. No third task is needed to reap it.
-            Task { @Sendable in
+            let timeoutTask = Task { @Sendable in
                 try? await Task.sleep(for: .milliseconds(Int(timeoutMilliseconds)))
                 await gate.complete {
                     operationTask.cancel()
                     continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
                 }
             }
+            // The operation can finish before this assignment, so handing the
+            // task over has to cancel it immediately in that case.
+            timer.arm(timeoutTask)
         }
     }
 
@@ -1901,6 +1933,36 @@ private actor RaceCompletion {
         }
         finished = true
         return firstError
+    }
+}
+
+/// Owns a timeout task so it can be retired the moment its work completes.
+///
+/// The two events race: the operation can finish before the timer task has even
+/// been handed over. Both paths funnel through one lock so the timer is
+/// cancelled exactly once, whichever happens first, and never survives its
+/// operation.
+private final class PendingTimer: @unchecked Sendable {
+    private let state = Mutex<(task: Task<Void, Never>?, finished: Bool)>((nil, false))
+
+    /// Hands the timer over. Cancels immediately if the work already finished.
+    func arm(_ task: Task<Void, Never>) {
+        let alreadyFinished = state.withLock { state -> Bool in
+            state.task = task
+            return state.finished
+        }
+        if alreadyFinished {
+            task.cancel()
+        }
+    }
+
+    /// Marks the work complete and cancels the timer if it has been armed.
+    func operationFinished() {
+        let task = state.withLock { state -> Task<Void, Never>? in
+            state.finished = true
+            return state.task
+        }
+        task?.cancel()
     }
 }
 

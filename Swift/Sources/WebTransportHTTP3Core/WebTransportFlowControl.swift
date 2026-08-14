@@ -406,6 +406,10 @@ private func setMonotonicLimit(
     value: UInt64,
     label: String
 ) throws {
+    // `.unlimited` deliberately carries no number: it means "no limit has been
+    // communicated yet", not "infinity". The first capsule therefore establishes
+    // the initial limit rather than being rejected as a decrease, and the
+    // monotonic comparison only applies once a limit exists.
     let normalized = WebTransportFlowControlLimitState(value, isEnabled: true)
     if let currentValue = current.asUInt64,
        let newValue = normalized.asUInt64,

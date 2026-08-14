@@ -63,3 +63,43 @@ func wellFormedPrefixStillRoundTrips() throws {
     #expect(parsed.form == .bidirectional)
     #expect(parsed.remainingPayload == payload)
 }
+
+// MARK: - Flow-control monotonicity
+
+/// Draft-16 requires WT_MAX_* limits to strictly increase once established.
+///
+/// The `.unlimited` state is deliberately not covered here as a rejection case:
+/// it means "no limit communicated yet", not "infinity", so the first capsule
+/// legitimately establishes the initial limit. An earlier version of this file
+/// asserted the opposite and was wrong.
+@Test
+func finiteFlowControlLimitsRequireStrictIncrease() throws {
+    var state = WebTransportFlowControlState(maxData: 100, maxStreamsBidi: 2, maxStreamsUni: 2)
+
+    try state.setMaxData(200)
+    #expect(state.maxData == 200)
+
+    #expect(throws: Error.self) { try state.setMaxData(200) }  // equal is not an increase
+    #expect(throws: Error.self) { try state.setMaxData(150) }  // decrease
+    #expect(state.maxData == 200, "a rejected update must leave the limit untouched")
+
+    try state.setMaxStreamsBidi(5)
+    #expect(throws: Error.self) { try state.setMaxStreamsBidi(4) }
+    #expect(state.maxStreamsBidi == 5)
+}
+
+/// The first limit after an unspecified one is accepted, and monotonicity binds
+/// from then on.
+@Test
+func unspecifiedFlowControlLimitAcceptsItsFirstValueThenLocksMonotonic() throws {
+    var state = WebTransportFlowControlState(
+        maxData: nil, maxStreamsBidi: nil, maxStreamsUni: nil, isEnabled: true
+    )
+    #expect(state.maxData == nil, "nil means no limit communicated yet")
+
+    try state.setMaxData(4)
+    #expect(state.maxData == 4)
+
+    #expect(throws: Error.self) { try state.setMaxData(3) }
+    #expect(state.maxData == 4)
+}
