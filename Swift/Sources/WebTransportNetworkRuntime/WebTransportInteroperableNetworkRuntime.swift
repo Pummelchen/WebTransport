@@ -149,6 +149,26 @@ public struct WebTransportQUICClient: Sendable {
             try await InteroperableQUICHelpers.withTimeout(remaining, operation)
         }
 
+        // Registered before the connection is started, not after it is ready.
+        // The peer opens its control stream the instant its own side completes
+        // the handshake, so a handler installed after `start()` races that
+        // stream and loses it outright — see `InteroperableQUICInboundRegistration`.
+        let inboundStreams = InteroperableQUICInboundStreamCollector()
+        let inboundRegistration = InteroperableQUICInboundRegistration()
+        let inboundTask = Task {
+            do {
+                await inboundRegistration.markEntered()
+                try await connection.inboundStreams { stream in
+                    InteroperableQUICDebug.log("client inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
+                    await inboundStreams.enqueue(stream, direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality))
+                }
+            } catch {
+                await inboundRegistration.markEntered()
+                await inboundStreams.fail(error)
+            }
+        }
+        await inboundRegistration.waitUntilEntered()
+
         try await InteroperableQUICHelpers.waitForReady(
             connection: connection,
             role: "client",
@@ -156,17 +176,6 @@ public struct WebTransportQUICClient: Sendable {
             timeoutMilliseconds: remainingTimeout()
         )
         InteroperableQUICDebug.log("client ready")
-
-        let inboundStreams = InteroperableQUICInboundStreamCollector()
-        let inboundTask = Task {
-            do {
-                try await connection.inboundStreams { stream in
-                    await inboundStreams.enqueue(stream, direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality))
-                }
-            } catch {
-                await inboundStreams.fail(error)
-            }
-        }
 
         let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
         InteroperableQUICDebug.log("client datagrams usable=\(useDatagrams)")
@@ -1030,8 +1039,36 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                         return
                     }
                     InteroperableQUICDebug.log("server accepted connection")
+                    // Attach the stream handler before starting the connection.
+                    // The peer opens its control stream as soon as the handshake
+                    // completes, which is typically while this connection is
+                    // still queued and long before anything calls `serveOne`.
+                    let inboundStreams = InteroperableQUICInboundStreamCollector()
+                    let inboundRegistration = InteroperableQUICInboundRegistration()
+                    let inboundTask = Task {
+                        do {
+                            await inboundRegistration.markEntered()
+                            try await connection.inboundStreams { stream in
+                                InteroperableQUICDebug.log("server inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
+                                await inboundStreams.enqueue(
+                                    stream,
+                                    direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality)
+                                )
+                            }
+                        } catch {
+                            await inboundRegistration.markEntered()
+                            await inboundStreams.fail(error)
+                        }
+                    }
+                    await inboundRegistration.waitUntilEntered()
                     _ = connection.start()
-                    await acceptedConnections.enqueue(connection)
+                    await acceptedConnections.enqueue(
+                        InteroperableQUICAcceptedConnection(
+                            connection: connection,
+                            inboundStreams: inboundStreams,
+                            inboundTask: inboundTask
+                        )
+                    )
                 }
             } catch {
                 await acceptedConnections.fail(error)
@@ -1058,6 +1095,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     public func shutdown() {
         accepting.withLock { $0 = false }
         listenerTask.cancel()
+        let queue = acceptedConnections
+        Task {
+            await queue.cancelQueued()
+        }
     }
 
     /// Stops accepting, tells every live session the server is going away, and
@@ -1098,6 +1139,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         }
 
         listenerTask.cancel()
+        await acceptedConnections.cancelQueued()
         InteroperableQUICDebug.log("server graceful shutdown complete")
     }
 
@@ -1109,9 +1151,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         guard accepting.withLock({ $0 }) else {
             throw WebTransportNetworkRuntimeError.invalidTransport("listener is shutting down")
         }
-        let connection = try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
+        let accepted = try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
             try await self.acceptedConnections.dequeue()
         }
+        let connection = accepted.connection
         InteroperableQUICDebug.log("server acceptSession dequeued")
         InteroperableQUICDebug.log("server acceptSession connection state before wait: \(connection.state)")
         connection.onStateUpdate { _, state in
@@ -1126,14 +1169,23 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                 timeoutMilliseconds: timeoutMilliseconds
             )
         } catch {
+            // This connection is being abandoned, so nothing will ever drain the
+            // handler attached to it at accept time.
+            accepted.inboundTask.cancel()
             _ = connection.state
             throw error
         }
 
-        let session = try await acceptSession(
-            on: connection,
-            timeoutMilliseconds: timeoutMilliseconds
-        )
+        let session: WebTransportNetworkSession
+        do {
+            session = try await acceptSession(
+                on: accepted,
+                timeoutMilliseconds: timeoutMilliseconds
+            )
+        } catch {
+            accepted.inboundTask.cancel()
+            throw error
+        }
         register(session)
         return session
     }
@@ -1221,9 +1273,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     }
 
     private func acceptSession(
-        on connection: NetworkConnection<QUIC>,
+        on accepted: InteroperableQUICAcceptedConnection,
         timeoutMilliseconds: Int32
     ) async throws -> WebTransportNetworkSession {
+        let connection = accepted.connection
         let started = Date()
         let remainingTimeout: @Sendable () -> Int32 = { [timeoutMilliseconds] () -> Int32 in
             InteroperableQUICHelpers.remainingTimeout(
@@ -1250,20 +1303,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
         let datagramFrameSizeLimit = transportLimits.maxDatagramFrameSize
         InteroperableQUICDebug.log("server serveSession start")
-        let inboundStreams = InteroperableQUICInboundStreamCollector()
-        let inboundTask = Task {
-            do {
-                try await connection.inboundStreams { stream in
-                    InteroperableQUICDebug.log("server inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
-                    await inboundStreams.enqueue(
-                        stream,
-                        direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality)
-                    )
-                }
-            } catch {
-                await inboundStreams.fail(error)
-            }
-        }
+        // Attached at accept time, before the connection was started, so streams
+        // the peer opened during the handshake are already collected here.
+        let inboundStreams = accepted.inboundStreams
+        let inboundTask = accepted.inboundTask
 
         let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
         InteroperableQUICDebug.log("server datagrams usable=\(useDatagrams)")
@@ -1795,30 +1838,47 @@ private enum InteroperableQUICHelpers {
     }
 }
 
+/// An accepted connection together with the stream handler already attached to it.
+///
+/// The handler cannot be attached later by whoever eventually serves the
+/// connection: the peer starts opening streams as soon as the handshake
+/// completes, which happens while the connection is still sitting in the accept
+/// queue. Attaching it before `start()` and carrying it along is what keeps the
+/// peer's control stream from being delivered to nothing.
+private struct InteroperableQUICAcceptedConnection: Sendable {
+    let connection: NetworkConnection<QUIC>
+    let inboundStreams: InteroperableQUICInboundStreamCollector
+    let inboundTask: Task<Void, Never>
+}
+
 private actor InteroperableQUICConnectionQueue {
-    private var queue: [NetworkConnection<QUIC>] = []
-    private var waiters: [CheckedContinuation<NetworkConnection<QUIC>, Error>] = []
+    private var queue: [InteroperableQUICAcceptedConnection] = []
+    private var waiters: [CheckedContinuation<InteroperableQUICAcceptedConnection, Error>] = []
     private var failure: Error?
 
-    func enqueue(_ connection: NetworkConnection<QUIC>) {
+    func enqueue(_ accepted: InteroperableQUICAcceptedConnection) {
         guard failure == nil else {
+            // The listener has already failed, so nothing will ever serve this
+            // connection. Its handler task would otherwise run for the lifetime
+            // of the process.
+            accepted.inboundTask.cancel()
             return
         }
         if let continuation = waiters.first {
             waiters.removeFirst()
-            continuation.resume(returning: connection)
+            continuation.resume(returning: accepted)
         } else {
-            queue.append(connection)
+            queue.append(accepted)
         }
     }
 
-    func dequeue() async throws -> NetworkConnection<QUIC> {
+    func dequeue() async throws -> InteroperableQUICAcceptedConnection {
         if let failure {
             throw failure
         }
-        if let connection = queue.first {
+        if let accepted = queue.first {
             queue.removeFirst()
-            return connection
+            return accepted
         }
         return try await withCheckedThrowingContinuation { continuation in
             waiters.append(continuation)
@@ -1832,12 +1892,79 @@ private actor InteroperableQUICConnectionQueue {
         for waiter in waiters {
             waiter.resume(throwing: error)
         }
+        cancelQueued()
+    }
+
+    /// Releases connections that were accepted but will never be served.
+    ///
+    /// Each carries a handler task that is parked in `inboundStreams` and holds
+    /// the connection alive, so dropping the queue alone would not end them.
+    func cancelQueued() {
+        let abandoned = queue
+        queue.removeAll()
+        for accepted in abandoned {
+            accepted.inboundTask.cancel()
+        }
     }
 }
 
-private actor InteroperableQUICInboundStreamCollector {
-    private var queued: [Int: [QUIC.Stream<QUICStream>]] = [:]
-    private var waiting: [Int: [CheckedContinuation<QUIC.Stream<QUICStream>, Error>]] = [:]
+/// Holds a connection back until its inbound-stream handler is on the scheduler.
+///
+/// `connection.inboundStreams` can only be entered from inside a task, and a
+/// freshly spawned task does not run at the point it is created. Starting the
+/// connection first therefore opens a window in which the peer completes its
+/// handshake, opens its HTTP/3 control stream, and has it delivered to a handler
+/// that does not exist yet. Network.framework does not replay those streams, so
+/// the control stream is lost and both ends wait for each other until the
+/// operation times out.
+///
+/// The window is small and the loss is total, which is what made this present as
+/// an occasional hang rather than a reproducible failure. Waiting here costs one
+/// scheduling hop on a path that is about to perform a network handshake.
+private actor InteroperableQUICInboundRegistration {
+    private var entered = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func markEntered() {
+        guard !entered else {
+            return
+        }
+        entered = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
+    }
+
+    func waitUntilEntered() async {
+        guard !entered else {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+}
+
+private typealias InteroperableQUICInboundStreamCollector = InteroperableQUICStreamQueue<QUIC.Stream<QUICStream>>
+
+/// Delivers inbound streams to whoever is waiting for one of that direction.
+///
+/// Generic over the element purely so the delivery and timeout semantics can be
+/// tested without a live QUIC connection; the runtime only ever uses the
+/// `InteroperableQUICInboundStreamCollector` specialization below.
+actor InteroperableQUICStreamQueue<Element: Sendable> {
+    /// A parked caller. The identifier lets a timeout fail exactly its own
+    /// waiter, so a stream delivered a moment earlier is never discarded.
+    private struct Waiter {
+        let id: UInt64
+        let continuation: CheckedContinuation<Element, Error>
+    }
+
+    private var queued: [Int: [Element]] = [:]
+    private var waiting: [Int: [Waiter]] = [:]
+    private var nextWaiterID: UInt64 = 0
     private var failure: Error?
 
     /// Peer control and QPACK streams, held for the lifetime of the connection.
@@ -1848,47 +1975,75 @@ private actor InteroperableQUICInboundStreamCollector {
     /// handle after reading lets the transport cancel the receive side, which
     /// the peer sees as exactly that. This collector is owned by the session, so
     /// anything parked here lives as long as the connection does.
-    private var retainedCriticalStreams: [QUIC.Stream<QUICStream>] = []
+    private var retainedCriticalStreams: [Element] = []
 
-    func retainCritical(_ stream: QUIC.Stream<QUICStream>) {
+    func retainCritical(_ stream: Element) {
         retainedCriticalStreams.append(stream)
     }
 
-    func enqueue(_ stream: QUIC.Stream<QUICStream>, direction: Int) {
+    func enqueue(_ stream: Element, direction: Int) {
         guard failure == nil else {
             return
         }
-        if var continuations = waiting[direction], !continuations.isEmpty {
-            let continuation = continuations.removeFirst()
-            if continuations.isEmpty {
+        if var waiters = waiting[direction], !waiters.isEmpty {
+            let waiter = waiters.removeFirst()
+            if waiters.isEmpty {
                 waiting.removeValue(forKey: direction)
             } else {
-                waiting[direction] = continuations
+                waiting[direction] = waiters
             }
-            continuation.resume(returning: stream)
+            waiter.continuation.resume(returning: stream)
             return
         }
         queued[direction, default: []].append(stream)
     }
 
-    func next(direction: Int, timeoutMilliseconds: Int32) async throws -> QUIC.Stream<QUICStream> {
+    /// Removes and returns the oldest queued stream for `direction`.
+    private func takeQueued(direction: Int) -> Element? {
+        guard var streams = queued[direction], !streams.isEmpty else {
+            return nil
+        }
+        let stream = streams.removeFirst()
+        if streams.isEmpty {
+            queued.removeValue(forKey: direction)
+        } else {
+            queued[direction] = streams
+        }
+        return stream
+    }
+
+    /// Waits for the next stream in `direction`, giving up after the timeout.
+    ///
+    /// The timeout is run as a task that resumes the waiter through the actor
+    /// rather than by racing and abandoning the wait. Abandoning is what the
+    /// general-purpose `withTimeout` does, and it is wrong here for two reasons:
+    /// the abandoned waiter stays parked and a later stream is handed to a caller
+    /// that already gave up — silently swallowing it — and the wait had to be
+    /// entered from a separate task, which is a suspension point during which a
+    /// stream can be queued and then never noticed. Here the waiter is resumed
+    /// exactly once, by whichever of the two arrives first, and both run on the
+    /// actor so neither can interleave with the other.
+    func next(direction: Int, timeoutMilliseconds: Int32) async throws -> Element {
         if let failure {
             throw failure
         }
-
-        if var streams = queued[direction], let stream = streams.first {
-            streams.removeFirst()
-            if streams.isEmpty {
-                queued.removeValue(forKey: direction)
-            } else {
-                queued[direction] = streams
-            }
+        if let stream = takeQueued(direction: direction) {
             return stream
         }
-
-        return try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
-            try await self.waitFor(direction: direction)
+        guard timeoutMilliseconds > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds)
         }
+
+        let id = nextWaiterID
+        nextWaiterID &+= 1
+        let timer = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(timeoutMilliseconds)))
+            await self?.expire(direction: direction, id: id, timeoutMilliseconds: timeoutMilliseconds)
+        }
+        defer {
+            timer.cancel()
+        }
+        return try await waitFor(direction: direction, id: id)
     }
 
     func fail(_ error: Error) {
@@ -1897,18 +2052,40 @@ private actor InteroperableQUICInboundStreamCollector {
         waiting.removeAll()
         for (_, waiters) in waitingByDirection {
             for waiter in waiters {
-                waiter.resume(throwing: error)
+                waiter.continuation.resume(throwing: error)
             }
         }
     }
 
-    private func waitFor(direction: Int) async throws -> QUIC.Stream<QUICStream> {
+    /// Fails one specific waiter, identified so a stream that arrived first wins.
+    private func expire(direction: Int, id: UInt64, timeoutMilliseconds: Int32) {
+        guard var waiters = waiting[direction],
+              let index = waiters.firstIndex(where: { $0.id == id }) else {
+            // Already resumed with a stream; the timeout lost the race.
+            return
+        }
+        let waiter = waiters.remove(at: index)
+        if waiters.isEmpty {
+            waiting.removeValue(forKey: direction)
+        } else {
+            waiting[direction] = waiters
+        }
+        waiter.continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
+    }
+
+    private func waitFor(direction: Int, id: UInt64) async throws -> Element {
         return try await withCheckedThrowingContinuation { continuation in
             if let failure {
                 continuation.resume(throwing: failure)
                 return
             }
-            waiting[direction, default: []].append(continuation)
+            // Re-check under the same actor step that parks: `next` may have
+            // suspended between its own check and here.
+            if let stream = takeQueued(direction: direction) {
+                continuation.resume(returning: stream)
+                return
+            }
+            waiting[direction, default: []].append(Waiter(id: id, continuation: continuation))
         }
     }
 }

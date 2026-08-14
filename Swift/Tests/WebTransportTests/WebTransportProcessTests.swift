@@ -573,7 +573,51 @@ enum WebTransportProcessSupport {
         throw ProcessTestError.missingExecutable(product)
     }
 
+    /// Runs one loopback exchange, retrying the whole pair rather than the client.
+    ///
+    /// The server serves for a bounded window that starts when it begins
+    /// listening, so retrying only the client is not a retry at all: the first
+    /// attempt consumes the entire window, and every later attempt connects to a
+    /// server that has already exited and can only time out. That turned a single
+    /// slow handshake into three stacked timeouts and reported the last one, which
+    /// hid what had actually gone wrong. Each attempt now gets its own server.
     static func runLoopback(host: String, transport: String, expectsEstablishedSession: Bool) throws {
+        let maximumAttempts = 3
+        var lastFailure = ""
+
+        for attempt in 1...maximumAttempts {
+            let loopbackName = "loopback-\(transport)-\(host == "::1" ? "ipv6" : "ipv4")"
+            let outcome = try runLoopbackAttempt(
+                host: host,
+                transport: transport,
+                message: attempt == 1 ? loopbackName : "\(loopbackName)-retry-\(attempt)",
+                expectsEstablishedSession: expectsEstablishedSession
+            )
+            switch outcome {
+            case .succeeded:
+                return
+            case .failed(let description):
+                lastFailure = "attempt \(attempt)/\(maximumAttempts): \(description)"
+                if attempt < maximumAttempts {
+                    Thread.sleep(forTimeInterval: 0.25)
+                }
+            }
+        }
+
+        Issue.record(Comment(rawValue: "loopback exchange never succeeded — \(lastFailure)"))
+    }
+
+    private enum LoopbackOutcome {
+        case succeeded
+        case failed(String)
+    }
+
+    private static func runLoopbackAttempt(
+        host: String,
+        transport: String,
+        message: String,
+        expectsEstablishedSession: Bool
+    ) throws -> LoopbackOutcome {
         let server = try productURL("WebTransportServer", configuration: "debug")
         let client = try productURL("WebTransportClient", configuration: "debug")
         let listenEndpoint = endpointArgument(host: host, port: 0)
@@ -589,34 +633,27 @@ enum WebTransportProcessSupport {
         _ = try runningServer.waitForOutput(containing: "certificate-sha256:", timeout: 5)
         let port = try parseListeningPort(from: line)
         let connectEndpoint = endpointArgument(host: host, port: port)
-        let loopbackName = "loopback-\(transport)-\(host == "::1" ? "ipv6" : "ipv4")"
-        var clientResult = try run(
+        let clientResult = try run(
             client,
-            ["--connect", connectEndpoint, "--transport", transport, "--trust", "local-self-signed", "--message", loopbackName, "--timeout-ms", "25000"],
+            ["--connect", connectEndpoint, "--transport", transport, "--trust", "local-self-signed", "--message", message, "--timeout-ms", "25000"],
             timeout: 30
         )
-        var attempts = 1
-        while clientResult.exitCode != 0 && attempts < 3 {
-            Thread.sleep(forTimeInterval: 0.25)
-            attempts += 1
-            clientResult = try run(
-                client,
-                ["--connect", connectEndpoint, "--transport", transport, "--trust", "local-self-signed", "--message", "\(loopbackName)-retry-\(attempts)", "--timeout-ms", "25000"],
-                timeout: 30
-            )
-        }
-        let clientFailure = "exit=\(clientResult.exitCode) stdout=\(clientResult.stdout) stderr=\(clientResult.stderr)"
-        #expect(clientResult.exitCode == 0, Comment(rawValue: clientFailure))
-        #expect(clientResult.stdout.contains("connected"), Comment(rawValue: clientFailure))
-        #expect(clientResult.stdout.contains(loopbackName), Comment(rawValue: clientFailure))
-        if expectsEstablishedSession {
-            #expect(clientResult.stdout.contains("session=established"))
+
+        guard clientResult.exitCode == 0,
+              clientResult.stdout.contains("connected"),
+              clientResult.stdout.contains(message),
+              !expectsEstablishedSession || clientResult.stdout.contains("session=established") else {
+            return .failed("client exit=\(clientResult.exitCode) stdout=\(clientResult.stdout) stderr=\(clientResult.stderr)")
         }
 
         let serverResult = try runningServer.wait(timeout: 20)
-        #expect(serverResult.exitCode == 0)
-        #expect(serverResult.stdout.contains("served"))
-        #expect(serverResult.stdout.contains(loopbackName))
+        guard serverResult.exitCode == 0,
+              serverResult.stdout.contains("served"),
+              serverResult.stdout.contains(message) else {
+            return .failed("server exit=\(serverResult.exitCode) stdout=\(serverResult.stdout) stderr=\(serverResult.stderr)")
+        }
+
+        return .succeeded
     }
 
     fileprivate static func run(
