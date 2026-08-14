@@ -213,6 +213,19 @@ public struct WebTransportIncomingStreamResult: Equatable, Sendable {
 }
 
 public struct WebTransportSessionManager: Equatable, Sendable {
+    /// Builds an HTTP/3 GOAWAY frame and records that this endpoint sent it.
+    ///
+    /// Exposed here rather than reaching into ``http3`` directly so the sent
+    /// GOAWAY identifier is tracked on the live connection state. Building the
+    /// frame from a copy would emit correct bytes but leave this endpoint unable
+    /// to reject the requests it just promised not to serve.
+    ///
+    /// `streamID` is the first client-initiated bidirectional stream the server
+    /// will *not* process, per RFC 9114 section 5.2.
+    public mutating func makeGoawayFrame(streamID: UInt64) throws -> HTTP3Frame {
+        try http3.makeGoawayFrame(streamID: streamID)
+    }
+
     public private(set) var http3: HTTP3ConnectionState
     public private(set) var sessionsByID: [WebTransportSessionID: WebTransportSession]
     public private(set) var sessionIDsByRequestStreamID: [UInt64: WebTransportSessionID]

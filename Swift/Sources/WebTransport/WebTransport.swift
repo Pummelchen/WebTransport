@@ -472,8 +472,22 @@ public final class WebTransportListeningServer: @unchecked Sendable {
         return WebTransportSession(session, logger: logger)
     }
 
+    /// Stops the listener immediately without signalling live peers.
+    ///
+    /// Prefer ``shutdown(gracePeriodMilliseconds:)`` when restarting or
+    /// deploying: this severs nothing cleanly and peers only notice on timeout.
     public func shutdown() {
         runtime.shutdown()
+    }
+
+    /// Stops accepting, sends HTTP/3 GOAWAY and WT_DRAIN_SESSION to every live
+    /// session, and returns once they are signalled or the grace period expires.
+    ///
+    /// Acceptance closes before any peer is signalled, so no session can be
+    /// established in the gap. Signalling is best effort: an unreachable peer is
+    /// skipped rather than blocking the rest.
+    public func shutdown(gracePeriodMilliseconds: Int32) async {
+        await runtime.shutdown(gracePeriodMilliseconds: gracePeriodMilliseconds)
     }
 }
 

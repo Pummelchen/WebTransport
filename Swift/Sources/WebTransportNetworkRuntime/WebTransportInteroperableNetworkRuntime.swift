@@ -660,6 +660,31 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         return Data(exported as DispatchData)
     }
 
+    /// Tells the peer this endpoint is going away, without tearing the session down.
+    ///
+    /// Sends HTTP/3 GOAWAY on the control stream, then WT_DRAIN_SESSION on the
+    /// CONNECT stream. The peer learns no new sessions or requests will be
+    /// accepted while in-flight work continues, which is what lets a deploy
+    /// finish serving instead of severing every live connection.
+    ///
+    /// The GOAWAY identifier is the next client-initiated bidirectional stream
+    /// after this session's CONNECT stream: everything already accepted is still
+    /// honoured, nothing beyond it is.
+    public func beginGracefulShutdown(
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        // Client-initiated bidirectional stream IDs advance by four.
+        let firstUnservedStreamID = connectStream.streamID &+ 4
+        let goawayPayload = try await manager.withManager { manager in
+            try manager.makeGoawayFrame(streamID: firstUnservedStreamID).encode()
+        }
+        try await InteroperableQUICHelpers.withTimeout(timeout) {
+            try await self.localControlStream.send(goawayPayload, endOfStream: false)
+        }
+        try await drain(timeoutMilliseconds: timeout)
+    }
+
     public func drain(timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil) async throws {
         let capsule = try await manager.withManager { manager in
             try manager.makeDrainSessionCapsule(sessionID: WebTransportSessionID(rawValue: self.sessionID))
@@ -826,8 +851,25 @@ private actor WebTransportNetworkSessionManagerState {
 // bound endpoint, which is held in a `Mutex` because `waitForListening` may
 // rewrite it concurrently with readers on the accept path. Accepted connections
 // are handed through an actor queue, and shutdown only cancels the listener task.
+/// Weak handle to a served session.
+///
+/// Weak so the registry never keeps a session alive past the application's own
+/// reference to it; shutdown simply skips entries the application already let go.
+private struct WeakSessionRef {
+    weak var session: WebTransportNetworkSession?
+}
+
 public final class WebTransportQUICServer: @unchecked Sendable {
     private let localEndpointStorage: Mutex<WebTransportNetworkEndpoint>
+
+    /// Sessions handed to the application, so `shutdown(gracePeriodMilliseconds:)`
+    /// can signal them. Without this the listener can stop accepting but has no
+    /// way to tell live peers that it is going away.
+    private let servedSessions = Mutex<[WeakSessionRef]>([])
+
+    /// Cleared once shutdown begins, so accept calls fail immediately with a
+    /// clear error instead of blocking until their timeout expires.
+    private let accepting = Mutex<Bool>(true)
 
     /// The endpoint the listener is bound to.
     ///
@@ -950,8 +992,55 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         }
     }
 
+    /// Stops the listener immediately, without telling live peers anything.
+    ///
+    /// Sessions already handed to the application are unaffected and their peers
+    /// learn nothing until the connection times out. Prefer
+    /// ``shutdown(gracePeriodMilliseconds:)`` for a deploy or restart.
     public func shutdown() {
+        accepting.withLock { $0 = false }
         listenerTask.cancel()
+    }
+
+    /// Stops accepting, tells every live session the server is going away, and
+    /// gives in-flight work a bounded window to finish.
+    ///
+    /// Ordering matters: acceptance is closed *before* peers are signalled, so a
+    /// peer cannot open a session in the window between being told to drain and
+    /// the listener actually stopping.
+    ///
+    /// Signalling is best effort by design. A peer that has already vanished
+    /// cannot be told anything, and one unreachable peer must not prevent the
+    /// rest from being drained, so per-session failures are logged and skipped
+    /// rather than thrown. Returns once every session has been signalled or the
+    /// grace period expires.
+    public func shutdown(gracePeriodMilliseconds: Int32) async {
+        accepting.withLock { $0 = false }
+
+        let sessions = servedSessions.withLock { registry -> [WebTransportNetworkSession] in
+            let live = registry.compactMap(\.session)
+            registry.removeAll()
+            return live
+        }
+        InteroperableQUICDebug.log("server graceful shutdown: signalling \(sessions.count) session(s)")
+
+        if !sessions.isEmpty, gracePeriodMilliseconds > 0 {
+            let perSession = max(1, gracePeriodMilliseconds / Int32(sessions.count))
+            await withTaskGroup(of: Void.self) { group in
+                for session in sessions {
+                    group.addTask {
+                        do {
+                            try await session.beginGracefulShutdown(timeoutMilliseconds: perSession)
+                        } catch {
+                            InteroperableQUICDebug.log("server graceful shutdown: session signal failed: \(error)")
+                        }
+                    }
+                }
+            }
+        }
+
+        listenerTask.cancel()
+        InteroperableQUICDebug.log("server graceful shutdown complete")
     }
 
     deinit {
@@ -959,6 +1048,9 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     }
 
     public func acceptSession(timeoutMilliseconds: Int32 = 1_000) async throws -> WebTransportNetworkSession {
+        guard accepting.withLock({ $0 }) else {
+            throw WebTransportNetworkRuntimeError.invalidTransport("listener is shutting down")
+        }
         let connection = try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
             try await self.acceptedConnections.dequeue()
         }
@@ -980,10 +1072,23 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             throw error
         }
 
-        return try await acceptSession(
+        let session = try await acceptSession(
             on: connection,
             timeoutMilliseconds: timeoutMilliseconds
         )
+        register(session)
+        return session
+    }
+
+    /// Records a served session and drops entries the application has released.
+    ///
+    /// Compaction happens here rather than on a timer so the registry cannot
+    /// grow without bound on a long-lived listener.
+    private func register(_ session: WebTransportNetworkSession) {
+        servedSessions.withLock { sessions in
+            sessions.removeAll { $0.session == nil }
+            sessions.append(WeakSessionRef(session: session))
+        }
     }
 
     @discardableResult
