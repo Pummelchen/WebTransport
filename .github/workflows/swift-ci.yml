@@ -83,6 +83,24 @@ jobs:
       - name: Run server CLI conformance
         run: swift run WebTransportServer --scenario all
 
+  fuzz-peer-input:
+    name: Fuzz peer-facing parsers / ASan
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # The parsers here run on bytes from an unauthenticated peer, so a trap in
+      # any of them is remotely reachable. The suite runs a small budget on every
+      # build; this job runs a much larger one under AddressSanitizer, which
+      # catches memory errors that do not trap on their own.
+      - name: Fuzz under AddressSanitizer
+        env:
+          WEBTRANSPORT_FUZZ_ITERATIONS: "20000"
+        run: >-
+          swift test --sanitize=address
+          --filter 'peerFacingParsers|huffmanDecoder'
+
   thread-sanitizer:
     name: Thread Sanitizer / in-process tests
     runs-on: macos-26
