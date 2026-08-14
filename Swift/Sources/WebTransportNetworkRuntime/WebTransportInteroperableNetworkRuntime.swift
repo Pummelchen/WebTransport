@@ -101,6 +101,15 @@ public struct WebTransportQUICClient: Sendable {
         self.trustPolicy = trustPolicy
     }
 
+    /// Renders HTTP/3 SETTINGS as sorted `0xid=value` pairs for the diagnostic
+    /// channel. Setting identifiers and counts only — no peer payload.
+    private static func renderSettings(_ settings: HTTP3Settings) -> String {
+        settings.entries
+            .sorted { $0.key < $1.key }
+            .map { "0x\(String($0.key, radix: 16))=\($0.value)" }
+            .joined(separator: " ")
+    }
+
     @discardableResult
     public func connectSession(
         to endpoint: WebTransportNetworkEndpoint,
@@ -177,6 +186,11 @@ public struct WebTransportQUICClient: Sendable {
             try await localControlStream.send(localControlPayload, endOfStream: false)
         }
         InteroperableQUICDebug.log("client sent local control payload")
+        try await InteroperableQUICHelpers.openQPACKStreams(
+            on: connection,
+            role: "client",
+            timeoutMilliseconds: remainingTimeout()
+        )
 
         let peerControlBytes = try await InteroperableQUICHelpers.readPeerControlStream(
             from: inboundStreams,
@@ -188,6 +202,10 @@ public struct WebTransportQUICClient: Sendable {
             peerControlBytes,
             settingsValidation: settingsValidation
         )
+        InteroperableQUICDebug.log("client local settings: \(Self.renderSettings(http3.localSettings))")
+        if let peerSettings = http3.remoteSettings {
+            InteroperableQUICDebug.log("client peer settings: \(Self.renderSettings(peerSettings))")
+        }
         var manager = WebTransportSessionManager(
             http3: http3,
             settingsValidation: settingsValidation
@@ -1047,6 +1065,11 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             try await localControlStream.send(localControlPayload, endOfStream: false)
         }
         InteroperableQUICDebug.log("server sent local control payload")
+        try await InteroperableQUICHelpers.openQPACKStreams(
+            on: connection,
+            role: "server",
+            timeoutMilliseconds: remainingTimeout()
+        )
 
         let controlPayload = try await runWithTimeout {
             try await InteroperableQUICHelpers.readPeerControlStream(
@@ -1268,6 +1291,37 @@ private enum InteroperableQUICHelpers {
 
     static func makeRequestStreamPayload(streamID: UInt64, requestFrame: HTTP3Frame) throws -> Data {
         try requestFrame.encode()
+    }
+
+    /// Opens this endpoint's QPACK encoder and decoder streams.
+    ///
+    /// RFC 9204 §4.2 gives each endpoint at most one encoder and one decoder
+    /// stream, and peers that intend to use the dynamic table expect them to
+    /// exist. This implementation encodes field sections without the dynamic
+    /// table, but omitting the streams entirely leaves a peer with no channel on
+    /// which to receive decoder acknowledgements, and deployed peers treat their
+    /// absence as a broken HTTP/3 connection.
+    ///
+    /// Only the stream type prefix is written; no instructions follow, which is
+    /// valid for an endpoint that never populates a dynamic table.
+    static func openQPACKStreams(
+        on connection: NetworkConnection<QUIC>,
+        role: String,
+        timeoutMilliseconds: Int32
+    ) async throws {
+        for (label, type) in [
+            ("encoder", HTTP3StreamType.qpackEncoder),
+            ("decoder", HTTP3StreamType.qpackDecoder)
+        ] {
+            let stream = try await withTimeout(timeoutMilliseconds) {
+                try await connection.openStream(directionality: .unidirectional)
+            }
+            let prefix = try QUICVarInt.encode(type)
+            try await withTimeout(timeoutMilliseconds) {
+                try await stream.send(prefix, endOfStream: false)
+            }
+            InteroperableQUICDebug.log("\(role) opened QPACK \(label) stream \(stream.streamID)")
+        }
     }
 
     static func waitForReady(

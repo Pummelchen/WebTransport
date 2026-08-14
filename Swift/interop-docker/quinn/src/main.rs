@@ -19,13 +19,31 @@ async fn main() -> Result<()> {
     let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "54002".into()).parse()?;
     let addr: std::net::SocketAddr = format!("0.0.0.0:{port}").parse()?;
 
-    let certified = rcgen::generate_simple_self_signed(vec![
+    // Browsers accept a self-signed certificate via serverCertificateHashes only
+    // when it is ECDSA P-256 with a validity window under 14 days, so the
+    // lifetime is set explicitly rather than taking rcgen's multi-year default.
+    let mut params = rcgen::CertificateParams::new(vec![
         "localhost".to_string(),
         "127.0.0.1".to_string(),
     ])?;
-    let cert_der = CertificateDer::from(certified.cert);
+    params.not_before = time::OffsetDateTime::now_utc() - time::Duration::hours(1);
+    params.not_after = time::OffsetDateTime::now_utc() + time::Duration::days(7);
+    let key_pair = rcgen::KeyPair::generate()?;
+    let certificate = params.self_signed(&key_pair)?;
+
+    let cert_der = CertificateDer::from(certificate.der().to_vec());
     let key_der: PrivateKeyDer<'static> =
-        PrivatePkcs8KeyDer::from(certified.key_pair.serialize_der()).into();
+        PrivatePkcs8KeyDer::from(key_pair.serialize_der()).into();
+
+    {
+        use sha2::{Digest, Sha256};
+        use base64::Engine;
+        let digest = Sha256::digest(cert_der.as_ref());
+        eprintln!(
+            "certificate-sha256: {}",
+            base64::engine::general_purpose::STANDARD.encode(digest)
+        );
+    }
 
     let mut server = ServerBuilder::new()
         .with_addr(addr)

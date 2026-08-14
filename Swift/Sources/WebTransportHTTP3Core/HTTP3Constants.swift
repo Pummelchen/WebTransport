@@ -20,7 +20,28 @@ public enum HTTP3SettingID {
     public static let qpackBlockedStreams: UInt64 = 0x07
     public static let enableConnectProtocol: UInt64 = 0x08
     public static let h3Datagram: UInt64 = 0x33
+
+    // MARK: - Pre-draft-16 identifiers, for compatibility profiles only
+    //
+    // These are NOT part of draft-16 and are never advertised by the
+    // `draft16Strict` profile. They exist because deployed peers — browsers in
+    // particular — still implement earlier revisions and look for the setting
+    // identifier of the revision they speak. RFC 9114 §7.2.4.1 requires
+    // endpoints to ignore unknown SETTINGS identifiers, so advertising these
+    // alongside the draft-16 set is additive: it cannot change how a conforming
+    // draft-16 peer behaves, and it does not weaken or replace anything this
+    // implementation sends or enforces.
+
+    /// `SETTINGS_WEBTRANSPORT_MAX_SESSIONS` as defined by draft-02.
     public static let legacyEnableWebTransport: UInt64 = 0x2b60_3742
+    /// Companion draft-02 era identifier observed alongside the above.
+    public static let legacyWebTransportMaxSessionsDraft02: UInt64 = 0x2b60_3743
+    /// `SETTINGS_WT_MAX_SESSIONS` as defined by draft-07 and later. This is the
+    /// identifier current Chromium looks for; without it Chromium concludes the
+    /// server does not support WebTransport and closes before sending CONNECT.
+    public static let legacyWebTransportMaxSessions: UInt64 = 0xc671_706a
+    /// `SETTINGS_H3_DATAGRAM` as defined by HTTP-datagram draft-04.
+    public static let legacyH3DatagramDraft04: UInt64 = 0xffd2_77
 
     public static func isReservedHTTP2Setting(_ value: UInt64) -> Bool {
         value == 0x02 || value == 0x03 || value == 0x04 || value == 0x05
