@@ -20,8 +20,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.2.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.2.0) |
-| `main` | Ahead of 1.2.0 and not yet tagged |
+| Latest release | [1.3.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.0) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -29,24 +28,28 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 The Swift conformance matrix passes in full. C99 and C++ directories contain planning material only; they are not protocol implementations.
 
-**`main` is ahead of the latest release.** The capabilities described below are on
-`main` and are not in 1.2.0. Server TLS identity injection, graceful shutdown,
-connection admission limits, certificate expiry reporting, and verified browser
-interop all landed after that tag. Pin `1.2.0` for the released behaviour, or
-depend on `main` knowingly.
+1.3.0 adds server TLS identity injection, graceful shutdown, connection admission
+limits, and certificate expiry reporting, and is the first release verified end to
+end against a browser. The code audit for 1.3.0 was performed by Claude Opus 5.
 
-One change on `main` is deliberately not backwards compatible: the built-in
-development certificate is now **refused on any non-loopback bind address**. A
-server that previously bound `0.0.0.0` with default settings now fails at startup
-with an error naming the fix, rather than starting and being unreachable by every
-real client.
+One change is deliberately not backwards compatible: the built-in development
+certificate is now **refused on any non-loopback bind address**. A server that
+previously bound `0.0.0.0` with default settings now fails at startup with an
+error naming the fix, rather than starting and being unreachable by every real
+client.
+
+Session establishment is not yet fully reliable: roughly 0.6% of loopback sessions
+fail and end in a timeout, from two causes that are known but unresolved. Treat a
+connect timeout as retryable, and read the
+[known limitations](https://github.com/Pummelchen/WebTransport/wiki/Known-Limitations)
+before adopting this in production.
 
 ## Add the package
 
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.2.0"
+    exact: "1.3.0"
 )
 ```
 
@@ -103,6 +106,25 @@ rejects peers still on earlier revisions — browsers among them.
 - Independent stream and datagram interoperability against pywebtransport/aioquic, Quinn, and Quiche, plus verified browser sessions with Chrome.
 
 See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Implementation-Status) for the precise coverage boundary.
+
+## Prebuilt binaries
+
+The [1.3.0 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.0)
+ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
+binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
+later. They are ad-hoc signed rather than Developer ID signed, and are not
+notarized, so Gatekeeper quarantines them on first run; clear it after verifying
+the checksums:
+
+```sh
+shasum -a 256 -c SHA256SUMS
+xattr -d com.apple.quarantine WebTransportClient WebTransportServer
+./WebTransportServer --scenario all
+```
+
+Both builds are reproducible: `./Swift/build-release-apple-silicon.sh` performs
+two clean builds and compares normalized Mach-O hashes, so the published
+checksums can be rebuilt from source.
 
 ## Build and verify
 
