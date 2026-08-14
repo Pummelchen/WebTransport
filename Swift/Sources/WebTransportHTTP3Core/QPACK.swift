@@ -401,6 +401,11 @@ public enum QPACK {
         dynamicTable: QPACKDynamicTable?,
         huffman: Bool = false
     ) throws -> Data {
+        // Raw rather than the wrapped form RFC 9204 section 4.5.1.1 specifies;
+        // see the note in decodeFieldSection. Symmetric with this decoder and
+        // unreachable while no dynamic table capacity is advertised, but a
+        // caller that passes a dynamic table here produces a field section a
+        // conforming peer will misread.
         let requiredInsertCount = dynamicTable?.insertedCount ?? 0
         var output = Data()
         output.append(try encodePrefixedInteger(requiredInsertCount, prefixBits: 8, firstBytePrefix: 0x00))
@@ -428,6 +433,23 @@ public enum QPACK {
         }
 
         var cursor = QUICByteCursor(data)
+        // CONFORMANCE GAP, currently unreachable. RFC 9204 section 4.5.1.1 does
+        // not put the Required Insert Count on the wire directly: it is encoded
+        // wrapped, as `ReqInsertCount % (2 * MaxEntries) + 1`, and decoded back
+        // using the peer's advertised table capacity. This reads and writes the
+        // raw value instead, so it is self-consistent but would disagree with a
+        // conforming peer by at least one whenever a dynamic reference is used.
+        //
+        // It cannot be reached as shipped. This implementation never advertises
+        // SETTINGS_QPACK_MAX_TABLE_CAPACITY, so a conforming peer must not use
+        // the dynamic table when encoding toward it and always sends a Required
+        // Insert Count of zero; the encoding path used for real traffic passes
+        // no dynamic table and likewise emits zero.
+        //
+        // Fixing it properly requires threading the negotiated table capacity in
+        // so MaxEntries can be derived, and it cannot be validated against a
+        // real peer until this implementation advertises a non-zero capacity.
+        // Doing that is a prerequisite for ever enabling the dynamic table.
         let requiredInsertCount = try decodePrefixedInteger(from: &cursor, prefixBits: 8)
         let baseByte = try cursor.readUInt8()
         let deltaBase = try decodePrefixedInteger(from: &cursor, prefixBits: 7, firstByte: baseByte)
