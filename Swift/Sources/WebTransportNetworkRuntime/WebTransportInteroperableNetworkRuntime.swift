@@ -871,6 +871,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     /// clear error instead of blocking until their timeout expires.
     private let accepting = Mutex<Bool>(true)
 
+    private let admission: WebTransportAdmissionPolicy
+    /// nil when the policy sets no rate limit.
+    private let rateLimiter: ConnectionRateLimiter?
+
     /// The endpoint the listener is bound to.
     ///
     /// Reads are synchronized: the port is not known until the listener binds,
@@ -907,7 +911,9 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         protocols: [String] = ["demo.v1"],
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         localOnly: Bool = false,
-        identity: WebTransportServerIdentity = .developmentSelfSigned
+        identity: WebTransportServerIdentity = .developmentSelfSigned,
+        admission: WebTransportAdmissionPolicy = .default,
+        transportLimits: WebTransportTransportLimits = .default
     ) throws {
         try self.init(
             endpoint: WebTransportNetworkEndpoint(port: bindPort),
@@ -918,7 +924,9 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             protocols: protocols,
             settingsValidation: settingsValidation,
             localOnly: localOnly,
-            identity: identity
+            identity: identity,
+            admission: admission,
+            transportLimits: transportLimits
         )
     }
 
@@ -931,9 +939,21 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         protocols: [String] = ["demo.v1"],
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         localOnly: Bool = false,
-        identity: WebTransportServerIdentity = .developmentSelfSigned
+        identity: WebTransportServerIdentity = .developmentSelfSigned,
+        admission: WebTransportAdmissionPolicy = .default,
+        transportLimits: WebTransportTransportLimits = .default
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
+        // `maxConcurrentConnections` predates the admission policy. When a caller
+        // supplies a policy its value wins; otherwise the legacy argument is
+        // honoured so existing call sites behave identically.
+        var admission = try admission.validated()
+        if admission == .default, maxConcurrentConnections != 16 {
+            admission.maxConcurrentConnections = maxConcurrentConnections
+        }
+        let transportLimits = try transportLimits.validated()
+        self.admission = admission
+        self.rateLimiter = ConnectionRateLimiter(policy: admission)
         let resolvedIdentity = try ServerIdentityResolver.resolve(
             identity,
             endpoint: endpoint,
@@ -943,7 +963,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         certificateSHA256 = resolvedIdentity.certificateSHA256
         usesDevelopmentCertificate = identity.isDevelopmentSelfSigned
         let baseParameters = NWParametersBuilder(auto: {
-            InteroperableQUICRuntime.makeServerQUIC(identity: resolvedIdentity.networkIdentity)
+            InteroperableQUICRuntime.makeServerQUIC(
+                identity: resolvedIdentity.networkIdentity,
+                limits: transportLimits
+            )
         })
         .localEndpoint(
             .hostPort(
@@ -954,7 +977,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let parameters = localOnly ? baseParameters.localOnly(true) : baseParameters
 
         listener = try NetworkListener<QUIC>(using: parameters)
-            .newConnectionLimit(max(1, max(16, maxConcurrentConnections * 2)))
+            .newConnectionLimit(max(1, admission.maxConcurrentConnections))
         acceptedConnections = InteroperableQUICConnectionQueue()
         localEndpointStorage = Mutex(endpoint)
         self.authority = authority
@@ -968,9 +991,19 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
         let listener = self.listener
         let acceptedConnections = self.acceptedConnections
+        let rateLimiter = self.rateLimiter
         listenerTask = Task {
             do {
                 try await listener.run { connection in
+                    // Refuse over-rate connections here, before the handshake is
+                    // driven, so a peer cycling connections cannot make the
+                    // server do unbounded work. The connection is neither
+                    // started nor queued, so it is released on return and the
+                    // refusal costs nothing beyond the accept itself.
+                    if let rateLimiter, !rateLimiter.allow() {
+                        InteroperableQUICDebug.log("server refused connection: rate limit")
+                        return
+                    }
                     InteroperableQUICDebug.log("server accepted connection")
                     _ = connection.start()
                     await acceptedConnections.enqueue(connection)
@@ -1386,18 +1419,18 @@ private enum InteroperableQUICRuntime {
         return WebTransportNetworkEndpoint(host: host.debugDescription, port: port.rawValue)
     }
 
-    static func makeBaseQUIC() -> QUIC {
+    static func makeBaseQUIC(limits: WebTransportTransportLimits = .default) -> QUIC {
         QUIC(alpn: ["h3"]) {
             UDP()
         }
-        .idleTimeout(30_000)
-        .initialMaxData(1_048_576)
-        .initialMaxStreamDataBidirectionalLocal(262_144)
-        .initialMaxStreamDataBidirectionalRemote(262_144)
-        .initialMaxStreamDataUnidirectional(262_144)
-        .initialMaxBidirectionalStreams(16)
-        .initialMaxUnidirectionalStreams(16)
-        .maxDatagramFrameSize(65_535)
+        .idleTimeout(limits.idleTimeoutMilliseconds)
+        .initialMaxData(limits.initialMaxData)
+        .initialMaxStreamDataBidirectionalLocal(limits.initialMaxStreamDataBidirectionalLocal)
+        .initialMaxStreamDataBidirectionalRemote(limits.initialMaxStreamDataBidirectionalRemote)
+        .initialMaxStreamDataUnidirectional(limits.initialMaxStreamDataUnidirectional)
+        .initialMaxBidirectionalStreams(limits.initialMaxBidirectionalStreams)
+        .initialMaxUnidirectionalStreams(limits.initialMaxUnidirectionalStreams)
+        .maxDatagramFrameSize(limits.maxDatagramFrameSize)
     }
 
     static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
@@ -1409,8 +1442,11 @@ private enum InteroperableQUICRuntime {
         }
     }
 
-    static func makeServerQUIC(identity: sec_identity_t) -> QUIC {
-        makeBaseQUIC()
+    static func makeServerQUIC(
+        identity: sec_identity_t,
+        limits: WebTransportTransportLimits = .default
+    ) -> QUIC {
+        makeBaseQUIC(limits: limits)
             .tls.localIdentity(identity)
     }
 }

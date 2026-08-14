@@ -80,6 +80,16 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
     /// CA-issued identity through `.pkcs12(data:passphrase:)` or
     /// `.certificateChain(chainDER:privateKeyDER:keyKind:)`.
     public var identity: WebTransportServerIdentity
+    /// What the listener accepts before it starts refusing.
+    ///
+    /// Defaults preserve the previous behaviour (16 concurrent connections, no
+    /// rate limit). Use `.publicFacing` as a starting point for a reachable
+    /// deployment — it is not the default because raising limits raises resource
+    /// consumption, which is the operator's call.
+    public var admission: WebTransportAdmissionPolicy
+    /// QUIC transport limits advertised to peers. These bound the memory an
+    /// unauthenticated peer can cause the server to commit.
+    public var transportLimits: WebTransportTransportLimits
 
     public init(
         authority: String = "localhost",
@@ -89,7 +99,9 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         timeoutMilliseconds: Int32 = 15_000,
         localOnly: Bool = false,
-        identity: WebTransportServerIdentity = .developmentSelfSigned
+        identity: WebTransportServerIdentity = .developmentSelfSigned,
+        admission: WebTransportAdmissionPolicy = .default,
+        transportLimits: WebTransportTransportLimits = .default
     ) {
         self.authority = authority
         self.path = path
@@ -99,6 +111,8 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         self.timeoutMilliseconds = timeoutMilliseconds
         self.localOnly = localOnly
         self.identity = identity
+        self.admission = admission
+        self.transportLimits = transportLimits
     }
 }
 
@@ -413,7 +427,9 @@ public actor WebTransportServer {
             protocols: configuration.supportedProtocols,
             settingsValidation: configuration.settingsValidation,
             localOnly: configuration.localOnly,
-            identity: configuration.identity
+            identity: configuration.identity,
+            admission: configuration.admission,
+            transportLimits: configuration.transportLimits
         )
         let local = try await server.waitForListening(timeoutMilliseconds: configuration.timeoutMilliseconds)
         logger.record(.serverControlAccepted)
