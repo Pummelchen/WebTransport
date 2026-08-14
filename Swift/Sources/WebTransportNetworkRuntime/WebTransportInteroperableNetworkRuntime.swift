@@ -1308,6 +1308,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         }
         var manager = WebTransportSessionManager(
             http3: http3,
+            // Accept what the QUIC layer advertised to the peer. Leaving this at
+            // the manager's own smaller default rejects a peer that is sending
+            // exactly what it was told it could send.
+            maxDatagramFrameSize: datagramFrameSizeLimit,
             settingsValidation: settingsValidation
         )
 

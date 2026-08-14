@@ -94,10 +94,10 @@ private struct FuzzCorpus {
 /// Every parser reachable from peer-controlled bytes, as `(name, invoke)`.
 ///
 /// The closures deliberately discard results: the assertion is that control
-/// returns at all, by value or by thrown error. `nonisolated(unsafe)` is sound
-/// here — the table is immutable after initialization and every entry is a
-/// stateless static call.
-private nonisolated(unsafe) let peerInputParsers: [(name: String, run: @Sendable (Data) throws -> Void)] = [
+/// returns at all, by value or by thrown error. The table is immutable and every
+/// entry is a stateless static call, so it is `Sendable` on its own and needs no
+/// concurrency escape hatch.
+private let peerInputParsers: [(name: String, run: @Sendable (Data) throws -> Void)] = [
     ("QUICVarInt.decode", { data in
         var cursor = QUICByteCursor(data)
         _ = try QUICVarInt.decode(from: &cursor)

@@ -122,7 +122,7 @@ func managerValidatesPeerSettingsWithItsConfiguredProfile() throws {
         HTTP3SettingID.h3Datagram: 1,
         HTTP3SettingID.legacyEnableWebTransport: 1
     ])
-    var peer = HTTP3ConnectionState(role: .client, localSettings: browserish)
+    let peer = HTTP3ConnectionState(role: .client, localSettings: browserish)
     let peerControl = try peer.localControlStreamBytes()
 
     // Strict: must reject, since the draft-16 enable setting is absent.
@@ -197,7 +197,7 @@ func datagramSendCeilingStaysDeliverableWhileReceiveCeilingMatchesAdvertisement(
 /// a safe answer.
 @Test
 func closedStreamTombstonesAreBounded() throws {
-    var manager = WebTransportSessionManager(
+    let manager = WebTransportSessionManager(
         http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
         maxRetainedClosedStreams: 8
     )
