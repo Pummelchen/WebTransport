@@ -25,7 +25,8 @@ struct WebTransportServerCLI {
                     path: options.path,
                     allowedOrigin: options.allowedOrigin,
                     protocols: options.protocols,
-                    settingsValidation: options.settingsValidation
+                    settingsValidation: options.settingsValidation,
+                    identity: options.identity
                 )
                 let local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
                 writeStandardOutput(
@@ -109,6 +110,7 @@ private struct NetworkServerOptions {
     var allowedOrigin: String?
     var protocols: [String]
     var settingsValidation: HTTP3WebTransportSettingsValidation
+    var identity: WebTransportServerIdentity
 
     static func parse(_ arguments: [String]) throws -> NetworkServerOptions {
         var endpoint: WebTransportNetworkEndpoint?
@@ -120,6 +122,8 @@ private struct NetworkServerOptions {
         var allowedOrigin: String? = "https://localhost"
         var protocols = ["demo.v1"]
         var settingsValidation = HTTP3WebTransportSettingsValidation.draft16Strict
+        var pkcs12Path: String?
+        var pkcs12Passphrase = ""
         var index = 0
 
         while index < arguments.count {
@@ -173,6 +177,18 @@ private struct NetworkServerOptions {
                     throw WebTransportNetworkRuntimeError.invalidPayload
                 }
                 protocols = arguments[index] == "none" ? [] : [arguments[index]]
+            case "--identity-pkcs12":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                pkcs12Path = arguments[index]
+            case "--identity-passphrase":
+                index += 1
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidPayload
+                }
+                pkcs12Passphrase = arguments[index]
             case "--settings-validation":
                 index += 1
                 guard index < arguments.count else {
@@ -221,6 +237,23 @@ private struct NetworkServerOptions {
         guard let endpoint else {
             throw WebTransportNetworkRuntimeError.invalidEndpoint("--listen requires host:port")
         }
+        // Without an injected identity the listener falls back to the
+        // development certificate, which is refused on any non-loopback bind.
+        // That is what previously made this executable unable to serve anything
+        // but loopback.
+        let identity: WebTransportServerIdentity
+        if let pkcs12Path {
+            let url = URL(fileURLWithPath: pkcs12Path)
+            guard let bundle = try? Data(contentsOf: url) else {
+                throw WebTransportNetworkRuntimeError.invalidTransport(
+                    "could not read PKCS#12 bundle at \(pkcs12Path)"
+                )
+            }
+            identity = .pkcs12(data: bundle, passphrase: pkcs12Passphrase)
+        } else {
+            identity = .developmentSelfSigned
+        }
+
         return NetworkServerOptions(
             endpoint: endpoint,
             timeoutMilliseconds: timeoutMilliseconds,
@@ -230,7 +263,8 @@ private struct NetworkServerOptions {
             path: path,
             allowedOrigin: allowedOrigin,
             protocols: protocols,
-            settingsValidation: settingsValidation
+            settingsValidation: settingsValidation,
+            identity: identity
         )
     }
 }
