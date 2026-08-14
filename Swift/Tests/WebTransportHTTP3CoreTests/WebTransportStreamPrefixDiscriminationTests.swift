@@ -103,3 +103,83 @@ func unspecifiedFlowControlLimitAcceptsItsFirstValueThenLocksMonotonic() throws 
     #expect(throws: Error.self) { try state.setMaxData(3) }
     #expect(state.maxData == 4)
 }
+
+// MARK: - Settings profile propagation
+
+/// A manager must validate peer SETTINGS with the profile it was configured
+/// with, not with the strict default.
+///
+/// `receivePeerControlStream` previously omitted the argument and inherited the
+/// parameter default, so a manager built for an earlier revision still applied
+/// draft-16 rules to the peer. That rejects exactly the peers the profile exists
+/// to accept: a browser does not send SETTINGS_WT_ENABLE_WEBTRANSPORT, so strict
+/// validation refuses it.
+@Test
+func managerValidatesPeerSettingsWithItsConfiguredProfile() throws {
+    // Settings a browser-like peer sends: no draft-16 WT enable setting.
+    let browserish = try HTTP3Settings([
+        HTTP3SettingID.enableConnectProtocol: 1,
+        HTTP3SettingID.h3Datagram: 1,
+        HTTP3SettingID.legacyEnableWebTransport: 1
+    ])
+    var peer = HTTP3ConnectionState(role: .client, localSettings: browserish)
+    let peerControl = try peer.localControlStreamBytes()
+
+    // Strict: must reject, since the draft-16 enable setting is absent.
+    var strict = WebTransportSessionManager(
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        settingsValidation: .draft16Strict
+    )
+    #expect(throws: Error.self) {
+        _ = try strict.receivePeerControlStream(peerControl)
+    }
+
+    // Interoperable: must accept the same bytes, or the profile is inert.
+    var interoperable = WebTransportSessionManager(
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportChromiumInteropDefaults),
+        settingsValidation: .interoperable
+    )
+    #expect(throws: Never.self) {
+        _ = try interoperable.receivePeerControlStream(peerControl)
+    }
+}
+
+// MARK: - Datagram ceilings
+
+/// Receive and send datagram ceilings answer different questions and must not
+/// be the same number.
+///
+/// The receive ceiling has to match what the QUIC layer advertised, or a peer
+/// honouring exactly what it was told gets rejected. The send ceiling has to
+/// stay within what a QUIC path is guaranteed to carry, because a DATAGRAM
+/// cannot be fragmented and an oversized one is silently dropped rather than
+/// reported.
+@Test
+func datagramSendCeilingStaysDeliverableWhileReceiveCeilingMatchesAdvertisement() throws {
+    // Advertised ceiling large, as the runtime advertises 65535.
+    let manager = WebTransportSessionManager(
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        maxDatagramFrameSize: 65_535
+    )
+    #expect(manager.maxDatagramFrameSize == 65_535, "must accept what was advertised")
+    #expect(
+        manager.maxSendableDatagramFrameSize == 1_200,
+        "sends stay within the QUIC guaranteed-deliverable size"
+    )
+
+    // A ceiling below the guaranteed size must also bound sends: an endpoint
+    // must never send more than it would itself accept.
+    let tiny = WebTransportSessionManager(
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        maxDatagramFrameSize: 4
+    )
+    #expect(tiny.maxSendableDatagramFrameSize == 4)
+
+    // An explicit value still wins.
+    let explicit = WebTransportSessionManager(
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        maxDatagramFrameSize: 65_535,
+        maxSendableDatagramFrameSize: 900
+    )
+    #expect(explicit.maxSendableDatagramFrameSize == 900)
+}

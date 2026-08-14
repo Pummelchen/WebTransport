@@ -237,7 +237,22 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public private(set) var flowControlStateBySessionID: [WebTransportSessionID: WebTransportFlowControlState]
     public private(set) var receiveFlowControlStateBySessionID: [WebTransportSessionID: WebTransportFlowControlState]
     public private(set) var blockedFlowCapsulesBySessionID: [WebTransportSessionID: [WebTransportFlowCapsule]]
+    /// Largest DATAGRAM this endpoint will accept, matching what the QUIC layer
+    /// advertised to the peer. Enforcing a smaller number here rejects peers that
+    /// are honouring exactly what we told them they could send.
     public let maxDatagramFrameSize: Int
+    /// Largest DATAGRAM this endpoint will attempt to send.
+    ///
+    /// Defaults to `min(maxDatagramFrameSize, 1200)`, which encodes two rules:
+    /// never send more than this endpoint would itself accept, and never exceed
+    /// the 1200 bytes a QUIC path is guaranteed to carry (RFC 9000 section 14).
+    ///
+    /// It is separate from the receive ceiling because the two are not the same
+    /// question. A peer may legitimately advertise a large receive limit, but a
+    /// QUIC DATAGRAM cannot be fragmented, so anything above the path MTU is
+    /// silently undeliverable. Bounding sends turns that silent loss into an
+    /// immediate, explicit error.
+    public let maxSendableDatagramFrameSize: Int
     public let maxDatagramReceiveBufferBytes: Int
     public let maxStreamReceiveBufferBytes: Int
     public let maxBufferedStreamsPerSession: Int
@@ -252,6 +267,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         http3: HTTP3ConnectionState,
         maxStreamReceiveBufferBytes: Int = 64 * 1024,
         maxDatagramFrameSize: Int = 1_200,
+        maxSendableDatagramFrameSize: Int? = nil,
         maxDatagramReceiveBufferBytes: Int = 64 * 1024,
         maxBufferedStreamsPerSession: Int = 64,
         maxBufferedDatagramsPerSession: Int = 64,
@@ -270,6 +286,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.receiveFlowControlStateBySessionID = [:]
         self.blockedFlowCapsulesBySessionID = [:]
         self.maxDatagramFrameSize = maxDatagramFrameSize
+        self.maxSendableDatagramFrameSize = maxSendableDatagramFrameSize
+            ?? min(maxDatagramFrameSize, 1_200)
         self.maxDatagramReceiveBufferBytes = maxDatagramReceiveBufferBytes
         self.maxStreamReceiveBufferBytes = maxStreamReceiveBufferBytes
         self.maxBufferedStreamsPerSession = maxBufferedStreamsPerSession
@@ -369,7 +387,13 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     public mutating func receivePeerControlStream(_ bytes: Data) throws -> [HTTP3Frame] {
-        try http3.receivePeerControlStream(bytes)
+        // Forward this manager's profile rather than letting the underlying
+        // parameter default to draft16Strict. Omitting it made a manager
+        // configured for an earlier revision validate the peer's SETTINGS
+        // strictly anyway, which rejects the peers that profile exists to
+        // accept — browsers in particular, since they do not send
+        // SETTINGS_WT_ENABLE_WEBTRANSPORT.
+        try http3.receivePeerControlStream(bytes, settingsValidation: settingsValidation)
     }
 
     public mutating func receiveClientSessionRequest(
@@ -460,9 +484,9 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             sessionID: sessionID.rawValue,
             payload: payload
         )
-        guard datagramPayload.count <= maxDatagramFrameSize else {
+        guard datagramPayload.count <= maxSendableDatagramFrameSize else {
             throw QUICCodecError.valueOutOfRange(
-                "WebTransport datagram payload exceeds maximum frame size of \(maxDatagramFrameSize)"
+                "WebTransport datagram payload exceeds the sendable frame size of \(maxSendableDatagramFrameSize)"
             )
         }
         return .datagram(datagramPayload)

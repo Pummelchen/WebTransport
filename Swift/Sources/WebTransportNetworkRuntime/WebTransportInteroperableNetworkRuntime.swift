@@ -208,6 +208,9 @@ public struct WebTransportQUICClient: Sendable {
         }
         var manager = WebTransportSessionManager(
             http3: http3,
+            // makeClientQUIC advertises the default limits, so enforce the same
+            // ceiling here rather than the manager's smaller built-in default.
+            maxDatagramFrameSize: WebTransportTransportLimits.default.maxDatagramFrameSize,
             settingsValidation: settingsValidation
         )
 
@@ -881,6 +884,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     private let admission: WebTransportAdmissionPolicy
     /// nil when the policy sets no rate limit.
     private let rateLimiter: ConnectionRateLimiter?
+    /// Kept so the session manager enforces the same datagram ceiling the QUIC
+    /// layer advertised. Advertising one number and enforcing a smaller one
+    /// rejects peers that are honouring what we told them.
+    private let transportLimits: WebTransportTransportLimits
 
     /// The endpoint the listener is bound to.
     ///
@@ -970,6 +977,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let transportLimits = try transportLimits.validated()
         self.admission = admission
         self.rateLimiter = ConnectionRateLimiter(policy: admission)
+        self.transportLimits = transportLimits
         let resolvedIdentity = try ServerIdentityResolver.resolve(
             identity,
             endpoint: endpoint,
@@ -1240,6 +1248,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             return try await InteroperableQUICHelpers.withTimeout(remaining, operation)
         }
 
+        let datagramFrameSizeLimit = transportLimits.maxDatagramFrameSize
         InteroperableQUICDebug.log("server serveSession start")
         let inboundStreams = InteroperableQUICInboundStreamCollector()
         let inboundTask = Task {
