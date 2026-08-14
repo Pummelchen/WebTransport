@@ -183,3 +183,47 @@ func datagramSendCeilingStaysDeliverableWhileReceiveCeilingMatchesAdvertisement(
     )
     #expect(explicit.maxSendableDatagramFrameSize == 900)
 }
+
+// MARK: - Bounded tombstone retention
+
+/// Terminated sessions and streams are retained so that late activity reports
+/// "session gone" rather than "unknown". That retention has to be bounded.
+///
+/// A session tombstone holds the peer's own authority and path strings, a
+/// CONNECT field section may be up to 16 KB, and a peer can open and close
+/// sessions on a single connection indefinitely. Retaining every one of them for
+/// the life of the connection is remotely triggerable memory growth, so the
+/// oldest are evicted and late activity on them degrades to "unknown", which is
+/// a safe answer.
+@Test
+func closedStreamTombstonesAreBounded() throws {
+    var manager = WebTransportSessionManager(
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        maxRetainedClosedStreams: 8
+    )
+    #expect(manager.maxRetainedClosedStreams == 8)
+
+    // Retention is a configured ceiling, not an accident of how many streams a
+    // peer happened to open.
+    #expect(manager.maxRetainedClosedSessions == 256, "default session tombstone bound")
+
+    // A zero bound is accepted and means "retain nothing", rather than trapping.
+    let none = WebTransportSessionManager(
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        maxRetainedClosedSessions: 0,
+        maxRetainedClosedStreams: 0
+    )
+    #expect(none.maxRetainedClosedSessions == 0)
+    #expect(none.maxRetainedClosedStreams == 0)
+
+    // Negative values are clamped rather than producing a negative ceiling that
+    // would make the eviction loop misbehave.
+    let clamped = WebTransportSessionManager(
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        maxRetainedClosedSessions: -5,
+        maxRetainedClosedStreams: -5
+    )
+    #expect(clamped.maxRetainedClosedSessions == 0)
+    #expect(clamped.maxRetainedClosedStreams == 0)
+    _ = manager
+}

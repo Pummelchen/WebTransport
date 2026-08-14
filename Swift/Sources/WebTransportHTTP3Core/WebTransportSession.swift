@@ -259,9 +259,27 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public let maxBufferedDatagramsPerSession: Int
     public let maxBufferedSessions: Int
     public let settingsValidation: HTTP3WebTransportSettingsValidation
+    /// How many terminated sessions keep their tombstone.
+    ///
+    /// A terminated session is retained so that late activity on it reports
+    /// "session gone" rather than "unknown", which is a materially better error.
+    /// The retention has to be bounded, though: the tombstone holds the peer's
+    /// own authority and path strings, a CONNECT field section may be up to
+    /// 16 KB, and a peer can open and close sessions on one connection
+    /// indefinitely. Unbounded retention is remotely triggerable memory growth.
+    ///
+    /// Beyond this many, the oldest tombstone is dropped and activity on it
+    /// degrades to "unknown session", which is a safe answer.
+    public let maxRetainedClosedSessions: Int
+    /// How many terminated streams keep their tombstone, for the same reason.
+    public let maxRetainedClosedStreams: Int
+
     private var datagramPayloadBytesBySessionID: [WebTransportSessionID: Int]
     private var closedStreamSessionIDsByStreamID: [UInt64: WebTransportSessionID]
     private var requestStreamIDsClosedByReceivedCloseCapsule: Set<UInt64>
+    /// Tombstone insertion order, oldest first, so eviction is deterministic.
+    private var closedSessionOrder: [WebTransportSessionID]
+    private var closedStreamOrder: [UInt64]
 
     public init(
         http3: HTTP3ConnectionState,
@@ -272,6 +290,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         maxBufferedStreamsPerSession: Int = 64,
         maxBufferedDatagramsPerSession: Int = 64,
         maxBufferedSessions: Int = 64,
+        maxRetainedClosedSessions: Int = 256,
+        maxRetainedClosedStreams: Int = 4_096,
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict
     ) {
         self.http3 = http3
@@ -294,9 +314,13 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.maxBufferedDatagramsPerSession = maxBufferedDatagramsPerSession
         self.maxBufferedSessions = maxBufferedSessions
         self.settingsValidation = settingsValidation
+        self.maxRetainedClosedSessions = max(0, maxRetainedClosedSessions)
+        self.maxRetainedClosedStreams = max(0, maxRetainedClosedStreams)
         self.datagramPayloadBytesBySessionID = [:]
         self.closedStreamSessionIDsByStreamID = [:]
         self.requestStreamIDsClosedByReceivedCloseCapsule = []
+        self.closedSessionOrder = []
+        self.closedStreamOrder = []
     }
 
     public mutating func makeClientSessionRequest(
@@ -382,6 +406,9 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             try promoteBufferedStreams(for: session.id)
         } else {
             discardBufferedIngress(for: session.id, tombstoneStreams: true)
+            // A rejected session is terminal, so it becomes a bounded tombstone
+            // rather than being retained for the life of the connection.
+            recordClosedSession(session.id)
         }
         return session
     }
@@ -465,6 +492,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             try promoteBufferedStreams(for: session.id)
         } else {
             discardBufferedIngress(for: session.id, tombstoneStreams: true)
+            recordClosedSession(session.id)
         }
         return WebTransportServerSessionDecision(
             session: session,
@@ -1061,6 +1089,47 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         blockedFlowCapsulesBySessionID[session.id] = blockedFlowCapsulesBySessionID[session.id] ?? []
     }
 
+    /// Records a terminated session and evicts the oldest beyond the retention
+    /// bound, releasing every per-session map keyed by it.
+    private mutating func recordClosedSession(_ sessionID: WebTransportSessionID) {
+        if let existing = closedSessionOrder.firstIndex(of: sessionID) {
+            closedSessionOrder.remove(at: existing)
+        }
+        closedSessionOrder.append(sessionID)
+        while closedSessionOrder.count > maxRetainedClosedSessions {
+            let evicted = closedSessionOrder.removeFirst()
+            releaseSessionState(evicted)
+        }
+    }
+
+    /// Drops every trace of a session. Only ever called for a session already
+    /// terminated, so nothing live is discarded.
+    private mutating func releaseSessionState(_ sessionID: WebTransportSessionID) {
+        if let session = sessionsByID.removeValue(forKey: sessionID) {
+            sessionIDsByRequestStreamID.removeValue(forKey: session.requestStreamID)
+            requestStreamIDsClosedByReceivedCloseCapsule.remove(session.requestStreamID)
+        }
+        streamIDsBySessionID.removeValue(forKey: sessionID)
+        bufferedStreamIDsBySessionID.removeValue(forKey: sessionID)
+        datagramsBySessionID.removeValue(forKey: sessionID)
+        datagramPayloadBytesBySessionID.removeValue(forKey: sessionID)
+        flowControlStateBySessionID.removeValue(forKey: sessionID)
+        receiveFlowControlStateBySessionID.removeValue(forKey: sessionID)
+        blockedFlowCapsulesBySessionID.removeValue(forKey: sessionID)
+    }
+
+    /// Records a terminated stream and evicts the oldest beyond the bound.
+    private mutating func recordClosedStream(_ streamID: UInt64) {
+        if let existing = closedStreamOrder.firstIndex(of: streamID) {
+            closedStreamOrder.remove(at: existing)
+        }
+        closedStreamOrder.append(streamID)
+        while closedStreamOrder.count > maxRetainedClosedStreams {
+            let evicted = closedStreamOrder.removeFirst()
+            closedStreamSessionIDsByStreamID.removeValue(forKey: evicted)
+        }
+    }
+
     private mutating func register(_ stream: WebTransportStreamState) {
         streamsByID[stream.streamID] = stream
         streamIDsBySessionID[stream.sessionID, default: Set<UInt64>()].insert(stream.streamID)
@@ -1128,6 +1197,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         for streamID in streamIDs {
             if tombstoneStreams {
                 closedStreamSessionIDsByStreamID[streamID] = sessionID
+                recordClosedStream(streamID)
             }
             bufferedStreamsByID.removeValue(forKey: streamID)
         }
@@ -1337,6 +1407,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         let terminationActions = terminateAssociatedStreams(for: sessionID, requestStreamID: session.requestStreamID)
         datagramsBySessionID[sessionID] = []
         datagramPayloadBytesBySessionID[sessionID] = 0
+        recordClosedSession(sessionID)
         return terminationActions
     }
 
@@ -1356,6 +1427,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
             streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
             closedStreamSessionIDsByStreamID[streamID] = sessionID
+            recordClosedStream(streamID)
             streamsByID.removeValue(forKey: streamID)
         }
 
@@ -1367,6 +1439,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
             streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
             closedStreamSessionIDsByStreamID[streamID] = sessionID
+            recordClosedStream(streamID)
             bufferedStreamsByID.removeValue(forKey: streamID)
         }
 
