@@ -20,13 +20,26 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Release | [1.2.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.2.0) |
+| Latest release | [1.2.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.2.0) |
+| `main` | Ahead of 1.2.0 and not yet tagged |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
 The Swift conformance matrix passes in full. C99 and C++ directories contain planning material only; they are not protocol implementations.
+
+**`main` is ahead of the latest release.** The capabilities described below are on
+`main` and are not in 1.2.0. Server TLS identity injection, graceful shutdown,
+connection admission limits, certificate expiry reporting, and verified browser
+interop all landed after that tag. Pin `1.2.0` for the released behaviour, or
+depend on `main` knowingly.
+
+One change on `main` is deliberately not backwards compatible: the built-in
+development certificate is now **refused on any non-loopback bind address**. A
+server that previously bound `0.0.0.0` with default settings now fails at startup
+with an error naming the fix, rather than starting and being unreachable by every
+real client.
 
 ## Add the package
 
