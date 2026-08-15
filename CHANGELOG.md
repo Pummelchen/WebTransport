@@ -33,7 +33,7 @@ Added:
 
 Fixed:
 
-- Inbound QUIC streams arriving before a handler was attached were discarded, most often the peer's HTTP/3 control stream, leaving both ends waiting until they timed out. Loopback session establishment went from 16 failures in 300 to 3 in 500.
+- Inbound QUIC streams arriving before a handler was attached were discarded, most often the peer's HTTP/3 control stream, leaving both ends waiting until they timed out. The loss was confirmed by logging every delivery: the peer's later streams arrived while the first never did. (The failure-rate figures originally given here were measured on a loaded development machine and have been withdrawn; see 1.3.1.)
 - A timed-out wait for a stream left its claim in the waiter list, so the next stream to arrive was handed to a caller that had already given up. `acceptBidirectionalStream` polls with a timeout and could therefore lose a stream the peer had opened.
 - Two HTTP/3 critical streams were released after reading, which a peer sees as closing them and answers with `H3_CLOSED_CRITICAL_STREAM`. This is what prevented browsers from connecting.
 - Terminated session and stream state was retained without bound, letting a peer grow server memory by opening and closing sessions on one connection.
@@ -48,7 +48,7 @@ Changed, not backwards compatible:
 
 Known limitation:
 
-- Roughly 0.6% of loopback sessions still fail to establish and end in a timeout. Two causes are known, both predating this release's fixes, and neither is resolved. Treat a connect timeout as retryable. See the Wiki's Known Limitations page.
+- Session establishment is load-sensitive. On an unsaturated machine no failures were observed in 4000 loopback sessions; with every core saturated, roughly 1% fail to establish and end in a timeout. Treat a connect timeout as retryable whenever the host may be under load. See the Wiki's Known Limitations page.
 
 ## [1.2.0] - 2026-08-11
 
