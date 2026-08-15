@@ -1709,10 +1709,26 @@ private enum InteroperableQUICHelpers {
         timeoutMilliseconds: Int32
     ) async throws -> Data {
         while true {
-            let stream = try await inboundStreams.next(
-                direction: unidirectionalStreamDirection,
-                timeoutMilliseconds: timeoutMilliseconds
-            )
+            let stream: QUIC.Stream<QUICStream>
+            do {
+                stream = try await inboundStreams.next(
+                    direction: unidirectionalStreamDirection,
+                    timeoutMilliseconds: timeoutMilliseconds
+                )
+            } catch let error as WebTransportNetworkRuntimeError {
+                // Name what actually happened. Waiting here and running out of
+                // time means the peer's control stream never arrived, which the
+                // transport can cause by dropping an inbound stream on a busy
+                // host. Reporting it as a generic timeout sent every previous
+                // investigation looking for a slow peer instead.
+                guard case .timeout = error else {
+                    throw error
+                }
+                throw WebTransportNetworkRuntimeError.peerControlStreamNotDelivered(
+                    role: role,
+                    timeoutMilliseconds: timeoutMilliseconds
+                )
+            }
             InteroperableQUICDebug.log("\(role) got peer unidirectional stream \(stream.streamID)")
             let bytes = try await readStream(stream, timeoutMilliseconds: timeoutMilliseconds)
             let prefix = try HTTP3StreamTypeParser.parsePrefix(bytes)

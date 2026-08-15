@@ -9,6 +9,15 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
     case unexpectedPacket
     case unexpectedFrame
     case timeout(Int32)
+    /// The peer's HTTP/3 control stream never arrived.
+    ///
+    /// Distinguished from a plain timeout because the cause is known and the
+    /// remedy is different: the transport can drop an inbound QUIC stream on a
+    /// saturated host, and when the lost stream is the control stream both ends
+    /// wait for each other until the deadline. Nothing is recoverable on this
+    /// connection — the stream is not resent — so a caller seeing this should
+    /// establish a new one rather than wait longer.
+    case peerControlStreamNotDelivered(role: String, timeoutMilliseconds: Int32)
 
     public var description: String {
         switch self {
@@ -26,6 +35,9 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
             return "unexpected frame in WebTransport network packet"
         case .timeout(let value):
             return "network runtime operation timed out after \(value)ms"
+        case .peerControlStreamNotDelivered(let role, let timeoutMilliseconds):
+            return "\(role) never received the peer's HTTP/3 control stream within \(timeoutMilliseconds)ms; "
+                + "the connection cannot proceed and should be retried"
         }
     }
 }
