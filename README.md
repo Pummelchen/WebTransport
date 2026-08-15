@@ -42,10 +42,17 @@ client.
 
 Session establishment is reliable on a machine that is not saturated, and degrades
 under heavy CPU contention. On four idle Macs, 4000 loopback sessions per release
-completed without a single failure. With every core saturated on those same
-machines, roughly 1% failed to establish and ended in a timeout rather than an
-error. Treat a connect timeout as retryable if the host may be under load, and
-read the
+completed without a single failure; with every core saturated on those same
+machines, roughly 1% failed to establish.
+
+The cause is below this package. Network.framework can drop an inbound QUIC stream
+on a saturated host, and when the stream it drops is the peer's HTTP/3 control
+stream, both ends wait for each other. This reproduces with about 50 lines of
+plain `NetworkConnection<QUIC>` and no WebTransport code at all, at 13 connections
+in 1600. Nothing here can recover such a connection, because the stream is never
+resent — which is also why a longer timeout does not help. The runtime reports
+`peerControlStreamNotDelivered` rather than a bare timeout so the condition is
+recognisable; **treat it as a signal to open a new connection**. See the
 [known limitations](https://github.com/Pummelchen/WebTransport/wiki/Known-Limitations)
 before adopting this in production.
 

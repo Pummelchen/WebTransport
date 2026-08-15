@@ -6,6 +6,18 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+Added:
+
+- `WebTransportNetworkRuntimeError.peerControlStreamNotDelivered` distinguishes a lost HTTP/3 control stream from a generic timeout. The condition is not recoverable on the affected connection, so the error says to establish a new one rather than wait longer.
+
+Fixed:
+
+- `QUICAckTracker` retained every packet number it had ever seen, so the set grew for the life of a connection and each `makeAckFrame` sorted the whole of it. Tracking is now bounded to a window that doubles as the replay boundary. Reachable by embedders of `WebTransportQUICCore`; this repository's own client and server use Network.framework's QUIC and never construct it.
+
+Known limitation, now attributed:
+
+- Session establishment failures under heavy CPU load are caused by Network.framework dropping an inbound QUIC stream, not by this package. A standalone harness — `NetworkListener<QUIC>` and `NetworkConnection<QUIC>`, no HTTP/3 — loses one of three peer-opened streams on a saturated receiver in 13 of 1600 connections, matching the rate seen here. When the lost stream is the peer's control stream, both ends wait until they time out. The stream is never resent, so raising the deadline does not help: 6 second and 60 second timeouts fail at the same rate. Reported to Apple.
+
 ## [1.3.1] - 2026-08-15
 
 Fixed:
