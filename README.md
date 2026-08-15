@@ -20,7 +20,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.3.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.0) |
+| Latest release | [1.3.1](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.1) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -28,9 +28,11 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 The Swift conformance matrix passes in full. C99 and C++ directories contain planning material only; they are not protocol implementations.
 
-1.3.0 adds server TLS identity injection, graceful shutdown, connection admission
-limits, and certificate expiry reporting, and is the first release verified end to
-end against a browser. The code audit for 1.3.0 was performed by Claude Opus 5.
+1.3.0 added server TLS identity injection, graceful shutdown, connection admission
+limits, and certificate expiry reporting, and was the first release verified end to
+end against a browser. 1.3.1 fixes an inbound stream delivered twice by the
+transport being processed twice, which was the main cause of sessions failing to
+establish. The code audit for the 1.3 series was performed by Claude Opus 5.
 
 One change is deliberately not backwards compatible: the built-in development
 certificate is now **refused on any non-loopback bind address**. A server that
@@ -38,9 +40,10 @@ previously bound `0.0.0.0` with default settings now fails at startup with an
 error naming the fix, rather than starting and being unreachable by every real
 client.
 
-Session establishment is not yet fully reliable: roughly 0.6% of loopback sessions
-fail and end in a timeout, from two causes that are known but unresolved. Treat a
-connect timeout as retryable, and read the
+Session establishment is close to but not fully reliable: about 0.07% of loopback
+sessions still fail and end in a timeout, from one cause that has not yet been
+reproduced under instrumentation. Treat a connect timeout as retryable, and read
+the
 [known limitations](https://github.com/Pummelchen/WebTransport/wiki/Known-Limitations)
 before adopting this in production.
 
@@ -49,7 +52,7 @@ before adopting this in production.
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.3.0"
+    exact: "1.3.1"
 )
 ```
 
@@ -109,7 +112,7 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 
 ## Prebuilt binaries
 
-The [1.3.0 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.0)
+The [1.3.1 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.1)
 ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
 binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
 later. They are ad-hoc signed rather than Developer ID signed, and are not

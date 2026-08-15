@@ -6,6 +6,16 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+## [1.3.1] - 2026-08-15
+
+Fixed:
+
+- An inbound QUIC stream delivered twice by the transport was processed twice. A QUIC stream identifier is unique for the life of a connection and never reused, so a repeat is a re-delivery of a stream already handed out. Processing it failed the session in one of two ways depending on timing: parsed as a new WebTransport stream it was rejected as `unknown WebTransport stream marker: 0`, and handed instead to a reader waiting for work it blocked on a stream with nothing left to give until the operation timed out. Measured on paired interleaved loopback runs against the 1.3.0 binaries, session establishment failures went from 14 in 2100 to 1 in 1400.
+
+Known limitation:
+
+- About 0.07% of loopback sessions still fail to establish and end in a timeout. The remaining case has not been reproduced under instrumentation, because enabling diagnostic logging suppresses it. Treat a connect timeout as retryable.
+
 ## [1.3.0] - 2026-08-15
 
 The code audit for this release was performed by Claude Opus 5.
