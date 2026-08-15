@@ -6,6 +6,8 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+## [1.3.3] - 2026-08-16
+
 Added:
 
 - `WebTransportNetworkRuntimeError.peerControlStreamNotDelivered` distinguishes a lost HTTP/3 control stream from a generic timeout. The condition is not recoverable on the affected connection, so the error says to establish a new one rather than wait longer.
@@ -28,7 +30,7 @@ Fixed:
 
 Known limitation:
 
-- Session establishment is load-sensitive. On an unsaturated machine no failures were observed in 4000 sessions per release. With every core saturated, roughly 1% failed to establish and ended in a timeout rather than an error. The underlying race has not been isolated; diagnostic logging suppresses it. Treat a connect timeout as retryable if the host may be under load.
+- Session establishment is load-sensitive. On an unsaturated machine no failures were observed in 4000 sessions per release. With every core saturated, roughly 1% failed to establish and ended in a timeout rather than an error. (The cause was unknown at this release and was attributed in 1.3.3: Network.framework drops an inbound QUIC stream on a saturated host.)
 
 ## [1.3.0] - 2026-08-15
 
