@@ -293,3 +293,53 @@ func closeStateMapsTransportApplicationAndIdleClose() throws {
         reason: Data("app".utf8)
     ))
 }
+
+// MARK: - Acknowledgement tracking window
+
+/// A connection receives packets for as long as it lives, so what the tracker
+/// remembers has to be bounded. Retaining every number seen grew without limit
+/// and made each `makeAckFrame` sort the whole history, so acknowledging got
+/// slower the longer a connection stayed up.
+@Test
+func ackTrackerBoundsWhatItRemembers() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+    let window = QUICAckTracker.maximumTrackedReceivedPacketNumbers
+
+    for packetNumber in 0..<UInt64(window * 3) {
+        tracker.recordReceived(packetNumber: packetNumber, nowMicros: packetNumber)
+    }
+
+    #expect(tracker.receivedPacketNumbers.count <= window * 2)
+    #expect(tracker.largestReceived == UInt64(window * 3 - 1))
+    #expect(tracker.discardedBelow > 0)
+}
+
+/// Dropping an old packet number must not make it acceptable again. The window
+/// floor is a replay boundary, not just an eviction policy.
+@Test
+func ackTrackerRefusesPacketNumbersItHasForgotten() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+    let window = QUICAckTracker.maximumTrackedReceivedPacketNumbers
+
+    // Past the point where the tracker trims, so the oldest numbers are gone.
+    for packetNumber in 0..<UInt64(window * 3) {
+        tracker.recordReceived(packetNumber: packetNumber, nowMicros: packetNumber)
+    }
+    #expect(tracker.discardedBelow > 0)
+
+    // Packet 0 was seen and has since been forgotten. Re-offering it must not
+    // read as new, or an old packet would be processed a second time.
+    #expect(tracker.recordReceived(packetNumber: 0, nowMicros: 1) == false)
+    // A number inside the window still behaves normally.
+    let insideWindow = tracker.discardedBelow
+    #expect(tracker.recordReceived(packetNumber: insideWindow, nowMicros: 1) == false)
+}
+
+/// Ordinary duplicate detection inside the window is unchanged.
+@Test
+func ackTrackerStillRejectsDuplicatesInsideTheWindow() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+    #expect(tracker.recordReceived(packetNumber: 7, nowMicros: 1) == true)
+    #expect(tracker.recordReceived(packetNumber: 7, nowMicros: 2) == false)
+    #expect(tracker.largestReceived == 7)
+}

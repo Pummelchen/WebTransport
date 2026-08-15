@@ -200,15 +200,34 @@ public enum QUICPacketNumberSpace: UInt8, CaseIterable, Equatable, Sendable {
 public struct QUICAckTracker: Equatable, Sendable {
     public static let maximumExpandedAckedPacketNumbers = 16_384
 
+    /// How many packet numbers below the largest received one stay individually
+    /// tracked.
+    ///
+    /// Something has to bound this. A connection receives packets for as long as
+    /// it lives, and retaining every number seen would grow without limit and
+    /// make `makeAckFrame` sort the entire history on each call, so the cost of
+    /// acknowledging would rise with the age of the connection rather than with
+    /// what is being acknowledged. RFC 9000 section 13.2.4 anticipates exactly
+    /// this and permits an endpoint to limit what it tracks.
+    ///
+    /// The window doubles as the replay boundary: a packet number below it is
+    /// refused rather than forgotten, so dropping old numbers cannot let an old
+    /// packet be accepted a second time.
+    public static let maximumTrackedReceivedPacketNumbers = 8_192
+
     public let packetNumberSpace: QUICPacketNumberSpace
     public var ackDelayExponent: UInt8
     public private(set) var receivedPacketNumbers: Set<UInt64>
     public private(set) var largestReceived: UInt64?
     public private(set) var largestAckElicitingReceiveTimeMicros: UInt64?
 
+    /// Packet numbers below this are no longer tracked and are refused on sight.
+    public private(set) var discardedBelow: UInt64
+
     public init(packetNumberSpace: QUICPacketNumberSpace, ackDelayExponent: UInt8 = 3) {
         self.packetNumberSpace = packetNumberSpace
         self.ackDelayExponent = ackDelayExponent
+        self.discardedBelow = 0
         self.receivedPacketNumbers = []
         self.largestReceived = nil
         self.largestAckElicitingReceiveTimeMicros = nil
@@ -220,6 +239,13 @@ public struct QUICAckTracker: Equatable, Sendable {
         nowMicros: UInt64,
         ackEliciting: Bool = true
     ) -> Bool {
+        // Below the window this tracker still remembers, so it cannot be
+        // distinguished from one already seen. Refusing rather than accepting is
+        // the safe direction: it keeps an old packet from being processed twice.
+        guard packetNumber >= discardedBelow else {
+            return false
+        }
+
         let inserted = receivedPacketNumbers.insert(packetNumber).inserted
         if inserted && shouldUpdateLargestReceived(packetNumber) {
             largestReceived = packetNumber
@@ -227,7 +253,36 @@ public struct QUICAckTracker: Equatable, Sendable {
                 largestAckElicitingReceiveTimeMicros = nowMicros
             }
         }
+        if inserted {
+            discardOutsideTrackingWindow()
+        }
         return inserted
+    }
+
+    /// Drops packet numbers that have fallen out of the tracking window and
+    /// raises the floor below which numbers are refused.
+    ///
+    /// Pruning waits until the set is well past the window rather than trimming
+    /// on every packet. Trimming as soon as it is one over means rebuilding the
+    /// whole set per packet, which is the same cost profile this window exists to
+    /// remove. Letting it overshoot and then trimming in one pass makes the cost
+    /// amortize to a constant per packet, at the price of holding at most twice
+    /// the window.
+    private mutating func discardOutsideTrackingWindow() {
+        guard receivedPacketNumbers.count > Self.maximumTrackedReceivedPacketNumbers * 2,
+              let largestReceived else {
+            return
+        }
+        let window = UInt64(Self.maximumTrackedReceivedPacketNumbers)
+        guard largestReceived >= window else {
+            return
+        }
+        let floor = largestReceived - window + 1
+        guard floor > discardedBelow else {
+            return
+        }
+        discardedBelow = floor
+        receivedPacketNumbers = receivedPacketNumbers.filter { $0 >= floor }
     }
 
     private func shouldUpdateLargestReceived(_ packetNumber: UInt64) -> Bool {
