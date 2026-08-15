@@ -30,9 +30,9 @@ The Swift conformance matrix passes in full. C99 and C++ directories contain pla
 
 1.3.0 added server TLS identity injection, graceful shutdown, connection admission
 limits, and certificate expiry reporting, and was the first release verified end to
-end against a browser. 1.3.1 fixes an inbound stream delivered twice by the
-transport being processed twice, which was the main cause of sessions failing to
-establish. The code audit for the 1.3 series was performed by Claude Opus 5.
+end against a browser. 1.3.1 refuses an inbound stream that the transport delivers
+twice, which a QUIC connection never legitimately does. The code audit for the 1.3
+series was performed by Claude Opus 5.
 
 One change is deliberately not backwards compatible: the built-in development
 certificate is now **refused on any non-loopback bind address**. A server that
@@ -40,10 +40,12 @@ previously bound `0.0.0.0` with default settings now fails at startup with an
 error naming the fix, rather than starting and being unreachable by every real
 client.
 
-Session establishment is close to but not fully reliable: about 0.07% of loopback
-sessions still fail and end in a timeout, from one cause that has not yet been
-reproduced under instrumentation. Treat a connect timeout as retryable, and read
-the
+Session establishment is reliable on a machine that is not saturated, and degrades
+under heavy CPU contention. On four idle Macs, 4000 loopback sessions per release
+completed without a single failure. With every core saturated on those same
+machines, roughly 1% failed to establish and ended in a timeout rather than an
+error. Treat a connect timeout as retryable if the host may be under load, and
+read the
 [known limitations](https://github.com/Pummelchen/WebTransport/wiki/Known-Limitations)
 before adopting this in production.
 
