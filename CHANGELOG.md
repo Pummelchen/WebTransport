@@ -16,7 +16,7 @@ Fixed:
 
 Known limitation, now attributed:
 
-- Session establishment failures under heavy CPU load are caused by Network.framework dropping an inbound QUIC stream, not by this package. A standalone harness — `NetworkListener<QUIC>` and `NetworkConnection<QUIC>`, no HTTP/3 — loses one of three peer-opened streams on a saturated receiver in 13 of 1600 connections, matching the rate seen here. When the lost stream is the peer's control stream, both ends wait until they time out. The stream is never resent, so raising the deadline does not help: 6 second and 60 second timeouts fail at the same rate. Reported to Apple.
+- Session establishment failures under heavy CPU load are caused by Network.framework dropping an inbound QUIC stream, not by this package. A standalone harness — `NetworkListener<QUIC>` and `NetworkConnection<QUIC>`, no HTTP/3 — loses one of three peer-opened streams on a saturated receiver in 13 of 1600 connections, matching the rate seen here. When the lost stream is the peer's control stream, both ends wait until they time out. The stream is never resent, so raising the deadline does not help: 6 second and 60 second timeouts fail at the same rate. A reproducer and Feedback Assistant report are prepared.
 
 ## [1.3.1] - 2026-08-15
 
