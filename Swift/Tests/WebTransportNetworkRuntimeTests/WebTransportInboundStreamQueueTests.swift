@@ -24,7 +24,7 @@ struct WebTransportInboundStreamQueueTests {
         // Let `next` reach the point where it parks before anything is enqueued,
         // so this exercises the waiter path rather than the already-queued path.
         try await Task.sleep(for: .milliseconds(50))
-        await queue.enqueue(7, direction: Self.direction)
+        await queue.enqueue(7, direction: Self.direction, streamID: 7)
 
         let received = try await receiver.value
         #expect(received == 7)
@@ -33,7 +33,7 @@ struct WebTransportInboundStreamQueueTests {
     @Test
     func streamQueuedBeforeAnyCallerArrivesIsReturnedImmediately() async throws {
         let queue = InteroperableQUICStreamQueue<Int>()
-        await queue.enqueue(3, direction: Self.direction)
+        await queue.enqueue(3, direction: Self.direction, streamID: 3)
 
         let received = try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000)
         #expect(received == 3)
@@ -54,7 +54,7 @@ struct WebTransportInboundStreamQueueTests {
             try await queue.next(direction: Self.direction, timeoutMilliseconds: 50)
         }
 
-        await queue.enqueue(11, direction: Self.direction)
+        await queue.enqueue(11, direction: Self.direction, streamID: 11)
         let received = try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000)
         #expect(received == 11)
     }
@@ -74,7 +74,7 @@ struct WebTransportInboundStreamQueueTests {
 
         // Let the first waiter's timeout fire before anything is enqueued.
         try await Task.sleep(for: .milliseconds(200))
-        await queue.enqueue(5, direction: Self.direction)
+        await queue.enqueue(5, direction: Self.direction, streamID: 5)
 
         let expiringResult = await expiring.result
         #expect(throws: (any Error).self) {
@@ -87,7 +87,7 @@ struct WebTransportInboundStreamQueueTests {
     @Test
     func directionsDoNotConsumeEachOthersStreams() async throws {
         let queue = InteroperableQUICStreamQueue<Int>()
-        await queue.enqueue(1, direction: 0)
+        await queue.enqueue(1, direction: 0, streamID: 1)
 
         await #expect(throws: (any Error).self) {
             try await queue.next(direction: 1, timeoutMilliseconds: 50)
@@ -113,5 +113,70 @@ struct WebTransportInboundStreamQueueTests {
         await #expect(throws: QueueFailure.self) {
             try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000)
         }
+    }
+
+    /// A stream identifier is never reused within a QUIC connection, so the same
+    /// identifier arriving twice is a repeat of a stream already handed out.
+    ///
+    /// Delivering it again is what produced both remaining failure shapes on
+    /// loopback: the peer's CONNECT request stream was delivered a second time
+    /// after the session was established, and was then either misparsed as a
+    /// WebTransport stream or handed to a reader that blocked on it forever.
+    @Test
+    func aRepeatedStreamIdentifierIsIgnored() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+
+        await queue.enqueue(1, direction: Self.direction, streamID: 0)
+        await queue.enqueue(2, direction: Self.direction, streamID: 0)
+
+        let first = try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000)
+        #expect(first == 1)
+
+        // The repeat must not be sitting behind it.
+        await #expect(throws: (any Error).self) {
+            try await queue.next(direction: Self.direction, timeoutMilliseconds: 50)
+        }
+    }
+
+    /// The repeat must be rejected even when a caller is already parked, since
+    /// that is the case that hands a dead stream straight to a live reader.
+    @Test
+    func aRepeatedIdentifierIsNotHandedToAWaitingCaller() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+        await queue.enqueue(1, direction: Self.direction, streamID: 4)
+        #expect(try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000) == 1)
+
+        let waiter = Task {
+            try await queue.next(direction: Self.direction, timeoutMilliseconds: 300)
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        await queue.enqueue(99, direction: Self.direction, streamID: 4)
+
+        let result = await waiter.result
+        #expect(throws: (any Error).self) {
+            _ = try result.get()
+        }
+    }
+
+    /// Distinct identifiers must still both be delivered.
+    @Test
+    func differentIdentifiersAreBothDelivered() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+        await queue.enqueue(1, direction: Self.direction, streamID: 0)
+        await queue.enqueue(2, direction: Self.direction, streamID: 4)
+
+        #expect(try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000) == 1)
+        #expect(try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000) == 2)
+    }
+
+    /// The same identifier in the other direction is a different stream.
+    @Test
+    func theSameIdentifierInAnotherDirectionIsNotADuplicate() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+        await queue.enqueue(1, direction: 0, streamID: 0)
+        await queue.enqueue(2, direction: 1, streamID: 0)
+
+        #expect(try await queue.next(direction: 0, timeoutMilliseconds: 5_000) == 1)
+        #expect(try await queue.next(direction: 1, timeoutMilliseconds: 5_000) == 2)
     }
 }

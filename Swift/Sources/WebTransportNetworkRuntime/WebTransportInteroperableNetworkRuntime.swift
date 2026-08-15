@@ -160,7 +160,11 @@ public struct WebTransportQUICClient: Sendable {
                 await inboundRegistration.markEntered()
                 try await connection.inboundStreams { stream in
                     InteroperableQUICDebug.log("client inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
-                    await inboundStreams.enqueue(stream, direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality))
+                    await inboundStreams.enqueue(
+                        stream,
+                        direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality),
+                        streamID: UInt64(stream.streamID)
+                    )
                 }
             } catch {
                 await inboundRegistration.markEntered()
@@ -1052,7 +1056,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                                 InteroperableQUICDebug.log("server inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
                                 await inboundStreams.enqueue(
                                     stream,
-                                    direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality)
+                                    direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality),
+                                    streamID: UInt64(stream.streamID)
                                 )
                             }
                         } catch {
@@ -1962,9 +1967,18 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         let continuation: CheckedContinuation<Element, Error>
     }
 
+    /// One inbound stream, identified so a repeat delivery can be recognised.
+    private struct DeliveredStream: Hashable {
+        let direction: Int
+        let streamID: UInt64
+    }
+
     private var queued: [Int: [Element]] = [:]
     private var waiting: [Int: [Waiter]] = [:]
     private var nextWaiterID: UInt64 = 0
+    private let maxRememberedDeliveries = 4096
+    private var deliveredKeys: Set<DeliveredStream> = []
+    private var deliveryOrder: [DeliveredStream] = []
     private var failure: Error?
 
     /// Peer control and QPACK streams, held for the lifetime of the connection.
@@ -1981,9 +1995,33 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         retainedCriticalStreams.append(stream)
     }
 
-    func enqueue(_ stream: Element, direction: Int) {
+    /// Accepts an inbound stream, ignoring one that has already been delivered.
+    ///
+    /// A QUIC stream identifier is unique for the life of a connection and is
+    /// never reused, so the same identifier arriving twice on the same collector
+    /// is a repeat of a stream already handed out, not a new one. Passing it on
+    /// is actively harmful: the peer's CONNECT request stream gets delivered a
+    /// second time after the session is established, is taken for a new
+    /// WebTransport stream, and fails the session with a stream-marker error
+    /// against bytes the peer never framed that way.
+    ///
+    /// Only recent identifiers are remembered. A duplicate observed in practice
+    /// follows its original almost immediately, and a connection is free to open
+    /// unboundedly many streams over its lifetime, so retaining every identifier
+    /// would trade this defect for unbounded growth.
+    func enqueue(_ stream: Element, direction: Int, streamID: UInt64) {
         guard failure == nil else {
             return
+        }
+        let key = DeliveredStream(direction: direction, streamID: streamID)
+        guard !deliveredKeys.contains(key) else {
+            InteroperableQUICDebug.log("ignoring duplicate inbound stream delivery id=\(streamID)")
+            return
+        }
+        deliveredKeys.insert(key)
+        deliveryOrder.append(key)
+        if deliveryOrder.count > maxRememberedDeliveries {
+            deliveredKeys.remove(deliveryOrder.removeFirst())
         }
         if var waiters = waiting[direction], !waiters.isEmpty {
             let waiter = waiters.removeFirst()
