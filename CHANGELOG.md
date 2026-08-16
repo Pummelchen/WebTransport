@@ -6,6 +6,16 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+## [1.3.4] - 2026-08-16
+
+Changed, wire format:
+
+- The QPACK Required Insert Count is now encoded as RFC 9204 section 4.5.1.1 specifies — modulo twice the table size and offset by one — rather than as the raw value. The raw form was self-consistent, so nothing here could see it, but it disagrees with a conforming peer by at least one as soon as a dynamic reference appears. It remains unreachable in practice: no table capacity is advertised, so a conforming peer may not use the dynamic table and always sends zero. Deriving the window needs the negotiated capacity, so both directions now take it from the dynamic table they are given, and a non-zero count without an advertised capacity is refused rather than encoded into something a peer would misread.
+
+Fixed:
+
+- `TLSCryptoStreamReassembler` had no ceiling on what it would hold. CRYPTO frames carry an arbitrary offset and are processed before the handshake has authenticated anything, so a peer could scatter single bytes across the offset space, never complete a message, and make the receiver retain all of them. RFC 9000 section 7.5 requires a limit and defines CRYPTO_BUFFER_EXCEEDED to report it. Bounded at 64 KB by default; retransmitted bytes do not count against the ceiling, so an honest peer resending a lost frame is not refused. Reachable by embedders of `WebTransportTLSCore`; this repository's own client and server use Network.framework's TLS and never construct it.
+
 ## [1.3.3] - 2026-08-16
 
 Added:

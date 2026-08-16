@@ -20,7 +20,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.3.3](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.3) |
+| Latest release | [1.3.4](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.4) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -33,7 +33,8 @@ limits, and certificate expiry reporting, and was the first release verified end
 end against a browser. 1.3.1 refuses an inbound stream that the transport delivers
 twice, which a QUIC connection never legitimately does. 1.3.3 attributes the
 remaining establishment failures to the transport and names them in the error it
-reports. The code audit for the 1.3 series was performed by Claude Opus 5.
+reports. 1.3.4 brings the QPACK Required Insert Count onto the encoding RFC 9204
+specifies and bounds the CRYPTO reassembly buffer. The code audit for the 1.3 series was performed by Claude Opus 5.
 
 One change is deliberately not backwards compatible: the built-in development
 certificate is now **refused on any non-loopback bind address**. A server that
@@ -62,7 +63,7 @@ before adopting this in production.
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.3.3"
+    exact: "1.3.4"
 )
 ```
 
@@ -122,7 +123,7 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 
 ## Prebuilt binaries
 
-The [1.3.3 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.3)
+The [1.3.4 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.4)
 ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
 binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
 later. They are ad-hoc signed rather than Developer ID signed, and are not
