@@ -368,7 +368,9 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try table.insert(first)
             try table.insert(second)
             try table.insert(third)
-            var fieldSection = Data([0x03, 0x81, 0x11, 0x00, 0x08])
+            // Wrapped Required Insert Count per RFC 9204 section 4.5.1.1: a 256
+            // byte capacity holds eight entries, so three inserts encode as 4.
+            var fieldSection = Data([0x04, 0x81, 0x11, 0x00, 0x08])
             fieldSection.append(Data("override".utf8))
             let decoded = try QPACK.decodeFieldSection(fieldSection, dynamicTable: table)
             try require(decoded == [third, HTTPFieldLine(name: "x-demo", value: "override")], "post-Base fields decoded")
