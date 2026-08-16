@@ -6,6 +6,19 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+## [1.3.5] - 2026-08-16
+
+No behaviour change. The substance of this release is verification rather than code.
+
+Verified:
+
+- The remote interoperability matrix passes all 7 proofs across all 5 independent implementations for the first time: pywebtransport/aioquic (stream), web-transport-quinn (stream and datagram), web-transport-quiche (stream), hyperium/h3-webtransport (datagram), and erlang-webtransport (stream and datagram). Unlike the containerized matrix, these run with platform system trust against a CA-issued certificate over a routable network path, so they exercise certificate validation. The two peers previously recorded as "not deployed" since June were built and deployed for this run.
+
+Changed:
+
+- The tree was reformatted in one mechanical pass and the formatter is now a blocking CI gate rather than an advisory notice. No behaviour change: the full test suite and both conformance suites pass unchanged across the reformat. Run `swift format --recursive --in-place Swift/Sources Swift/Tests` before pushing.
+- Two `try!` calls in a test helper now throw, so a failure there fails the calling test instead of trapping and taking the suite process down with it.
+
 ## [1.3.4] - 2026-08-16
 
 Changed, wire format:

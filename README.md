@@ -20,7 +20,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.3.4](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.4) |
+| Latest release | [1.3.5](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.5) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -63,7 +63,7 @@ before adopting this in production.
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.3.4"
+    exact: "1.3.5"
 )
 ```
 
@@ -117,13 +117,13 @@ rejects peers still on earlier revisions — browsers among them.
 - A Network.framework-backed client/server runtime with sanitized logging and public error surfaces.
 - Server TLS identity injection (PKCS#12 or DER chain), graceful shutdown with GOAWAY and drain, connection admission limits, and tunable QUIC transport parameters.
 - Deterministic protocol tests, malformed-input and resource-limit coverage, parser fuzzing, sanitizer and soak runs, CLI conformance, and reproducible release builds.
-- Independent stream and datagram interoperability against pywebtransport/aioquic, Quinn, and Quiche, plus verified browser sessions with Chrome.
+- Independent stream and datagram interoperability against five implementations — pywebtransport/aioquic, Quinn, Quiche, hyperium/h3-webtransport and erlang-webtransport — verified both in containers and over a routable network path with platform system trust, plus verified browser sessions with Chrome.
 
 See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Implementation-Status) for the precise coverage boundary.
 
 ## Prebuilt binaries
 
-The [1.3.4 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.4)
+The [1.3.5 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.5)
 ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
 binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
 later. They are ad-hoc signed rather than Developer ID signed, and are not
