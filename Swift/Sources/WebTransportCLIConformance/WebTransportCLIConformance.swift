@@ -150,12 +150,13 @@ public enum WebTransportCLIConformance {
             do {
                 try await scenario.run()
                 let duration = Date().timeIntervalSince(started)
-                results.append(WebTransportCLIConformanceResult(
-                    name: scenario.name,
-                    passed: true,
-                    durationSeconds: duration,
-                    detail: "passed"
-                ))
+                results.append(
+                    WebTransportCLIConformanceResult(
+                        name: scenario.name,
+                        passed: true,
+                        durationSeconds: duration,
+                        detail: "passed"
+                    ))
                 if options.verbose, !options.json {
                     print("  PASS \(scenario.name) \(format(duration))s")
                 }
@@ -346,14 +347,14 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try WebTransportHTTP3Headers.validateConnectRequest(fields)
             let response = try QPACK.headersFrame(fields: [
                 HTTPFieldLine(name: ":status", value: "200"),
-                HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: WebTransportProtocolNegotiation.encodeItem("chat.v1"))
+                HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: WebTransportProtocolNegotiation.encodeItem("chat.v1")),
             ])
             try WebTransportHTTP3Headers.validateSuccessfulResponse(try QPACK.decodeHeadersFrame(response))
         },
         scenario("Headers and QPACK", "qpack-static-literal-huffman", "QPACK static, literal, and Huffman field sections round-trip") {
             let fields = try [
                 HTTPFieldLine(name: ":status", value: "200"),
-                HTTPFieldLine(name: "x-webtransport", value: "demo")
+                HTTPFieldLine(name: "x-webtransport", value: "demo"),
             ]
             let plain = try QPACK.decodeFieldSection(QPACK.encodeFieldSection(fields))
             try require(plain == fields, "plain QPACK round trip")
@@ -393,25 +394,29 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             let received = try pair.server.receiveDatagramFrame(frame)
             try require(received == sessionID, "datagram session routed")
             try require(pair.server.popDatagramPayload(sessionID: sessionID) == Data("hello".utf8), "datagram payload preserved")
-            let parsed = try WebTransportDatagramSignaling.parse(try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8)))
+            let parsed = try WebTransportDatagramSignaling.parse(
+                try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8)))
             try require(parsed.quarterStreamID == 0, "quarter stream ID encoded")
         },
         scenario("Datagrams", "datagram-unknown-session", "unknown datagram session ID is rejected") {
             var pair = try makeReadyPair()
             try expectThrows {
-                _ = try pair.client.receiveDatagramFrame(.datagram(
-                    try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("orphan".utf8))
-                ))
+                _ = try pair.client.receiveDatagramFrame(
+                    .datagram(
+                        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("orphan".utf8))
+                    ))
             }
         },
         scenario("Datagrams", "datagram-buffering", "early datagrams buffer before accept and excess early datagrams drop") {
             var pair = try makeReadyPair(maxBufferedDatagramsPerSession: 1)
-            _ = try pair.server.receiveDatagramFrame(.datagram(
-                try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("one".utf8))
-            ))
-            _ = try pair.server.receiveDatagramFrame(.datagram(
-                try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("two".utf8))
-            ))
+            _ = try pair.server.receiveDatagramFrame(
+                .datagram(
+                    try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("one".utf8))
+                ))
+            _ = try pair.server.receiveDatagramFrame(
+                .datagram(
+                    try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("two".utf8))
+                ))
             let sessionID = try establishDefaultSession(pair: &pair)
             try require(pair.server.popDatagramPayload(sessionID: sessionID) == Data("one".utf8), "first early datagram promoted")
             try require(pair.server.popDatagramPayload(sessionID: sessionID) == nil, "excess early datagram dropped")
@@ -449,28 +454,34 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             let early = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
             let result = try pair.server.acceptBidirectionalStreamWithActions(streamID: 4, firstBytes: early)
             try require(result.prefix == nil, "overflow stream rejected")
-            try require(result.rejectionFrame == .resetStreamAt(
-                id: 4,
-                applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
-                finalSize: 0,
-                reliableSize: 0
-            ), "overflow stream reset action")
+            try require(
+                result.rejectionFrame
+                    == .resetStreamAt(
+                        id: 4,
+                        applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
+                        finalSize: 0,
+                        reliableSize: 0
+                    ), "overflow stream reset action")
         },
         scenario("Streams", "stream-reset-stop-sending", "stream reset and stop-sending use mapped WebTransport app errors") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
             let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
             _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
-            try require(try pair.server.resetStream(streamID: 4, applicationErrorCode: 0x10) == .resetStreamAt(
-                id: 4,
-                applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x10),
-                finalSize: 0,
-                reliableSize: 0
-            ), "RESET_STREAM_AT mapped")
-            try require(try pair.server.stopSendingStream(streamID: 4, applicationErrorCode: 0x11) == .stopSending(
-                id: 4,
-                applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
-            ), "STOP_SENDING mapped")
+            try require(
+                try pair.server.resetStream(streamID: 4, applicationErrorCode: 0x10)
+                    == .resetStreamAt(
+                        id: 4,
+                        applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x10),
+                        finalSize: 0,
+                        reliableSize: 0
+                    ), "RESET_STREAM_AT mapped")
+            try require(
+                try pair.server.stopSendingStream(streamID: 4, applicationErrorCode: 0x11)
+                    == .stopSending(
+                        id: 4,
+                        applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
+                    ), "STOP_SENDING mapped")
         },
         scenario("Close and Drain", "close-drain", "WT_DRAIN_SESSION and WT_CLOSE_SESSION drive state and cleanup") {
             var pair = try makeReadyPair()
@@ -507,11 +518,13 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 sessionID: sessionID,
                 bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: "closed"))
             )
-            try require(try pair.server.receiveConnectStreamData(streamID: sessionID.rawValue, data: Data("late".utf8)) == .resetStream(
-                id: sessionID.rawValue,
-                applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
-                finalSize: 0
-            ), "late CONNECT data reset")
+            try require(
+                try pair.server.receiveConnectStreamData(streamID: sessionID.rawValue, data: Data("late".utf8))
+                    == .resetStream(
+                        id: sessionID.rawValue,
+                        applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
+                        finalSize: 0
+                    ), "late CONNECT data reset")
         },
         scenario("Flow Control", "flow-disabled-multi-session", "disabled WebTransport flow control rejects simultaneous sessions") {
             var pair = try makeReadyPair()
@@ -560,10 +573,12 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
             _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
             try expectThrows { try pair.server.receiveStreamPayload(streamID: 4, payload: Data(repeating: 1, count: 5)) }
-            try require(pair.server.sessionsByID[sessionID]?.state == .closed(
-                applicationErrorCode: UInt32(constants.wtFlowControlError),
-                message: "WebTransport flow-control violation"
-            ), "receive-side violation closed session")
+            try require(
+                pair.server.sessionsByID[sessionID]?.state
+                    == .closed(
+                        applicationErrorCode: UInt32(constants.wtFlowControlError),
+                        message: "WebTransport flow-control violation"
+                    ), "receive-side violation closed session")
         },
         scenario("Errors and Shutdown", "error-mapping", "WebTransport app error mapping is reversible and rejects reserved/out-of-range codes") {
             let code = WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x1234)
@@ -572,7 +587,8 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try WebTransportDraft16ErrorMapper.applicationErrorCode(forHTTPErrorCode: 0x21)
             }
             try expectThrows {
-                _ = try WebTransportDraft16ErrorMapper.applicationErrorCode(forHTTPErrorCode: WebTransportHTTP3DraftConstants.current.wtApplicationErrorRange.upperBound + 1)
+                _ = try WebTransportDraft16ErrorMapper.applicationErrorCode(
+                    forHTTPErrorCode: WebTransportHTTP3DraftConstants.current.wtApplicationErrorRange.upperBound + 1)
             }
         },
         scenario("Errors and Shutdown", "goaway", "GOAWAY drains existing sessions and blocks late sessions") {
@@ -651,7 +667,7 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(text.contains("Unexpected spike binary in production release output"), "stale spike rejection present")
             try require(text.contains("Release artifact is not reproducible"), "reproducibility failure path present")
             try require(text.contains("SHA256SUMS"), "checksum manifest is emitted")
-        }
+        },
     ]
 }
 
@@ -787,10 +803,11 @@ private func runConnectInteropMatrix() throws {
         request: WebTransportSessionRequest(authority: "example.com", path: "/wt", availableProtocols: ["chat.v1"])
     )
     var invalidSelectedProtocolFields = try WebTransportHTTP3Headers.successfulResponse(status: 200)
-    invalidSelectedProtocolFields.append(try HTTPFieldLine(
-        name: WebTransportHeaderName.selectedProtocol,
-        value: WebTransportProtocolNegotiation.encodeItem("chat.v2")
-    ))
+    invalidSelectedProtocolFields.append(
+        try HTTPFieldLine(
+            name: WebTransportHeaderName.selectedProtocol,
+            value: WebTransportProtocolNegotiation.encodeItem("chat.v2")
+        ))
     let invalidSelectedProtocol = try QPACK.headersFrame(fields: invalidSelectedProtocolFields)
     try expectThrows {
         _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: invalidSelectedProtocol)
@@ -843,9 +860,10 @@ private func runDatagramInteropMatrix() throws {
     }
     var orphanPair = try makeReadyPair()
     try expectThrows {
-        _ = try orphanPair.client.receiveDatagramFrame(.datagram(
-            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("unknown".utf8))
-        ))
+        _ = try orphanPair.client.receiveDatagramFrame(
+            .datagram(
+                try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("unknown".utf8))
+            ))
     }
 
     var smallFramePair = try makeReadyPair(maxDatagramFrameSize: 4)
@@ -924,19 +942,22 @@ private func runMalformedFlowInteropMatrix() throws {
     try expectThrows {
         try pair.server.receiveStreamPayload(streamID: 4, payload: Data("5".utf8))
     }
-    try require(pair.server.sessionsByID[sessionID]?.state == .closed(
-        applicationErrorCode: UInt32(constants.wtFlowControlError),
-        message: "WebTransport flow-control violation"
-    ), "flow-control violation closed session")
+    try require(
+        pair.server.sessionsByID[sessionID]?.state
+            == .closed(
+                applicationErrorCode: UInt32(constants.wtFlowControlError),
+                message: "WebTransport flow-control violation"
+            ), "flow-control violation closed session")
 }
 
 private func runClientServerAPIDemo() async throws {
     let message = "hello from WebTransportClient"
     let (connected, serverResult) = try await runClientServerAPIDemoAttempt(message: message)
     guard connected.sessionEstablished,
-          serverResult.sessionEstablished,
-          connected.message == message,
-          serverResult.message == message else {
+        serverResult.sessionEstablished,
+        connected.message == message,
+        serverResult.message == message
+    else {
         throw QUICCodecError.malformed("WebTransport network API did not complete echo session")
     }
 }
@@ -947,21 +968,23 @@ private func runClientServerAPIDemoAttempt(
     var lastError: Error?
     for _ in 0..<3 {
         do {
-            let server = WebTransportServer(configuration: WebTransportServerConfiguration(
-                authority: "localhost",
-                path: "/wt",
-                origin: "https://localhost",
-                supportedProtocols: ["demo.v1"],
-                timeoutMilliseconds: 12_000
-            ))
-            let client = WebTransportClient(configuration: WebTransportClientConfiguration(
-                authority: "localhost",
-                path: "/wt",
-                origin: "https://localhost",
-                availableProtocols: ["demo.v1"],
-                trustPolicy: .localDevelopmentSelfSigned,
-                timeoutMilliseconds: 12_000
-            ))
+            let server = WebTransportServer(
+                configuration: WebTransportServerConfiguration(
+                    authority: "localhost",
+                    path: "/wt",
+                    origin: "https://localhost",
+                    supportedProtocols: ["demo.v1"],
+                    timeoutMilliseconds: 12_000
+                ))
+            let client = WebTransportClient(
+                configuration: WebTransportClientConfiguration(
+                    authority: "localhost",
+                    path: "/wt",
+                    origin: "https://localhost",
+                    availableProtocols: ["demo.v1"],
+                    trustPolicy: .localDevelopmentSelfSigned,
+                    timeoutMilliseconds: 12_000
+                ))
             let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
             async let served = listener.serveOne()
             let connected = try await client.echo(to: listener.localEndpoint, message: message)
@@ -1009,12 +1032,13 @@ private func emit(
                     "name": result.name,
                     "passed": result.passed,
                     "durationSeconds": result.durationSeconds,
-                    "detail": result.detail
+                    "detail": result.detail,
                 ] as [String: Any]
-            }
+            },
         ]
         if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
-           let text = String(data: data, encoding: .utf8) {
+            let text = String(data: data, encoding: .utf8)
+        {
             print(text)
         }
     } else {
@@ -1036,13 +1060,13 @@ private func emit(
 private func writeFailureLog(result: WebTransportCLIConformanceResult, executableName: String, directory: URL) {
     let file = directory.appendingPathComponent("\(safe(executableName))-\(safe(result.name))-failure.log")
     let text = """
-    timestamp=\(timestamp())
-    executable=\(executableName)
-    scenario=\(result.name)
-    passed=false
-    durationSeconds=\(format(result.durationSeconds))
-    detail=\(result.detail)
-    """
+        timestamp=\(timestamp())
+        executable=\(executableName)
+        scenario=\(result.name)
+        passed=false
+        durationSeconds=\(format(result.durationSeconds))
+        detail=\(result.detail)
+        """
     try? text.write(to: file, atomically: true, encoding: .utf8)
 }
 
@@ -1050,13 +1074,14 @@ private func writeSummaryLog(results: [WebTransportCLIConformanceResult], execut
     let passed = results.filter(\.passed).count
     let failed = results.count - passed
     let file = directory.appendingPathComponent("\(safe(executableName))-summary.log")
-    let lines = [
-        "timestamp=\(timestamp())",
-        "executable=\(executableName)",
-        "passed=\(passed)",
-        "failed=\(failed)",
-        "total=\(results.count)"
-    ] + results.map { "\($0.passed ? "PASS" : "FAIL") \($0.name) \(format($0.durationSeconds))s \($0.detail)" }
+    let lines =
+        [
+            "timestamp=\(timestamp())",
+            "executable=\(executableName)",
+            "passed=\(passed)",
+            "failed=\(failed)",
+            "total=\(results.count)",
+        ] + results.map { "\($0.passed ? "PASS" : "FAIL") \($0.name) \(format($0.durationSeconds))s \($0.detail)" }
     try? lines.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
 }
 

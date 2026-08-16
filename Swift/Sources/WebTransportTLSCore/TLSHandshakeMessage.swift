@@ -38,9 +38,7 @@ public struct TLSHandshakeMessage: Equatable, Sendable {
             throw QUICCodecError.malformed("unknown TLS handshake type")
         }
         let length =
-            (Int(try cursor.readUInt8()) << 16) |
-            (Int(try cursor.readUInt8()) << 8) |
-            Int(try cursor.readUInt8())
+            (Int(try cursor.readUInt8()) << 16) | (Int(try cursor.readUInt8()) << 8) | Int(try cursor.readUInt8())
         return TLSHandshakeMessage(type: type, body: try cursor.readBytes(count: length))
     }
 

@@ -18,7 +18,8 @@ public struct WebTransportSessionID: RawRepresentable, Hashable, Sendable {
 
     public static func fromRequestStreamID(_ streamID: UInt64) throws -> WebTransportSessionID {
         guard QUICStreamID.direction(of: streamID) == .bidirectional,
-              QUICStreamID.initiator(of: streamID) == .client else {
+            QUICStreamID.initiator(of: streamID) == .client
+        else {
             throw QUICCodecError.malformed("WebTransport session ID must be a client-initiated bidirectional request stream ID")
         }
         return WebTransportSessionID(rawValue: streamID)
@@ -91,10 +92,11 @@ public struct WebTransportSessionRequest: Equatable, Sendable {
             upgradeToken: upgradeToken
         )
         if !availableProtocols.isEmpty {
-            fields.append(try HTTPFieldLine(
-                name: WebTransportHeaderName.availableProtocols,
-                value: WebTransportProtocolNegotiation.encodeList(availableProtocols)
-            ))
+            fields.append(
+                try HTTPFieldLine(
+                    name: WebTransportHeaderName.availableProtocols,
+                    value: WebTransportProtocolNegotiation.encodeList(availableProtocols)
+                ))
         }
         return fields
     }
@@ -306,7 +308,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.receiveFlowControlStateBySessionID = [:]
         self.blockedFlowCapsulesBySessionID = [:]
         self.maxDatagramFrameSize = maxDatagramFrameSize
-        self.maxSendableDatagramFrameSize = maxSendableDatagramFrameSize
+        self.maxSendableDatagramFrameSize =
+            maxSendableDatagramFrameSize
             ?? min(maxDatagramFrameSize, 1_200)
         self.maxDatagramReceiveBufferBytes = maxDatagramReceiveBufferBytes
         self.maxStreamReceiveBufferBytes = maxStreamReceiveBufferBytes
@@ -616,7 +619,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         _ = try sessionForIngress(sessionID)
         let capsuleType = try capsuleTypePrefix(bytes)
         if !webTransportFlowControlNegotiated,
-           isHTTP3FlowControlCapsuleType(capsuleType) {
+            isHTTP3FlowControlCapsuleType(capsuleType)
+        {
             let ignored = try ignoredFlowControlCapsuleEnvelope(bytes)
             return WebTransportReceivedFlowControlCapsule(
                 capsule: ignored.capsule,
@@ -699,10 +703,11 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     ) throws -> WebTransportCloseSessionCapsuleResult {
         try validateSettingsReady()
         _ = try sessionForIngress(sessionID)
-        let capsuleBytes = try WebTransportFlowCapsuleCodec.serialize(.closeSession(
-            applicationErrorCode: applicationErrorCode,
-            message: message
-        ))
+        let capsuleBytes = try WebTransportFlowCapsuleCodec.serialize(
+            .closeSession(
+                applicationErrorCode: applicationErrorCode,
+                message: message
+            ))
         let terminationActions = try markSessionClosed(
             sessionID,
             applicationErrorCode: applicationErrorCode,
@@ -765,7 +770,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
                 received.append(result)
                 terminationActions = result.terminationActions ?? terminationActions
                 remaining.removeFirst(parsed.bytesConsumed)
-            } catch where capsuleType == WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule {
+            } catch  where capsuleType == WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule {
                 let isAlreadyClosed: Bool
                 if case .closed = sessionsByID[sessionID]?.state {
                     isAlreadyClosed = true
@@ -992,7 +997,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     public mutating func receiveStreamPayload(streamID: UInt64, payload: Data) throws {
         guard var stream = streamsByID[streamID] else {
             if let sessionID = closedStreamSessionIDsByStreamID[streamID],
-               let state = sessionsByID[sessionID]?.state {
+                let state = sessionsByID[sessionID]?.state
+            {
                 switch state {
                 case .closed:
                     throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session is closed")
@@ -1078,12 +1084,14 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         sessionIDsByRequestStreamID[session.requestStreamID] = session.id
         datagramsBySessionID[session.id] = datagramsBySessionID[session.id] ?? []
         let negotiated = webTransportFlowControlNegotiated
-        flowControlStateBySessionID[session.id] = flowControlStateBySessionID[session.id]
+        flowControlStateBySessionID[session.id] =
+            flowControlStateBySessionID[session.id]
             ?? WebTransportFlowControlState(
                 settings: http3.remoteSettings ?? .webTransportDraft16Defaults,
                 isEnabled: negotiated
             )
-        receiveFlowControlStateBySessionID[session.id] = receiveFlowControlStateBySessionID[session.id]
+        receiveFlowControlStateBySessionID[session.id] =
+            receiveFlowControlStateBySessionID[session.id]
             ?? WebTransportFlowControlState(settings: http3.localSettings, isEnabled: negotiated)
         datagramPayloadBytesBySessionID[session.id] = datagramPayloadBytesBySessionID[session.id] ?? 0
         blockedFlowCapsulesBySessionID[session.id] = blockedFlowCapsulesBySessionID[session.id] ?? []
@@ -1142,7 +1150,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             total + (bufferedStreamsByID[streamID]?.bufferedPayloadBytes ?? 0)
         }
         guard bufferedStreamIDs.count < maxBufferedStreamsPerSession,
-              bufferedPayloadBytes + stream.bufferedPayloadBytes <= maxStreamReceiveBufferBytes else {
+            bufferedPayloadBytes + stream.bufferedPayloadBytes <= maxStreamReceiveBufferBytes
+        else {
             throw WebTransportDraft16Error(
                 kind: .bufferedStreamRejected,
                 message: "buffered WebTransport stream exceeds receive limit"
@@ -1217,7 +1226,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
 
     private func hasBufferedIngress(for sessionID: WebTransportSessionID) -> Bool {
         guard let streamIDs = bufferedStreamIDsBySessionID[sessionID],
-              !streamIDs.isEmpty else {
+            !streamIDs.isEmpty
+        else {
             return datagramsBySessionID[sessionID]?.isEmpty == false
         }
         return true
@@ -1239,7 +1249,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         form: WebTransportStreamForm,
         receiveSide: Bool
     ) throws {
-        var state = receiveSide
+        var state =
+            receiveSide
             ? receiveFlowControlStateBySessionID[sessionID] ?? .init()
             : flowControlStateBySessionID[sessionID] ?? .init()
         do {
@@ -1267,7 +1278,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         byteCount: Int,
         receiveSide: Bool
     ) throws {
-        var state = receiveSide
+        var state =
+            receiveSide
             ? receiveFlowControlStateBySessionID[sessionID] ?? .init()
             : flowControlStateBySessionID[sessionID] ?? .init()
         do {
@@ -1352,7 +1364,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             throw QUICCodecError.malformed("WebTransport stream is already buffered")
         }
         if let sessionID = closedStreamSessionIDsByStreamID[streamID],
-           sessionsByID[sessionID] != nil {
+            sessionsByID[sessionID] != nil
+        {
             throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport stream belongs to a terminated session")
         }
 
@@ -1641,9 +1654,11 @@ public enum WebTransportProtocolNegotiation {
             guard !name.isEmpty else {
                 throw QUICCodecError.malformed("WebTransport protocol token must not be empty")
             }
-            guard name.utf8.allSatisfy({ byte in
-                byte >= 0x21 && byte <= 0x7e && byte != 0x22 && byte != 0x2c && byte != 0x5c
-            }) else {
+            guard
+                name.utf8.allSatisfy({ byte in
+                    byte >= 0x21 && byte <= 0x7e && byte != 0x22 && byte != 0x2c && byte != 0x5c
+                })
+            else {
                 throw QUICCodecError.malformed("WebTransport protocol token contains invalid bytes")
             }
             guard seen.insert(name).inserted else {
@@ -1711,8 +1726,9 @@ enum WebTransportSessionHeaders {
 
     static func status(from fields: [HTTPFieldLine]) throws -> UInt16 {
         guard let statusValue = try optionalUniqueField(":status", from: fields),
-              let status = UInt16(statusValue),
-              (100...599).contains(status) else {
+            let status = UInt16(statusValue),
+            (100...599).contains(status)
+        else {
             throw QUICCodecError.malformed("WebTransport response requires a valid :status")
         }
         return status
@@ -1752,10 +1768,11 @@ enum WebTransportSessionHeaders {
         ]
         if let selectedProtocol {
             try WebTransportProtocolNegotiation.validate([selectedProtocol])
-            fields.append(try HTTPFieldLine(
-                name: WebTransportHeaderName.selectedProtocol,
-                value: WebTransportProtocolNegotiation.encodeItem(selectedProtocol)
-            ))
+            fields.append(
+                try HTTPFieldLine(
+                    name: WebTransportHeaderName.selectedProtocol,
+                    value: WebTransportProtocolNegotiation.encodeItem(selectedProtocol)
+                ))
         }
         return try QPACK.headersFrame(fields: fields)
     }

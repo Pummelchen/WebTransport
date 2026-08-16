@@ -16,12 +16,13 @@ func connectionIDStoreRetiresOlderConnectionIDs() throws {
     let token = Data(repeating: 0xab, count: 16)
     var store = try QUICConnectionIDStore(initialConnectionID: Data([0x00]), activeConnectionIDLimit: 3)
 
-    #expect(try store.applyNewConnectionID(
-        sequence: 1,
-        retirePriorTo: 0,
-        connectionID: Data([0x01]),
-        statelessResetToken: token
-    ).isEmpty)
+    #expect(
+        try store.applyNewConnectionID(
+            sequence: 1,
+            retirePriorTo: 0,
+            connectionID: Data([0x01]),
+            statelessResetToken: token
+        ).isEmpty)
     _ = try store.useDestinationConnectionID(sequence: 1)
 
     let retireFrames = try store.applyNewConnectionID(
@@ -50,20 +51,24 @@ func ackTrackerBuildsAckRangesAndDecodesThem() throws {
     var zeroTracker = QUICAckTracker(packetNumberSpace: .initial)
     let zeroInserted = zeroTracker.recordReceived(packetNumber: 0, nowMicros: 100)
     #expect(zeroInserted)
-    #expect(zeroTracker.makeAckFrame(nowMicros: 108) == .ack(
-        largestAcknowledged: 0,
-        ackDelay: 1,
-        firstAckRange: 0,
-        ranges: []
-    ))
+    #expect(
+        zeroTracker.makeAckFrame(nowMicros: 108)
+            == .ack(
+                largestAcknowledged: 0,
+                ackDelay: 1,
+                firstAckRange: 0,
+                ranges: []
+            ))
     var highExponentTracker = QUICAckTracker(packetNumberSpace: .initial, ackDelayExponent: 63)
     _ = highExponentTracker.recordReceived(packetNumber: 1, nowMicros: 100)
-    #expect(highExponentTracker.makeAckFrame(nowMicros: 200) == .ack(
-        largestAcknowledged: 1,
-        ackDelay: 0,
-        firstAckRange: 0,
-        ranges: []
-    ))
+    #expect(
+        highExponentTracker.makeAckFrame(nowMicros: 200)
+            == .ack(
+                largestAcknowledged: 1,
+                ackDelay: 0,
+                firstAckRange: 0,
+                ranges: []
+            ))
 
     var tracker = QUICAckTracker(packetNumberSpace: .applicationData, ackDelayExponent: 3)
     for packetNumber in [2, 6, 7, 9, 10] as [UInt64] {
@@ -74,15 +79,17 @@ func ackTrackerBuildsAckRangesAndDecodesThem() throws {
     #expect(!duplicateInserted)
 
     let frame = try #require(tracker.makeAckFrame(nowMicros: 1_090))
-    #expect(frame == .ack(
-        largestAcknowledged: 10,
-        ackDelay: 10,
-        firstAckRange: 1,
-        ranges: [
-            QUICAckRange(gap: 0, length: 1),
-            QUICAckRange(gap: 2, length: 0)
-        ]
-    ))
+    #expect(
+        frame
+            == .ack(
+                largestAcknowledged: 10,
+                ackDelay: 10,
+                firstAckRange: 1,
+                ranges: [
+                    QUICAckRange(gap: 0, length: 1),
+                    QUICAckRange(gap: 2, length: 0),
+                ]
+            ))
     #expect(try QUICAckTracker.acknowledgedPacketNumbers(from: frame) == Set([2, 6, 7, 9, 10]))
 }
 
@@ -107,28 +114,31 @@ func ackTrackerRejectsPathologicallyLargeExpandedAckRanges() throws {
 @Test
 func lossRecoveryReturnsRetransmittableFrames() throws {
     var recovery = QUICLossRecovery(packetThreshold: 3)
-    recovery.recordSent(QUICSentPacket(
-        packetNumberSpace: .applicationData,
-        packetNumber: 1,
-        sentTimeMicros: 100,
-        bytes: 100,
-        frames: [.stream(id: 0, offset: 0, fin: false, data: Data("lost".utf8))]
-    ))
-    recovery.recordSent(QUICSentPacket(
-        packetNumberSpace: .applicationData,
-        packetNumber: 2,
-        sentTimeMicros: 110,
-        bytes: 20,
-        frames: [.ack(largestAcknowledged: 1, ackDelay: 0, firstAckRange: 0, ranges: [])],
-        ackEliciting: false
-    ))
-    recovery.recordSent(QUICSentPacket(
-        packetNumberSpace: .applicationData,
-        packetNumber: 4,
-        sentTimeMicros: 130,
-        bytes: 120,
-        frames: [.datagram(Data("acked".utf8))]
-    ))
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 1,
+            sentTimeMicros: 100,
+            bytes: 100,
+            frames: [.stream(id: 0, offset: 0, fin: false, data: Data("lost".utf8))]
+        ))
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 2,
+            sentTimeMicros: 110,
+            bytes: 20,
+            frames: [.ack(largestAcknowledged: 1, ackDelay: 0, firstAckRange: 0, ranges: [])],
+            ackEliciting: false
+        ))
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 4,
+            sentTimeMicros: 130,
+            bytes: 120,
+            frames: [.datagram(Data("acked".utf8))]
+        ))
 
     let result = try recovery.processAck(
         .ack(largestAcknowledged: 4, ackDelay: 0, firstAckRange: 0, ranges: []),
@@ -137,29 +147,32 @@ func lossRecoveryReturnsRetransmittableFrames() throws {
 
     #expect(result.acknowledged.map(\.packetNumber) == [4])
     #expect(result.lost.map(\.packetNumber) == [1])
-    #expect(result.retransmittableFrames == [
-        .stream(id: 0, offset: 0, fin: false, data: Data("lost".utf8))
-    ])
+    #expect(
+        result.retransmittableFrames == [
+            .stream(id: 0, offset: 0, fin: false, data: Data("lost".utf8))
+        ])
     #expect(recovery.sentPackets[.applicationData]?.keys.sorted() == [2])
 }
 
 @Test
 func lossRecoveryProcessesLargeAckRangesWithoutExpandingEveryPacketNumber() throws {
     var recovery = QUICLossRecovery(packetThreshold: 3)
-    recovery.recordSent(QUICSentPacket(
-        packetNumberSpace: .applicationData,
-        packetNumber: 1,
-        sentTimeMicros: 100,
-        bytes: 1,
-        frames: [.ping]
-    ))
-    recovery.recordSent(QUICSentPacket(
-        packetNumberSpace: .applicationData,
-        packetNumber: 100_000,
-        sentTimeMicros: 200,
-        bytes: 1,
-        frames: [.ping]
-    ))
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 1,
+            sentTimeMicros: 100,
+            bytes: 1,
+            frames: [.ping]
+        ))
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 100_000,
+            sentTimeMicros: 200,
+            bytes: 1,
+            frames: [.ping]
+        ))
 
     let result = try recovery.processAck(
         .ack(largestAcknowledged: 100_000, ackDelay: 0, firstAckRange: 100_000, ranges: []),
@@ -209,12 +222,14 @@ func streamStateHandlesBidirectionalAndUnidirectionalFlowControl() throws {
         maxSendOffset: 0,
         maxReceiveOffset: 5
     )
-    #expect(try serverUni.receive(.stream(
-        id: 3,
-        offset: 0,
-        fin: true,
-        data: Data("hello".utf8)
-    )) == Data("hello".utf8))
+    #expect(
+        try serverUni.receive(
+            .stream(
+                id: 3,
+                offset: 0,
+                fin: true,
+                data: Data("hello".utf8)
+            )) == Data("hello".utf8))
     #expect(serverUni.receiveClosed)
     #expect(throws: Error.self) {
         _ = try serverUni.send(data: Data("x".utf8))
@@ -269,29 +284,35 @@ func closeStateMapsTransportApplicationAndIdleClose() throws {
     try close.recordActivity(nowMicros: 1_050)
     #expect(try close.checkIdleTimeout(nowMicros: 1_120) == false)
     #expect(try close.checkIdleTimeout(nowMicros: 1_150))
-    #expect(close.closeFrame == .connectionClose(
-        errorCode: QUICTransportErrorCode.noError.rawValue,
-        frameType: nil,
-        reason: Data("idle timeout".utf8)
-    ))
+    #expect(
+        close.closeFrame
+            == .connectionClose(
+                errorCode: QUICTransportErrorCode.noError.rawValue,
+                frameType: nil,
+                reason: Data("idle timeout".utf8)
+            ))
 
     var transportClose = QUICConnectionCloseState(idleTimeoutMicros: 100)
-    #expect(transportClose.closeTransport(
-        error: .flowControlError,
-        frameType: 0x08,
-        reason: "flow"
-    ) == .connectionClose(
-        errorCode: QUICTransportErrorCode.flowControlError.rawValue,
-        frameType: 0x08,
-        reason: Data("flow".utf8)
-    ))
+    #expect(
+        transportClose.closeTransport(
+            error: .flowControlError,
+            frameType: 0x08,
+            reason: "flow"
+        )
+            == .connectionClose(
+                errorCode: QUICTransportErrorCode.flowControlError.rawValue,
+                frameType: 0x08,
+                reason: Data("flow".utf8)
+            ))
 
     var applicationClose = QUICConnectionCloseState(idleTimeoutMicros: 100)
-    #expect(applicationClose.closeApplication(errorCode: 0x54, reason: "app") == .connectionClose(
-        errorCode: 0x54,
-        frameType: nil,
-        reason: Data("app".utf8)
-    ))
+    #expect(
+        applicationClose.closeApplication(errorCode: 0x54, reason: "app")
+            == .connectionClose(
+                errorCode: 0x54,
+                frameType: nil,
+                reason: Data("app".utf8)
+            ))
 }
 
 // MARK: - Acknowledgement tracking window

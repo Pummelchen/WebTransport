@@ -27,8 +27,8 @@ func http3FrameSequenceRoundTripsAndVarIntPayloadDecodes() throws {
         try HTTP3Frame(type: HTTP3FrameType.goaway, varIntValue: 16),
         try HTTP3Settings([
             HTTP3SettingID.qpackMaxTableCapacity: 0,
-            HTTP3SettingID.maxFieldSectionSize: 4_096
-        ]).frame()
+            HTTP3SettingID.maxFieldSectionSize: 4_096,
+        ]).frame(),
     ]
 
     let decoded = try HTTP3Frame.decodeFrames(try HTTP3Frame.encodeFrames(frames))
@@ -52,10 +52,8 @@ func http3SettingsRoundTripAndRejectMalformedSettings() throws {
     #expect(try HTTP3Settings.decodeFrame(frame).entries == settings.entries)
 
     let duplicatePayload =
-        (try QUICVarInt.encode(constants.settingsWTEnabled)) +
-        (try QUICVarInt.encode(1)) +
-        (try QUICVarInt.encode(constants.settingsWTEnabled)) +
-        (try QUICVarInt.encode(1))
+        (try QUICVarInt.encode(constants.settingsWTEnabled)) + (try QUICVarInt.encode(1)) + (try QUICVarInt.encode(constants.settingsWTEnabled))
+        + (try QUICVarInt.encode(1))
     #expect(throws: Error.self) {
         _ = try HTTP3Settings.decodePayload(duplicatePayload)
     }

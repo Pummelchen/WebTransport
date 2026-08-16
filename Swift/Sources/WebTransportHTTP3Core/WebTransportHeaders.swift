@@ -22,7 +22,7 @@ public enum WebTransportHTTP3Headers {
             try HTTPFieldLine(name: ":scheme", value: scheme),
             try HTTPFieldLine(name: ":authority", value: authority),
             try HTTPFieldLine(name: ":path", value: path),
-            try HTTPFieldLine(name: ":protocol", value: upgradeToken)
+            try HTTPFieldLine(name: ":protocol", value: upgradeToken),
         ]
         if let origin {
             fields.append(try HTTPFieldLine(name: "origin", value: origin))
@@ -71,14 +71,15 @@ public enum WebTransportHTTP3Headers {
         upgradeToken: String = WebTransportHTTP3DraftConstants.current.upgradeToken,
         constants: WebTransportHTTP3DraftConstants = .current
     ) throws -> HTTP3Frame {
-        try QPACK.headersFrame(fields: connectRequest(
-            authority: authority,
-            path: path,
-            scheme: scheme,
-            origin: origin,
-            upgradeToken: upgradeToken,
-            constants: constants
-        ))
+        try QPACK.headersFrame(
+            fields: connectRequest(
+                authority: authority,
+                path: path,
+                scheme: scheme,
+                origin: origin,
+                upgradeToken: upgradeToken,
+                constants: constants
+            ))
     }
 
     public static func successfulResponseHeadersFrame(status: UInt16 = 200) throws -> HTTP3Frame {

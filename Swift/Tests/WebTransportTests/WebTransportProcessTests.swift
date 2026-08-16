@@ -51,7 +51,7 @@ func webTransportCLIProcessRunsScenarioMatrixAcrossClientAndServer() throws {
             "stream-bidi-uni-round-trip",
             "close-drain",
             "flow-monotonic",
-            "interop-malformed-flow-matrix"
+            "interop-malformed-flow-matrix",
         ]
         let flag = scenarios.joined(separator: ",")
         let logDirectory = try WebTransportProcessSupport.temporaryLogDirectory("matrix")
@@ -123,11 +123,10 @@ func webTransportCLIProcessJSONContractForSelectedScenarios() throws {
         #expect(failed == 0)
         #expect(results?.count == 2)
         #expect(Set(results?.compactMap { $0["name"] as? String } ?? []) == Set(["demo", "session-accept"]))
-        #expect(results?.allSatisfy { entry in
-            (entry["passed"] as? Bool == true) &&
-            (entry["durationSeconds"] != nil) &&
-            (entry["detail"] as? String == "passed")
-        } == true)
+        #expect(
+            results?.allSatisfy { entry in
+                (entry["passed"] as? Bool == true) && (entry["durationSeconds"] != nil) && (entry["detail"] as? String == "passed")
+            } == true)
     }
 }
 
@@ -350,7 +349,10 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
                 do {
                     var result = try WebTransportProcessSupport.run(
                         client,
-                        ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)", "--timeout-ms", "25000"],
+                        [
+                            "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)",
+                            "--timeout-ms", "25000",
+                        ],
                         timeout: 30
                     )
                     var attempts = 1
@@ -359,11 +361,15 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
                         Thread.sleep(forTimeInterval: 0.12)
                         result = try WebTransportProcessSupport.run(
                             client,
-                            ["--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "25000"],
+                            [
+                                "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message",
+                                "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "25000",
+                            ],
                             timeout: 30
                         )
                     }
-                    let message = result.stdout.contains("connected")
+                    let message =
+                        result.stdout.contains("connected")
                         ? ""
                         : "non-connected client #\(index) after \(attempts) attempts: exit=\(result.exitCode) stdout=\(result.stdout) stderr=\(result.stderr)"
                     capture.addResult(result, connected: result.stdout.contains("connected"), message: message)
@@ -460,7 +466,7 @@ func webTransportExternalInteropHookRunsWhenConfigured() throws {
                 "--protocol", wtProtocol,
                 "--trust", trust,
                 "--message", message,
-                "--timeout-ms", timeoutMilliseconds
+                "--timeout-ms", timeoutMilliseconds,
             ],
             timeout: 10
         )
@@ -565,7 +571,7 @@ enum WebTransportProcessSupport {
             repositoryDirectory.appendingPathComponent(".build/\(configuration)/\(product)"),
             repositoryDirectory.appendingPathComponent(".build/arm64-apple-macosx/\(configuration)/\(product)"),
             packageDirectory.appendingPathComponent(".build/\(configuration)/\(product)"),
-            packageDirectory.appendingPathComponent(".build/arm64-apple-macosx/\(configuration)/\(product)")
+            packageDirectory.appendingPathComponent(".build/arm64-apple-macosx/\(configuration)/\(product)"),
         ]
         for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate.path) {
             return candidate
@@ -640,16 +646,18 @@ enum WebTransportProcessSupport {
         )
 
         guard clientResult.exitCode == 0,
-              clientResult.stdout.contains("connected"),
-              clientResult.stdout.contains(message),
-              !expectsEstablishedSession || clientResult.stdout.contains("session=established") else {
+            clientResult.stdout.contains("connected"),
+            clientResult.stdout.contains(message),
+            !expectsEstablishedSession || clientResult.stdout.contains("session=established")
+        else {
             return .failed("client exit=\(clientResult.exitCode) stdout=\(clientResult.stdout) stderr=\(clientResult.stderr)")
         }
 
         let serverResult = try runningServer.wait(timeout: 20)
         guard serverResult.exitCode == 0,
-              serverResult.stdout.contains("served"),
-              serverResult.stdout.contains(message) else {
+            serverResult.stdout.contains("served"),
+            serverResult.stdout.contains(message)
+        else {
             return .failed("server exit=\(serverResult.exitCode) stdout=\(serverResult.stdout) stderr=\(serverResult.stderr)")
         }
 
@@ -705,7 +713,8 @@ enum WebTransportProcessSupport {
 
     static func parseListeningPort(from line: String) throws -> UInt16 {
         guard let range = line.range(of: #":(\d+)$"#, options: .regularExpression),
-              let port = UInt16(line[range].dropFirst()) else {
+            let port = UInt16(line[range].dropFirst())
+        else {
             throw ProcessTestError.malformedOutput(line)
         }
         return port
@@ -779,7 +788,7 @@ enum WebTransportProcessSupport {
             "exitCode": Int(result.exitCode),
             "passed": result.exitCode == 0 && result.stdout.contains("connected") && result.stdout.contains(message),
             "stdout": result.stdout,
-            "stderr": result.stderr
+            "stderr": result.stderr,
         ]
         let data = try JSONSerialization.data(withJSONObject: proof, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: directory.appendingPathComponent("latest.json"))

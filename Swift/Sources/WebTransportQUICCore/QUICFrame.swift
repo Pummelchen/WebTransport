@@ -166,10 +166,11 @@ public enum QUICFrame: Equatable, Sendable {
             let firstAckRange = try QUICVarInt.decode(from: &cursor)
             var ranges: [QUICAckRange] = []
             for _ in 0..<rangeCount {
-                ranges.append(QUICAckRange(
-                    gap: try QUICVarInt.decode(from: &cursor),
-                    length: try QUICVarInt.decode(from: &cursor)
-                ))
+                ranges.append(
+                    QUICAckRange(
+                        gap: try QUICVarInt.decode(from: &cursor),
+                        length: try QUICVarInt.decode(from: &cursor)
+                    ))
             }
             return .ack(
                 largestAcknowledged: largestAcknowledged,

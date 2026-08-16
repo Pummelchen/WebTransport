@@ -96,12 +96,13 @@ func packetProtectionAcceptsTLSHandshakeTrafficSecret() throws {
         keys: keys
     )
 
-    #expect(try QUICPacketProtection.open(
-        ciphertextAndTag: sealed,
-        packetNumber: 7,
-        associatedData: associatedData,
-        keys: keys
-    ) == plaintext)
+    #expect(
+        try QUICPacketProtection.open(
+            ciphertextAndTag: sealed,
+            packetNumber: 7,
+            associatedData: associatedData,
+            keys: keys
+        ) == plaintext)
 }
 
 @Test
@@ -126,12 +127,13 @@ func packetProtectionAcceptsTLSApplicationTrafficSecret() throws {
         keys: keys
     )
 
-    #expect(try QUICPacketProtection.open(
-        ciphertextAndTag: sealed,
-        packetNumber: 11,
-        associatedData: associatedData,
-        keys: keys
-    ) == plaintext)
+    #expect(
+        try QUICPacketProtection.open(
+            ciphertextAndTag: sealed,
+            packetNumber: 11,
+            associatedData: associatedData,
+            keys: keys
+        ) == plaintext)
 }
 
 @Test

@@ -18,7 +18,7 @@ func webTransportDraft16SettingsVectorIsRoundTripCompatible() throws {
         0x6b, 0x65,
         0x00,
         0xac, 0x7c, 0xf0, 0x00,
-        0x01
+        0x01,
     ])
     let frame = try HTTP3Frame(type: HTTP3FrameType.settings, payload: expectedPayload)
     let settings = try HTTP3Settings.decodePayload(expectedPayload)
@@ -58,7 +58,7 @@ func webTransportStreamAndDatagramDraftVectorsRoundTrip() throws {
 
 @Test
 func webTransportStreamStressLongRunningOpenReceiveLoop() throws {
-    var pair = WebTransportInteropTestSupport.makeReadyManagers()
+    var pair = try WebTransportInteropTestSupport.makeReadyManagers()
     let requestFrame = try pair.client.makeClientSessionRequest(
         streamID: 0,
         request: try WebTransportSessionRequest(authority: "example.com", path: "/wt")
@@ -85,7 +85,7 @@ func webTransportStreamStressLongRunningOpenReceiveLoop() throws {
 
 @Test
 func webTransportDatagramStressLongRunningRoundTripLoop() throws {
-    var pair = WebTransportInteropTestSupport.makeReadyManagers()
+    var pair = try WebTransportInteropTestSupport.makeReadyManagers()
     let requestFrame = try pair.client.makeClientSessionRequest(
         streamID: 0,
         request: try WebTransportSessionRequest(authority: "example.com", path: "/wt")
@@ -107,11 +107,13 @@ func webTransportDatagramStressLongRunningRoundTripLoop() throws {
 }
 
 private enum WebTransportInteropTestSupport {
-    static func makeReadyManagers() -> (client: WebTransportSessionManager, server: WebTransportSessionManager) {
+    /// Throwing rather than force-trying: a failure here should fail the test
+    /// that called it, not trap and take the whole suite process down with it.
+    static func makeReadyManagers() throws -> (client: WebTransportSessionManager, server: WebTransportSessionManager) {
         var clientHTTP3 = HTTP3ConnectionState(role: .client)
         var serverHTTP3 = HTTP3ConnectionState(role: .server)
-        _ = try! serverHTTP3.receivePeerControlStream(clientHTTP3.localControlStreamBytes())
-        _ = try! clientHTTP3.receivePeerControlStream(serverHTTP3.localControlStreamBytes())
+        _ = try serverHTTP3.receivePeerControlStream(clientHTTP3.localControlStreamBytes())
+        _ = try clientHTTP3.receivePeerControlStream(serverHTTP3.localControlStreamBytes())
         return (
             WebTransportSessionManager(http3: clientHTTP3),
             WebTransportSessionManager(http3: serverHTTP3)

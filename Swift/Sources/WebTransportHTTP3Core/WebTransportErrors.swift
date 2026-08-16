@@ -102,9 +102,10 @@ public enum WebTransportDraft16ErrorMapper {
         guard errorCode <= UInt64(UInt32.max) else {
             throw QUICCodecError.valueOutOfRange("WebTransport close-session error code exceeds UInt32")
         }
-        return try WebTransportFlowCapsuleCodec.serialize(.closeSession(
-            applicationErrorCode: UInt32(errorCode),
-            message: message
-        ))
+        return try WebTransportFlowCapsuleCodec.serialize(
+            .closeSession(
+                applicationErrorCode: UInt32(errorCode),
+                message: message
+            ))
     }
 }

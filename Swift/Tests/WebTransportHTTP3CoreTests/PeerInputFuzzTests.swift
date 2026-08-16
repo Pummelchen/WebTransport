@@ -47,9 +47,11 @@ private struct FuzzCorpus {
     /// A QUIC variable-length integer, biased toward boundary encodings where
     /// length-prefix bugs live.
     mutating func varInt() -> Data {
-        let choices: [UInt64] = [0, 1, 63, 64, 16_383, 16_384, 1_073_741_823,
-                                 1_073_741_824, 4_611_686_018_427_387_903,
-                                 UInt64.random(in: 0...UInt64(Int.max), using: &generator)]
+        let choices: [UInt64] = [
+            0, 1, 63, 64, 16_383, 16_384, 1_073_741_823,
+            1_073_741_824, 4_611_686_018_427_387_903,
+            UInt64.random(in: 0...UInt64(Int.max), using: &generator),
+        ]
         let value = choices.randomElement(using: &generator) ?? 0
         return (try? QUICVarInt.encode(value)) ?? Data([0])
     }
@@ -79,12 +81,13 @@ private struct FuzzCorpus {
             out.append(contentsOf: [UInt8](bytes(count: Int.random(in: 1...64, using: &generator))))
         case 3:  // byte overwrite with a boundary value
             let i = Int.random(in: 0..<out.count, using: &generator)
-            out[i] = [0x00, 0x01, 0x3f, 0x40, 0x7f, 0x80, 0xbf, 0xc0, 0xff]
+            out[i] =
+                [0x00, 0x01, 0x3f, 0x40, 0x7f, 0x80, 0xbf, 0xc0, 0xff]
                 .randomElement(using: &generator) ?? 0xff
         case 4:  // splice against fresh noise
             let cut = Int.random(in: 0..<out.count, using: &generator)
             out = Array(out.prefix(cut)) + [UInt8](bytes(count: Int.random(in: 0...64, using: &generator)))
-        default: // duplicate, to trip accumulating-length logic
+        default:  // duplicate, to trip accumulating-length logic
             out += out
         }
         return Data(out)
@@ -98,10 +101,13 @@ private struct FuzzCorpus {
 /// entry is a stateless static call, so it is `Sendable` on its own and needs no
 /// concurrency escape hatch.
 private let peerInputParsers: [(name: String, run: @Sendable (Data) throws -> Void)] = [
-    ("QUICVarInt.decode", { data in
-        var cursor = QUICByteCursor(data)
-        _ = try QUICVarInt.decode(from: &cursor)
-    }),
+    (
+        "QUICVarInt.decode",
+        { data in
+            var cursor = QUICByteCursor(data)
+            _ = try QUICVarInt.decode(from: &cursor)
+        }
+    ),
     ("QUICFrame.decodeFrames", { _ = try QUICFrame.decodeFrames($0) }),
     ("QUICTransportParameters.decode", { _ = try QUICTransportParameters.decode($0) }),
     ("QUICLongHeaderPacket.decode", { _ = try QUICLongHeaderPacket.decode($0) }),
@@ -127,12 +133,13 @@ private let peerInputParsers: [(name: String, run: @Sendable (Data) throws -> Vo
     ("TLSClientHello.decode", { _ = try TLSClientHello.decode($0) }),
     ("TLSServerHello.decode", { _ = try TLSServerHello.decode($0) }),
     ("TLSCertificate.decode", { _ = try TLSCertificate.decode($0) }),
-    ("TLSCertificateVerify.decode", { _ = try TLSCertificateVerify.decode($0) })
+    ("TLSCertificateVerify.decode", { _ = try TLSCertificateVerify.decode($0) }),
 ]
 
 private var fuzzIterations: Int {
     if let raw = ProcessInfo.processInfo.environment["WEBTRANSPORT_FUZZ_ITERATIONS"],
-       let parsed = Int(raw), parsed > 0 {
+        let parsed = Int(raw), parsed > 0
+    {
         return parsed
     }
     return 400
@@ -147,7 +154,7 @@ func peerFacingParsersNeverTrapOnArbitraryInput() throws {
     // valid for one parser is fed to all the others too.
     var inputs: [Data] = [
         Data(), Data([0x00]), Data([0xff]), Data([0x40]), Data([0xc0]),
-        Data(repeating: 0xff, count: 1024)
+        Data(repeating: 0xff, count: 1024),
     ]
     for _ in 0..<iterations {
         inputs.append(corpus.framed())
@@ -180,9 +187,9 @@ func peerFacingParsersRejectOversizedInputWithoutExhaustingMemory() throws {
     // A peer can claim an enormous length in a few bytes. The parser must not
     // pre-allocate on that claim; it must fail against the bytes it actually has.
     var oversized = Data()
-    oversized.append(try QUICVarInt.encode(0x3f))                          // type
-    oversized.append(try QUICVarInt.encode(4_611_686_018_427_387_903))     // absurd length
-    oversized.append(Data(repeating: 0x41, count: 64))                     // tiny body
+    oversized.append(try QUICVarInt.encode(0x3f))  // type
+    oversized.append(try QUICVarInt.encode(4_611_686_018_427_387_903))  // absurd length
+    oversized.append(Data(repeating: 0x41, count: 64))  // tiny body
 
     for parser in peerInputParsers {
         do {

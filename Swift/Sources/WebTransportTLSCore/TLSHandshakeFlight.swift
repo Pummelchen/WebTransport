@@ -152,9 +152,7 @@ public struct TLSHandshakeFlightDecoder: Equatable, Sendable {
             }
             let lengthOffset = data.index(after: localOffset)
             let bodyLength =
-                (Int(data[lengthOffset]) << 16) |
-                (Int(data[data.index(after: lengthOffset)]) << 8) |
-                Int(data[data.index(lengthOffset, offsetBy: 2)])
+                (Int(data[lengthOffset]) << 16) | (Int(data[data.index(after: lengthOffset)]) << 8) | Int(data[data.index(lengthOffset, offsetBy: 2)])
             let messageLength = 4 + bodyLength
             guard data.distance(from: localOffset, to: data.endIndex) >= messageLength else {
                 break

@@ -31,7 +31,7 @@ struct WebTransportServerCLI {
                 let local = try await server.waitForListening(timeoutMilliseconds: options.timeoutMilliseconds)
                 writeStandardOutput(
                     "network packet session listening: \(local.commandLineValue)\n"
-                    + "network packet session certificate-sha256: \(server.certificateSHA256.base64EncodedString())\n"
+                        + "network packet session certificate-sha256: \(server.certificateSHA256.base64EncodedString())\n"
                 )
                 let tasks: [Task<WebTransportNetworkSessionResult, Error>] = (0..<options.maxSessions).map { _ in
                     Task {
@@ -48,7 +48,9 @@ struct WebTransportServerCLI {
                 }
                 for result in results {
                     let session = result.sessionEstablished ? " session=established" : ""
-                    print("network \(result.transport.rawValue) session served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\"")
+                    print(
+                        "network \(result.transport.rawValue) session served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\""
+                    )
                 }
                 return
             } catch {
@@ -199,12 +201,14 @@ private struct NetworkServerOptions {
                 if argument.hasPrefix("--listen=") {
                     endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--listen=".count)))
                 } else if argument.hasPrefix("--timeout-ms="),
-                          let value = Int32(argument.dropFirst("--timeout-ms=".count)) {
+                    let value = Int32(argument.dropFirst("--timeout-ms=".count))
+                {
                     timeoutMilliseconds = value
                 } else if argument.hasPrefix("--transport=") {
                     transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))
                 } else if argument.hasPrefix("--max-sessions="),
-                          let value = Int(argument.dropFirst("--max-sessions=".count)), value > 0 {
+                    let value = Int(argument.dropFirst("--max-sessions=".count)), value > 0
+                {
                     maxSessions = value
                 } else if argument.hasPrefix("--authority=") {
                     let value = String(argument.dropFirst("--authority=".count))

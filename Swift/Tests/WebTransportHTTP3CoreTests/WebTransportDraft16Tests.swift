@@ -47,10 +47,12 @@ func draft16IgnoresFlowControlCapsulesWhenFlowControlWasNotNegotiated() throws {
         sessionID: sessionID,
         bytes: oversized
     )
-    #expect(received == .unknown(
-        type: constants.wtStreamsBlockedBidiCapsule,
-        payload: try QUICVarInt.encode(constants.maximumMaxStreamsValue + 1)
-    ))
+    #expect(
+        received
+            == .unknown(
+                type: constants.wtStreamsBlockedBidiCapsule,
+                payload: try QUICVarInt.encode(constants.maximumMaxStreamsValue + 1)
+            ))
     #expect(pair.client.flowState(for: sessionID)?.isEnabled == false)
     #expect(pair.client.sessionsByID[sessionID]?.state == .accepted)
 }
@@ -66,10 +68,12 @@ func draft16EqualFlowControlUpdatesCloseTheSession() throws {
             bytes: try WebTransportFlowCapsuleCodec.serialize(.maxData(limit: 8))
         )
     }
-    #expect(pair.client.sessionsByID[sessionID]?.state == .closed(
-        applicationErrorCode: UInt32(WebTransportHTTP3DraftConstants.current.wtFlowControlError),
-        message: "WebTransport flow-control violation"
-    ))
+    #expect(
+        pair.client.sessionsByID[sessionID]?.state
+            == .closed(
+                applicationErrorCode: UInt32(WebTransportHTTP3DraftConstants.current.wtFlowControlError),
+                message: "WebTransport flow-control violation"
+            ))
 }
 
 @Test
@@ -104,24 +108,27 @@ func draft16MalformedCloseMessagesResetConnectStreamWithH3MessageError() throws 
     let constants = WebTransportHTTP3DraftConstants.current
     let payloads = [
         Data(repeating: 0, count: 4) + Data(repeating: 0x61, count: constants.wtCloseSessionMaxMessageBytes + 1),
-        Data(repeating: 0, count: 4) + Data([0xff])
+        Data(repeating: 0, count: 4) + Data([0xff]),
     ]
 
     for payload in payloads {
         var pair = try Draft16TestSupport.makeReadyPair()
         let sessionID = try Draft16TestSupport.establishSession(pair: &pair)
-        let capsule = try QUICVarInt.encode(constants.wtCloseSessionCapsule)
+        let capsule =
+            try QUICVarInt.encode(constants.wtCloseSessionCapsule)
             + QUICVarInt.encode(UInt64(payload.count))
             + payload
         let result = try pair.server.receiveConnectStreamCapsulesWithActions(
             streamID: sessionID.rawValue,
             bytes: capsule
         )
-        #expect(result.connectResetFrame == .resetStream(
-            id: sessionID.rawValue,
-            applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
-            finalSize: 0
-        ))
+        #expect(
+            result.connectResetFrame
+                == .resetStream(
+                    id: sessionID.rawValue,
+                    applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
+                    finalSize: 0
+                ))
         #expect(result.terminationActions != nil)
     }
 }
@@ -179,10 +186,11 @@ func draft16DatagramsDoNotConsumeSessionStreamDataCredit() throws {
 func draft16ServerMapsExcessSessionWithoutFlowControlToH3RequestRejected() throws {
     var pair = try Draft16TestSupport.makeReadyPair()
     _ = try Draft16TestSupport.establishSession(pair: &pair)
-    let secondRequest = try QPACK.headersFrame(fields: WebTransportSessionRequest(
-        authority: "example.com",
-        path: "/second"
-    ).headers())
+    let secondRequest = try QPACK.headersFrame(
+        fields: WebTransportSessionRequest(
+            authority: "example.com",
+            path: "/second"
+        ).headers())
 
     do {
         _ = try pair.server.receiveClientSessionRequest(
@@ -194,14 +202,16 @@ func draft16ServerMapsExcessSessionWithoutFlowControlToH3RequestRejected() throw
     } catch let error as WebTransportDraft16Error {
         #expect(error.kind == .requestRejected)
         #expect(error.code == HTTP3ApplicationErrorCode.requestRejected.rawValue)
-        #expect(WebTransportDraft16ErrorMapper.streamFrame(
-            for: error.kind,
-            signal: .resetStream(streamID: 4, finalSize: 0)
-        ) == .resetStream(
-            id: 4,
-            applicationErrorCode: HTTP3ApplicationErrorCode.requestRejected.rawValue,
-            finalSize: 0
-        ))
+        #expect(
+            WebTransportDraft16ErrorMapper.streamFrame(
+                for: error.kind,
+                signal: .resetStream(streamID: 4, finalSize: 0)
+            )
+                == .resetStream(
+                    id: 4,
+                    applicationErrorCode: HTTP3ApplicationErrorCode.requestRejected.rawValue,
+                    finalSize: 0
+                ))
     }
 }
 
@@ -212,11 +222,13 @@ func draft16ExporterContextUsesFixedSessionIDAndByteLengths() throws {
         applicationLabel: Data("label".utf8),
         applicationContext: Data([0xaa, 0xbb])
     )
-    #expect(context == Data([
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        0x05, 0x6c, 0x61, 0x62, 0x65, 0x6c,
-        0x02, 0xaa, 0xbb
-    ]))
+    #expect(
+        context
+            == Data([
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                0x05, 0x6c, 0x61, 0x62, 0x65, 0x6c,
+                0x02, 0xaa, 0xbb,
+            ]))
     #expect(WebTransportExporter.tlsLabel == "EXPORTER-WebTransport")
 }
 
@@ -230,7 +242,7 @@ private enum Draft16TestSupport {
         if flowControl {
             for settingsID in [
                 constants.settingsWTInitialMaxStreamsBidi,
-                constants.settingsWTInitialMaxStreamsUni
+                constants.settingsWTInitialMaxStreamsUni,
             ] {
                 try clientSettings.set(8, for: settingsID)
                 try serverSettings.set(8, for: settingsID)

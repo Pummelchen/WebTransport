@@ -114,7 +114,8 @@ final class WebTransportQUICPacketProbeServer: @unchecked Sendable {
         if let expectedRemote {
             let expectedKey = key(for: expectedRemote)
             if var packets = bufferedInitialPackets.removeValue(forKey: expectedKey),
-               let buffered = packets.first {
+                let buffered = packets.first
+            {
                 packets.removeFirst()
                 if packets.isEmpty {
                     return (buffered.bytes, buffered.remote)
@@ -416,7 +417,8 @@ enum WebTransportQUICPacketProbeCodec {
             initialSecretConnectionID: clientDestinationConnectionID
         )
         guard packet.destinationConnectionID == clientSourceConnectionID,
-              packet.sourceConnectionID == clientDestinationConnectionID else {
+            packet.sourceConnectionID == clientDestinationConnectionID
+        else {
             throw WebTransportNetworkRuntimeError.unexpectedPacket
         }
         let frames = try QUICFrame.decodeFrames(packet.payload)
@@ -470,7 +472,7 @@ enum WebTransportQUICPacketProbeCodec {
             frames: [
                 .ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
                 .stream(id: sessionStreamID, offset: 0, fin: false, data: streamBytes),
-                .datagram(datagram)
+                .datagram(datagram),
             ]
         )
     }
@@ -509,10 +511,11 @@ enum WebTransportQUICPacketProbeCodec {
     ) throws -> Data {
         let request = handshakeContext.request
         var responseFields = try WebTransportHTTP3Headers.successfulResponse(status: 200)
-        responseFields.append(try HTTPFieldLine(
-            name: WebTransportHeaderName.selectedProtocol,
-            value: WebTransportProtocolNegotiation.encodeItem(sessionProtocol)
-        ))
+        responseFields.append(
+            try HTTPFieldLine(
+                name: WebTransportHeaderName.selectedProtocol,
+                value: WebTransportProtocolNegotiation.encodeItem(sessionProtocol)
+            ))
         let headersFrame = try QPACK.headersFrame(fields: responseFields)
         let streamBytes = try HTTP3Frame.encodeFrames([headersFrame])
         let datagram = try WebTransportDatagramSignaling.serialize(
@@ -528,7 +531,7 @@ enum WebTransportQUICPacketProbeCodec {
                 .handshakeDone,
                 .ack(largestAcknowledged: applicationPacketNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
                 .stream(id: sessionStreamID, offset: 0, fin: false, data: streamBytes),
-                .datagram(datagram)
+                .datagram(datagram),
             ]
         )
     }
@@ -569,8 +572,8 @@ enum WebTransportQUICPacketProbeCodec {
                 ]),
                 try TLSSignatureAlgorithmsExtension.make([
                     TLSSignatureScheme.ed25519,
-                    TLSSignatureScheme.ecdsaSecp256r1SHA256
-                ])
+                    TLSSignatureScheme.ecdsaSecp256r1SHA256,
+                ]),
             ]
         ).handshakeMessage()
     }
@@ -583,7 +586,7 @@ enum WebTransportQUICPacketProbeCodec {
                 TLSSupportedVersionsExtension.server(),
                 try TLSKeyShareExtension.server(
                     TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x22, count: 32))
-                )
+                ),
             ]
         ).handshakeMessage()
     }
@@ -593,7 +596,7 @@ enum WebTransportQUICPacketProbeCodec {
     ) throws -> TLSHandshakeMessage {
         try TLSEncryptedExtensions(extensions: [
             try TLSALPNExtension.make(protocols: [h3ALPN]),
-            try TLSQUICTransportParametersExtension.make(serverTransportParameters(originalDestinationConnectionID: request.destinationConnectionID))
+            try TLSQUICTransportParametersExtension.make(serverTransportParameters(originalDestinationConnectionID: request.destinationConnectionID)),
         ]).handshakeMessage()
     }
 
@@ -792,8 +795,9 @@ enum WebTransportQUICPacketProbeCodec {
             parsedHeader: parsed
         )
         guard packet.packetType == .initial,
-              packet.version == quicVersion,
-              packet.token.isEmpty else {
+            packet.version == quicVersion,
+            packet.token.isEmpty
+        else {
             throw WebTransportNetworkRuntimeError.unexpectedPacket
         }
         return packet
@@ -825,15 +829,17 @@ enum WebTransportQUICPacketProbeCodec {
             }
         }
 
-        guard (!requiresPing || hasPing),
-              (!requiresAck || hasAck) else {
+        guard !requiresPing || hasPing,
+            !requiresAck || hasAck
+        else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
         var decoder = TLSHandshakeFlightDecoder()
         let messages = try decoder.receive(frames: cryptoFrames)
         guard messages.map(\.type) == expectedTypes,
-              let first = messages.first else {
+            let first = messages.first
+        else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
@@ -849,10 +855,11 @@ enum WebTransportQUICPacketProbeCodec {
             let hello = try TLSServerHello.decode(first.body)
             try validateServerHello(hello)
             guard messages.count == 5,
-                  messages[1].type == .encryptedExtensions,
-                  messages[2].type == .certificate,
-                  messages[3].type == .certificateVerify,
-                  messages[4].type == .finished else {
+                messages[1].type == .encryptedExtensions,
+                messages[2].type == .certificate,
+                messages[3].type == .certificateVerify,
+                messages[4].type == .finished
+            else {
                 throw WebTransportNetworkRuntimeError.invalidPayload
             }
             let encryptedExtensions = try TLSEncryptedExtensions.decode(messages[1].body)
@@ -875,9 +882,11 @@ enum WebTransportQUICPacketProbeCodec {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
         let keyShare = try requireExtension(.keyShare, in: hello.extensions)
-        guard try TLSKeyShareExtension.clientShares(from: keyShare.data).contains(where: {
-            $0.group == TLSNamedGroup.x25519 && $0.keyExchange.count == 32
-        }) else {
+        guard
+            try TLSKeyShareExtension.clientShares(from: keyShare.data).contains(where: {
+                $0.group == TLSNamedGroup.x25519 && $0.keyExchange.count == 32
+            })
+        else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
     }
@@ -908,8 +917,9 @@ enum WebTransportQUICPacketProbeCodec {
     ) throws {
         let certificate = try TLSCertificate.decode(messages[2].body)
         guard certificate.requestContext.isEmpty,
-              certificate.entries.count == 1,
-              certificate.entries[0].certificateData == deterministicServerCertificateDER else {
+            certificate.entries.count == 1,
+            certificate.entries[0].certificateData == deterministicServerCertificateDER
+        else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
@@ -922,7 +932,8 @@ enum WebTransportQUICPacketProbeCodec {
         }
         let certificateVerify = try TLSCertificateVerify.decode(messages[3].body)
         guard certificateVerify.algorithm == TLSSignatureScheme.ed25519,
-              certificateVerify.signature == deterministicCertificateVerifySignature(transcriptHash: transcript.hash) else {
+            certificateVerify.signature == deterministicCertificateVerifySignature(transcriptHash: transcript.hash)
+        else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
 
@@ -951,12 +962,14 @@ enum WebTransportQUICPacketProbeCodec {
         let transportParametersExtension = try requireExtension(.quicTransportParameters, in: extensions)
         let parameters = try TLSQUICTransportParametersExtension.parameters(from: transportParametersExtension.data)
         guard try parameters.integer(for: QUICTransportParameterID.maxDatagramFrameSize) == UInt64(minimumInitialDatagramBytes),
-              try parameters.integer(for: QUICTransportParameterID.maxUDPPayloadSize) == UInt64(minimumInitialDatagramBytes),
-              parameters[QUICTransportParameterID.initialSourceConnectionID] != nil else {
+            try parameters.integer(for: QUICTransportParameterID.maxUDPPayloadSize) == UInt64(minimumInitialDatagramBytes),
+            parameters[QUICTransportParameterID.initialSourceConnectionID] != nil
+        else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
         if requiresOriginalDestinationConnectionID,
-           parameters[QUICTransportParameterID.originalDestinationConnectionID] == nil {
+            parameters[QUICTransportParameterID.originalDestinationConnectionID] == nil
+        {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
     }
@@ -1017,7 +1030,8 @@ enum WebTransportQUICPacketProbeCodec {
         }
         let parsed = try WebTransportDatagramSignaling.parse(datagram)
         guard parsed.sessionID.rawValue == sessionStreamID,
-              let message = String(data: parsed.payload, encoding: .utf8) else {
+            let message = String(data: parsed.payload, encoding: .utf8)
+        else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
         return message
@@ -1185,7 +1199,8 @@ enum QUICInitialPacketProtection {
             throw WebTransportNetworkRuntimeError.unexpectedPacket
         }
         guard parsed.packetNumberOffset + packetNumberLength <= parsed.payloadEndOffset,
-              parsed.payloadEndOffset <= unprotected.count else {
+            parsed.payloadEndOffset <= unprotected.count
+        else {
             throw QUICCodecError.truncated(
                 needed: parsed.payloadEndOffset,
                 available: unprotected.count
@@ -1232,7 +1247,8 @@ enum QUICInitialPacketProtection {
             throw QUICCodecError.malformed("not a long header packet")
         }
         guard let packetType = QUICPacketType(rawValue: (first >> 4) & 0x03),
-              packetType == .initial else {
+            packetType == .initial
+        else {
             throw WebTransportNetworkRuntimeError.unexpectedPacket
         }
         let version = try readUInt32(data, offset: &offset)

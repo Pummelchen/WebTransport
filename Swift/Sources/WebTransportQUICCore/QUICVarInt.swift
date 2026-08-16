@@ -25,14 +25,14 @@ public enum QUICVarInt {
         case 0..<16_384:
             Data([
                 UInt8((value >> 8) | 0x40),
-                UInt8(value & 0xff)
+                UInt8(value & 0xff),
             ])
         case 0..<1_073_741_824:
             Data([
                 UInt8((value >> 24) | 0x80),
                 UInt8((value >> 16) & 0xff),
                 UInt8((value >> 8) & 0xff),
-                UInt8(value & 0xff)
+                UInt8(value & 0xff),
             ])
         case 0...maximum:
             Data([
@@ -43,7 +43,7 @@ public enum QUICVarInt {
                 UInt8((value >> 24) & 0xff),
                 UInt8((value >> 16) & 0xff),
                 UInt8((value >> 8) & 0xff),
-                UInt8(value & 0xff)
+                UInt8(value & 0xff),
             ])
         default:
             throw QUICCodecError.valueOutOfRange("QUIC varint exceeds 62 bits")

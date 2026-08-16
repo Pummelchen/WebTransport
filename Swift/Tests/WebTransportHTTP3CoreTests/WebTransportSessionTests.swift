@@ -18,10 +18,12 @@ func webTransportClientBuildsExtendedConnectRequestAndMapsSession() throws {
 
     try WebTransportHTTP3Headers.validateConnectRequest(fields)
     #expect(fields.contains(try HTTPFieldLine(name: ":protocol", value: "webtransport-h3")))
-    #expect(fields.contains(try HTTPFieldLine(
-        name: WebTransportHeaderName.availableProtocols,
-        value: "\"chat.v1\", \"chat.v2\""
-    )))
+    #expect(
+        fields.contains(
+            try HTTPFieldLine(
+                name: WebTransportHeaderName.availableProtocols,
+                value: "\"chat.v1\", \"chat.v2\""
+            )))
     #expect(pair.client.session(forRequestStreamID: 0)?.state == .requested)
     #expect(pair.client.session(forRequestStreamID: 0)?.availableProtocols == ["chat.v1", "chat.v2"])
     #expect(pair.client.sessionsByID[WebTransportSessionID(rawValue: 0)]?.path == "/wt")
@@ -134,7 +136,7 @@ func webTransportClientRejectsUnadvertisedSelectedProtocol() throws {
     )
     let badResponse = try QPACK.headersFrame(fields: [
         try HTTPFieldLine(name: ":status", value: "200"),
-        try HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: "\"chat.v2\"")
+        try HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: "\"chat.v2\""),
     ])
 
     #expect(throws: Error.self) {
@@ -208,7 +210,7 @@ func webTransportSessionHeadersRejectDuplicateNegotiationFields() throws {
         try HTTPFieldLine(name: ":path", value: "/wt"),
         try HTTPFieldLine(name: ":protocol", value: "webtransport-h3"),
         try HTTPFieldLine(name: WebTransportHeaderName.availableProtocols, value: "\"a\""),
-        try HTTPFieldLine(name: WebTransportHeaderName.availableProtocols, value: "\"b\"")
+        try HTTPFieldLine(name: WebTransportHeaderName.availableProtocols, value: "\"b\""),
     ])
     #expect(throws: Error.self) {
         _ = try pair.server.receiveClientSessionRequest(
@@ -226,7 +228,7 @@ func webTransportSessionHeadersRejectDuplicateNegotiationFields() throws {
     let duplicateSelectedProtocol = try QPACK.headersFrame(fields: [
         try HTTPFieldLine(name: ":status", value: "200"),
         try HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: "a"),
-        try HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: "b")
+        try HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: "b"),
     ])
     #expect(throws: Error.self) {
         _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: duplicateSelectedProtocol)
@@ -259,7 +261,7 @@ func webTransportSessionEstablishmentRequiresValidatedSettings() throws {
         type: HTTP3StreamType.control,
         payload: try HTTP3Settings([
             WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
-            WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1
+            WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
         ]).frame().encode()
     )
     #expect(throws: Error.self) {
@@ -301,7 +303,8 @@ private enum WebTransportSessionTestSupport {
     static func responseStatus(_ frame: HTTP3Frame) throws -> UInt16 {
         let fields = try QPACK.decodeHeadersFrame(frame)
         guard let value = fields.first(where: { $0.name == ":status" })?.value,
-              let status = UInt16(value) else {
+            let status = UInt16(value)
+        else {
             throw QUICCodecError.malformed("missing status")
         }
         return status

@@ -20,10 +20,11 @@ import WebTransport
 func listenerReportsCertificateExpirySoRotationCanBeScheduled() async throws {
     // Without an expiry an operator has no signal for when to rebind, and the
     // first symptom of an expired certificate is peers failing validation.
-    let server = WebTransportServer(configuration: WebTransportServerConfiguration(
-        authority: "localhost",
-        localOnly: true
-    ))
+    let server = WebTransportServer(
+        configuration: WebTransportServerConfiguration(
+            authority: "localhost",
+            localOnly: true
+        ))
     let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
     defer { listener.shutdown() }
 
@@ -35,10 +36,11 @@ func listenerReportsCertificateExpirySoRotationCanBeScheduled() async throws {
 
 @Test
 func rotationProducesAListenerPresentingADifferentCertificate() async throws {
-    let server = WebTransportServer(configuration: WebTransportServerConfiguration(
-        authority: "localhost",
-        localOnly: true
-    ))
+    let server = WebTransportServer(
+        configuration: WebTransportServerConfiguration(
+            authority: "localhost",
+            localOnly: true
+        ))
 
     let original = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
     let originalFingerprint = original.certificateSHA256
@@ -61,10 +63,11 @@ func rotationProducesAListenerPresentingADifferentCertificate() async throws {
 
 @Test
 func rotationRetiresTheOldListenerBeforeReturning() async throws {
-    let server = WebTransportServer(configuration: WebTransportServerConfiguration(
-        authority: "localhost",
-        localOnly: true
-    ))
+    let server = WebTransportServer(
+        configuration: WebTransportServerConfiguration(
+            authority: "localhost",
+            localOnly: true
+        ))
     let original = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
 
     let rotated = try await server.rotateIdentity(

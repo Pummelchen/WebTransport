@@ -98,7 +98,7 @@ private func makeInjectableIdentityMaterial(
     let attributes: [CFString: Any] = [
         kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
         kSecAttrKeySizeInBits: 256,
-        kSecAttrIsPermanent: false
+        kSecAttrIsPermanent: false,
     ]
     var keyError: Unmanaged<CFError>?
     guard let privateKey = unsafe SecKeyCreateRandomKey(attributes as CFDictionary, &keyError) else {
@@ -107,8 +107,9 @@ private func makeInjectableIdentityMaterial(
     // No `unsafe` marker here: passing nil for the error out-parameter means
     // these calls perform no unsafe pointer operation.
     guard let publicKey = SecKeyCopyPublicKey(privateKey),
-          let publicKeyDER = SecKeyCopyExternalRepresentation(publicKey, nil) as Data?,
-          let privateKeyDER = SecKeyCopyExternalRepresentation(privateKey, nil) as Data? else {
+        let publicKeyDER = SecKeyCopyExternalRepresentation(publicKey, nil) as Data?,
+        let privateKeyDER = SecKeyCopyExternalRepresentation(privateKey, nil) as Data?
+    else {
         throw WebTransportNetworkRuntimeError.invalidTransport("test key export failed")
     }
 

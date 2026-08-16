@@ -19,10 +19,12 @@ func webTransportCloseAndDrainCapsulesDriveSessionStateAndGating() throws {
         applicationErrorCode: 7,
         message: "done"
     )
-    #expect(try WebTransportFlowCapsuleCodec.parse(close).capsule == .closeSession(
-        applicationErrorCode: 7,
-        message: "done"
-    ))
+    #expect(
+        try WebTransportFlowCapsuleCodec.parse(close).capsule
+            == .closeSession(
+                applicationErrorCode: 7,
+                message: "done"
+            ))
     #expect(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 7, message: "done"))
     #expect(throws: WebTransportDraft16Error.self) {
         _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("x".utf8))
@@ -42,34 +44,42 @@ func webTransportCloseSessionResultCarriesFINStopSendingAndStreamCleanupActions(
         message: "done"
     )
 
-    #expect(try WebTransportFlowCapsuleCodec.parse(result.capsuleBytes).capsule == .closeSession(
-        applicationErrorCode: 7,
-        message: "done"
-    ))
-    #expect(result.terminationActions.connectFINFrame == .stream(
-        id: sessionID.rawValue,
-        offset: nil,
-        fin: true,
-        data: Data()
-    ))
-    #expect(result.terminationActions.connectStopSendingFrame == .stopSending(
-        id: sessionID.rawValue,
-        applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError
-    ))
-    #expect(result.terminationActions.streamResetFrames == [
-        .resetStreamAt(
-            id: 4,
-            applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError,
-            finalSize: 0,
-            reliableSize: 0
-        )
-    ])
-    #expect(result.terminationActions.streamStopSendingFrames == [
-        .stopSending(
-            id: 4,
-            applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError
-        )
-    ])
+    #expect(
+        try WebTransportFlowCapsuleCodec.parse(result.capsuleBytes).capsule
+            == .closeSession(
+                applicationErrorCode: 7,
+                message: "done"
+            ))
+    #expect(
+        result.terminationActions.connectFINFrame
+            == .stream(
+                id: sessionID.rawValue,
+                offset: nil,
+                fin: true,
+                data: Data()
+            ))
+    #expect(
+        result.terminationActions.connectStopSendingFrame
+            == .stopSending(
+                id: sessionID.rawValue,
+                applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+            ))
+    #expect(
+        result.terminationActions.streamResetFrames == [
+            .resetStreamAt(
+                id: 4,
+                applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError,
+                finalSize: 0,
+                reliableSize: 0
+            )
+        ])
+    #expect(
+        result.terminationActions.streamStopSendingFrames == [
+            .stopSending(
+                id: 4,
+                applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+            )
+        ])
     #expect(pair.client.stream(for: 4) == nil)
 }
 
@@ -87,12 +97,14 @@ func webTransportReceivedCloseCleansStreamsAndDatagrams() throws {
         bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 9, message: "bye"))
     )
 
-    #expect(received.terminationActions?.connectFINFrame == .stream(
-        id: sessionID.rawValue,
-        offset: nil,
-        fin: true,
-        data: Data()
-    ))
+    #expect(
+        received.terminationActions?.connectFINFrame
+            == .stream(
+                id: sessionID.rawValue,
+                offset: nil,
+                fin: true,
+                data: Data()
+            ))
     #expect(pair.server.stream(for: 4) == nil)
     #expect(pair.server.popDatagramPayload(sessionID: sessionID) == nil)
     #expect(throws: WebTransportDraft16Error.self) {
@@ -110,14 +122,16 @@ func webTransportReceivedCloseResetsAdditionalConnectStreamDataWithH3MessageErro
         bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: "closed"))
     )
 
-    #expect(try pair.server.receiveConnectStreamData(
-        streamID: sessionID.rawValue,
-        data: Data("late".utf8)
-    ) == .resetStream(
-        id: sessionID.rawValue,
-        applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
-        finalSize: 0
-    ))
+    #expect(
+        try pair.server.receiveConnectStreamData(
+            streamID: sessionID.rawValue,
+            data: Data("late".utf8)
+        )
+            == .resetStream(
+                id: sessionID.rawValue,
+                applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
+                finalSize: 0
+            ))
 }
 
 @Test
@@ -125,16 +139,18 @@ func webTransportCloseSessionRejectsOversizedMessages() throws {
     let maximumSized = String(repeating: "x", count: WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes)
     let oversized = String(repeating: "x", count: WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes + 1)
 
-    _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(
-        applicationErrorCode: 1,
-        message: maximumSized
-    ))
+    _ = try WebTransportFlowCapsuleCodec.serialize(
+        .closeSession(
+            applicationErrorCode: 1,
+            message: maximumSized
+        ))
 
     #expect(throws: Error.self) {
-        _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(
-            applicationErrorCode: 1,
-            message: oversized
-        ))
+        _ = try WebTransportFlowCapsuleCodec.serialize(
+            .closeSession(
+                applicationErrorCode: 1,
+                message: oversized
+            ))
     }
 
     var payload = Data([0, 0, 0, 1])
@@ -231,9 +247,10 @@ func webTransportServerBuffersIngressBeforeConnectRequestArrives() throws {
 @Test
 func webTransportServerDiscardsBufferedIngressWhenConnectIsRejected() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
-    _ = try pair.server.receiveDatagramFrame(.datagram(
-        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("reject-d".utf8))
-    ))
+    _ = try pair.server.receiveDatagramFrame(
+        .datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("reject-d".utf8))
+        ))
     let earlyPrefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
     _ = try pair.server.acceptBidirectionalStream(
         streamID: 4,
@@ -269,9 +286,10 @@ func webTransportEarlyIngressOverflowMapsToBufferedStreamRejected() throws {
         request: try WebTransportSessionRequest(authority: "example.com", path: "/wt")
     )
 
-    _ = try pair.client.receiveDatagramFrame(.datagram(
-        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("abc".utf8))
-    ))
+    _ = try pair.client.receiveDatagramFrame(
+        .datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("abc".utf8))
+        ))
     #expect(pair.client.popDatagramPayload(sessionID: WebTransportSessionID(rawValue: 0)) == nil)
 
     let prefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
@@ -280,12 +298,14 @@ func webTransportEarlyIngressOverflowMapsToBufferedStreamRejected() throws {
         firstBytes: prefix + Data("abc".utf8)
     )
     #expect(rejected.prefix == nil)
-    #expect(rejected.rejectionFrame == .resetStreamAt(
-        id: 1,
-        applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
-        finalSize: 0,
-        reliableSize: 0
-    ))
+    #expect(
+        rejected.rejectionFrame
+            == .resetStreamAt(
+                id: 1,
+                applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
+                finalSize: 0,
+                reliableSize: 0
+            ))
 }
 
 @Test
@@ -295,12 +315,14 @@ func webTransportServerBufferedIngressCountExhaustionMapsToBufferedStreamRejecte
         maxBufferedDatagramsPerSession: 1
     )
 
-    _ = try pair.server.receiveDatagramFrame(.datagram(
-        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("a".utf8))
-    ))
-    _ = try pair.server.receiveDatagramFrame(.datagram(
-        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("b".utf8))
-    ))
+    _ = try pair.server.receiveDatagramFrame(
+        .datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("a".utf8))
+        ))
+    _ = try pair.server.receiveDatagramFrame(
+        .datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("b".utf8))
+        ))
     #expect(pair.server.datagramQueue(sessionID: WebTransportSessionID(rawValue: 0))?.count == 1)
 
     let firstPrefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
@@ -319,13 +341,15 @@ func webTransportServerBufferedIngressCountExhaustionMapsToBufferedStreamRejecte
 func webTransportServerBufferedSessionExhaustionMapsToBufferedStreamRejected() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers(maxBufferedSessions: 1)
 
-    _ = try pair.server.receiveDatagramFrame(.datagram(
-        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("a".utf8))
-    ))
-    do {
-        _ = try pair.server.receiveDatagramFrame(.datagram(
-            try WebTransportDatagramSignaling.serialize(sessionID: 4, payload: Data("b".utf8))
+    _ = try pair.server.receiveDatagramFrame(
+        .datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("a".utf8))
         ))
+    do {
+        _ = try pair.server.receiveDatagramFrame(
+            .datagram(
+                try WebTransportDatagramSignaling.serialize(sessionID: 4, payload: Data("b".utf8))
+            ))
         Issue.record("second early session should exceed buffered session count")
     } catch let error as WebTransportDraft16Error {
         #expect(error.kind == .bufferedStreamRejected)
@@ -343,33 +367,38 @@ func webTransportDraft16ErrorMapperCoversRequiredOutcomes() throws {
         (.alpn, constants.wtALPNError),
         (.requirementsNotMet, constants.wtRequirementsNotMetError),
         (.h3ID, HTTP3ApplicationErrorCode.idError.rawValue),
-        (.requestRejected, HTTP3ApplicationErrorCode.requestRejected.rawValue)
+        (.requestRejected, HTTP3ApplicationErrorCode.requestRejected.rawValue),
     ]
 
     for (kind, code) in cases {
         #expect(WebTransportDraft16ErrorMapper.code(for: kind) == code)
-        #expect(WebTransportDraft16ErrorMapper.connectionCloseFrame(
-            for: kind,
-            reason: "reason"
-        ) == .connectionClose(errorCode: code, frameType: nil, reason: Data("reason".utf8)))
-        #expect(WebTransportDraft16ErrorMapper.streamFrame(
-            for: kind,
-            signal: .resetStream(streamID: 4, finalSize: 9)
-        ) == .resetStream(id: 4, applicationErrorCode: code, finalSize: 9))
-        #expect(WebTransportDraft16ErrorMapper.streamFrame(
-            for: kind,
-            signal: .stopSending(streamID: 4)
-        ) == .stopSending(id: 4, applicationErrorCode: code))
+        #expect(
+            WebTransportDraft16ErrorMapper.connectionCloseFrame(
+                for: kind,
+                reason: "reason"
+            ) == .connectionClose(errorCode: code, frameType: nil, reason: Data("reason".utf8)))
+        #expect(
+            WebTransportDraft16ErrorMapper.streamFrame(
+                for: kind,
+                signal: .resetStream(streamID: 4, finalSize: 9)
+            ) == .resetStream(id: 4, applicationErrorCode: code, finalSize: 9))
+        #expect(
+            WebTransportDraft16ErrorMapper.streamFrame(
+                for: kind,
+                signal: .stopSending(streamID: 4)
+            ) == .stopSending(id: 4, applicationErrorCode: code))
     }
 
     let close = try WebTransportDraft16ErrorMapper.closeSessionCapsule(
         for: .requirementsNotMet,
         message: "policy"
     )
-    #expect(try WebTransportFlowCapsuleCodec.parse(close).capsule == .closeSession(
-        applicationErrorCode: UInt32(constants.wtRequirementsNotMetError),
-        message: "policy"
-    ))
+    #expect(
+        try WebTransportFlowCapsuleCodec.parse(close).capsule
+            == .closeSession(
+                applicationErrorCode: UInt32(constants.wtRequirementsNotMetError),
+                message: "policy"
+            ))
 }
 
 @Test
@@ -382,14 +411,16 @@ func webTransportSecurityNegativesAreDeterministicAndPromptFree() throws {
     } catch let error as WebTransportDraft16Error {
         #expect(error.kind == .alpn)
         #expect(error.code == constants.wtALPNError)
-        #expect(WebTransportDraft16ErrorMapper.connectionCloseFrame(
-            for: error.kind,
-            reason: error.message
-        ) == .connectionClose(
-            errorCode: constants.wtALPNError,
-            frameType: nil,
-            reason: Data(error.message.utf8)
-        ))
+        #expect(
+            WebTransportDraft16ErrorMapper.connectionCloseFrame(
+                for: error.kind,
+                reason: error.message
+            )
+                == .connectionClose(
+                    errorCode: constants.wtALPNError,
+                    frameType: nil,
+                    reason: Data(error.message.utf8)
+                ))
     }
     do {
         try WebTransportALPNPolicy.validateOfferedProtocols(["webtransport"])
@@ -434,15 +465,17 @@ func webTransportSecurityNegativesAreDeterministicAndPromptFree() throws {
     }
     #expect(connection.remoteSettings == nil)
     #expect(connection.receivedPeerControlStream == false)
-    #expect(connection.closeFrame(
-        error: .settingsError,
-        reason: "WebTransport settings rejected",
-        frameType: HTTP3FrameType.settings
-    ) == .connectionClose(
-        errorCode: HTTP3ApplicationErrorCode.settingsError.rawValue,
-        frameType: HTTP3FrameType.settings,
-        reason: Data("WebTransport settings rejected".utf8)
-    ))
+    #expect(
+        connection.closeFrame(
+            error: .settingsError,
+            reason: "WebTransport settings rejected",
+            frameType: HTTP3FrameType.settings
+        )
+            == .connectionClose(
+                errorCode: HTTP3ApplicationErrorCode.settingsError.rawValue,
+                frameType: HTTP3FrameType.settings,
+                reason: Data("WebTransport settings rejected".utf8)
+            ))
 }
 
 @Test
@@ -457,14 +490,15 @@ func webTransportLibrarySmokeMatrixCoversPhase13IScenarios() throws {
 func webTransportDraft16ComplianceDefinitionOfDoneIsExplicitAndPassing() {
     let items = WebTransportDraft16ComplianceMatrix.definitionOfDone
     #expect(WebTransportDraft16ComplianceMatrix.allPass)
-    #expect(items.map(\.requirementFamily) == [
-        "Session establishment and application protocol negotiation",
-        "Streams and datagrams, including buffered ingress and rejection behavior",
-        "Session close/drain behavior",
-        "Flow-control and error codes",
-        "H3 control and request stream constraints",
-        "Security and identity handling without prompts"
-    ])
+    #expect(
+        items.map(\.requirementFamily) == [
+            "Session establishment and application protocol negotiation",
+            "Streams and datagrams, including buffered ingress and rejection behavior",
+            "Session close/drain behavior",
+            "Flow-control and error codes",
+            "H3 control and request stream constraints",
+            "Security and identity handling without prompts",
+        ])
     #expect(items.allSatisfy { $0.status == .pass })
     #expect(items.allSatisfy { !$0.documentedBehavior.isEmpty })
     #expect(items.allSatisfy { !$0.evidence.isEmpty })
@@ -508,9 +542,10 @@ func webTransportProtocolPolicyRejectionsCarryRequirementsNotMetError() throws {
 func webTransportMapsUnknownSessionIDsToH3IDError() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
     do {
-        _ = try pair.client.receiveDatagramFrame(.datagram(
-            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("x".utf8))
-        ))
+        _ = try pair.client.receiveDatagramFrame(
+            .datagram(
+                try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("x".utf8))
+            ))
         Issue.record("unknown session datagram should throw")
     } catch let error as WebTransportDraft16Error {
         #expect(error.kind == .h3ID)

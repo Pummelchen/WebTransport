@@ -12,7 +12,7 @@ func webTransportFlowControlCapsulesSerializeAndParseRoundTrip() throws {
         .dataBlocked(limit: 4),
         .streamsBlockedBidi(limit: 5),
         .streamsBlockedUni(limit: 6),
-        .unknown(type: 0x190b_4d99, payload: Data([0x0a, 0x0b]))
+        .unknown(type: 0x190b_4d99, payload: Data([0x0a, 0x0b])),
     ]
 
     for expected in cases {
@@ -123,18 +123,21 @@ func webTransportMaxStreamsCapsulesRejectValuesAboveDraftLimit() throws {
     let invalidLimit = WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue + 1
 
     #expect(throws: Error.self) {
-        _ = try WebTransportFlowCapsuleCodec.parse(try WebTransportFlowCapsuleCodec.serialize(
-            .maxStreamsBidi(limit: invalidLimit)
-        ))
+        _ = try WebTransportFlowCapsuleCodec.parse(
+            try WebTransportFlowCapsuleCodec.serialize(
+                .maxStreamsBidi(limit: invalidLimit)
+            ))
     }
     #expect(throws: Error.self) {
-        _ = try WebTransportFlowCapsuleCodec.parse(try WebTransportFlowCapsuleCodec.serialize(
-            .maxStreamsUni(limit: invalidLimit)
-        ))
+        _ = try WebTransportFlowCapsuleCodec.parse(
+            try WebTransportFlowCapsuleCodec.serialize(
+                .maxStreamsUni(limit: invalidLimit)
+            ))
     }
-    _ = try WebTransportFlowCapsuleCodec.parse(try WebTransportFlowCapsuleCodec.serialize(
-        .maxStreamsBidi(limit: WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue)
-    ))
+    _ = try WebTransportFlowCapsuleCodec.parse(
+        try WebTransportFlowCapsuleCodec.serialize(
+            .maxStreamsBidi(limit: WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue)
+        ))
 
     var state = WebTransportFlowControlState(maxData: nil, maxStreamsBidi: 0, maxStreamsUni: 0)
     #expect(throws: Error.self) {
@@ -226,10 +229,12 @@ func webTransportFlowControlTracksReceivePayloadAgainstSessionDataLimit() throws
     #expect(throws: Error.self) {
         try pair.server.receiveStreamPayload(streamID: 6, payload: Data([0x03, 0x04]))
     }
-    #expect(pair.server.sessionsByID[sessionID]?.state == .closed(
-        applicationErrorCode: UInt32(WebTransportHTTP3DraftConstants.current.wtFlowControlError),
-        message: "WebTransport flow-control violation"
-    ))
+    #expect(
+        pair.server.sessionsByID[sessionID]?.state
+            == .closed(
+                applicationErrorCode: UInt32(WebTransportHTTP3DraftConstants.current.wtFlowControlError),
+                message: "WebTransport flow-control violation"
+            ))
     #expect(try pair.server.popFlowControlCapsule(sessionID: sessionID) == nil)
 }
 
@@ -330,7 +335,7 @@ func webTransportFlowControlRejectsMaliciousOrderUpdatesWithoutMutatingState() t
     for capsule in [
         WebTransportFlowCapsule.maxData(limit: 9),
         .maxStreamsBidi(limit: 3),
-        .maxStreamsUni(limit: 4)
+        .maxStreamsUni(limit: 4),
     ] {
         #expect(throws: WebTransportDraft16Error.self) {
             _ = try pair.client.receiveFlowControlCapsule(
@@ -361,9 +366,10 @@ func webTransportFlowControlClosedSessionRejectsPostCloseAccounting() throws {
         try pair.server.receiveStreamPayload(streamID: 4, payload: Data("x".utf8))
     }
     #expect(throws: WebTransportDraft16Error.self) {
-        _ = try pair.server.receiveDatagramFrame(.datagram(
-            try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8))
-        ))
+        _ = try pair.server.receiveDatagramFrame(
+            .datagram(
+                try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8))
+            ))
     }
     #expect(pair.server.receiveFlowState(for: sessionID)?.usedData == 0)
     #expect(pair.server.receiveFlowState(for: sessionID)?.openedBidiStreams == 1)
@@ -383,7 +389,8 @@ private enum WebTransportFlowControlTestSupport {
         var clientSettings = HTTP3Settings.webTransportDraft16Defaults
         var serverSettings = HTTP3Settings.webTransportDraft16Defaults
 
-        let enablesFlowControl = (maxStreamsBidi ?? 0) > 0
+        let enablesFlowControl =
+            (maxStreamsBidi ?? 0) > 0
             || (maxStreamsUni ?? 0) > 0
             || (maxData ?? 0) > 0
         if enablesFlowControl {
@@ -453,10 +460,11 @@ private enum WebTransportFlowControlCodecTestHelpers {
         parsed: WebTransportFlowCapsuleEnvelope,
         limit: UInt64
     ) -> Bool {
-        parsed == .init(
-            capsule: .dataBlocked(limit: limit),
-            bytesConsumed: parsed.bytesConsumed,
-            payload: parsed.payload
-        )
+        parsed
+            == .init(
+                capsule: .dataBlocked(limit: limit),
+                bytesConsumed: parsed.bytesConsumed,
+                payload: parsed.payload
+            )
     }
 }

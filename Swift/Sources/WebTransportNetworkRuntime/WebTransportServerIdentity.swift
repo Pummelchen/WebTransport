@@ -92,10 +92,12 @@ struct ResolvedServerIdentity {
     /// read is still perfectly usable, and refusing to serve over a missing
     /// convenience value would be worse than serving without it.
     static func expiry(of certificate: SecCertificate) -> Date? {
-        guard let values = SecCertificateCopyValues(certificate, [kSecOIDX509V1ValidityNotAfter] as CFArray, nil)
-            as? [CFString: Any],
+        guard
+            let values = SecCertificateCopyValues(certificate, [kSecOIDX509V1ValidityNotAfter] as CFArray, nil)
+                as? [CFString: Any],
             let entry = values[kSecOIDX509V1ValidityNotAfter] as? [CFString: Any],
-            let raw = entry[kSecPropertyKeyValue] as? NSNumber else {
+            let raw = entry[kSecPropertyKeyValue] as? NSNumber
+        else {
             return nil
         }
         // Security reports this as seconds since the Apple absolute reference date.
@@ -209,14 +211,15 @@ enum ServerIdentityResolver {
         let attributes: [CFString: Any] = [
             kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits: 256,
-            kSecAttrIsPermanent: false
+            kSecAttrIsPermanent: false,
         ]
 
         var privateKeyError: Unmanaged<CFError>?
         // SAFETY: Security.framework initializes the optional retained CFError
         // out-parameter; failure transfers that ownership exactly once below.
         guard let privateKey = unsafe SecKeyCreateRandomKey(attributes as CFDictionary, &privateKeyError) else {
-            let detail = unsafe privateKeyError?.takeRetainedValue().localizedDescription
+            let detail =
+                unsafe privateKeyError?.takeRetainedValue().localizedDescription
                 ?? "unknown Security.framework error"
             throw WebTransportNetworkRuntimeError.invalidTransport("server key generation failed: \(detail)")
         }
@@ -226,7 +229,8 @@ enum ServerIdentityResolver {
         var publicKeyError: Unmanaged<CFError>?
         // SAFETY: As above, the retained error is consumed only on failure.
         guard let publicKeyData = unsafe SecKeyCopyExternalRepresentation(publicKey, &publicKeyError) as Data? else {
-            let detail = unsafe publicKeyError?.takeRetainedValue().localizedDescription
+            let detail =
+                unsafe publicKeyError?.takeRetainedValue().localizedDescription
                 ?? "unknown Security.framework error"
             throw WebTransportNetworkRuntimeError.invalidTransport("server public key export failed: \(detail)")
         }
@@ -306,9 +310,10 @@ enum IPv4 {
         for part in parts {
             // Reject leading zeros and non-digits so "127.0.0.01" is not silently accepted.
             guard !part.isEmpty,
-                  part.allSatisfy(\.isNumber),
-                  part.count == 1 || part.first != "0",
-                  let octet = UInt8(part) else {
+                part.allSatisfy(\.isNumber),
+                part.count == 1 || part.first != "0",
+                let octet = UInt8(part)
+            else {
                 return nil
             }
             octets.append(octet)
@@ -383,50 +388,53 @@ enum SelfSignedCertificate {
         ])
         let ecPublicKeyAlgorithm = DER.sequence([
             try DER.objectIdentifier([1, 2, 840, 10045, 2, 1]),
-            try DER.objectIdentifier([1, 2, 840, 10045, 3, 1, 7])
+            try DER.objectIdentifier([1, 2, 840, 10045, 3, 1, 7]),
         ])
         let name = DER.sequence([
             DER.set([
                 DER.sequence([
                     try DER.objectIdentifier([2, 5, 4, 3]),
-                    DER.utf8String(commonName)
+                    DER.utf8String(commonName),
                 ])
             ])
         ])
         let validity = DER.sequence([
             DER.utcTime(Date(timeIntervalSinceNow: -60)),
-            DER.utcTime(Date(timeIntervalSinceNow: 86_400))
+            DER.utcTime(Date(timeIntervalSinceNow: 86_400)),
         ])
         let subjectPublicKeyInfo = DER.sequence([
             ecPublicKeyAlgorithm,
-            DER.bitString(p256PublicKeyDER)
+            DER.bitString(p256PublicKeyDER),
         ])
 
         var generalNames: [Data] = dnsNames.map { DER.contextSpecificPrimitive(2, Data($0.utf8)) }
         generalNames.append(contentsOf: ipAddresses.map { DER.contextSpecificPrimitive(7, Data($0)) })
 
-        let extensions = DER.explicit(3, DER.sequence([
+        let extensions = DER.explicit(
+            3,
             DER.sequence([
-                try DER.objectIdentifier([2, 5, 29, 19]),
-                DER.boolean(true),
-                DER.octetString(DER.sequence([DER.boolean(false)]))
-            ]),
-            DER.sequence([
-                try DER.objectIdentifier([2, 5, 29, 15]),
-                DER.boolean(true),
-                DER.octetString(DER.bitString(Data([0x80]), unusedBits: 7))
-            ]),
-            DER.sequence([
-                try DER.objectIdentifier([2, 5, 29, 37]),
-                DER.octetString(DER.sequence([
-                    try DER.objectIdentifier([1, 3, 6, 1, 5, 5, 7, 3, 1])
-                ]))
-            ]),
-            DER.sequence([
-                try DER.objectIdentifier([2, 5, 29, 17]),
-                DER.octetString(DER.sequence(generalNames))
-            ])
-        ]))
+                DER.sequence([
+                    try DER.objectIdentifier([2, 5, 29, 19]),
+                    DER.boolean(true),
+                    DER.octetString(DER.sequence([DER.boolean(false)])),
+                ]),
+                DER.sequence([
+                    try DER.objectIdentifier([2, 5, 29, 15]),
+                    DER.boolean(true),
+                    DER.octetString(DER.bitString(Data([0x80]), unusedBits: 7)),
+                ]),
+                DER.sequence([
+                    try DER.objectIdentifier([2, 5, 29, 37]),
+                    DER.octetString(
+                        DER.sequence([
+                            try DER.objectIdentifier([1, 3, 6, 1, 5, 5, 7, 3, 1])
+                        ])),
+                ]),
+                DER.sequence([
+                    try DER.objectIdentifier([2, 5, 29, 17]),
+                    DER.octetString(DER.sequence(generalNames)),
+                ]),
+            ]))
 
         let tbsCertificate = DER.sequence([
             DER.explicit(0, DER.integer(Data([0x02]))),
@@ -436,19 +444,22 @@ enum SelfSignedCertificate {
             validity,
             name,
             subjectPublicKeyInfo,
-            extensions
+            extensions,
         ])
 
         var signError: Unmanaged<CFError>?
         // SAFETY: Security.framework initializes the optional retained CFError
         // out-parameter; failure transfers that ownership exactly once below.
-        guard let signature = unsafe SecKeyCreateSignature(
-            privateKey,
-            .ecdsaSignatureMessageX962SHA256,
-            tbsCertificate as CFData,
-            &signError
-        ) as Data? else {
-            let detail = unsafe signError?.takeRetainedValue().localizedDescription
+        guard
+            let signature = unsafe SecKeyCreateSignature(
+                privateKey,
+                .ecdsaSignatureMessageX962SHA256,
+                tbsCertificate as CFData,
+                &signError
+            ) as Data?
+        else {
+            let detail =
+                unsafe signError?.takeRetainedValue().localizedDescription
                 ?? "unknown Security.framework error"
             throw WebTransportNetworkRuntimeError.invalidTransport("server certificate signing failed: \(detail)")
         }
@@ -456,7 +467,7 @@ enum SelfSignedCertificate {
         return DER.sequence([
             tbsCertificate,
             signatureAlgorithm,
-            DER.bitString(signature)
+            DER.bitString(signature),
         ])
     }
 
@@ -472,7 +483,7 @@ enum SelfSignedCertificate {
         guard status == errSecSuccess else {
             throw WebTransportNetworkRuntimeError.invalidTransport(
                 "secure random generation failed (OSStatus \(status)); refusing to emit a certificate "
-                + "with a predictable serial number"
+                    + "with a predictable serial number"
             )
         }
         // Clear the high bit so the DER INTEGER stays positive without padding.

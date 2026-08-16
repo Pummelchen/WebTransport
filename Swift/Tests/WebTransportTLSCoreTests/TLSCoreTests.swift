@@ -44,7 +44,7 @@ func extensionListRoundTripsALPNAndQUICTransportParameters() throws {
 
     let extensions = [
         try TLSALPNExtension.make(protocols: ["h3"]),
-        try TLSQUICTransportParametersExtension.make(parameters)
+        try TLSQUICTransportParametersExtension.make(parameters),
     ]
 
     let decoded = try TLSExtension.decodeList(try TLSExtension.encodeList(extensions))
@@ -55,7 +55,7 @@ func extensionListRoundTripsALPNAndQUICTransportParameters() throws {
 func extensionListRejectsDuplicateExtensionTypes() throws {
     let duplicateList = try TLSExtension.encodeList([
         try TLSALPNExtension.make(protocols: ["h3"]),
-        try TLSALPNExtension.make(protocols: ["h3-29"])
+        try TLSALPNExtension.make(protocols: ["h3-29"]),
     ])
 
     #expect(throws: Error.self) {
@@ -102,16 +102,17 @@ func typedTLS13HandshakeBodiesRoundTripWithQUICExtensions() throws {
             ]),
             try TLSSignatureAlgorithmsExtension.make([
                 TLSSignatureScheme.ed25519,
-                TLSSignatureScheme.ecdsaSecp256r1SHA256
-            ])
+                TLSSignatureScheme.ecdsaSecp256r1SHA256,
+            ]),
         ]
     )
     let decodedClientHello = try TLSClientHello.decode(try clientHello.body())
     #expect(decodedClientHello == clientHello)
 
-    let alpnExtension = try #require(decodedClientHello.extensions.first {
-        $0.type == TLSExtensionType.applicationLayerProtocolNegotiation.rawValue
-    })
+    let alpnExtension = try #require(
+        decodedClientHello.extensions.first {
+            $0.type == TLSExtensionType.applicationLayerProtocolNegotiation.rawValue
+        })
     #expect(try TLSALPNExtension.protocols(from: alpnExtension.data) == ["h3"])
 
     let serverHello = try TLSServerHello(
@@ -121,14 +122,14 @@ func typedTLS13HandshakeBodiesRoundTripWithQUICExtensions() throws {
             TLSSupportedVersionsExtension.server(),
             try TLSKeyShareExtension.server(
                 TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x22, count: 32))
-            )
+            ),
         ]
     )
     #expect(try TLSServerHello.decode(try serverHello.body()) == serverHello)
 
     let encryptedExtensions = TLSEncryptedExtensions(extensions: [
         try TLSALPNExtension.make(protocols: ["h3"]),
-        try TLSQUICTransportParametersExtension.make(parameters)
+        try TLSQUICTransportParametersExtension.make(parameters),
     ])
     #expect(try TLSEncryptedExtensions.decode(try encryptedExtensions.body()) == encryptedExtensions)
 }
@@ -139,7 +140,7 @@ func typedHandshakeTranscriptProducesFinishedMessage() throws {
         random: Data(repeating: 0x03, count: 32),
         extensions: [
             try TLSSupportedVersionsExtension.client(),
-            try TLSALPNExtension.make(protocols: ["h3"])
+            try TLSALPNExtension.make(protocols: ["h3"]),
         ]
     )
     let serverHello = try TLSServerHello(
@@ -193,14 +194,14 @@ func x25519KeyAgreementDerivesHandshakeTrafficSecrets() throws {
         extensions: [
             try TLSSupportedVersionsExtension.client(),
             try TLSKeyShareExtension.client([clientShare]),
-            try TLSALPNExtension.make(protocols: ["h3"])
+            try TLSALPNExtension.make(protocols: ["h3"]),
         ]
     )
     let serverHello = try TLSServerHello(
         random: Data(repeating: 0x06, count: 32),
         extensions: [
             TLSSupportedVersionsExtension.server(),
-            try TLSKeyShareExtension.server(serverShare)
+            try TLSKeyShareExtension.server(serverShare),
         ]
     )
 
@@ -280,7 +281,7 @@ func promptFreeServerIdentityImportsPrivateKeyWithoutKeychain() throws {
     let attributes: [CFString: Any] = [
         kSecAttrKeyType: kSecAttrKeyTypeRSA,
         kSecAttrKeySizeInBits: 2_048,
-        kSecAttrIsPermanent: false
+        kSecAttrIsPermanent: false,
     ]
     let generatedKey = try SecurityFixture.makeRandomKey(attributes: attributes)
     let privateKeyDER = try SecurityFixture.externalRepresentation(of: generatedKey)
@@ -408,7 +409,7 @@ func certificateVerifySignatureVerifiesWithInMemorySecKey() throws {
     let attributes: [CFString: Any] = [
         kSecAttrKeyType: kSecAttrKeyTypeRSA,
         kSecAttrKeySizeInBits: 2_048,
-        kSecAttrIsPermanent: false
+        kSecAttrIsPermanent: false,
     ]
     let privateKey = try SecurityFixture.makeRandomKey(attributes: attributes)
     guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
@@ -428,18 +429,20 @@ func certificateVerifySignatureVerifiesWithInMemorySecKey() throws {
         algorithm: TLSSignatureScheme.rsaPSSRSAESHA256,
         signature: signature
     )
-    #expect(try TLSCertificateVerifier.verify(
-        certificateVerify,
-        role: .server,
-        transcriptHash: transcriptHash,
-        publicKey: publicKey
-    ))
-    #expect(try TLSCertificateVerifier.verify(
-        certificateVerify,
-        role: .server,
-        transcriptHash: TLS13KeySchedule.transcriptHash(Data("tampered".utf8)),
-        publicKey: publicKey
-    ) == false)
+    #expect(
+        try TLSCertificateVerifier.verify(
+            certificateVerify,
+            role: .server,
+            transcriptHash: transcriptHash,
+            publicKey: publicKey
+        ))
+    #expect(
+        try TLSCertificateVerifier.verify(
+            certificateVerify,
+            role: .server,
+            transcriptHash: TLS13KeySchedule.transcriptHash(Data("tampered".utf8)),
+            publicKey: publicKey
+        ) == false)
     try expectThrowing {
         _ = try TLSCertificateVerifier.secKeyAlgorithm(for: TLSSignatureScheme.ed25519)
     }
@@ -450,7 +453,7 @@ func handshakeFlightFragmentsReassemblesAndUpdatesTranscript() throws {
     let messages = [
         TLSHandshakeMessage(type: .clientHello, body: Data(repeating: 0x01, count: 7)),
         TLSHandshakeMessage(type: .serverHello, body: Data(repeating: 0x02, count: 5)),
-        TLSHandshakeMessage(type: .encryptedExtensions, body: Data([0x03, 0x04, 0x05]))
+        TLSHandshakeMessage(type: .encryptedExtensions, body: Data([0x03, 0x04, 0x05])),
     ]
     let flight = TLSHandshakeFlight(messages: messages)
     let frames = try flight.cryptoFrames(maxFramePayloadBytes: 4)
@@ -486,9 +489,10 @@ func handshakeFlightRejectsInvalidCryptoInput() throws {
     let conflicting = QUICFrame.crypto(offset: 4, data: Data([0xbb]))
     var decoder = TLSHandshakeFlightDecoder()
 
-    #expect(try decoder.receive(frame: first) == [
-        TLSHandshakeMessage(type: .clientHello, body: Data([0xaa]))
-    ])
+    #expect(
+        try decoder.receive(frame: first) == [
+            TLSHandshakeMessage(type: .clientHello, body: Data([0xaa]))
+        ])
     try expectThrowing {
         _ = try decoder.receive(frame: conflicting)
     }
@@ -563,16 +567,20 @@ func tlsQUICConnectionStateRunsHandshakeKeysAndKeyUpdateLifecycle() throws {
         outputByteCount: 32
     )
     #expect(exported.count == 32)
-    #expect(exported == (try state.exportKeyingMaterial(
-        label: "EXPORTER-WebTransport",
-        context: Data("session-context".utf8),
-        outputByteCount: 32
-    )))
-    #expect(exported != (try state.exportKeyingMaterial(
-        label: "EXPORTER-WebTransport",
-        context: Data("different-context".utf8),
-        outputByteCount: 32
-    )))
+    #expect(
+        exported
+            == (try state.exportKeyingMaterial(
+                label: "EXPORTER-WebTransport",
+                context: Data("session-context".utf8),
+                outputByteCount: 32
+            )))
+    #expect(
+        exported
+            != (try state.exportKeyingMaterial(
+                label: "EXPORTER-WebTransport",
+                context: Data("different-context".utf8),
+                outputByteCount: 32
+            )))
 
     let updatedSecrets = try state.updateApplicationTrafficSecrets()
     #expect(state.keyUpdateGeneration == 1)
@@ -596,7 +604,7 @@ func tlsQUICConnectionStateReportsPartialApplicationKeyReadiness() throws {
         .certificateTrust,
         .certificateVerify,
         .finished,
-        .alpnH3
+        .alpnH3,
     ])
 
     #expect(state.applicationKeyReadiness.missingRequirements == [.quicTransportParameters])
@@ -618,11 +626,13 @@ func tlsQUICConnectionStateClosesOnPrematureKeyUpdate() throws {
     }
 
     #expect(state.phase == .closed)
-    #expect(state.closeState.closeFrame == .connectionClose(
-        errorCode: QUICTransportErrorCode.keyUpdateError.rawValue,
-        frameType: nil,
-        reason: Data("key update before application traffic secrets".utf8)
-    ))
+    #expect(
+        state.closeState.closeFrame
+            == .connectionClose(
+                errorCode: QUICTransportErrorCode.keyUpdateError.rawValue,
+                frameType: nil,
+                reason: Data("key update before application traffic secrets".utf8)
+            ))
 }
 
 @Test
@@ -630,11 +640,13 @@ func tlsQUICConnectionStateMapsApplicationCloseAndFinalSizeErrors() throws {
     var applicationClose = TLSQUICConnectionState(role: .client)
     let closeFrame = applicationClose.closeApplication(errorCode: 0x52e4a40fa8db, reason: "WT_CLOSE_SESSION")
     #expect(applicationClose.phase == .closed)
-    #expect(closeFrame == .connectionClose(
-        errorCode: 0x52e4a40fa8db,
-        frameType: nil,
-        reason: Data("WT_CLOSE_SESSION".utf8)
-    ))
+    #expect(
+        closeFrame
+            == .connectionClose(
+                errorCode: 0x52e4a40fa8db,
+                frameType: nil,
+                reason: Data("WT_CLOSE_SESSION".utf8)
+            ))
     #expect(applicationClose.closeApplication(errorCode: 0x01, reason: "late close") == closeFrame)
     try expectThrowing {
         try applicationClose.openStream(id: 4, maxSendOffset: 1, maxReceiveOffset: 1)
@@ -648,11 +660,13 @@ func tlsQUICConnectionStateMapsApplicationCloseAndFinalSizeErrors() throws {
     }
 
     #expect(finalSizeClose.phase == .closed)
-    #expect(finalSizeClose.closeState.closeFrame == .connectionClose(
-        errorCode: QUICTransportErrorCode.finalSizeError.rawValue,
-        frameType: nil,
-        reason: Data("stream state violation: STREAM data exceeds final size".utf8)
-    ))
+    #expect(
+        finalSizeClose.closeState.closeFrame
+            == .connectionClose(
+                errorCode: QUICTransportErrorCode.finalSizeError.rawValue,
+                frameType: nil,
+                reason: Data("stream state violation: STREAM data exceeds final size".utf8)
+            ))
 }
 
 private enum PromptFreeCertificateFixture {
@@ -660,7 +674,7 @@ private enum PromptFreeCertificateFixture {
         let attributes: [CFString: Any] = [
             kSecAttrKeyType: kSecAttrKeyTypeRSA,
             kSecAttrKeySizeInBits: 2_048,
-            kSecAttrIsPermanent: false
+            kSecAttrIsPermanent: false,
         ]
         let privateKey = try SecurityFixture.makeRandomKey(attributes: attributes)
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
@@ -670,41 +684,44 @@ private enum PromptFreeCertificateFixture {
 
         let signatureAlgorithm = try DERFixture.sequence([
             DERFixture.objectIdentifier([1, 2, 840, 113_549, 1, 1, 11]),
-            DERFixture.null()
+            DERFixture.null(),
         ])
         let rsaAlgorithm = try DERFixture.sequence([
             DERFixture.objectIdentifier([1, 2, 840, 113_549, 1, 1, 1]),
-            DERFixture.null()
+            DERFixture.null(),
         ])
         let name = DERFixture.sequence([
             DERFixture.set([
                 try DERFixture.sequence([
                     DERFixture.objectIdentifier([2, 5, 4, 3]),
-                    DERFixture.utf8String("localhost")
+                    DERFixture.utf8String("localhost"),
                 ])
             ])
         ])
         let validity = DERFixture.sequence([
             DERFixture.utcTime(Date(timeIntervalSince1970: 1_700_000_000)),
-            DERFixture.utcTime(Date(timeIntervalSince1970: 1_800_000_000))
+            DERFixture.utcTime(Date(timeIntervalSince1970: 1_800_000_000)),
         ])
         let subjectPublicKeyInfo = DERFixture.sequence([
             rsaAlgorithm,
-            DERFixture.bitString(publicKeyDER)
+            DERFixture.bitString(publicKeyDER),
         ])
-        let extensions = try DERFixture.explicit(3, DERFixture.sequence([
+        let extensions = try DERFixture.explicit(
+            3,
             DERFixture.sequence([
-                DERFixture.objectIdentifier([2, 5, 29, 19]),
-                DERFixture.boolean(true),
-                DERFixture.octetString(DERFixture.sequence([DERFixture.boolean(false)]))
-            ]),
-            DERFixture.sequence([
-                DERFixture.objectIdentifier([2, 5, 29, 17]),
-                DERFixture.octetString(DERFixture.sequence([
-                    DERFixture.contextSpecificPrimitive(2, Data("localhost".utf8))
-                ]))
-            ])
-        ]))
+                DERFixture.sequence([
+                    DERFixture.objectIdentifier([2, 5, 29, 19]),
+                    DERFixture.boolean(true),
+                    DERFixture.octetString(DERFixture.sequence([DERFixture.boolean(false)])),
+                ]),
+                DERFixture.sequence([
+                    DERFixture.objectIdentifier([2, 5, 29, 17]),
+                    DERFixture.octetString(
+                        DERFixture.sequence([
+                            DERFixture.contextSpecificPrimitive(2, Data("localhost".utf8))
+                        ])),
+                ]),
+            ]))
 
         let tbsCertificate = DERFixture.sequence([
             DERFixture.explicit(0, DERFixture.integer(Data([0x02]))),
@@ -714,7 +731,7 @@ private enum PromptFreeCertificateFixture {
             validity,
             name,
             subjectPublicKeyInfo,
-            extensions
+            extensions,
         ])
         let signature = try SecurityFixture.signature(
             privateKey: privateKey,
@@ -725,7 +742,7 @@ private enum PromptFreeCertificateFixture {
         return DERFixture.sequence([
             tbsCertificate,
             signatureAlgorithm,
-            DERFixture.bitString(signature)
+            DERFixture.bitString(signature),
         ])
     }
 }
@@ -755,12 +772,14 @@ private enum SecurityFixture {
         var error: Unmanaged<CFError>?
         // SAFETY: Security.framework consumes the immutable CFData during this
         // synchronous call and initializes the retained error out-parameter.
-        guard let signature = unsafe SecKeyCreateSignature(
-            privateKey,
-            algorithm,
-            data as CFData,
-            &error
-        ) as Data? else {
+        guard
+            let signature = unsafe SecKeyCreateSignature(
+                privateKey,
+                algorithm,
+                data as CFData,
+                &error
+            ) as Data?
+        else {
             throw unsafe error?.takeRetainedValue() ?? ExpectedThrowError.missingThrow
         }
         return signature

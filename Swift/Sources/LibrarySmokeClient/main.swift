@@ -399,7 +399,6 @@ enum LibrarySmokeClient {
             print("client: full suite checks passed in \(formatDuration(elapsed))s")
         }
 
-
         mutating func runMalformedDatagramScenario() throws {
             let session = try establishAcceptedSession(
                 authority: "example.com",
@@ -530,7 +529,8 @@ enum LibrarySmokeClient {
             for _ in 0..<(streamCount * 2) {
                 let response = try receive(expect: .streamEcho)
                 guard let streamID = response.streamID, let payload = response.payload,
-                      let text = String(data: payload, encoding: .utf8) else {
+                    let text = String(data: payload, encoding: .utf8)
+                else {
                     throw Error.runtime("interleaved stream response missing stream/payload")
                 }
                 observedPayloads[streamID, default: Set<String>()].insert(text)
@@ -580,8 +580,8 @@ enum LibrarySmokeClient {
             )
             let mismatch = try receive()
             if mismatch.kind != .error {
-                    throw Error.runtime("malformed stream prefix should be rejected")
-                }
+                throw Error.runtime("malformed stream prefix should be rejected")
+            }
 
             let validStreamID = nextBidirectionalStreamID()
             let validPrefix = try manager.openBidirectionalStream(streamID: validStreamID, sessionID: session.id)
@@ -709,8 +709,9 @@ enum LibrarySmokeClient {
                 )
                 let echoed = try receive(expect: .streamEcho)
                 guard let payload = echoed.payload,
-                      let response = String(data: payload, encoding: .utf8),
-                      response == message else {
+                    let response = String(data: payload, encoding: .utf8),
+                    response == message
+                else {
                     throw Error.runtime("stream echo mismatch for scenario stream #\(index)")
                 }
             }
@@ -893,7 +894,8 @@ enum LibrarySmokeClient {
                 throw Error.runtime("server unexpectedly rejected protocol negotiation")
             }
             guard let session = manager.session(forRequestStreamID: streamID),
-                  session.selectedProtocol == "wt-echo" else {
+                session.selectedProtocol == "wt-echo"
+            else {
                 throw Error.runtime("protocol negotiation did not select wt-echo")
             }
             print("client: protocol negotiation scenario passed")
@@ -1293,7 +1295,8 @@ enum LibrarySmokeClient {
             let (bytes, _) = try client.receive(timeoutMilliseconds: 10_000)
             let envelope = try Phase11Protocol.decode(bytes)
             if let expected,
-               envelope.kind != expected {
+                envelope.kind != expected
+            {
                 throw Error.transport("expected \(expected) got \(envelope.kind)")
             }
             return envelope

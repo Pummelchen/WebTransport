@@ -220,7 +220,7 @@ public enum QPACKHuffman {
         HuffmanCode(code: 0x7ffffec, bitCount: 27), HuffmanCode(code: 0x7ffffed, bitCount: 27),
         HuffmanCode(code: 0x7ffffee, bitCount: 27), HuffmanCode(code: 0x7ffffef, bitCount: 27),
         HuffmanCode(code: 0x7fffff0, bitCount: 27), HuffmanCode(code: 0x3ffffee, bitCount: 26),
-        HuffmanCode(code: 0x3fffffff, bitCount: 30)
+        HuffmanCode(code: 0x3fffffff, bitCount: 30),
     ]
 }
 

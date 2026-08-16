@@ -42,10 +42,12 @@ func tlsIdentityRejectsMalformedKeyMaterialWithoutPrompt() {
 
 private enum TLSInteropSelfSignedCertificate {
     static func makeRSACertificate() throws -> Data {
-        guard let certificateDER = Data(
-            base64Encoded: SelfSignedCertificateDER.derBase64,
-            options: .ignoreUnknownCharacters
-        ) else {
+        guard
+            let certificateDER = Data(
+                base64Encoded: SelfSignedCertificateDER.derBase64,
+                options: .ignoreUnknownCharacters
+            )
+        else {
             throw QUICCodecError.malformed("invalid self-signed certificate fixture")
         }
         return certificateDER
@@ -54,6 +56,6 @@ private enum TLSInteropSelfSignedCertificate {
 
 private enum SelfSignedCertificateDER {
     static let derBase64 = """
-    MIIDHzCCAgegAwIBAgIUPByc28F3tfpRpYaQZdEPtYmJKeMwDQYJKoZIhvcNAQELBQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDYxOTAyMDA1NloXDTI2MDYyMDAyMDA1NlowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4IUwlpWT2KgW7ILsD2qubjRBMGrGV/tlRCQVvTxOiv0yN3MTBvoMZgFNtLSscRXKNk6OkUX5Jaiq11hanLOBEZ/beiCu5EjzP/H09CdNgqSRStPoF4frIsFfAMjOyyE2LRuj8+Yjw1r2OueHESe0s1y/LHkF8/HarQyXOyKTcmceGsKArACP4ceT6aveM46Rs7aBqma/+lUnnfHatAMTr9xMjc/Mgg0XJEEFBWgYf2v1WJnGwUxKJ53wRdAB95aACfU2mHS8gB/dzOFfVX0P4HD8DDn+R6JmXgY0Lb9uxalje6/ARrCudJoXFvqgs+mNLy4fViK+PrTMhcj4wTX5rwIDAQABo2kwZzAdBgNVHQ4EFgQUEEIHs0CmftlkzVGFvGnkdU51SvwwHwYDVR0jBBgwFoAUEEIHs0CmftlkzVGFvGnkdU51SvwwDwYDVR0TAQH/BAUwAwEB/zAUBgNVHREEDTALgglsb2NhbGhvc3QwDQYJKoZIhvcNAQELBQADggEBAERPDeSqneOTjtQVaI71mg8z6KceW8Sre1p5b8ceyyvSjnHW+G6le3VY/1iU9lIhbGvguqkTd1byXuYNfrGJrVN6kSw8aOpq4TQNQ+PJz0nkxRquVwQ/EnqJ+3xd3O571V72uUkRLzDIYenWJvjX9ML4Qv9SgxD4bTxqZ033Rx4YC+xXhu/KgsvvxgsJKZyDHKCnFJqTwJMeMGA6+9ZT5e5nlPnSoVOwK6pAjHOVrVAyN4zu7c0BGXVwVIU4mfaujyUvPMfQzpk/pUTzVzXNv4RGMZffbqogX9d9COeZ4CdZGbixz3OW7i1H3x2NBpeYvOLYHQ089jIKRk7MauGEEY4=
-    """
+        MIIDHzCCAgegAwIBAgIUPByc28F3tfpRpYaQZdEPtYmJKeMwDQYJKoZIhvcNAQELBQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDYxOTAyMDA1NloXDTI2MDYyMDAyMDA1NlowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4IUwlpWT2KgW7ILsD2qubjRBMGrGV/tlRCQVvTxOiv0yN3MTBvoMZgFNtLSscRXKNk6OkUX5Jaiq11hanLOBEZ/beiCu5EjzP/H09CdNgqSRStPoF4frIsFfAMjOyyE2LRuj8+Yjw1r2OueHESe0s1y/LHkF8/HarQyXOyKTcmceGsKArACP4ceT6aveM46Rs7aBqma/+lUnnfHatAMTr9xMjc/Mgg0XJEEFBWgYf2v1WJnGwUxKJ53wRdAB95aACfU2mHS8gB/dzOFfVX0P4HD8DDn+R6JmXgY0Lb9uxalje6/ARrCudJoXFvqgs+mNLy4fViK+PrTMhcj4wTX5rwIDAQABo2kwZzAdBgNVHQ4EFgQUEEIHs0CmftlkzVGFvGnkdU51SvwwHwYDVR0jBBgwFoAUEEIHs0CmftlkzVGFvGnkdU51SvwwDwYDVR0TAQH/BAUwAwEB/zAUBgNVHREEDTALgglsb2NhbGhvc3QwDQYJKoZIhvcNAQELBQADggEBAERPDeSqneOTjtQVaI71mg8z6KceW8Sre1p5b8ceyyvSjnHW+G6le3VY/1iU9lIhbGvguqkTd1byXuYNfrGJrVN6kSw8aOpq4TQNQ+PJz0nkxRquVwQ/EnqJ+3xd3O571V72uUkRLzDIYenWJvjX9ML4Qv9SgxD4bTxqZ033Rx4YC+xXhu/KgsvvxgsJKZyDHKCnFJqTwJMeMGA6+9ZT5e5nlPnSoVOwK6pAjHOVrVAyN4zu7c0BGXVwVIU4mfaujyUvPMfQzpk/pUTzVzXNv4RGMZffbqogX9d9COeZ4CdZGbixz3OW7i1H3x2NBpeYvOLYHQ089jIKRk7MauGEEY4=
+        """
 }

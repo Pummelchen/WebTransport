@@ -76,11 +76,12 @@ func webTransportEndpointParsesIPv4AndIPv6Forms() throws {
 
 @Test
 func webTransportPublicAPIRejectsUnsupportedTransportConfiguration() async throws {
-    let client = WebTransportClient(configuration: WebTransportClientConfiguration(
-        authority: "localhost",
-        path: "/wt",
-        transport: .frame
-    ))
+    let client = WebTransportClient(
+        configuration: WebTransportClientConfiguration(
+            authority: "localhost",
+            path: "/wt",
+            transport: .frame
+        ))
     await #expect(throws: WebTransportNetworkRuntimeError.self) {
         _ = try await client.connect(to: WebTransportEndpoint(host: "127.0.0.1", port: 4433))
     }
@@ -194,11 +195,12 @@ private func runLoopbackPublicAPISessionCloseExchange() async throws {
             #expect(clientExporter == serverExporter)
             #expect(clientExporter.count == 32)
             #expect(clientExporter != Data(repeating: 0, count: 32))
-            #expect(try session.exportKeyingMaterial(
-                applicationLabel: exporterLabel,
-                applicationContext: Data([0x04]),
-                outputByteCount: 32
-            ) != clientExporter)
+            #expect(
+                try session.exportKeyingMaterial(
+                    applicationLabel: exporterLabel,
+                    applicationContext: Data([0x04]),
+                    outputByteCount: 32
+                ) != clientExporter)
 
             try await session.drain()
             try await session.close(applicationErrorCode: 0, reason: "done")

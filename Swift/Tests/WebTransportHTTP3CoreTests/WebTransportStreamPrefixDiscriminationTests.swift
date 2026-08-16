@@ -28,8 +28,8 @@ func streamPrefixDetectionRejectsUnprefixedAndTruncatedPayloads() throws {
     #expect(!WebTransportStreamSignaling.hasStreamPrefix(headersFrame))
 
     #expect(!WebTransportStreamSignaling.hasStreamPrefix(Data()))
-    #expect(!WebTransportStreamSignaling.hasStreamPrefix(Data([0x40])))       // truncated 2-byte varint
-    #expect(!WebTransportStreamSignaling.hasStreamPrefix(Data([0x00])))       // varint 0, not a marker
+    #expect(!WebTransportStreamSignaling.hasStreamPrefix(Data([0x40])))  // truncated 2-byte varint
+    #expect(!WebTransportStreamSignaling.hasStreamPrefix(Data([0x00])))  // varint 0, not a marker
 }
 
 @Test
@@ -120,7 +120,7 @@ func managerValidatesPeerSettingsWithItsConfiguredProfile() throws {
     let browserish = try HTTP3Settings([
         HTTP3SettingID.enableConnectProtocol: 1,
         HTTP3SettingID.h3Datagram: 1,
-        HTTP3SettingID.legacyEnableWebTransport: 1
+        HTTP3SettingID.legacyEnableWebTransport: 1,
     ])
     let peer = HTTP3ConnectionState(role: .client, localSettings: browserish)
     let peerControl = try peer.localControlStreamBytes()
@@ -246,7 +246,7 @@ func malformedSelectedProtocolIsRejectedRatherThanTreatedAsNoneSelected() throws
     // Well-formed still works.
     let good = try QPACK.headersFrame(fields: [
         try HTTPFieldLine(name: ":status", value: "200"),
-        try HTTPFieldLine(name: "wt-protocol", value: WebTransportProtocolNegotiation.encodeItem("chat.v1"))
+        try HTTPFieldLine(name: "wt-protocol", value: WebTransportProtocolNegotiation.encodeItem("chat.v1")),
     ])
     let goodFields = try QPACK.decodeHeadersFrame(good)
     #expect(try WebTransportSessionHeaders.selectedProtocol(from: goodFields) == "chat.v1")
@@ -259,7 +259,7 @@ func malformedSelectedProtocolIsRejectedRatherThanTreatedAsNoneSelected() throws
     for bad in ["\"unterminated", "not-a-quoted-string", "\"bad\\n\""] {
         let frame = try QPACK.headersFrame(fields: [
             try HTTPFieldLine(name: ":status", value: "200"),
-            try HTTPFieldLine(name: "wt-protocol", value: bad)
+            try HTTPFieldLine(name: "wt-protocol", value: bad),
         ])
         let fields = try QPACK.decodeHeadersFrame(frame)
         #expect(throws: Error.self, "malformed wt-protocol \(bad) must be rejected") {
@@ -278,10 +278,11 @@ func malformedAvailableProtocolsIsRejectedRatherThanTreatedAsNoneOffered() throw
             upgradeToken: WebTransportHTTP3DraftConstants.current.upgradeToken
         )
         if let availableProtocols {
-            fields.append(try HTTPFieldLine(
-                name: "wt-available-protocols",
-                value: availableProtocols
-            ))
+            fields.append(
+                try HTTPFieldLine(
+                    name: "wt-available-protocols",
+                    value: availableProtocols
+                ))
         }
         return fields
     }

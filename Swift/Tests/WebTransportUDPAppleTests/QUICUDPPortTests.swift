@@ -10,7 +10,7 @@ func udpPortExchangesNativeFramesOnLoopback() throws {
 
     let frames: [QUICFrame] = [
         .stream(id: 0, offset: 0, fin: false, data: Data("hello".utf8)),
-        .datagram(Data("dgram".utf8))
+        .datagram(Data("dgram".utf8)),
     ]
     try client.send(try QUICFrame.encodeFrames(frames), to: server.localEndpoint)
 
@@ -26,7 +26,7 @@ func udpPortExchangesNativeFramesOnIPv6Loopback() throws {
 
     let frames: [QUICFrame] = [
         .stream(id: 4, offset: 0, fin: true, data: Data("hello-v6".utf8)),
-        .datagram(Data("dgram-v6".utf8))
+        .datagram(Data("dgram-v6".utf8)),
     ]
     try client.send(try QUICFrame.encodeFrames(frames), to: server.localEndpoint)
 

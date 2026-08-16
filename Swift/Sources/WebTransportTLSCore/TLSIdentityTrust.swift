@@ -45,7 +45,7 @@ public struct TLSPromptFreeServerIdentity {
             kSecAttrKeyType: privateKeyType,
             kSecAttrKeyClass: kSecAttrKeyClassPrivate,
             kSecAttrKeySizeInBits: privateKeySizeInBits,
-            kSecAttrIsPermanent: false
+            kSecAttrIsPermanent: false,
         ]
         var error: Unmanaged<CFError>?
         // SAFETY: Security.framework initializes the optional retained CFError

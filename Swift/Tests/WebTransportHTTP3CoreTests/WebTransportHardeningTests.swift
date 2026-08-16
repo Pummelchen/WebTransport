@@ -55,7 +55,7 @@ func http3FrameAndCapsulePropertyCorpusRejectsMalformedPeers() throws {
         HTTP3Frame(type: HTTP3FrameType.headers, payload: QPACK.encodeFieldSection([HTTPFieldLine(name: ":status", value: "200")])),
         HTTP3Frame(type: HTTP3FrameType.goaway, varIntValue: 0),
         HTTP3Settings.webTransportDraft16Defaults.frame(),
-        HTTP3Frame(type: 0x21, payload: Data([0x01, 0x02, 0x03]))
+        HTTP3Frame(type: 0x21, payload: Data([0x01, 0x02, 0x03])),
     ]
     let encodedFrames = try HTTP3Frame.encodeFrames(frames)
     #expect(try HTTP3Frame.decodeFrames(encodedFrames) == frames)
@@ -73,7 +73,7 @@ func http3FrameAndCapsulePropertyCorpusRejectsMalformedPeers() throws {
         .dataBlocked(limit: 9),
         .streamsBlockedBidi(limit: 3),
         .streamsBlockedUni(limit: 4),
-        .unknown(type: 0x3f, payload: Data([0xde, 0xad]))
+        .unknown(type: 0x3f, payload: Data([0xde, 0xad])),
     ]
     for capsule in capsules {
         let encoded = try WebTransportFlowCapsuleCodec.serialize(capsule)
@@ -125,7 +125,7 @@ func webTransportStreamPrefixPropertyCorpusRejectsMalformedPeers() throws {
         Data([0xff]),
         try QUICVarInt.encode(WebTransportHTTP3DraftConstants.current.wtStreamFrame),
         truncatedSessionID,
-        unknownMarker
+        unknownMarker,
     ]
     for bytes in malformed {
         #expect(throws: Error.self) {
@@ -144,30 +144,35 @@ func resourceLimitsCoverBufferedStreamsDatagramsDynamicTablesAndMalformedPeers()
         maxBufferedSessions: 1
     )
 
-    _ = try pair.server.receiveDatagramFrame(QUICFrame.datagram(
-        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("1234".utf8))
-    ))
-    _ = try pair.server.receiveDatagramFrame(QUICFrame.datagram(
-        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("drop".utf8))
-    ))
+    _ = try pair.server.receiveDatagramFrame(
+        QUICFrame.datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("1234".utf8))
+        ))
+    _ = try pair.server.receiveDatagramFrame(
+        QUICFrame.datagram(
+            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("drop".utf8))
+        ))
     #expect(pair.server.datagramQueue(sessionID: WebTransportSessionID(rawValue: 0))?.count == 1)
 
     let firstPrefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
     _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: firstPrefix + Data("1234".utf8))
     let secondResult = try pair.server.acceptBidirectionalStreamWithActions(streamID: 8, firstBytes: firstPrefix)
     #expect(secondResult.prefix == nil)
-    #expect(secondResult.rejectionFrame == QUICFrame.resetStreamAt(
-        id: 8,
-        applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
-        finalSize: 0,
-        reliableSize: 0
-    ))
+    #expect(
+        secondResult.rejectionFrame
+            == QUICFrame.resetStreamAt(
+                id: 8,
+                applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
+                finalSize: 0,
+                reliableSize: 0
+            ))
 
     var orphanClientPair = try WebTransportHardeningSupport.makeReadyManagers()
     #expect(throws: Error.self) {
-        _ = try orphanClientPair.client.receiveDatagramFrame(QUICFrame.datagram(
-            try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("other".utf8))
-        ))
+        _ = try orphanClientPair.client.receiveDatagramFrame(
+            QUICFrame.datagram(
+                try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("other".utf8))
+            ))
     }
 
     var table = try QPACKDynamicTable(capacity: 64, maximumCapacity: 64)
@@ -203,14 +208,15 @@ func adversarialOrderingReplayExhaustionAndCloseResetRacesAreDeterministic() thr
     let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
     _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
     let close = try pair.client.makeCloseSessionCapsuleResult(sessionID: sessionID, applicationErrorCode: 9, message: "race")
-    #expect(close.terminationActions.streamResetFrames == [
-        QUICFrame.resetStreamAt(
-            id: 4,
-            applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError,
-            finalSize: 0,
-            reliableSize: 0
-        )
-    ])
+    #expect(
+        close.terminationActions.streamResetFrames == [
+            QUICFrame.resetStreamAt(
+                id: 4,
+                applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError,
+                finalSize: 0,
+                reliableSize: 0
+            )
+        ])
     #expect(throws: Error.self) {
         _ = try pair.client.resetStream(streamID: 4, applicationErrorCode: 10)
     }
@@ -219,19 +225,22 @@ func adversarialOrderingReplayExhaustionAndCloseResetRacesAreDeterministic() thr
     }
 
     let receivedClose = try pair.server.receiveFlowControlCapsuleWithActions(sessionID: sessionID, bytes: close.capsuleBytes)
-    #expect(receivedClose.terminationActions?.streamResetFrames ?? [] == [
-        QUICFrame.resetStreamAt(
-            id: 4,
-            applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError,
-            finalSize: 0,
-            reliableSize: 0
-        )
-    ])
-    #expect(try pair.server.receiveConnectStreamData(streamID: sessionID.rawValue, data: Data("late".utf8)) == QUICFrame.resetStream(
-        id: sessionID.rawValue,
-        applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
-        finalSize: 0
-    ))
+    #expect(
+        receivedClose.terminationActions?.streamResetFrames ?? [] == [
+            QUICFrame.resetStreamAt(
+                id: 4,
+                applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtSessionGoneError,
+                finalSize: 0,
+                reliableSize: 0
+            )
+        ])
+    #expect(
+        try pair.server.receiveConnectStreamData(streamID: sessionID.rawValue, data: Data("late".utf8))
+            == QUICFrame.resetStream(
+                id: sessionID.rawValue,
+                applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
+                finalSize: 0
+            ))
 }
 
 private enum WebTransportHardeningSupport {

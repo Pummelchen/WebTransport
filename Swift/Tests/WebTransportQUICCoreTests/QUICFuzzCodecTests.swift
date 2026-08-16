@@ -143,7 +143,7 @@ private enum FuzzFrameGenerator {
             ),
             .handshakeDone,
             .dataBlocked(rng.nextUInt64(upperInclusive: 2_048)),
-            .streamsBlocked(direction: .bidirectional, maximum: rng.nextUInt64(upperInclusive: 8))
+            .streamsBlocked(direction: .bidirectional, maximum: rng.nextUInt64(upperInclusive: 8)),
         ]
     }
 }
@@ -158,7 +158,7 @@ func quicVarIntCodecFuzzRoundTrips() throws {
         0x3fff,
         0x4000,
         0x55_55_55,
-        QUICVarInt.maximum
+        QUICVarInt.maximum,
     ]
 
     for value in inputs {
@@ -201,7 +201,7 @@ func quicFrameCorpusRejectsTruncatedWireData() throws {
         Data([0x24, 0x00, 0x00, 0x00]),
         Data([0x31, 0x40]),
         Data([0x08]),
-        Data([0x18, 0x01, 0x00, 0x00, 0x21])
+        Data([0x18, 0x01, 0x00, 0x00, 0x21]),
     ]
 
     for payload in malformedVectors {

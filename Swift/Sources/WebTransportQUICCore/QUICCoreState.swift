@@ -270,7 +270,8 @@ public struct QUICAckTracker: Equatable, Sendable {
     /// the window.
     private mutating func discardOutsideTrackingWindow() {
         guard receivedPacketNumbers.count > Self.maximumTrackedReceivedPacketNumbers * 2,
-              let largestReceived else {
+            let largestReceived
+        else {
             return
         }
         let window = UInt64(Self.maximumTrackedReceivedPacketNumbers)
@@ -444,7 +445,8 @@ public struct QUICLossRecovery: Equatable, Sendable {
             }
         }
 
-        for packetNumber in packets.keys.sorted() where isPacketThresholdLost(
+        for packetNumber in packets.keys.sorted()
+        where isPacketThresholdLost(
             packetNumber: packetNumber,
             largestAcknowledged: largestAcknowledged
         ) {

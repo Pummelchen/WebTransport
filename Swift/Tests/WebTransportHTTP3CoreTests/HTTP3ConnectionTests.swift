@@ -34,7 +34,7 @@ func http3SettingsValidationRejectsMissingWebTransportRequirements() throws {
         type: HTTP3StreamType.control,
         payload: try HTTP3Settings([
             WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
-            WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1
+            WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
         ]).frame().encode()
     )
     var server = HTTP3ConnectionState(role: .server)
@@ -72,7 +72,7 @@ func http3ServerAcceptsClientSettingsWithoutEnableConnectProtocol() throws {
     let constants = WebTransportHTTP3DraftConstants.current
     let clientSettings = try HTTP3Settings([
         constants.settingsH3Datagram: 1,
-        constants.settingsWTEnabled: 1
+        constants.settingsWTEnabled: 1,
     ])
     let clientControl = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
@@ -145,7 +145,7 @@ func http3ControlStreamRejectsRequestFramesAndProcessesGoaway() throws {
         type: HTTP3StreamType.control,
         payload: try HTTP3Frame.encodeFrames([
             HTTP3Settings.webTransportDraft16Defaults.frame(),
-            goaway
+            goaway,
         ])
     )
 
@@ -158,7 +158,7 @@ func http3ControlStreamRejectsRequestFramesAndProcessesGoaway() throws {
         type: HTTP3StreamType.control,
         payload: try HTTP3Frame.encodeFrames([
             HTTP3Settings.webTransportDraft16Defaults.frame(),
-            try HTTP3Frame(type: HTTP3FrameType.headers)
+            try HTTP3Frame(type: HTTP3FrameType.headers),
         ])
     )
     #expect(throws: Error.self) {
@@ -240,13 +240,15 @@ func http3GoawaySendAndApplicationErrorMapping() throws {
     #expect(goaway == expectedGoaway)
     #expect(connection.sentGoawayID == 0)
 
-    #expect(connection.closeFrame(
-        error: .settingsError,
-        reason: "bad settings",
-        frameType: HTTP3FrameType.settings
-    ) == .connectionClose(
-        errorCode: HTTP3ApplicationErrorCode.settingsError.rawValue,
-        frameType: HTTP3FrameType.settings,
-        reason: Data("bad settings".utf8)
-    ))
+    #expect(
+        connection.closeFrame(
+            error: .settingsError,
+            reason: "bad settings",
+            frameType: HTTP3FrameType.settings
+        )
+            == .connectionClose(
+                errorCode: HTTP3ApplicationErrorCode.settingsError.rawValue,
+                frameType: HTTP3FrameType.settings,
+                reason: Data("bad settings".utf8)
+            ))
 }

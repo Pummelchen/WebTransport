@@ -19,7 +19,7 @@ func qpackEncodesStaticIndexedAndLiteralFieldLines() throws {
     let fields = [
         try HTTPFieldLine(name: ":method", value: "CONNECT"),
         try HTTPFieldLine(name: ":authority", value: "example.com"),
-        try HTTPFieldLine(name: ":protocol", value: "webtransport-h3")
+        try HTTPFieldLine(name: ":protocol", value: "webtransport-h3"),
     ]
     let encoded = try QPACK.encodeFieldSection(fields)
 
@@ -39,14 +39,15 @@ func webTransportConnectRequestHeadersFrameRoundTrips() throws {
 
     let fields = try QPACK.decodeHeadersFrame(frame)
     try WebTransportHTTP3Headers.validateConnectRequest(fields)
-    #expect(fields == [
-        try HTTPFieldLine(name: ":method", value: "CONNECT"),
-        try HTTPFieldLine(name: ":scheme", value: "https"),
-        try HTTPFieldLine(name: ":authority", value: "example.com"),
-        try HTTPFieldLine(name: ":path", value: "/wt"),
-        try HTTPFieldLine(name: ":protocol", value: "webtransport-h3"),
-        try HTTPFieldLine(name: "origin", value: "https://example.com")
-    ])
+    #expect(
+        fields == [
+            try HTTPFieldLine(name: ":method", value: "CONNECT"),
+            try HTTPFieldLine(name: ":scheme", value: "https"),
+            try HTTPFieldLine(name: ":authority", value: "example.com"),
+            try HTTPFieldLine(name: ":path", value: "/wt"),
+            try HTTPFieldLine(name: ":protocol", value: "webtransport-h3"),
+            try HTTPFieldLine(name: "origin", value: "https://example.com"),
+        ])
 }
 
 @Test
@@ -54,9 +55,10 @@ func webTransportResponseHeadersFrameRoundTrips() throws {
     let frame = try WebTransportHTTP3Headers.successfulResponseHeadersFrame()
     let fields = try QPACK.decodeHeadersFrame(frame)
     try WebTransportHTTP3Headers.validateSuccessfulResponse(fields)
-    #expect(fields == [
-        try HTTPFieldLine(name: ":status", value: "200")
-    ])
+    #expect(
+        fields == [
+            try HTTPFieldLine(name: ":status", value: "200")
+        ])
 }
 
 @Test
@@ -73,7 +75,7 @@ func webTransportHeaderValidatorsRejectMalformedPseudoHeaders() throws {
             try HTTPFieldLine(name: ":scheme", value: "https"),
             try HTTPFieldLine(name: ":authority", value: "example.com"),
             try HTTPFieldLine(name: ":path", value: "/wt"),
-            try HTTPFieldLine(name: ":protocol", value: "webtransport-h3")
+            try HTTPFieldLine(name: ":protocol", value: "webtransport-h3"),
         ])
     }
     #expect(throws: Error.self) {
@@ -82,7 +84,7 @@ func webTransportHeaderValidatorsRejectMalformedPseudoHeaders() throws {
             try HTTPFieldLine(name: ":scheme", value: "http"),
             try HTTPFieldLine(name: ":authority", value: "example.com"),
             try HTTPFieldLine(name: ":path", value: "/wt"),
-            try HTTPFieldLine(name: ":protocol", value: "webtransport-h3")
+            try HTTPFieldLine(name: ":protocol", value: "webtransport-h3"),
         ])
     }
     #expect(throws: Error.self) {
@@ -91,13 +93,13 @@ func webTransportHeaderValidatorsRejectMalformedPseudoHeaders() throws {
             try HTTPFieldLine(name: ":scheme", value: "https"),
             try HTTPFieldLine(name: ":authority", value: "example.com"),
             try HTTPFieldLine(name: ":path", value: "/wt"),
-            try HTTPFieldLine(name: ":protocol", value: "webtransport")
+            try HTTPFieldLine(name: ":protocol", value: "webtransport"),
         ])
     }
     #expect(throws: Error.self) {
         try WebTransportHTTP3Headers.validateConnectRequest([
             try HTTPFieldLine(name: "origin", value: "https://example.com"),
-            try HTTPFieldLine(name: ":method", value: "CONNECT")
+            try HTTPFieldLine(name: ":method", value: "CONNECT"),
         ])
     }
     #expect(throws: Error.self) {
@@ -131,7 +133,7 @@ func qpackDecoderRejectsUnsupportedAndOversizedInputs() throws {
         _ = try QPACK.decodeFieldSection(
             try QPACK.encodeFieldSection([
                 try HTTPFieldLine(name: ":path", value: "/"),
-                try HTTPFieldLine(name: ":scheme", value: "https")
+                try HTTPFieldLine(name: ":scheme", value: "https"),
             ]),
             limits: QPACKDecoderLimits(maxFieldSectionBytes: 64, maxFieldLineBytes: 64, maxFieldLineCount: 1)
         )
@@ -155,7 +157,7 @@ func qpackHuffmanRoundTripsRFC7541Example() throws {
 
     let fields = [
         try HTTPFieldLine(name: ":authority", value: "www.example.com"),
-        try HTTPFieldLine(name: ":path", value: "/wt")
+        try HTTPFieldLine(name: ":path", value: "/wt"),
     ]
     #expect(try QPACK.decodeFieldSection(try QPACK.encodeFieldSection(fields, huffman: true)) == fields)
 }
@@ -204,10 +206,11 @@ func qpackDecodesPostBaseIndexedAndNameReferences() throws {
     var fieldSection = Data([0x04, 0x81, 0x11, 0x00, 0x08])
     fieldSection.append(Data("override".utf8))
 
-    #expect(try QPACK.decodeFieldSection(fieldSection, dynamicTable: table) == [
-        third,
-        try HTTPFieldLine(name: "x-demo", value: "override")
-    ])
+    #expect(
+        try QPACK.decodeFieldSection(fieldSection, dynamicTable: table) == [
+            third,
+            try HTTPFieldLine(name: "x-demo", value: "override"),
+        ])
 
     #expect(throws: Error.self) {
         _ = try QPACK.decodeFieldSection(Data([0x01, 0x81]), dynamicTable: table)
@@ -235,7 +238,7 @@ func qpackEncoderStreamInstructionsRoundTripAndPopulateDynamicTable() throws {
         .insertWithNameReference(name: .staticTable(index: 1), value: "/wt"),
         .insertWithLiteralName(name: "origin", value: "https://example.com"),
         .duplicate(relativeIndex: 1),
-        .insertWithNameReference(name: .dynamicTable(relativeIndex: 1), value: "https://again.example")
+        .insertWithNameReference(name: .dynamicTable(relativeIndex: 1), value: "https://again.example"),
     ]
     let encoded = try QPACK.encodeEncoderStreamInstructions(instructions, huffman: true)
     #expect(try QPACK.decodeEncoderStreamInstructions(encoded) == instructions)
@@ -243,19 +246,20 @@ func qpackEncoderStreamInstructionsRoundTripAndPopulateDynamicTable() throws {
     var table = try QPACKDynamicTable(capacity: 0, maximumCapacity: 512)
     let inserted = try QPACK.applyEncoderStream(encoded, to: &table)
 
-    #expect(inserted == [
-        try HTTPFieldLine(name: ":path", value: "/wt"),
-        try HTTPFieldLine(name: "origin", value: "https://example.com"),
-        try HTTPFieldLine(name: ":path", value: "/wt"),
-        try HTTPFieldLine(name: "origin", value: "https://again.example")
-    ])
+    #expect(
+        inserted == [
+            try HTTPFieldLine(name: ":path", value: "/wt"),
+            try HTTPFieldLine(name: "origin", value: "https://example.com"),
+            try HTTPFieldLine(name: ":path", value: "/wt"),
+            try HTTPFieldLine(name: "origin", value: "https://again.example"),
+        ])
     #expect(table.capacity == 256)
     let mostRecent = try HTTPFieldLine(name: "origin", value: "https://again.example")
     #expect(table.entries.first == mostRecent)
 
     let fields = [
         try HTTPFieldLine(name: "origin", value: "https://again.example"),
-        try HTTPFieldLine(name: ":path", value: "/wt")
+        try HTTPFieldLine(name: ":path", value: "/wt"),
     ]
     let fieldSection = try QPACK.encodeFieldSection(fields, dynamicTable: table)
     #expect(try QPACK.decodeFieldSection(fieldSection, dynamicTable: table) == fields)
@@ -303,7 +307,7 @@ func qpackDecoderStreamInstructionsRoundTripAndUpdateState() throws {
     let instructions: [QPACKDecoderStreamInstruction] = [
         .sectionAcknowledgement(streamID: 4),
         .streamCancellation(streamID: 8),
-        .insertCountIncrement(3)
+        .insertCountIncrement(3),
     ]
     let encoded = try QPACK.encodeDecoderStreamInstructions(instructions)
     #expect(try QPACK.decodeDecoderStreamInstructions(encoded) == instructions)
@@ -401,7 +405,7 @@ func anEncodedCountBeyondTheWindowIsRejected() throws {
 func fieldSectionsStillRoundTripWithNoDynamicTable() throws {
     let fields = [
         try HTTPFieldLine(name: ":method", value: "CONNECT"),
-        try HTTPFieldLine(name: ":protocol", value: "webtransport-h3")
+        try HTTPFieldLine(name: ":protocol", value: "webtransport-h3"),
     ]
     let encoded = try QPACK.encodeFieldSection(fields, dynamicTable: nil)
     let decoded = try QPACK.decodeFieldSection(encoded)

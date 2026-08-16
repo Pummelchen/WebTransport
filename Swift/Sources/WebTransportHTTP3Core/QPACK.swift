@@ -13,9 +13,11 @@ public struct HTTPFieldLine: Equatable, Sendable {
         guard lowercasedName == name else {
             throw QUICCodecError.malformed("HTTP field name must be lowercase")
         }
-        guard lowercasedName.utf8.allSatisfy({ byte in
-            byte == 0x3a || byte == 0x2d || (byte >= 0x30 && byte <= 0x39) || (byte >= 0x61 && byte <= 0x7a)
-        }) else {
+        guard
+            lowercasedName.utf8.allSatisfy({ byte in
+                byte == 0x3a || byte == 0x2d || (byte >= 0x30 && byte <= 0x39) || (byte >= 0x61 && byte <= 0x7a)
+            })
+        else {
             throw QUICCodecError.malformed("HTTP field name contains invalid bytes")
         }
         self.name = name
@@ -129,7 +131,7 @@ public enum QPACKStaticTable {
         QPACKStaticTableEntry(index: 95, name: "user-agent", value: ""),
         QPACKStaticTableEntry(index: 96, name: "x-forwarded-for", value: ""),
         QPACKStaticTableEntry(index: 97, name: "x-frame-options", value: "deny"),
-        QPACKStaticTableEntry(index: 98, name: "x-frame-options", value: "sameorigin")
+        QPACKStaticTableEntry(index: 98, name: "x-frame-options", value: "sameorigin"),
     ]
 
     public static func entry(index: UInt64) -> QPACKStaticTableEntry? {
@@ -714,7 +716,8 @@ public enum QPACK {
         let first = try cursor.readUInt8()
         if (first & 0x80) != 0 {
             let index = try decodePrefixedInteger(from: &cursor, prefixBits: 6, firstByte: first)
-            let reference: QPACKNameReference = (first & 0x40) != 0
+            let reference: QPACKNameReference =
+                (first & 0x40) != 0
                 ? .staticTable(index: index)
                 : .dynamicTable(relativeIndex: index)
             let value = try decodeStringLiteral(from: &cursor, prefixBits: 7)

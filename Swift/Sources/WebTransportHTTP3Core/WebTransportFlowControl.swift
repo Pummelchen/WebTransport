@@ -122,7 +122,8 @@ public enum WebTransportFlowCapsuleCodec {
         case .closeSession(let applicationErrorCode, let message):
             let messageBytes = Data(message.utf8)
             guard messageBytes.count <= WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes else {
-                throw QUICCodecError.valueOutOfRange("WT_CLOSE_SESSION message exceeds \(WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes) bytes")
+                throw QUICCodecError.valueOutOfRange(
+                    "WT_CLOSE_SESSION message exceeds \(WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes) bytes")
             }
             var payload = Data()
             payload.append(UInt8((applicationErrorCode >> 24) & 0xff))
@@ -159,13 +160,15 @@ public enum WebTransportFlowCapsuleCodec {
             throw QUICCodecError.malformed("WT_CLOSE_SESSION capsule payload is shorter than 32-bit error code")
         }
         let bytes = [UInt8](payload.prefix(4))
-        let errorCode = UInt32(bytes[0]) << 24
+        let errorCode =
+            UInt32(bytes[0]) << 24
             | UInt32(bytes[1]) << 16
             | UInt32(bytes[2]) << 8
             | UInt32(bytes[3])
         let messageBytes = payload.dropFirst(4)
         guard messageBytes.count <= WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes else {
-            throw QUICCodecError.valueOutOfRange("WT_CLOSE_SESSION message exceeds \(WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes) bytes")
+            throw QUICCodecError.valueOutOfRange(
+                "WT_CLOSE_SESSION message exceeds \(WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes) bytes")
         }
         guard let message = String(data: Data(messageBytes), encoding: .utf8) else {
             throw QUICCodecError.malformed("WT_CLOSE_SESSION message must be UTF-8")
@@ -187,7 +190,8 @@ public enum WebTransportFlowCapsuleCodec {
         if label == "wt-max-streams-bidi"
             || label == "wt-max-streams-uni"
             || label == "wt-streams-blocked-bidi"
-            || label == "wt-streams-blocked-uni" {
+            || label == "wt-streams-blocked-uni"
+        {
             guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
                 throw WebTransportDraft16Error(
                     kind: .flowControl,
@@ -412,8 +416,9 @@ private func setMonotonicLimit(
     // monotonic comparison only applies once a limit exists.
     let normalized = WebTransportFlowControlLimitState(value, isEnabled: true)
     if let currentValue = current.asUInt64,
-       let newValue = normalized.asUInt64,
-       newValue <= currentValue {
+        let newValue = normalized.asUInt64,
+        newValue <= currentValue
+    {
         throw WebTransportDraft16Error(
             kind: .flowControl,
             message: "\(label) must strictly increase"

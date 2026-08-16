@@ -26,7 +26,7 @@ private enum InteroperableQUICDebug {
     private static let announceOnce: Void = {
         write(
             "[interoperable-quic] diagnostic logging is enabled and is NOT redacted; "
-            + "it emits transport identifiers and must not be used in production\n"
+                + "it emits transport identifiers and must not be used in production\n"
         )
     }()
 
@@ -247,10 +247,11 @@ public struct WebTransportQUICClient: Sendable {
         )
         let pendingSessionID = try WebTransportSessionID.fromRequestStreamID(requestStreamID)
         for capsule in optimisticCapsules {
-            connectPayload.append(try manager.makeOptimisticConnectStreamCapsule(
-                sessionID: pendingSessionID,
-                capsule: capsule
-            ))
+            connectPayload.append(
+                try manager.makeOptimisticConnectStreamCapsule(
+                    sessionID: pendingSessionID,
+                    capsule: capsule
+                ))
         }
         let requestPayload = connectPayload
         try await runWithTimeout {
@@ -589,9 +590,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             )
         }
         guard let prefix = accepted.prefix,
-              accepted.rejectionFrame == nil,
-              prefix.form == .bidirectional,
-              prefix.sessionID.rawValue == sessionID else {
+            accepted.rejectionFrame == nil,
+            prefix.form == .bidirectional,
+            prefix.sessionID.rawValue == sessionID
+        else {
             throw WebTransportNetworkRuntimeError.unexpectedFrame
         }
         return WebTransportNetworkBidirectionalStream(
@@ -640,7 +642,8 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         return try await manager.withManager { manager in
             let responseSessionID = try manager.receiveDatagramFrame(.datagram(receivedDatagram))
             guard responseSessionID.rawValue == self.sessionID,
-                  let payload = manager.popDatagramPayload(sessionID: responseSessionID) else {
+                let payload = manager.popDatagramPayload(sessionID: responseSessionID)
+            else {
                 throw WebTransportNetworkRuntimeError.invalidPayload
             }
             return payload
@@ -1232,7 +1235,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             let raceTimeout = min(timeoutMilliseconds, Self.firstMessageWaitMilliseconds)
             echoed = try await InteroperableQUICHelpers.raceFirstSuccess([
                 { try await Self.echoOneDatagram(on: session, timeoutMilliseconds: raceTimeout) },
-                { try await Self.echoOneStream(on: session, timeoutMilliseconds: raceTimeout) }
+                { try await Self.echoOneStream(on: session, timeoutMilliseconds: raceTimeout) },
             ])
         } else {
             echoed = try await Self.echoOneStream(on: session, timeoutMilliseconds: timeoutMilliseconds)
@@ -1429,8 +1432,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         }
         InteroperableQUICDebug.log(
             "server CONNECT decision: session=\(decision.session.id) "
-            + "protocol=\(decision.session.selectedProtocol ?? "none") "
-            + "rejection=\(decision.rejectionError.map { "\($0)" } ?? "none")"
+                + "protocol=\(decision.session.selectedProtocol ?? "none") "
+                + "rejection=\(decision.rejectionError.map { "\($0)" } ?? "none")"
         )
         let responsePayload = try decision.responseFrame.encode()
         try await runWithTimeout {
@@ -1508,7 +1511,8 @@ private enum InteroperableQUICRuntime {
         fallback: WebTransportNetworkEndpoint
     ) -> WebTransportNetworkEndpoint {
         guard let endpoint,
-              case .hostPort(let host, let port) = endpoint else {
+            case .hostPort(let host, let port) = endpoint
+        else {
             return fallback
         }
         return WebTransportNetworkEndpoint(host: host.debugDescription, port: port.rawValue)
@@ -1591,7 +1595,7 @@ private enum InteroperableQUICHelpers {
         var opened: [QUIC.Stream<QUICStream>] = []
         for (label, type) in [
             ("encoder", HTTP3StreamType.qpackEncoder),
-            ("decoder", HTTP3StreamType.qpackDecoder)
+            ("decoder", HTTP3StreamType.qpackDecoder),
         ] {
             let stream = try await withTimeout(timeoutMilliseconds) {
                 try await connection.openStream(directionality: .unidirectional)
@@ -2114,7 +2118,8 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     /// Fails one specific waiter, identified so a stream that arrived first wins.
     private func expire(direction: Int, id: UInt64, timeoutMilliseconds: Int32) {
         guard var waiters = waiting[direction],
-              let index = waiters.firstIndex(where: { $0.id == id }) else {
+            let index = waiters.firstIndex(where: { $0.id == id })
+        else {
             // Already resumed with a stream; the timeout lost the race.
             return
         }

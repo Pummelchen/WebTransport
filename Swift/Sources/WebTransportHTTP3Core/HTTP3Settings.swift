@@ -81,7 +81,7 @@ public struct HTTP3Settings: Equatable, Sendable {
     public static let webTransportDraft16Defaults = HTTP3Settings(unchecked: [
         WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
         WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
-        WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1
+        WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1,
     ])
 
     /// Draft-16 settings plus the pre-draft-16 identifiers deployed peers look for.
@@ -99,7 +99,7 @@ public struct HTTP3Settings: Equatable, Sendable {
         HTTP3SettingID.legacyEnableWebTransport: 1,
         HTTP3SettingID.legacyWebTransportMaxSessionsDraft02: 1,
         HTTP3SettingID.legacyWebTransportMaxSessions: 1,
-        HTTP3SettingID.legacyH3DatagramDraft04: 1
+        HTTP3SettingID.legacyH3DatagramDraft04: 1,
     ])
 
     public static let webTransportPyWebTransportStreamInteropDefaults = HTTP3Settings(unchecked: [

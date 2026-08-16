@@ -82,7 +82,7 @@ func quicFrameDecoderRejectsTruncatedPropertyCorpus() throws {
         .maxData(4096),
         .maxStreamData(id: 4, maximum: 4096),
         .datagram(Data("datagram".utf8)),
-        .connectionClose(errorCode: 0x100, frameType: 0x01, reason: Data("close".utf8))
+        .connectionClose(errorCode: 0x100, frameType: 0x01, reason: Data("close".utf8)),
     ]
 
     for frame in frames {
@@ -112,7 +112,7 @@ private func deterministicVarIntCorpus() -> [UInt64] {
         1_073_741_824,
         1_073_741_825,
         QUICVarInt.maximum - 1,
-        QUICVarInt.maximum
+        QUICVarInt.maximum,
     ]
 
     var state: UInt64 = 0x1234_5678_9abc_def0

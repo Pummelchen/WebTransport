@@ -59,24 +59,26 @@ public struct WebTransportLibrarySmokePair: Equatable, Sendable {
         _ = try serverHTTP3.receivePeerControlStream(clientHTTP3.localControlStreamBytes())
         _ = try clientHTTP3.receivePeerControlStream(serverHTTP3.localControlStreamBytes())
         return WebTransportLibrarySmokePair(
-            client: LibrarySmokeClient(manager: WebTransportSessionManager(
-                http3: clientHTTP3,
-                maxStreamReceiveBufferBytes: maxStreamReceiveBufferBytes,
-                maxDatagramFrameSize: maxDatagramFrameSize,
-                maxDatagramReceiveBufferBytes: maxDatagramReceiveBufferBytes,
-                maxBufferedStreamsPerSession: maxBufferedStreamsPerSession,
-                maxBufferedDatagramsPerSession: maxBufferedDatagramsPerSession,
-                maxBufferedSessions: maxBufferedSessions
-            )),
-            server: LibrarySmokeServer(manager: WebTransportSessionManager(
-                http3: serverHTTP3,
-                maxStreamReceiveBufferBytes: maxStreamReceiveBufferBytes,
-                maxDatagramFrameSize: maxDatagramFrameSize,
-                maxDatagramReceiveBufferBytes: maxDatagramReceiveBufferBytes,
-                maxBufferedStreamsPerSession: maxBufferedStreamsPerSession,
-                maxBufferedDatagramsPerSession: maxBufferedDatagramsPerSession,
-                maxBufferedSessions: maxBufferedSessions
-            ))
+            client: LibrarySmokeClient(
+                manager: WebTransportSessionManager(
+                    http3: clientHTTP3,
+                    maxStreamReceiveBufferBytes: maxStreamReceiveBufferBytes,
+                    maxDatagramFrameSize: maxDatagramFrameSize,
+                    maxDatagramReceiveBufferBytes: maxDatagramReceiveBufferBytes,
+                    maxBufferedStreamsPerSession: maxBufferedStreamsPerSession,
+                    maxBufferedDatagramsPerSession: maxBufferedDatagramsPerSession,
+                    maxBufferedSessions: maxBufferedSessions
+                )),
+            server: LibrarySmokeServer(
+                manager: WebTransportSessionManager(
+                    http3: serverHTTP3,
+                    maxStreamReceiveBufferBytes: maxStreamReceiveBufferBytes,
+                    maxDatagramFrameSize: maxDatagramFrameSize,
+                    maxDatagramReceiveBufferBytes: maxDatagramReceiveBufferBytes,
+                    maxBufferedStreamsPerSession: maxBufferedStreamsPerSession,
+                    maxBufferedDatagramsPerSession: maxBufferedDatagramsPerSession,
+                    maxBufferedSessions: maxBufferedSessions
+                ))
         )
     }
 
@@ -240,10 +242,11 @@ public enum WebTransportLibrarySmokeMatrix {
             payload: Data("early".utf8)
         )
         _ = try pair.server.manager.receiveDatagramFrame(.datagram(earlyDatagram))
-        let earlyStream = try WebTransportStreamSignaling.serializePrefix(
-            form: .bidirectional,
-            sessionID: 0
-        ) + Data("early-stream".utf8)
+        let earlyStream =
+            try WebTransportStreamSignaling.serializePrefix(
+                form: .bidirectional,
+                sessionID: 0
+            ) + Data("early-stream".utf8)
         _ = try pair.server.manager.acceptBidirectionalStream(streamID: 4, firstBytes: earlyStream)
 
         let sessionID = try pair.establishSession(

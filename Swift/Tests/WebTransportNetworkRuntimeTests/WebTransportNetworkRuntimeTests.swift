@@ -17,9 +17,10 @@ func networkProbeCodecRoundTripsAndRejectsMalformedPackets() throws {
         _ = try WebTransportNetworkProbeCodec.decodeProbePacket(ack)
     }
     #expect(throws: Error.self) {
-        _ = try WebTransportNetworkProbeCodec.decodeProbePacket(try QUICFrame.encodeFrames([
-            .stream(id: 0, offset: 0, fin: false, data: Data("not a probe".utf8))
-        ]))
+        _ = try WebTransportNetworkProbeCodec.decodeProbePacket(
+            try QUICFrame.encodeFrames([
+                .stream(id: 0, offset: 0, fin: false, data: Data("not a probe".utf8))
+            ]))
     }
 }
 
@@ -60,15 +61,18 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     #expect(decodedRequest.handshakeMessages.map(\.type) == [.clientHello])
     let clientHello = try TLSClientHello.decode(try #require(decodedRequest.handshakeMessages.first).body)
     #expect(String(data: clientHello.legacySessionID, encoding: .utf8) == "hello")
-    let clientALPN = try #require(clientHello.extensions.first {
-        $0.type == TLSExtensionType.applicationLayerProtocolNegotiation.rawValue
-    })
+    let clientALPN = try #require(
+        clientHello.extensions.first {
+            $0.type == TLSExtensionType.applicationLayerProtocolNegotiation.rawValue
+        })
     #expect(try TLSALPNExtension.protocols(from: clientALPN.data) == ["h3"])
-    let clientTransportParameters = try #require(clientHello.extensions.first {
-        $0.type == TLSExtensionType.quicTransportParameters.rawValue
-    })
-    #expect(try TLSQUICTransportParametersExtension.parameters(from: clientTransportParameters.data)
-        .integer(for: QUICTransportParameterID.maxDatagramFrameSize) == 1_200)
+    let clientTransportParameters = try #require(
+        clientHello.extensions.first {
+            $0.type == TLSExtensionType.quicTransportParameters.rawValue
+        })
+    #expect(
+        try TLSQUICTransportParametersExtension.parameters(from: clientTransportParameters.data)
+            .integer(for: QUICTransportParameterID.maxDatagramFrameSize) == 1_200)
 
     let serverPacket = try WebTransportQUICPacketProbeCodec.encodeServerInitial(
         request: decodedRequest,
@@ -81,13 +85,14 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     )
     #expect(handshakeContext.message == "hello")
     #expect(handshakeContext.request == decodedRequest)
-    #expect(handshakeContext.serverHandshakeMessages.map(\.type) == [
-        .serverHello,
-        .encryptedExtensions,
-        .certificate,
-        .certificateVerify,
-        .finished
-    ])
+    #expect(
+        handshakeContext.serverHandshakeMessages.map(\.type) == [
+            .serverHello,
+            .encryptedExtensions,
+            .certificate,
+            .certificateVerify,
+            .finished,
+        ])
     let decodedServerPacket = try QUICInitialPacketProtection.open(
         serverPacket,
         keyPhase: .server,
@@ -102,13 +107,14 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     }
     var serverFlightDecoder = TLSHandshakeFlightDecoder()
     let serverMessages = try serverFlightDecoder.receive(frames: serverCryptoFrames)
-    #expect(serverMessages.map(\.type) == [
-        .serverHello,
-        .encryptedExtensions,
-        .certificate,
-        .certificateVerify,
-        .finished
-    ])
+    #expect(
+        serverMessages.map(\.type) == [
+            .serverHello,
+            .encryptedExtensions,
+            .certificate,
+            .certificateVerify,
+            .finished,
+        ])
     #expect(try TLSCertificate.decode(serverMessages[2].body).entries.count == 1)
     #expect(try TLSCertificateVerify.decode(serverMessages[3].body).signature.count == 64)
     #expect(TLSFinished.decode(serverMessages[4].body).verifyData.count == 32)
@@ -153,19 +159,21 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     )
     #expect(applicationRequest.message == "hello")
     #expect(applicationRequest.packetNumber == 1)
-    #expect(applicationRequest.requestHeaders.contains {
-        $0.name == ":protocol" && $0.value == "webtransport-h3"
-    })
+    #expect(
+        applicationRequest.requestHeaders.contains {
+            $0.name == ":protocol" && $0.value == "webtransport-h3"
+        })
 
     let applicationResponsePacket = try WebTransportQUICPacketProbeCodec.encodeServerApplicationResponse(
         handshakeContext: handshakeContext,
         message: applicationRequest.message
     )
     #expect(applicationResponsePacket.range(of: Data("hello".utf8)) == nil)
-    #expect(try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
-        applicationResponsePacket,
-        handshakeContext: handshakeContext
-    ) == "hello")
+    #expect(
+        try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
+            applicationResponsePacket,
+            handshakeContext: handshakeContext
+        ) == "hello")
 
     let mismatchedHandshakeContext = try WebTransportQUICPacketProbeCodec.serverHandshakeContext(
         request: decodedRequest,
@@ -217,7 +225,7 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         sourceConnectionID: decodedRequest.sourceConnectionID,
         frames: [
             .crypto(offset: 0, data: Data("WT-QUIC-CLIENT-FLIGHT\0short".utf8)),
-            .ping
+            .ping,
         ],
         padToMinimumInitialSize: false
     )
@@ -231,7 +239,7 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         frames: [
             .crypto(offset: 0, data: try WebTransportQUICPacketProbeCodec.makeClientHelloHandshakeMessage(message: "one").encode()),
             .crypto(offset: 0, data: try WebTransportQUICPacketProbeCodec.makeClientHelloHandshakeMessage(message: "two").encode()),
-            .ping
+            .ping,
         ],
         padToMinimumInitialSize: true
     )
@@ -249,7 +257,7 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         packetNumberLength: 2,
         plaintextPayload: try QUICFrame.encodeFrames([
             .ack(largestAcknowledged: decodedRequest.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
-            .crypto(offset: 0, data: Data("WT-QUIC-SERVER-FLIGHT\0hello".utf8))
+            .crypto(offset: 0, data: Data("WT-QUIC-SERVER-FLIGHT\0hello".utf8)),
         ]),
         keyPhase: .server,
         initialSecretConnectionID: decodedRequest.destinationConnectionID
@@ -347,14 +355,18 @@ func quicPacketProbeClientServerExchangeOverUDP() async throws {
 
 @Test
 func networkEndpointParserRejectsMalformedValues() throws {
-    #expect(try WebTransportNetworkEndpoint.parse("127.0.0.1:4433") == WebTransportNetworkEndpoint(
-        host: "127.0.0.1",
-        port: 4433
-    ))
-    #expect(try WebTransportNetworkEndpoint.parse("[::1]:4433") == WebTransportNetworkEndpoint(
-        host: "::1",
-        port: 4433
-    ))
+    #expect(
+        try WebTransportNetworkEndpoint.parse("127.0.0.1:4433")
+            == WebTransportNetworkEndpoint(
+                host: "127.0.0.1",
+                port: 4433
+            ))
+    #expect(
+        try WebTransportNetworkEndpoint.parse("[::1]:4433")
+            == WebTransportNetworkEndpoint(
+                host: "::1",
+                port: 4433
+            ))
     #expect(WebTransportNetworkEndpoint(host: "::1", port: 4433).commandLineValue == "[::1]:4433")
     #expect(throws: Error.self) {
         _ = try WebTransportNetworkEndpoint.parse("127.0.0.1")
@@ -416,7 +428,8 @@ private func protectedServerInitial(
     request: WebTransportQUICPacketProbeRequest,
     messages: [TLSHandshakeMessage]
 ) throws -> Data {
-    let frames = [.ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: [])]
+    let frames =
+        [.ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: [])]
         + (try TLSHandshakeFlight(messages: messages).cryptoFrames(maxFramePayloadBytes: 9))
     return try QUICInitialPacketProtection.seal(
         packetType: .initial,
@@ -452,7 +465,7 @@ private func clientHelloForValidationTest(
             try TLSKeyShareExtension.client([
                 TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x11, count: 32))
             ]),
-            try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519])
+            try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519]),
         ]
     ).handshakeMessage()
 }

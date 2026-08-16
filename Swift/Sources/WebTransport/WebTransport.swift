@@ -331,10 +331,11 @@ public final class WebTransportSession: @unchecked Sendable {
 
     public func close(applicationErrorCode: UInt32 = 0, reason: String = "") async throws {
         try await runtime.close(applicationErrorCode: applicationErrorCode, reason: reason)
-        logger.record(.sessionClosed(
-            applicationErrorCode: applicationErrorCode,
-            reasonByteCount: Data(reason.utf8).count
-        ))
+        logger.record(
+            .sessionClosed(
+                applicationErrorCode: applicationErrorCode,
+                reasonByteCount: Data(reason.utf8).count
+            ))
     }
 }
 

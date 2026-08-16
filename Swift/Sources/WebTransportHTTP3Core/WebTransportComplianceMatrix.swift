@@ -26,50 +26,56 @@ public enum WebTransportDraft16ComplianceMatrix {
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Session establishment and application protocol negotiation",
             status: .pass,
-            documentedBehavior: "Extended CONNECT setup, protocol negotiation, 405 resource rejection, excess-session rejection, optimistic capsules, and session ID mapping are implemented and documented.",
+            documentedBehavior:
+                "Extended CONNECT setup, protocol negotiation, 405 resource rejection, excess-session rejection, optimistic capsules, and session ID mapping are implemented and documented.",
             evidence: ["WebTransportSessionTests", "WebTransportDraft16Tests", "WebTransportPublicAPITests"]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Streams and datagrams, including buffered ingress and rejection behavior",
             status: .pass,
-            documentedBehavior: "WebTransport stream/datagram prefixes, ownership, routing, buffering, rejection cleanup, and bounded ingress are implemented and documented.",
+            documentedBehavior:
+                "WebTransport stream/datagram prefixes, ownership, routing, buffering, rejection cleanup, and bounded ingress are implemented and documented.",
             evidence: [
                 "WebTransportStreamTests",
                 "WebTransportDatagramTests",
                 "WebTransportPhase13Tests",
                 "WebTransportLibrarySmokeMatrix",
-                "run-third-party-interop.sh datagram exchange proof"
+                "run-third-party-interop.sh datagram exchange proof",
             ]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Session close/drain behavior",
             status: .pass,
-            documentedBehavior: "WT_DRAIN_SESSION, 1024-byte UTF-8 WT_CLOSE_SESSION validation, H3_MESSAGE_ERROR reset behavior, CONNECT FIN close equivalence, stream cleanup, and post-close gating are implemented and documented.",
+            documentedBehavior:
+                "WT_DRAIN_SESSION, 1024-byte UTF-8 WT_CLOSE_SESSION validation, H3_MESSAGE_ERROR reset behavior, CONNECT FIN close equivalence, stream cleanup, and post-close gating are implemented and documented.",
             evidence: ["WebTransportDraft16Tests", "WebTransportPhase13Tests", "WebTransportLibrarySmokeMatrix"]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Flow-control and error codes",
             status: .pass,
-            documentedBehavior: "Both-peer flow-control negotiation, directional stream-byte accounting, missing-setting zero defaults, strictly increasing WT_MAX_* capsules, the 2^60 stream ceiling, blocked capsules, and prohibited HTTP/2 capsule handling are implemented and documented.",
+            documentedBehavior:
+                "Both-peer flow-control negotiation, directional stream-byte accounting, missing-setting zero defaults, strictly increasing WT_MAX_* capsules, the 2^60 stream ceiling, blocked capsules, and prohibited HTTP/2 capsule handling are implemented and documented.",
             evidence: ["WebTransportDraft16Tests", "WebTransportFlowControlTests", "WebTransportPhase13Tests"]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "H3 control and request stream constraints",
             status: .pass,
-            documentedBehavior: "HTTP/3 SETTINGS, GOAWAY, request stream lifecycle, DATA policy, malformed ordering, and control-stream constraints are implemented and documented.",
+            documentedBehavior:
+                "HTTP/3 SETTINGS, GOAWAY, request stream lifecycle, DATA policy, malformed ordering, and control-stream constraints are implemented and documented.",
             evidence: ["HTTP3ConnectionTests", "HTTP3CoreTests", "WebTransportPhase13Tests"]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Security and identity handling without prompts",
             status: .pass,
-            documentedBehavior: "ALPN/settings/session-policy negatives, prompt-free identity inputs, pinned trust, deterministic trust failures, and the EXPORTER-WebTransport TLS binding are implemented and documented.",
+            documentedBehavior:
+                "ALPN/settings/session-policy negatives, prompt-free identity inputs, pinned trust, deterministic trust failures, and the EXPORTER-WebTransport TLS binding are implemented and documented.",
             evidence: [
                 "WebTransportTLSCoreTests",
                 "WebTransportPublicAPITests",
                 "WebTransportPhase13Tests",
-                "run-third-party-interop.sh three independent endpoint proof"
+                "run-third-party-interop.sh three independent endpoint proof",
             ]
-        )
+        ),
     ]
 
     public static var allPass: Bool {

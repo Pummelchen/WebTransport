@@ -151,6 +151,10 @@ public enum TLSProtocolVersion {
 }
 
 public enum TLSCipherSuite {
+    /// Named after the registry entry it encodes, `TLS_AES_128_GCM_SHA256`, so
+    /// that it can be matched against RFC 8446 by eye. Renaming it to satisfy the
+    /// casing rule would break a public symbol for no reader's benefit.
+    // swift-format-ignore: AlwaysUseLowerCamelCase
     public static let aes128GCM_SHA256: UInt16 = 0x1301
 }
 

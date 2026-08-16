@@ -100,7 +100,7 @@ private func protectedClientInitialForRuntimeHardening(
             try TLSKeyShareExtension.client([
                 TLSKeyShareEntry(group: TLSNamedGroup.x25519, keyExchange: Data(repeating: 0x11, count: 32))
             ]),
-            try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519])
+            try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519]),
         ]
     ).handshakeMessage()
     var payload = try QUICFrame.encodeFrames(

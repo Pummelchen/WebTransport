@@ -26,12 +26,11 @@ jobs:
       - name: Verify package manifests agree on shared targets
         run: ./Swift/check-manifest-sync.sh
 
-      # Informational. The codebase predates a formatter, so a blocking gate
-      # would require a repo-wide reformat; this surfaces drift without holding
-      # up a merge. Promote to blocking once the tree is formatted once.
+      # Blocking. The tree was reformatted in one pass so that this could become a
+      # gate rather than a notice nobody reads. Before pushing, run
+      # `swift format --recursive --in-place Swift/Sources Swift/Tests`.
       - name: Lint formatting
-        continue-on-error: true
-        run: swift format lint --recursive --parallel Swift/Sources Swift/Tests
+        run: swift format lint --strict --recursive --parallel Swift/Sources Swift/Tests
 
       - name: Build both package entry points with safety diagnostics
         run: |

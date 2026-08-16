@@ -168,7 +168,8 @@ enum LibrarySmokeServer {
                 )
             case .sessionRequest:
                 guard let requestStreamID = envelope.requestStreamID,
-                      let payload = envelope.payload else {
+                    let payload = envelope.payload
+                else {
                     throw Error.runtime("sessionRequest envelope missing stream id or payload")
                 }
                 let requestFrame = try Phase11FramePacket.decodeHTTP3Frame(payload)
@@ -196,8 +197,9 @@ enum LibrarySmokeServer {
                 )
             case .streamOpen:
                 guard let streamID = envelope.streamID,
-                      let streamKind = envelope.streamKind,
-                      let payload = envelope.payload else {
+                    let streamKind = envelope.streamKind,
+                    let payload = envelope.payload
+                else {
                     throw Error.runtime("streamOpen envelope missing fields")
                 }
                 switch streamKind {

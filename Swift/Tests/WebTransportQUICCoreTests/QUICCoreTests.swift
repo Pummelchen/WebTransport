@@ -12,7 +12,7 @@ func varIntRoundTripsBoundaryValues() throws {
         16_384,
         1_073_741_823,
         1_073_741_824,
-        QUICVarInt.maximum
+        QUICVarInt.maximum,
     ]
 
     for value in values {
@@ -53,7 +53,7 @@ func frameRoundTripsRepresentativeFrameSet() throws {
         .connectionClose(errorCode: 0x100, frameType: 0x08, reason: Data("done".utf8)),
         .connectionClose(errorCode: 0x101, frameType: nil, reason: Data("app".utf8)),
         .handshakeDone,
-        .datagram(Data("datagram".utf8))
+        .datagram(Data("datagram".utf8)),
     ]
 
     let encoded = try QUICFrame.encodeFrames(frames)
@@ -94,7 +94,7 @@ func transportParametersRoundTripIntegerValues() throws {
 func longHeaderInitialPacketRoundTrips() throws {
     let frames: [QUICFrame] = [
         .crypto(offset: 0, data: Data("hello".utf8)),
-        .padding
+        .padding,
     ]
     let packet = QUICLongHeaderPacket(
         packetType: .initial,
@@ -139,7 +139,7 @@ func shortHeaderPacketRoundTrips() throws {
         packetNumberLength: 1,
         payload: try QUICFrame.encodeFrames([
             .stream(id: 0, offset: 0, fin: false, data: Data("short".utf8)),
-            .datagram(Data("packet".utf8))
+            .datagram(Data("packet".utf8)),
         ])
     )
 

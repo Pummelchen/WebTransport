@@ -377,7 +377,8 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
 
     private func validateClientInitiatedBidirectionalStreamID(_ streamID: UInt64) throws {
         guard QUICStreamID.direction(of: streamID) == .bidirectional,
-              QUICStreamID.initiator(of: streamID) == .client else {
+            QUICStreamID.initiator(of: streamID) == .client
+        else {
             throw QUICCodecError.malformed("HTTP/3 request streams must be client-initiated bidirectional streams")
         }
     }

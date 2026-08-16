@@ -8,17 +8,20 @@ func webTransportConcurrentMultiSessionStress() async throws {
     var pair = try WebTransportLibrarySmokePair.connectedWithFlowControl()
     var sessionIDs: [WebTransportSessionID] = []
     for index in 0..<16 {
-        sessionIDs.append(try pair.establishSession(
-            streamID: UInt64(index * 4),
-            request: WebTransportSessionRequest(authority: "example.com", path: "/stress-\(index)")
-        ))
+        sessionIDs.append(
+            try pair.establishSession(
+                streamID: UInt64(index * 4),
+                request: WebTransportSessionRequest(authority: "example.com", path: "/stress-\(index)")
+            ))
     }
 
     for (index, sessionID) in sessionIDs.enumerated() {
-        _ = try pair.server.manager.receiveDatagramFrame(.datagram(try WebTransportDatagramSignaling.serialize(
-            sessionID: sessionID.rawValue,
-            payload: Data("stress-datagram-\(index)".utf8)
-        )))
+        _ = try pair.server.manager.receiveDatagramFrame(
+            .datagram(
+                try WebTransportDatagramSignaling.serialize(
+                    sessionID: sessionID.rawValue,
+                    payload: Data("stress-datagram-\(index)".utf8)
+                )))
         #expect(pair.server.manager.popDatagramPayload(sessionID: sessionID) == Data("stress-datagram-\(index)".utf8))
     }
 }
@@ -39,10 +42,12 @@ func webTransportDeterministicSoakRunsRepeatedSessionLifecycle() async throws {
                 availableProtocols: ["soak.v1"]
             )
         )
-        _ = try pair.server.manager.receiveDatagramFrame(.datagram(try WebTransportDatagramSignaling.serialize(
-            sessionID: sessionID.rawValue,
-            payload: payload
-        )))
+        _ = try pair.server.manager.receiveDatagramFrame(
+            .datagram(
+                try WebTransportDatagramSignaling.serialize(
+                    sessionID: sessionID.rawValue,
+                    payload: payload
+                )))
         #expect(pair.server.manager.popDatagramPayload(sessionID: sessionID) == payload)
         _ = try pair.server.manager.receiveFlowControlCapsuleWithActions(
             sessionID: sessionID,

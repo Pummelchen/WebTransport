@@ -31,7 +31,9 @@ struct WebTransportClientCLI {
                     timeoutMilliseconds: options.timeoutMilliseconds
                 )
                 let session = result.sessionEstablished ? " session=established" : ""
-                print("network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) exchange=\(options.exchangeMode.rawValue) message=\"\(result.message)\"")
+                print(
+                    "network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) exchange=\(options.exchangeMode.rawValue) message=\"\(result.message)\""
+                )
                 return
             } catch {
                 writeStandardError("\(executable) network session failed: \(error)\n")
@@ -63,21 +65,23 @@ struct WebTransportClientCLI {
         }
 
         do {
-            let server = WebTransportServer(configuration: WebTransportServerConfiguration(
-                authority: "localhost",
-                path: "/wt",
-                origin: "https://localhost",
-                supportedProtocols: ["demo.v1"],
-                timeoutMilliseconds: 12_000
-            ))
-            let client = WebTransportClient(configuration: WebTransportClientConfiguration(
-                authority: "localhost",
-                path: "/wt",
-                origin: "https://localhost",
-                availableProtocols: ["demo.v1"],
-                trustPolicy: .localDevelopmentSelfSigned,
-                timeoutMilliseconds: 12_000
-            ))
+            let server = WebTransportServer(
+                configuration: WebTransportServerConfiguration(
+                    authority: "localhost",
+                    path: "/wt",
+                    origin: "https://localhost",
+                    supportedProtocols: ["demo.v1"],
+                    timeoutMilliseconds: 12_000
+                ))
+            let client = WebTransportClient(
+                configuration: WebTransportClientConfiguration(
+                    authority: "localhost",
+                    path: "/wt",
+                    origin: "https://localhost",
+                    availableProtocols: ["demo.v1"],
+                    trustPolicy: .localDevelopmentSelfSigned,
+                    timeoutMilliseconds: 12_000
+                ))
             let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
             async let served = listener.serveOne()
             let result = try await client.echo(to: listener.localEndpoint, message: "hello from WebTransportClient")
@@ -197,7 +201,8 @@ private struct NetworkClientOptions {
                 } else if argument.hasPrefix("--message=") {
                     message = String(argument.dropFirst("--message=".count))
                 } else if argument.hasPrefix("--timeout-ms="),
-                          let value = Int32(argument.dropFirst("--timeout-ms=".count)) {
+                    let value = Int32(argument.dropFirst("--timeout-ms=".count))
+                {
                     timeoutMilliseconds = value
                 } else if argument.hasPrefix("--transport=") {
                     transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))
