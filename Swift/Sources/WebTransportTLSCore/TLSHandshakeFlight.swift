@@ -44,10 +44,33 @@ public struct TLSHandshakeFlight: Equatable, Sendable {
 }
 
 public struct TLSCryptoStreamReassembler: Equatable, Sendable {
-    private var bytesByOffset: [UInt64: UInt8]
+    /// How many bytes of CRYPTO stream data may be held while waiting for the
+    /// gaps between them to be filled.
+    ///
+    /// CRYPTO frames carry an arbitrary offset and are processed before the
+    /// handshake has authenticated anything, so without a ceiling a peer can
+    /// scatter a few bytes across the offset space and make the receiver hold
+    /// them indefinitely. RFC 9000 section 7.5 requires a limit for exactly this
+    /// and provides CRYPTO_BUFFER_EXCEEDED to report it. A TLS handshake that
+    /// needs more than this is not one worth completing.
+    ///
+    /// Note that the cost per byte is far above one: each is held as its own
+    /// dictionary entry so that out-of-order arrival is easy to express, which
+    /// trades memory for simplicity. The ceiling is on the byte count, so the
+    /// real footprint is a multiple of it.
+    public static let defaultMaximumBufferedBytes = 64 * 1024
 
-    public init() {
+    private var bytesByOffset: [UInt64: UInt8]
+    public let maximumBufferedBytes: Int
+
+    public init(maximumBufferedBytes: Int = TLSCryptoStreamReassembler.defaultMaximumBufferedBytes) {
         self.bytesByOffset = [:]
+        self.maximumBufferedBytes = max(1, maximumBufferedBytes)
+    }
+
+    /// How many bytes are currently held.
+    public var bufferedByteCount: Int {
+        bytesByOffset.count
     }
 
     public mutating func append(offset: UInt64, data: Data) throws {
@@ -57,8 +80,16 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
 
         for (index, byte) in data.enumerated() {
             let absoluteOffset = offset + UInt64(index)
-            if let existing = bytesByOffset[absoluteOffset], existing != byte {
-                throw QUICCodecError.malformed("conflicting CRYPTO data overlap")
+            if let existing = bytesByOffset[absoluteOffset] {
+                guard existing == byte else {
+                    throw QUICCodecError.malformed("conflicting CRYPTO data overlap")
+                }
+                continue
+            }
+            guard bytesByOffset.count < maximumBufferedBytes else {
+                throw QUICCodecError.valueOutOfRange(
+                    "CRYPTO stream buffer exceeded \(maximumBufferedBytes) bytes"
+                )
             }
             bytesByOffset[absoluteOffset] = byte
         }
