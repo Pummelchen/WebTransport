@@ -1877,9 +1877,26 @@ private struct InteroperableQUICAcceptedConnection: Sendable {
 }
 
 private actor InteroperableQUICConnectionQueue {
+    /// A parked accept, tagged so its own caller can take it back out.
+    ///
+    /// `acceptSession` bounds the wait with a timeout, and a continuation that is only
+    /// cancelled is never resumed. Untagged, such an abandoned waiter stays at the head
+    /// of the queue, is handed the next accepted connection, and drops it, so the live
+    /// accept behind it never sees a connection.
+    private struct Waiter {
+        let id: UInt64
+        let continuation: CheckedContinuation<InteroperableQUICAcceptedConnection, Error>
+    }
+
     private var queue: [InteroperableQUICAcceptedConnection] = []
-    private var waiters: [CheckedContinuation<InteroperableQUICAcceptedConnection, Error>] = []
+    private var waiters: [Waiter] = []
+    private var nextWaiterID: UInt64 = 0
     private var failure: Error?
+
+    /// Delivered to parked accepts when the listener stops accepting.
+    static var listenerStopped: WebTransportNetworkRuntimeError {
+        .invalidTransport("listener is shutting down")
+    }
 
     func enqueue(_ accepted: InteroperableQUICAcceptedConnection) {
         guard failure == nil else {
@@ -1889,9 +1906,9 @@ private actor InteroperableQUICConnectionQueue {
             accepted.inboundTask.cancel()
             return
         }
-        if let continuation = waiters.first {
+        if let waiter = waiters.first {
             waiters.removeFirst()
-            continuation.resume(returning: accepted)
+            waiter.continuation.resume(returning: accepted)
         } else {
             queue.append(accepted)
         }
@@ -1905,9 +1922,24 @@ private actor InteroperableQUICConnectionQueue {
             queue.removeFirst()
             return accepted
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            waiters.append(continuation)
+        let id = nextWaiterID
+        nextWaiterID += 1
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiters.append(Waiter(id: id, continuation: continuation))
+            }
+        } onCancel: {
+            Task { await self.removeWaiter(id) }
         }
+    }
+
+    /// Detaches a waiter whose caller has stopped waiting.
+    ///
+    /// Only the entry is removed. The continuation is deliberately left parked: the
+    /// task that owned it has gone, so there is nowhere to deliver a value, and with
+    /// the entry gone it can no longer consume a connection.
+    func removeWaiter(_ id: UInt64) {
+        waiters.removeAll { $0.id == id }
     }
 
     func fail(_ error: Error) {
@@ -1915,7 +1947,7 @@ private actor InteroperableQUICConnectionQueue {
         let waiters = self.waiters
         self.waiters.removeAll()
         for waiter in waiters {
-            waiter.resume(throwing: error)
+            waiter.continuation.resume(throwing: error)
         }
         cancelQueued()
     }
@@ -1929,6 +1961,14 @@ private actor InteroperableQUICConnectionQueue {
         queue.removeAll()
         for accepted in abandoned {
             accepted.inboundTask.cancel()
+        }
+        // Parked accepts have to be woken as well. Shutdown previously left them
+        // blocking for their whole timeout, and each one that then expired became
+        // exactly the abandoned waiter described above.
+        let parked = waiters
+        waiters.removeAll()
+        for waiter in parked {
+            waiter.continuation.resume(throwing: Self.listenerStopped)
         }
     }
 }
