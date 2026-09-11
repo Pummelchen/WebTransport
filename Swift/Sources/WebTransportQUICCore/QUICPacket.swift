@@ -80,6 +80,18 @@ public struct QUICLongHeaderPacket: Equatable, Sendable {
         guard (first & 0x80) != 0 else {
             throw QUICCodecError.malformed("not a long header packet")
         }
+        // RFC 9000 section 17.2: "Packets that have the Fixed Bit set to 0 ... are not
+        // valid packets in this version and MUST be discarded." The short-header decoder
+        // already enforces this; without the same check here a long-header packet with
+        // the bit cleared would be processed despite being invalid.
+        guard (first & 0x40) != 0 else {
+            throw QUICCodecError.malformed("long header fixed bit is not set")
+        }
+        // RFC 9001 section 5.4: the two reserved bits must be zero after header
+        // protection is removed; a non-zero value is a PROTOCOL_VIOLATION.
+        guard (first & 0x0c) == 0 else {
+            throw QUICCodecError.malformed("long header reserved bits are not zero")
+        }
         guard let packetType = QUICPacketType(rawValue: (first >> 4) & 0x03) else {
             throw QUICCodecError.malformed("unknown long header packet type")
         }
@@ -193,6 +205,15 @@ public struct QUICRetryPacket: Equatable, Sendable {
         guard (first & 0x80) != 0 else {
             throw QUICCodecError.malformed("not a long header packet")
         }
+        // A Retry packet is a long header packet, so it carries the same Fixed Bit and
+        // reserved-bit requirements as any other: RFC 9000 section 17.2 for the Fixed
+        // Bit, RFC 9001 section 5.4 for the reserved bits.
+        guard (first & 0x40) != 0 else {
+            throw QUICCodecError.malformed("Retry packet fixed bit is not set")
+        }
+        guard (first & 0x0c) == 0 else {
+            throw QUICCodecError.malformed("Retry packet reserved bits are not zero")
+        }
         guard ((first >> 4) & 0x03) == QUICPacketType.retry.rawValue else {
             throw QUICCodecError.malformed("not a Retry packet")
         }
@@ -208,8 +229,11 @@ public struct QUICRetryPacket: Equatable, Sendable {
             throw QUICCodecError.valueOutOfRange("source connection ID length exceeds 20")
         }
         let sourceConnectionID = try cursor.readBytes(count: sourceLength)
-        guard cursor.remaining >= 16 else {
-            throw QUICCodecError.truncated(needed: 16, available: cursor.remaining)
+        // RFC 9000 section 17.2.5: "A client MUST discard a Retry packet with a
+        // zero-length Retry Token field." Sixteen bytes are the integrity tag, so
+        // anything beyond that is the token and it must not be empty.
+        guard cursor.remaining > 16 else {
+            throw QUICCodecError.malformed("Retry packet has a zero-length token")
         }
         let token = try cursor.readBytes(count: cursor.remaining - 16)
         let tag = try cursor.readBytes(count: 16)

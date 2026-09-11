@@ -208,3 +208,86 @@ func transportParameterValidationEnforcesRFC9000Section18Point2() throws {
     }
     try conforming.validated()
 }
+
+// MARK: - Long header validity
+
+/// RFC 9000 section 17.2: a packet whose Fixed Bit is zero "is not a valid packet in
+/// this version and MUST be discarded". RFC 9001 section 5.4 requires the reserved bits
+/// to be zero once header protection is removed. The short-header decoder enforced the
+/// Fixed Bit but the long-header path enforced neither.
+private func longHeaderPacket(
+    fixedBit: Bool,
+    reservedBits: UInt8 = 0,
+    packetType: UInt8 = 0
+) -> Data {
+    var first: UInt8 = 0x80  // long form
+    if fixedBit {
+        first |= 0x40
+    }
+    first |= (packetType & 0x03) << 4
+    first |= (reservedBits & 0x03) << 2
+    var data = Data([first])
+    data.append(contentsOf: [0x00, 0x00, 0x00, 0x01])  // version 1
+    data.append(0x00)  // destination connection ID length
+    data.append(0x00)  // source connection ID length
+    data.append(0x00)  // token length
+    data.append(0x01)  // length varint
+    data.append(0x00)  // packet number
+    return data
+}
+
+@Test
+func longHeaderRejectsClearedFixedBitAndReservedBits() throws {
+    // A well-formed packet is still accepted.
+    _ = try QUICLongHeaderPacket.decode(longHeaderPacket(fixedBit: true))
+
+    #expect(throws: (any Error).self, "a cleared Fixed Bit must be rejected") {
+        _ = try QUICLongHeaderPacket.decode(longHeaderPacket(fixedBit: false))
+    }
+    for reserved: UInt8 in [0b01, 0b10, 0b11] {
+        #expect(throws: (any Error).self, "reserved bits \(reserved) must be rejected") {
+            _ = try QUICLongHeaderPacket.decode(longHeaderPacket(fixedBit: true, reservedBits: reserved))
+        }
+    }
+}
+
+// MARK: - Retry packet validity
+
+/// RFC 9000 section 17.2.5: "A client MUST discard a Retry packet with a zero-length
+/// Retry Token field." A Retry packet is also a long header packet, so it carries the
+/// same Fixed Bit and reserved-bit requirements.
+private func retryPacket(
+    tokenByteCount: Int,
+    fixedBit: Bool = true,
+    reservedBits: UInt8 = 0
+) -> Data {
+    var first: UInt8 = 0x80
+    if fixedBit {
+        first |= 0x40
+    }
+    first |= (QUICPacketType.retry.rawValue & 0x03) << 4
+    first |= (reservedBits & 0x03) << 2
+    var data = Data([first])
+    data.append(contentsOf: [0x00, 0x00, 0x00, 0x01])  // version 1
+    data.append(0x00)  // destination connection ID length
+    data.append(0x00)  // source connection ID length
+    data.append(Data(repeating: 0xaa, count: tokenByteCount))
+    data.append(Data(repeating: 0x11, count: 16))  // integrity tag
+    return data
+}
+
+@Test
+func retryPacketRejectsZeroLengthTokenAndInvalidHeaderBits() throws {
+    let valid = try QUICRetryPacket.decode(retryPacket(tokenByteCount: 4))
+    #expect(valid.retryToken.count == 4)
+
+    #expect(throws: (any Error).self, "a zero-length Retry token must be rejected") {
+        _ = try QUICRetryPacket.decode(retryPacket(tokenByteCount: 0))
+    }
+    #expect(throws: (any Error).self, "a cleared Fixed Bit must be rejected") {
+        _ = try QUICRetryPacket.decode(retryPacket(tokenByteCount: 4, fixedBit: false))
+    }
+    #expect(throws: (any Error).self, "non-zero reserved bits must be rejected") {
+        _ = try QUICRetryPacket.decode(retryPacket(tokenByteCount: 4, reservedBits: 0b11))
+    }
+}

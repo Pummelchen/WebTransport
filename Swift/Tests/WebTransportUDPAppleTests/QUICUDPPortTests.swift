@@ -90,3 +90,29 @@ func udpPortCancellationObservedWithShortReceiveTimeout() async throws {
     let observedCancellation = await task.value
     #expect(observedCancellation)
 }
+
+/// A datagram larger than the caller's buffer must be reported, not silently truncated.
+///
+/// The receive path called `recvfrom` without `MSG_TRUNC`, so an oversized datagram came
+/// back as a short payload with a valid source and no indication — a QUIC parser would
+/// then try to read a packet that was never sent.
+@Test
+func udpReceiveReportsADatagramLargerThanItsBuffer() throws {
+    let server = try QUICUDPPort()
+    let client = try QUICUDPPort()
+
+    let oversized = Data(repeating: 0x5a, count: 2_048)
+    try client.send(oversized, to: server.localEndpoint)
+
+    // A buffer that cannot hold it is refused rather than truncated.
+    #expect(throws: QUICUDPError.self) {
+        _ = try server.receive(maximumBytes: 512, timeoutMilliseconds: 1_000)
+    }
+
+    // A buffer that can hold it still succeeds, so the check does not reject valid input.
+    // The first datagram was consumed by the failed receive, so send again.
+    try client.send(oversized, to: server.localEndpoint)
+    let (bytes, _) = try server.receive(maximumBytes: 4_096, timeoutMilliseconds: 1_000)
+    #expect(bytes.count == oversized.count)
+    #expect(bytes == oversized)
+}

@@ -16,6 +16,7 @@ public enum QUICUDPError: Error, CustomStringConvertible, Sendable {
     case timeout
     case invalidAddress
     case invalidReceiveConfiguration(String)
+    case datagramExceedsReceiveBuffer(actual: Int, buffer: Int)
 
     public var description: String {
         switch self {
@@ -25,6 +26,8 @@ public enum QUICUDPError: Error, CustomStringConvertible, Sendable {
             "\(operation) failed: \(unsafe String(cString: strerror(code)))"
         case .timeout:
             "UDP receive timed out"
+        case .datagramExceedsReceiveBuffer(let actual, let buffer):
+            "received a \(actual)-byte datagram into a \(buffer)-byte buffer; it was truncated"
         case .invalidAddress:
             "invalid UDP address"
         case .invalidReceiveConfiguration(let message):
@@ -152,22 +155,45 @@ public final class QUICUDPPort: @unchecked Sendable {
         }
 
         var storage = sockaddr_storage()
-        var storageLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
         var buffer = [UInt8](repeating: 0, count: maximumBytes)
-        // SAFETY: Both buffers remain alive throughout recvfrom, their declared
-        // lengths match writable storage, and maximumBytes was range-checked.
-        let received = try unsafe buffer.withUnsafeMutableBytes { bytes in
-            try unsafe withUnsafeMutablePointer(to: &storage) { pointer in
-                try unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                    guard let baseAddress = bytes.baseAddress else {
-                        throw QUICUDPError.invalidReceiveConfiguration("receive buffer is empty")
+        // `recvmsg` rather than `recvfrom`, because it is the only form that reports
+        // truncation on this platform. macOS documents `MSG_TRUNC` as "data discarded
+        // before delivery": passing it to `recvfrom` does not return the datagram's real
+        // length, but `recvmsg` sets it in `msg_flags` when the datagram did not fit.
+        // Without this an oversized datagram arrives as a short payload with a valid
+        // source and no indication, which for QUIC means parsing a packet that was never
+        // sent.
+        let (received, truncated) = try unsafe buffer.withUnsafeMutableBytes { bytes -> (Int, Bool) in
+            guard let baseAddress = bytes.baseAddress else {
+                throw QUICUDPError.invalidReceiveConfiguration("receive buffer is empty")
+            }
+            var iovec = unsafe iovec(iov_base: baseAddress, iov_len: bytes.count)
+            // SAFETY: `storage`, `iovec` and `message` all outlive the call, and each
+            // pointer in `message` is derived from one of them for the duration.
+            return try unsafe withUnsafeMutablePointer(to: &storage) { storagePointer in
+                try unsafe withUnsafeMutablePointer(to: &iovec) { iovecPointer in
+                    var message = unsafe msghdr(
+                        msg_name: UnsafeMutableRawPointer(storagePointer),
+                        msg_namelen: socklen_t(MemoryLayout<sockaddr_storage>.size),
+                        msg_iov: iovecPointer,
+                        msg_iovlen: 1,
+                        msg_control: nil,
+                        msg_controllen: 0,
+                        msg_flags: 0
+                    )
+                    let result = unsafe recvmsg(descriptor, &message, 0)
+                    guard result >= 0 else {
+                        throw QUICUDPError.posix(operation: "recvmsg", code: errno)
                     }
-                    return unsafe recvfrom(descriptor, baseAddress, bytes.count, 0, sockaddrPointer, &storageLength)
+                    return (result, unsafe (message.msg_flags & MSG_TRUNC) != 0)
                 }
             }
         }
-        guard received >= 0 else {
-            throw QUICUDPError.posix(operation: "recvfrom", code: errno)
+        guard !truncated else {
+            throw QUICUDPError.datagramExceedsReceiveBuffer(
+                actual: received,
+                buffer: buffer.count
+            )
         }
 
         let endpoint = try Self.endpoint(from: storage)
