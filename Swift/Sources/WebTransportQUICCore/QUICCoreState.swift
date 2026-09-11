@@ -824,9 +824,21 @@ public struct QUICConnectionCloseState: Equatable, Sendable {
 }
 
 extension QUICFrame {
+    /// Whether losing this frame obliges the sender to send its content again.
+    ///
+    /// `DATAGRAM` is deliberately excluded. RFC 9221 section 5.2 states that DATAGRAM
+    /// frames "are not retransmitted upon loss detection", because resending one turns
+    /// an unreliable datagram into a delayed duplicate. A caller that resends
+    /// everything in ``QUICAckProcessingResult/retransmittableFrames`` would otherwise
+    /// deliver the same datagram twice.
+    ///
+    /// `PING` and `PADDING` are excluded because they carry no content to repair.
+    /// RFC 9000 section 13.3 notes that a lost PING needs no replacement: if another
+    /// ack-eliciting packet is outstanding the peer still acknowledges it, and if not,
+    /// the sender's own PTO produces a new one.
     public var isRetransmittable: Bool {
         switch self {
-        case .padding, .ack, .connectionClose:
+        case .padding, .ping, .ack, .connectionClose, .datagram:
             false
         default:
             true

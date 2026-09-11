@@ -246,8 +246,13 @@ public enum QUICFrame: Equatable, Sendable {
             let sequence = try QUICVarInt.decode(from: &cursor)
             let retirePriorTo = try QUICVarInt.decode(from: &cursor)
             let length = Int(try cursor.readUInt8())
-            guard length <= 20 else {
-                throw QUICCodecError.valueOutOfRange("connection ID length exceeds 20")
+            // RFC 9000 section 19.15: "Values less than 1 and greater than 20 are
+            // invalid and MUST be treated as a connection error of type
+            // FRAME_ENCODING_ERROR."
+            guard (1...20).contains(length) else {
+                throw QUICCodecError.valueOutOfRange(
+                    "connection ID length must be 1...20, got \(length)"
+                )
             }
             return .newConnectionID(
                 sequence: sequence,

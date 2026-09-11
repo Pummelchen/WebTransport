@@ -364,3 +364,71 @@ func ackTrackerStillRejectsDuplicatesInsideTheWindow() throws {
     #expect(tracker.recordReceived(packetNumber: 7, nowMicros: 2) == false)
     #expect(tracker.largestReceived == 7)
 }
+
+// MARK: - Retransmission classification
+
+/// RFC 9221 section 5.2: DATAGRAM frames "are not retransmitted upon loss detection".
+/// RFC 9000 section 13.3: a lost PING or PADDING frame requires no repair.
+///
+/// A caller resends everything in `retransmittableFrames`, so classifying either of
+/// these as retransmittable would re-send an unreliable datagram and deliver it twice.
+@Test
+func lossRecoveryDoesNotRetransmitUnreliableOrEmptyFrames() throws {
+    var recovery = QUICLossRecovery(packetThreshold: 3)
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 1,
+            sentTimeMicros: 100,
+            bytes: 10,
+            frames: [.datagram(Data("unreliable".utf8)), .ping, .padding]
+        ))
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 5,
+            sentTimeMicros: 100,
+            bytes: 10,
+            frames: [.ping]
+        ))
+
+    // Acknowledge 5 so that 1 is declared lost by the packet threshold.
+    let result = try recovery.processAck(
+        .ack(largestAcknowledged: 5, ackDelay: 0, firstAckRange: 0, ranges: []),
+        in: .applicationData
+    )
+
+    #expect(result.lost.map(\.packetNumber) == [1])
+    #expect(
+        result.retransmittableFrames.isEmpty,
+        "lost packet carried only DATAGRAM/PING/PADDING, none of which are retransmitted; got \(result.retransmittableFrames)"
+    )
+}
+
+/// A lost packet carrying real stream data is still retransmitted.
+@Test
+func lossRecoveryStillRetransmitsStreamData() throws {
+    var recovery = QUICLossRecovery(packetThreshold: 3)
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 1,
+            sentTimeMicros: 100,
+            bytes: 20,
+            frames: [.stream(id: 0, offset: 0, fin: false, data: Data("keep".utf8))]
+        ))
+    recovery.recordSent(
+        QUICSentPacket(
+            packetNumberSpace: .applicationData,
+            packetNumber: 5,
+            sentTimeMicros: 100,
+            bytes: 20,
+            frames: [.ping]
+        ))
+
+    let result = try recovery.processAck(
+        .ack(largestAcknowledged: 5, ackDelay: 0, firstAckRange: 0, ranges: []),
+        in: .applicationData
+    )
+    #expect(result.retransmittableFrames == [.stream(id: 0, offset: 0, fin: false, data: Data("keep".utf8))])
+}

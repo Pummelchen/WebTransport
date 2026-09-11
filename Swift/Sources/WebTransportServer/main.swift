@@ -52,6 +52,16 @@ struct WebTransportServerCLI {
                         "network \(result.transport.rawValue) session served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\""
                     )
                 }
+                // Serving nothing is a failure, not a success. Every session attempt
+                // that timed out or errored has already been reported; returning zero
+                // here would tell a script or a CI job that the run succeeded when no
+                // peer was ever served.
+                if results.isEmpty {
+                    writeStandardError(
+                        "\(executable) served no sessions and returned no results\n"
+                    )
+                    Foundation.exit(1)
+                }
                 return
             } catch {
                 writeStandardError("\(executable) network session failed: \(error)\n")
@@ -103,6 +113,16 @@ private func writeStandardError(_ message: String) {
 }
 
 private struct NetworkServerOptions {
+    /// Upper bound accepted for `--max-sessions`.
+    ///
+    /// The value sizes an array of `Task`s, one per session, so it has to be bounded:
+    /// without a cap an argument like `--max-sessions=1000000` commits memory
+    /// proportional to the request and the process can be made to exhaust the machine
+    /// before it serves anything. The bound is far above any realistic test run and
+    /// matches the listener's own concurrency ceiling, so it cannot mask a legitimate
+    /// configuration.
+    static let maximumSessions = 4_096
+
     var endpoint: WebTransportNetworkEndpoint
     var timeoutMilliseconds: Int32
     var transport: WebTransportNetworkTransport
@@ -151,8 +171,12 @@ private struct NetworkServerOptions {
                 transport = try WebTransportNetworkTransport.parse(arguments[index])
             case "--max-sessions":
                 index += 1
-                guard index < arguments.count, let value = Int(arguments[index]), value > 0 else {
-                    throw WebTransportNetworkRuntimeError.invalidPayload
+                guard index < arguments.count, let value = Int(arguments[index]),
+                    (1...Self.maximumSessions).contains(value)
+                else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport(
+                        "--max-sessions requires an integer in 1...\(Self.maximumSessions)"
+                    )
                 }
                 maxSessions = value
             case "--authority":
@@ -207,7 +231,8 @@ private struct NetworkServerOptions {
                 } else if argument.hasPrefix("--transport=") {
                     transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))
                 } else if argument.hasPrefix("--max-sessions="),
-                    let value = Int(argument.dropFirst("--max-sessions=".count)), value > 0
+                    let value = Int(argument.dropFirst("--max-sessions=".count)),
+                    (1...Self.maximumSessions).contains(value)
                 {
                     maxSessions = value
                 } else if argument.hasPrefix("--authority=") {

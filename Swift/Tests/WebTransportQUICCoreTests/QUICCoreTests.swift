@@ -159,3 +159,37 @@ func packetNumberReconstructionFollowsExpectedWindow() throws {
     #expect(try QUICPacketNumber.decodeTruncated(0x9b32, byteCount: 2, largestAcknowledged: 0xa82e) == 0x9b32)
     #expect(try QUICPacketNumber.decodeTruncated(0x0000, byteCount: 2, largestAcknowledged: 0xffff) == 0x1_0000)
 }
+
+// MARK: - Frame encoding validation
+
+/// RFC 9000 section 19.15: a NEW_CONNECTION_ID length "less than 1 [or] greater than
+/// 20" is a FRAME_ENCODING_ERROR. A zero-length CID must be rejected rather than
+/// accepted as an identity with an empty connection ID.
+@Test
+func newConnectionIDRejectsZeroLengthConnectionID() throws {
+    var bytes = Data([0x18, 0x01, 0x00, 0x00])  // type 0x18, sequence 1, retire_prior_to 0, length 0
+    bytes.append(Data(repeating: 0xab, count: 16))  // stateless reset token
+
+    var cursor = QUICByteCursor(bytes)
+    #expect(throws: (any Error).self) {
+        _ = try QUICFrame.decode(from: &cursor)
+    }
+}
+
+/// The boundary values that are valid must still be accepted: 1 and 20.
+@Test
+func newConnectionIDAcceptsBoundaryLengths() throws {
+    for length in [1, 20] {
+        var bytes = Data([0x18, 0x01, 0x00, UInt8(length)])
+        bytes.append(Data(repeating: 0xcd, count: length))
+        bytes.append(Data(repeating: 0xab, count: 16))
+
+        var cursor = QUICByteCursor(bytes)
+        let frame = try QUICFrame.decode(from: &cursor)
+        guard case .newConnectionID(_, _, let connectionID, _) = frame else {
+            Issue.record("expected a newConnectionID frame for length \(length)")
+            continue
+        }
+        #expect(connectionID.count == length)
+    }
+}

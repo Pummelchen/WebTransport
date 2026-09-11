@@ -923,3 +923,19 @@ private enum HexError: Error {
     case invalidLength
     case invalidByte
 }
+
+// MARK: - HKDF output bounds
+
+/// RFC 5869 section 2.3 caps L at 255 * HashLen. The schedule only uses SHA-256, so
+/// the ceiling is 8160 bytes; above it the block counter wraps and the output silently
+/// stops being the RFC's HKDF stream.
+@Test
+func hkdfExpandLabelRejectsOutputBeyondTheRFCBound() throws {
+    #expect(try TLS13KeySchedule.hkdfExpandLabel(secret: Data(repeating: 0x0b, count: 32), label: "test", outputByteCount: 8160).count == 8160)
+    #expect(throws: (any Error).self) {
+        _ = try TLS13KeySchedule.hkdfExpandLabel(secret: Data(repeating: 0x0b, count: 32), label: "test", outputByteCount: 8161)
+    }
+    #expect(throws: (any Error).self) {
+        _ = try TLS13KeySchedule.hkdfExpandLabel(secret: Data(repeating: 0x0b, count: 32), label: "test", outputByteCount: 65535)
+    }
+}

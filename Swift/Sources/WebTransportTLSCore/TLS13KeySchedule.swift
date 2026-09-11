@@ -33,8 +33,14 @@ public enum TLS13KeySchedule {
         context: Data = Data(),
         outputByteCount: Int
     ) throws -> Data {
-        guard outputByteCount >= 0, outputByteCount <= UInt16.max else {
-            throw QUICCodecError.valueOutOfRange("HKDF output too large")
+        // RFC 5869 section 2.3 caps L at 255 * HashLen. The schedule only uses SHA-256,
+        // so anything above 8160 bytes cannot be produced by the defined construction:
+        // the block counter would wrap to zero and the output would silently stop being
+        // the RFC's HKDF stream while still looking well-formed to a caller.
+        guard outputByteCount >= 0, outputByteCount <= 255 * sha256Length else {
+            throw QUICCodecError.valueOutOfRange(
+                "HKDF output must be 0...\(255 * sha256Length) bytes for SHA-256 (RFC 5869 section 2.3)"
+            )
         }
 
         let fullLabel = "tls13 " + label
