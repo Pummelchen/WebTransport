@@ -8,6 +8,25 @@ The project uses semantic versioning.
 
 Fixed:
 
+- An accept that times out no longer consumes the next connection. `acceptSession` bounds its wait on the connection queue with a timeout, and a cancelled `CheckedContinuation` is never resumed, so the abandoned waiter stayed at the head of the queue and was handed the next accepted connection — which was then dropped. Reachable from the documented accept loop, `while true { try await acceptSession() }`, whose one-second default plants an abandoned waiter on every idle timeout; once connections arrive slower than that, every connection is lost. The queue now tags each waiter so a caller that stops waiting removes its own entry.
+
+- Shutdown now wakes a parked accept with a shutdown error instead of leaving it to block for its full timeout. That timeout was how the abandoned waiters above were created, so the two defects compounded.
+
+- `connectSession` cancels its inbound handler task on every failure path, not only when the peer rejects the session. The handler strongly retains the connection and Network.framework exposes no `cancel()`, so a task left running kept the connection and its socket alive. `acceptSession` already did this.
+
+- DATAGRAM and PING frames are no longer classified as retransmittable. RFC 9221 section 5.2 states DATAGRAM frames are not retransmitted on loss detection, and RFC 9000 section 13.3 notes a lost PING needs no repair; a caller resending everything in `retransmittableFrames` re-sent an unreliable datagram and delivered it twice.
+
+- `NEW_CONNECTION_ID` rejects a zero-length connection ID. RFC 9000 section 19.15 makes anything outside 1...20 a `FRAME_ENCODING_ERROR`, and only the upper bound was checked, so an empty connection ID was accepted and stored as a usable identity.
+
+- `HKDF-Expand` is capped at `255 * HashLen` (8,160 bytes for SHA-256) as RFC 5869 section 2.3 requires. The guard allowed up to `UInt16.max`, so a larger request wrapped the block counter to zero and returned bytes that look well-formed but are not the RFC's stream.
+
+- `--max-sessions` is bounded at 4,096. The value sizes an array of tasks, so `--max-sessions=1000000` committed memory proportional to the request until the process was killed; the parser accepted any positive integer.
+
+- `--listen` exits non-zero when it served no sessions. It previously exited zero after every session attempt failed, which a script or CI job reads as success.
+
+## [1.3.5] - 2026-08-16
+Fixed:
+
 - A PKCS#12 bundle whose certificate carries explicit elliptic-curve parameters — which is what the macOS system `openssl` (LibreSSL 3.3.6) emits for an EC key — no longer terminates the process. `SecPKCS12Import` raises an Objective-C `NSInvalidArgumentException` in that case rather than returning a status, and because Swift cannot catch Objective-C exceptions the failure escaped every `do`/`catch` and aborted the host application. The import now runs behind an exception boundary in a new `WebTransportSecurityShim` target, so `listen(on:)` throws a `WebTransportNetworkRuntimeError` naming the cause instead of killing the process. Reported in issue #20. Named-curve EC identities and RSA identities are unaffected; a bundle that previously crashed now reports: regenerate the certificate against a named curve, or use RSA.
 
 - `ServerIdentityResolver` now refuses an identity whose private key cannot be read, with the reason attached, rather than handing it to Network.framework and deferring the failure to the first peer handshake.
