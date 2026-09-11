@@ -173,6 +173,19 @@ public struct WebTransportQUICClient: Sendable {
         }
         await inboundRegistration.waitUntilEntered()
 
+        // Cancel the inbound handler on every failure path, not only the
+        // rejected-session one below. The handler task strongly retains the connection,
+        // and Network.framework exposes no `cancel()` — only `deinit` — so a task left
+        // running keeps the connection and its socket alive for the process lifetime.
+        // `acceptSession` already does this on its error paths; `defer` keeps it out of
+        // the body and clear of the rest of this function's indentation.
+        var handedBackSession = false
+        defer {
+            if !handedBackSession {
+                inboundTask.cancel()
+            }
+        }
+
         try await InteroperableQUICHelpers.waitForReady(
             connection: connection,
             role: "client",
@@ -279,6 +292,7 @@ public struct WebTransportQUICClient: Sendable {
         }
         let sessionID = try WebTransportSessionID.fromRequestStreamID(requestStreamID)
 
+        handedBackSession = true
         return WebTransportNetworkSession(
             connection: connection,
             inboundStreams: inboundStreams,
