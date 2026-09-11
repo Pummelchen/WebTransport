@@ -6,7 +6,10 @@ import WebTransportQUICCore
 import WebTransportSecurityShim
 import WebTransportTLSCore
 
-/// Private-key kind for an injected server identity supplied as raw DER.
+/// Private-key kind for an injected server identity supplied as Apple key material.
+///
+/// The kind is paired with a key supplied through
+/// ``WebTransportServerIdentity/certificateChain(chainDER:privateKeyDER:keyKind:)``.
 public enum WebTransportPrivateKeyKind: Equatable, Sendable {
     case ellipticCurveP256
     case ellipticCurveP384
@@ -57,9 +60,13 @@ public enum WebTransportPrivateKeyKind: Equatable, Sendable {
 ///   names its elliptic curve. macOS cannot build an identity from a certificate
 ///   whose ``SubjectPublicKeyInfo`` carries explicit curve parameters instead of a
 ///   named-curve OID. This is easy to hit by accident: the macOS system
-///   `/usr/bin/openssl` is LibreSSL, which emits the explicit form for an EC key,
-///   and generates the private key in Apple's raw representation, which is a 65-byte
-///   uncompressed point for P-256. An RSA identity avoids all of this.
+///   `/usr/bin/openssl` is LibreSSL, which emits the explicit form for an EC key, so
+///   the most obvious self-signed EC command on this platform produces a bundle that
+///   this runtime cannot import. An RSA identity avoids the issue entirely, because
+///   there is no curve encoding to get wrong.
+///
+///   Separately, ``certificateChain(chainDER:privateKeyDER:keyKind:)`` also requires
+///   Apple's private-key representation rather than DER; see that case for the sizes.
 public enum WebTransportServerIdentity: Equatable, Sendable {
     /// Ephemeral self-signed identity generated in memory. Loopback binds only.
     ///
@@ -71,7 +78,32 @@ public enum WebTransportServerIdentity: Equatable, Sendable {
     /// PKCS#12 bundle containing the leaf certificate, its chain, and the private key.
     case pkcs12(data: Data, passphrase: String)
 
-    /// Explicit DER certificate chain (leaf first) with a matching private key.
+    /// Explicit certificate chain (leaf first) with a matching private key.
+    ///
+    /// - Important: `privateKeyDER` must be the key in the representation Apple's
+    ///   `SecKeyCreateWithData` accepts — the bytes `SecKeyCopyExternalRepresentation`
+    ///   returns for that **private** key. Despite the parameter name it is **not** the
+    ///   DER that `openssl` writes, and it is not the public key export either. For EC
+    ///   it is Apple's raw private form, `0x04` followed by X, Y, and the private
+    ///   scalar: 97 bytes for P-256, 145 for P-384, 199 for P-521. For RSA it is PKCS#1
+    ///   `RSAPrivateKey`, about 1.2 KB for a 2,048-bit key. A key in the `openssl`
+    ///   forms is rejected, and the thrown error names the expected form and length.
+    ///
+    ///   To obtain the bytes Apple expects, export them from a key that already works:
+    ///
+    ///   ```swift
+    ///   let attributes: [CFString: Any] = [
+    ///       kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
+    ///       kSecAttrKeySizeInBits: 256,
+    ///       kSecAttrIsPermanent: false,
+    ///   ]
+    ///   let key = SecKeyCreateRandomKey(attributes as CFDictionary, nil)!
+    ///   let privateKeyDER = SecKeyCopyExternalRepresentation(key, nil)! as Data
+    ///   ```
+    ///
+    ///   If you have a PEM or DER key from `openssl`, importing it through
+    ///   ``pkcs12(data:passphrase:)`` instead is usually the simpler path, provided
+    ///   the certificate names its curve.
     case certificateChain(chainDER: [Data], privateKeyDER: Data, keyKind: WebTransportPrivateKeyKind)
 
     var isDevelopmentSelfSigned: Bool {
@@ -163,14 +195,13 @@ enum ServerIdentityResolver {
         var rawItems: CFArray?
         var status: OSStatus = errSecSuccess
         var exceptionName: UnsafePointer<CChar>?
-        var exceptionReason: UnsafePointer<CChar>?
 
         // SAFETY: Security.framework writes an optional retained CFArray to the
         // first out-parameter and leaves it nil on failure; ownership transfers to
         // `rawItems` once. The remaining out-parameters are written by the shim
-        // before it returns; both optional pointers are nil unless an exception was
-        // caught, and are copied into Swift strings immediately below so that no
-        // C pointer escapes this scope.
+        // before it returns; `exceptionName` is nil unless an exception was caught,
+        // and is copied into a Swift string immediately below so that no C pointer
+        // escapes this scope.
         //
         // The import runs behind an Objective-C exception boundary. Security.framework
         // raises an `NSException` — unrecoverable in Swift, and fatal because it
@@ -183,28 +214,26 @@ enum ServerIdentityResolver {
             options as CFDictionary,
             &rawItems,
             &status,
-            &exceptionName,
-            &exceptionReason
+            &exceptionName
         )
 
         if raisedException != 0 {
-            // The shim copies the exception text, so this is a plain Swift String by
-            // the time it reaches the error message.
-            var name = "NSException"
+            // Only the exception name is carried into the public error; the reason is
+            // deliberately dropped. It is a fixed string from Security.framework that
+            // says nothing a caller can act on, and the trust rules keep
+            // framework-supplied text out of public errors. What a caller needs is the
+            // cause and the remedy, which this message states.
+            var name = ""
             if let pointer = unsafe exceptionName {
                 name = unsafe String(cString: pointer)
             }
-            var reason = ""
-            if let pointer = unsafe exceptionReason {
-                reason = unsafe String(cString: pointer)
-            }
             throw WebTransportNetworkRuntimeError.invalidTransport(
                 """
-                PKCS#12 identity could not be constructed: Security.framework raised \
-                \(name)\(reason.isEmpty ? "" : " (\(reason))"). This usually means the \
-                bundle's certificate uses explicit elliptic-curve parameters rather than \
-                a named curve, which this platform cannot import. Regenerate the \
-                certificate against a named curve (for example with \
+                PKCS#12 identity could not be constructed: Security.framework could not \
+                build the identity from this bundle\(name.isEmpty ? "" : ", raising \(name)"). \
+                This usually means the bundle's certificate uses explicit elliptic-curve \
+                parameters rather than a named curve, which this platform cannot import. \
+                Regenerate the certificate against a named curve (for example with \
                 `openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256` using a tool \
                 that emits a named curve, or convert with \
                 `openssl ec -param_enc named_curve`), or use an RSA identity.
@@ -220,11 +249,31 @@ enum ServerIdentityResolver {
         guard let items = rawItems as? [[CFString: Any]], let first = items.first else {
             throw WebTransportNetworkRuntimeError.invalidTransport("PKCS#12 bundle contained no items")
         }
-        guard let identity = first[kSecImportItemIdentity] as! SecIdentity? else {
+        // Read the identity without a forced cast. Security.framework returns a
+        // `SecIdentity` under this key when the bundle has one, and omits the key
+        // otherwise. An unchecked `as!` on a value whose shape this code does not
+        // control would be a crash waiting to happen in the trust path, so the type
+        // is verified before the reference is used.
+        //
+        // Note that `as? SecIdentity` is not usable here: the compiler treats a
+        // conditional downcast to a CoreFoundation type as infallible, so it cannot
+        // express the check.
+        guard let identityValue = first[kSecImportItemIdentity] else {
             throw WebTransportNetworkRuntimeError.invalidTransport(
                 "PKCS#12 bundle contained no identity (certificate plus private key)"
             )
         }
+        // SAFETY: `SecIdentity` is a CoreFoundation object whose Swift type is a class
+        // reference, and the type-identifier comparison below is the documented way to
+        // ask whether a value is an identity. Once it holds, the unchecked downcast
+        // cannot produce a value of the wrong type.
+        let identityTypeID = SecIdentityGetTypeID()
+        guard CFGetTypeID(identityValue as CFTypeRef) == identityTypeID else {
+            throw WebTransportNetworkRuntimeError.invalidTransport(
+                "PKCS#12 bundle entry under the identity key is not a SecIdentity"
+            )
+        }
+        let identity = unsafe unsafeDowncast(identityValue as AnyObject, to: SecIdentity.self)
 
         let chain = (first[kSecImportItemCertChain] as? [SecCertificate]) ?? []
         return try finish(identity: identity, chain: chain)

@@ -39,8 +39,8 @@ extern "C" {
 /// a log and distinct from the four-character codes Security.framework returns.
 extern const int32_t WTSecPKCS12ImportExceptionStatus;
 
-/// Calls `SecPKCS12Import`, converting an Objective-C exception into a status
-/// code and copies of the exception text instead of letting it abort the process.
+/// Calls `SecPKCS12Import`, converting an Objective-C exception into a status code
+/// instead of letting it abort the process.
 ///
 /// Results are returned through out-parameters rather than a C struct because
 /// Swift, with strict memory safety enabled, treats an imported C struct as an
@@ -51,10 +51,16 @@ extern const int32_t WTSecPKCS12ImportExceptionStatus;
 /// `SecPKCS12Import`: `*outItems` follows the Create Rule and the caller owns it.
 /// On the exception path `*outItems` is set to NULL.
 ///
-/// `outExceptionName` and `outExceptionReason` are optional (NULL may be passed);
-/// when supplied they receive the exception text when one was raised, or NULL
-/// otherwise. The strings are owned by the shim and remain valid until the next
-/// call on the same thread, so a caller must copy anything it needs to retain.
+/// The exception name is surfaced through `outExceptionName` so a caller can say
+/// which exception was raised. The reason is not: it is a fixed string emitted by
+/// Security.framework rather than an input-dependent value, so it carries nothing a
+/// caller can act on, and the project's trust rules keep framework-supplied text out
+/// of public errors.
+///
+/// `outExceptionName` is optional (NULL may be passed). When supplied it receives the
+/// exception name when one was raised, or NULL otherwise. The string is owned by the
+/// shim and remains valid until the next call on the same thread, so a caller must
+/// copy anything it needs to retain.
 ///
 /// `outItems` carries `CF_RETURNS_RETAINED` so the imported Swift signature takes
 /// a plain `CFArray?` rather than an `Unmanaged<CFArray>?`.
@@ -65,8 +71,7 @@ int32_t WTSecPKCS12ImportCatchingExceptions(
     CFDictionaryRef _Nonnull options,
     CFArrayRef _Nullable * _Nonnull CF_RETURNS_RETAINED outItems,
     OSStatus * _Nullable outStatus,
-    const char * _Nullable * _Nullable outExceptionName,
-    const char * _Nullable * _Nullable outExceptionReason);
+    const char * _Nullable * _Nullable outExceptionName);
 
 #ifdef __cplusplus
 }

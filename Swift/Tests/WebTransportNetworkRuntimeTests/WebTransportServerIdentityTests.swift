@@ -270,6 +270,19 @@ func pkcs12WithExplicitCurveParametersThrowsInsteadOfTerminating() throws {
     #expect(message.contains("could not be constructed"))
     #expect(message.contains("explicit elliptic-curve parameters"))
     #expect(message.contains("named curve"))
+    // The exception name is useful and stable, so it is reported.
+    #expect(message.contains("NSInvalidArgumentException"))
+    // The exception reason is not, and the trust rules keep framework-supplied text
+    // out of public errors. Pin that so a future change does not quietly splice it in.
+    //
+    // Caveat: this asserts the absence of one specific framework string, so it becomes
+    // vacuous rather than failing if Apple rewords that reason. It cannot be made
+    // stronger from here — the shim deliberately no longer captures the reason at all,
+    // so there is nothing to compare against.
+    #expect(
+        !message.contains("SecKeyCopyExternalRepresentation called with NULL SecKeyRef"),
+        "raw framework exception text leaked into the public error: \(message)"
+    )
 }
 
 @Test
@@ -308,6 +321,138 @@ func pkcs12WithWrongPassphraseReportsAnImportFailure() throws {
     }
     #expect(message.contains("PKCS#12 import failed"))
     #expect(message.contains("OSStatus"))
+}
+
+// MARK: - Injected key encoding diagnostics
+
+@Test
+func rejectedRSAKeyNamesTheEncodingAppleExpects() throws {
+    // `privateKeyDER` invites DER, but SecKeyCreateWithData wants the representation
+    // SecKeyCopyExternalRepresentation returns. A bare `OSStatus -50` does not say so,
+    // which makes a wrong-but-plausible input hard to diagnose, so the error has to
+    // name the expected form and the rejected ones.
+    let material = try makeInjectableIdentityMaterial()
+
+    let error = #expect(throws: (any Error).self) {
+        _ = try ServerIdentityResolver.resolve(
+            .certificateChain(
+                chainDER: material.chainDER,
+                privateKeyDER: Data(repeating: 0xa5, count: 1_218),
+                keyKind: .rsa(sizeInBits: 2048)
+            ),
+            endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433),
+            authority: "localhost",
+            localOnly: false
+        )
+    }
+
+    let message = String(describing: try #require(error))
+    #expect(message.contains("SecKeyCopyExternalRepresentation"), "message was: \(message)")
+    #expect(message.contains("PKCS#1"), "message was: \(message)")
+}
+
+@Test
+func documentedPrivateKeyLengthsMatchWhatThePlatformProduces() throws {
+    // The error message and the documentation both state exact EC private-key lengths,
+    // and a caller is expected to check their blob against them. Pin every curve rather
+    // than only P-256, because a wrong figure for the others would ship unnoticed.
+    //
+    // Measured on this platform: the private representation is the raw uncompressed
+    // point followed by the private scalar, which is why it is larger than the point.
+    let expected: [(kind: WebTransportPrivateKeyKind, bits: Int, bytes: Int)] = [
+        (.ellipticCurveP256, 256, 97),
+        (.ellipticCurveP384, 384, 145),
+        (.ellipticCurveP521, 521, 199),
+    ]
+
+    for entry in expected {
+        let attributes: [CFString: Any] = [
+            kSecAttrKeyType: entry.kind.secAttrKeyType,
+            kSecAttrKeySizeInBits: entry.bits,
+            kSecAttrIsPermanent: false,
+        ]
+        guard let key = SecKeyCreateRandomKey(attributes as CFDictionary, nil),
+            let exported = SecKeyCopyExternalRepresentation(key, nil) as Data?
+        else {
+            Issue.record("could not generate a \(entry.bits)-bit key")
+            continue
+        }
+        #expect(
+            exported.count == entry.bytes,
+            "\(entry.bits)-bit private export was \(exported.count) bytes, documented as \(entry.bytes)"
+        )
+    }
+}
+
+@Test
+func rejectedP256KeyNamesTheExpectedByteLength() throws {
+    let material = try makeInjectableIdentityMaterial()
+
+    // 65 bytes is the uncompressed curve point, which is what a reader would guess and
+    // is exactly what SecKeyCreateWithData rejects; the accepted form is the 97-byte
+    // Apple raw private representation.
+    let error = #expect(throws: (any Error).self) {
+        _ = try ServerIdentityResolver.resolve(
+            .certificateChain(
+                chainDER: material.chainDER,
+                privateKeyDER: Data(repeating: 0x5a, count: 65),
+                keyKind: .ellipticCurveP256
+            ),
+            endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433),
+            authority: "localhost",
+            localOnly: false
+        )
+    }
+
+    let message = String(describing: try #require(error))
+    #expect(message.contains("97 bytes"), "message was: \(message)")
+    #expect(message.contains("scalar"), "message was: \(message)")
+}
+
+@Test
+func documentedConfigurationIsAccepted() throws {
+    // Pins the guidance in the doc comments and the wiki: the bytes
+    // SecKeyCopyExternalRepresentation returns for the private key are the bytes
+    // SecKeyCreateWithData accepts, and an EC key in that form resolves. If this ever
+    // fails, the documented remedy is wrong.
+    let attributes: [CFString: Any] = [
+        kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom,
+        kSecAttrKeySizeInBits: 256,
+        kSecAttrIsPermanent: false,
+    ]
+    // The optionals are unwrapped with guards rather than `#require`: the macro
+    // expansion does not carry an `unsafe` marker through to the call it wraps, so
+    // the Security.framework calls are made outside it. Passing `nil` for the error
+    // out-parameters means these calls perform no unsafe pointer operation.
+    guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, nil),
+        let publicKey = SecKeyCopyPublicKey(privateKey),
+        let publicKeyPoint = SecKeyCopyExternalRepresentation(publicKey, nil) as Data?,
+        let privateKeyBytes = SecKeyCopyExternalRepresentation(privateKey, nil) as Data?
+    else {
+        Issue.record("could not generate and export a test identity")
+        return
+    }
+    #expect(privateKeyBytes.count == 97, "expected the 97-byte raw EC private representation")
+
+    let certificateDER = try SelfSignedCertificate.make(
+        privateKey: privateKey,
+        p256PublicKeyDER: publicKeyPoint,
+        commonName: "documented.test",
+        dnsNames: ["documented.test"],
+        ipAddresses: []
+    )
+
+    let resolved = try ServerIdentityResolver.resolve(
+        .certificateChain(
+            chainDER: [certificateDER],
+            privateKeyDER: privateKeyBytes,
+            keyKind: .ellipticCurveP256
+        ),
+        endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433),
+        authority: "documented.test",
+        localOnly: false
+    )
+    #expect(!resolved.leafCertificateDER.isEmpty)
 }
 
 // MARK: - Listener wiring

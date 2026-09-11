@@ -12,6 +12,12 @@ Fixed:
 
 - `ServerIdentityResolver` now refuses an identity whose private key cannot be read, with the reason attached, rather than handing it to Network.framework and deferring the failure to the first peer handshake.
 
+- `.certificateChain(chainDER:privateKeyDER:keyKind:)` reports why a private key was rejected. The parameter must hold the representation `SecKeyCopyExternalRepresentation` returns for the private key, not the DER that `openssl` writes and not the public point: 97 bytes for P-256, 145 for P-384, and 199 for P-521. The previous failure was a bare `OSStatus -50` that said nothing about the encoding; the error now names the expected form and length. The required encoding is documented on the case and on `makePrivateKey`, with a worked example in the wiki (issue #21).
+
+- The PKCS#12 import error no longer repeats Security.framework's raw exception reason. It is a fixed framework string that carries nothing a caller can act on, and the project's trust rules keep framework-supplied text out of public errors. The exception name is still reported, because it is stable and useful.
+
+- `makeFromPKCS12` reads the imported identity through a type-identifier check rather than a forced cast.
+
 Added:
 
 - The repository's first non-Swift target, `WebTransportSecurityShim`, which exists only to give `SecPKCS12Import` an Objective-C frame where its exception can be converted into a status code. It is an internal target and is not part of the public product surface.
