@@ -217,6 +217,99 @@ func malformedPKCS12BundlesAreRejected() {
     }
 }
 
+// MARK: - PKCS#12 bundles Security.framework cannot build an identity from
+//
+// Regression coverage for issue #20. A bundle whose certificate carries explicit
+// elliptic-curve parameters rather than a named curve makes `SecPKCS12Import`
+// dereference a NULL `SecKeyRef` and raise `NSInvalidArgumentException`. Swift
+// cannot catch an Objective-C exception, so before the exception boundary was
+// added this terminated the test process rather than failing a test — which is
+// why these cases need a real bundle rather than synthesised bytes.
+//
+// Both fixtures were produced by the macOS system `openssl` (LibreSSL 3.3.6);
+// see Resources/README.md for the exact commands and checksums.
+
+/// Loads a fixture copied into the test bundle by the package manifest.
+///
+/// SwiftPM flattens declared resources to the bundle root, so the lookup uses the
+/// bare file name rather than the `Resources/` path from the manifest.
+private func identityFixture(named name: String) throws -> Data {
+    let url = try #require(
+        Bundle.module.url(forResource: name, withExtension: "p12"),
+        "missing fixture \(name).p12; is it declared in Package.swift resources?"
+    )
+    return try Data(contentsOf: url)
+}
+
+@Test
+func pkcs12WithExplicitCurveParametersThrowsInsteadOfTerminating() throws {
+    let bundle = try identityFixture(named: "libressl-explicit-curve-identity")
+
+    // This pins the observed macOS 26 behaviour: the import raises rather than
+    // returning a status, so the exception boundary is what produces the error. If
+    // a future macOS instead imports the bundle successfully, this test is the
+    // signal to revisit the error contract rather than a defect in the fix.
+    //
+    // If the exception boundary regresses, the process dies here and this test
+    // never reports a failure — the suite aborts instead.
+    let error = #expect(throws: WebTransportNetworkRuntimeError.self) {
+        _ = try ServerIdentityResolver.resolve(
+            .pkcs12(data: bundle, passphrase: "pw"),
+            endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433),
+            authority: "localhost",
+            localOnly: false
+        )
+    }
+
+    guard case .invalidTransport(let message) = try #require(error) else {
+        Issue.record("expected .invalidTransport, got \(String(describing: error))")
+        return
+    }
+    // The message has to name the cause and a way out, since the failure is
+    // otherwise indistinguishable from a wrong passphrase.
+    #expect(message.contains("could not be constructed"))
+    #expect(message.contains("explicit elliptic-curve parameters"))
+    #expect(message.contains("named curve"))
+}
+
+@Test
+func pkcs12WithRSAIdentityStillResolvesAfterTheExceptionBoundary() throws {
+    let bundle = try identityFixture(named: "libressl-rsa-identity")
+
+    // The reporter's workaround, and the control that proves the boundary does
+    // not reject valid bundles.
+    let resolved = try ServerIdentityResolver.resolve(
+        .pkcs12(data: bundle, passphrase: "pw"),
+        endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433),
+        authority: "localhost",
+        localOnly: false
+    )
+    #expect(!resolved.leafCertificateDER.isEmpty)
+}
+
+@Test
+func pkcs12WithWrongPassphraseReportsAnImportFailure() throws {
+    let bundle = try identityFixture(named: "libressl-rsa-identity")
+
+    // The ordinary failure path: no exception is raised, so the status returned by
+    // SecPKCS12Import has to survive the shim unchanged and be reported as itself.
+    let error = #expect(throws: WebTransportNetworkRuntimeError.self) {
+        _ = try ServerIdentityResolver.resolve(
+            .pkcs12(data: bundle, passphrase: "not-the-passphrase"),
+            endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433),
+            authority: "localhost",
+            localOnly: false
+        )
+    }
+
+    guard case .invalidTransport(let message) = try #require(error) else {
+        Issue.record("expected .invalidTransport, got \(String(describing: error))")
+        return
+    }
+    #expect(message.contains("PKCS#12 import failed"))
+    #expect(message.contains("OSStatus"))
+}
+
 // MARK: - Listener wiring
 
 @Test

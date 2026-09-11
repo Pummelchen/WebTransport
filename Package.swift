@@ -78,11 +78,16 @@ let package = Package(
                 "WebTransportCryptoApple",
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
+                "WebTransportSecurityShim",
                 "WebTransportTLSCore",
                 "WebTransportUDPApple"
             ],
             path: "Swift/Sources/WebTransportNetworkRuntime",
             swiftSettings: strictSwiftSettings
+        ),
+        .target(
+            name: "WebTransportSecurityShim",
+            path: "Swift/Sources/WebTransportSecurityShim"
         ),
         .target(
             name: "WebTransportQUICCore",
@@ -148,6 +153,11 @@ let package = Package(
             name: "WebTransportNetworkRuntimeTests",
             dependencies: ["WebTransportNetworkRuntime"],
             path: "Swift/Tests/WebTransportNetworkRuntimeTests",
+            resources: [
+                .copy("Resources/README.md"),
+                .copy("Resources/libressl-explicit-curve-identity.p12"),
+                .copy("Resources/libressl-rsa-identity.p12"),
+            ],
             swiftSettings: strictSwiftSettings
         ),
         .testTarget(

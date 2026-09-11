@@ -3,6 +3,7 @@ import Foundation
 import Network
 import Security
 import WebTransportQUICCore
+import WebTransportSecurityShim
 import WebTransportTLSCore
 
 /// Private-key kind for an injected server identity supplied as raw DER.
@@ -51,6 +52,14 @@ public enum WebTransportPrivateKeyKind: Equatable, Sendable {
 /// ``pkcs12(data:passphrase:)`` or ``certificateChain(chainDER:privateKeyDER:keyKind:)``.
 /// ``developmentSelfSigned`` is a development affordance and is refused on any
 /// non-loopback bind address.
+///
+/// - Important: A PKCS#12 bundle can only be imported when the certificate inside it
+///   names its elliptic curve. macOS cannot build an identity from a certificate
+///   whose ``SubjectPublicKeyInfo`` carries explicit curve parameters instead of a
+///   named-curve OID. This is easy to hit by accident: the macOS system
+///   `/usr/bin/openssl` is LibreSSL, which emits the explicit form for an EC key,
+///   and generates the private key in Apple's raw representation, which is a 65-byte
+///   uncompressed point for P-256. An RSA identity avoids all of this.
 public enum WebTransportServerIdentity: Equatable, Sendable {
     /// Ephemeral self-signed identity generated in memory. Loopback binds only.
     ///
@@ -152,9 +161,57 @@ enum ServerIdentityResolver {
 
         let options: [CFString: Any] = [kSecImportExportPassphrase: passphrase]
         var rawItems: CFArray?
+        var status: OSStatus = errSecSuccess
+        var exceptionName: UnsafePointer<CChar>?
+        var exceptionReason: UnsafePointer<CChar>?
+
         // SAFETY: Security.framework writes an optional retained CFArray to the
-        // out-parameter and leaves it nil on failure; ownership transfers once.
-        let status = unsafe SecPKCS12Import(data as CFData, options as CFDictionary, &rawItems)
+        // first out-parameter and leaves it nil on failure; ownership transfers to
+        // `rawItems` once. The remaining out-parameters are written by the shim
+        // before it returns; both optional pointers are nil unless an exception was
+        // caught, and are copied into Swift strings immediately below so that no
+        // C pointer escapes this scope.
+        //
+        // The import runs behind an Objective-C exception boundary. Security.framework
+        // raises an `NSException` — unrecoverable in Swift, and fatal because it
+        // unwinds past every `catch` — when it cannot build the identity, notably
+        // for a certificate carrying explicit elliptic-curve parameters instead of
+        // a named curve. The shim turns that into a reportable result so the caller
+        // gets an error it can act on rather than a dead process.
+        let raisedException = unsafe WTSecPKCS12ImportCatchingExceptions(
+            data as CFData,
+            options as CFDictionary,
+            &rawItems,
+            &status,
+            &exceptionName,
+            &exceptionReason
+        )
+
+        if raisedException != 0 {
+            // The shim copies the exception text, so this is a plain Swift String by
+            // the time it reaches the error message.
+            var name = "NSException"
+            if let pointer = unsafe exceptionName {
+                name = unsafe String(cString: pointer)
+            }
+            var reason = ""
+            if let pointer = unsafe exceptionReason {
+                reason = unsafe String(cString: pointer)
+            }
+            throw WebTransportNetworkRuntimeError.invalidTransport(
+                """
+                PKCS#12 identity could not be constructed: Security.framework raised \
+                \(name)\(reason.isEmpty ? "" : " (\(reason))"). This usually means the \
+                bundle's certificate uses explicit elliptic-curve parameters rather than \
+                a named curve, which this platform cannot import. Regenerate the \
+                certificate against a named curve (for example with \
+                `openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256` using a tool \
+                that emits a named curve, or convert with \
+                `openssl ec -param_enc named_curve`), or use an RSA identity.
+                """
+            )
+        }
+
         guard status == errSecSuccess else {
             throw WebTransportNetworkRuntimeError.invalidTransport(
                 "PKCS#12 import failed (OSStatus \(status)); check the passphrase and bundle format"
@@ -255,6 +312,23 @@ enum ServerIdentityResolver {
     // MARK: - Shared tail
 
     private static func finish(identity: SecIdentity, chain: [SecCertificate]) throws -> ResolvedServerIdentity {
+        // An identity whose private key is unreadable is not usable, and handing it
+        // to Network.framework defers the failure to the first peer handshake.
+        // Defence in depth rather than the fix for issue #20: that failure happens
+        // inside `SecPKCS12Import`, before this function is reached.
+        var privateKey: SecKey?
+        // SAFETY: SecIdentityCopyPrivateKey writes an optional retained key to the
+        // out-parameter; a NULL result means the identity carries no readable key.
+        let keyStatus = unsafe SecIdentityCopyPrivateKey(identity, &privateKey)
+        guard keyStatus == errSecSuccess, privateKey != nil else {
+            throw WebTransportNetworkRuntimeError.invalidTransport(
+                """
+                server identity has no readable private key (OSStatus \(keyStatus)); \
+                the certificate and key could not be paired
+                """
+            )
+        }
+
         var leafCertificate: SecCertificate?
         // SAFETY: SecIdentityCopyCertificate writes an optional retained
         // certificate to the out-parameter; ownership transfers exactly once.
