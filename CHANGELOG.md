@@ -8,6 +8,8 @@ The project uses semantic versioning.
 
 Fixed:
 
+- The CRYPTO reassembly ceiling now bounds bytes waiting for a gap rather than every byte the connection has carried. Consumed bytes are retained so a conflicting retransmission is still detected, and counting them against the ceiling made it a lifetime cap: a peer that completed a large handshake could no longer deliver a legitimate post-handshake message such as a NewSessionTicket or KeyUpdate, and was disconnected instead. The count is memoised so a large frame is not quadratic.
+
 - An accept that times out no longer consumes the next connection. `acceptSession` bounds its wait on the connection queue with a timeout, and a cancelled `CheckedContinuation` is never resumed, so the abandoned waiter stayed at the head of the queue and was handed the next accepted connection — which was then dropped. Reachable from the documented accept loop, `while true { try await acceptSession() }`, whose one-second default plants an abandoned waiter on every idle timeout; once connections arrive slower than that, every connection is lost. The queue now tags each waiter so a caller that stops waiting removes its own entry and resumes it, which lets the abandoned task unwind; dropping the continuation instead would leak it. A cancelled accept also releases a connection that arrives after it gave up.
 
 - Shutdown now wakes a parked accept with a shutdown error instead of leaving it to block for its full timeout. That timeout was how the abandoned waiters above were created, so the two defects compounded.

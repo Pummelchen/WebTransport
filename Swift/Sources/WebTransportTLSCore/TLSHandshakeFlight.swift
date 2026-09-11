@@ -63,20 +63,80 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
     private var bytesByOffset: [UInt64: UInt8]
     public let maximumBufferedBytes: Int
 
+    /// Everything below this offset has already been handed to the decoder.
+    ///
+    /// The bytes themselves are deliberately retained rather than deleted: they are
+    /// what a conflicting retransmission is checked against, so a peer that sends
+    /// different bytes for an offset it already used is still rejected after the
+    /// decoder has moved past it. This watermark is what lets the ceiling below
+    /// measure only what is still waiting for a gap.
+    private var consumedByteCount: UInt64 = 0
+
+    /// Memoised ``pendingByteCount``; nil means "recompute on next read".
+    private var pendingByteCountCache: Int?
+
     public init(maximumBufferedBytes: Int = TLSCryptoStreamReassembler.defaultMaximumBufferedBytes) {
         self.bytesByOffset = [:]
         self.maximumBufferedBytes = max(1, maximumBufferedBytes)
     }
 
-    /// How many bytes are currently held.
+    /// How many bytes are currently held, including those already consumed.
     public var bufferedByteCount: Int {
         bytesByOffset.count
+    }
+
+    /// How many held bytes the decoder has not yet consumed.
+    ///
+    /// This, not the total row count, is the quantity ``maximumBufferedBytes`` bounds.
+    /// Counting every row made the ceiling a lifetime cap: consumed bytes are retained
+    /// for conflict detection, so a peer that completed a large handshake could no
+    /// longer deliver a legitimate post-handshake message such as a NewSessionTicket
+    /// or KeyUpdate, and was disconnected instead.
+    ///
+    /// A peer scattering bytes across the offset space never completes a message, so
+    /// the watermark never moves and this figure grows with every byte received —
+    /// which is the attack the ceiling exists to stop.
+    public var pendingByteCount: Int {
+        if let pendingByteCountCache {
+            return pendingByteCountCache
+        }
+        return recomputePendingByteCount()
+    }
+
+    /// Counts held bytes at or above the watermark.
+    ///
+    /// Only called when the cache is cold: once per ``append(offset:data:)`` and once
+    /// per ``markConsumed(below:)``. Counting per byte inside a large frame would make
+    /// a 16 KB CRYPTO frame quadratic, which is the kind of peer-controlled cost the
+    /// ceiling exists to prevent.
+    private func recomputePendingByteCount() -> Int {
+        guard consumedByteCount > 0 else {
+            return bytesByOffset.count
+        }
+        // Contiguous fragmented data starts at the current watermark, so the pending
+        // count is every row except the consumed prefix below the lowest live key.
+        guard let lowestLive = bytesByOffset.keys.filter({ $0 >= consumedByteCount }).min() else {
+            return 0
+        }
+        return bytesByOffset.count - bytesByOffset.keys.count(where: { $0 < lowestLive })
+    }
+
+    /// Records that the decoder has consumed everything below `offset`.
+    ///
+    /// The bytes stay in place; only the accounting changes.
+    public mutating func markConsumed(below offset: UInt64) {
+        if offset > consumedByteCount {
+            consumedByteCount = offset
+            pendingByteCountCache = nil
+        }
     }
 
     public mutating func append(offset: UInt64, data: Data) throws {
         guard UInt64(data.count) <= UInt64.max - offset else {
             throw QUICCodecError.valueOutOfRange("CRYPTO data offset would overflow")
         }
+
+        var pendingBytes = pendingByteCount
 
         for (index, byte) in data.enumerated() {
             let absoluteOffset = offset + UInt64(index)
@@ -86,13 +146,16 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
                 }
                 continue
             }
-            guard bytesByOffset.count < maximumBufferedBytes else {
+            guard pendingBytes < maximumBufferedBytes else {
                 throw QUICCodecError.valueOutOfRange(
                     "CRYPTO stream buffer exceeded \(maximumBufferedBytes) bytes"
                 )
             }
             bytesByOffset[absoluteOffset] = byte
+            pendingBytes += 1
         }
+        // The count moved; drop the memo so the next reader sees the new value.
+        pendingByteCountCache = nil
     }
 
     public func contiguousBytes(from offset: UInt64 = 0) -> Data {
@@ -169,6 +232,10 @@ public struct TLSHandshakeFlightDecoder: Equatable, Sendable {
             consumedByteCount += UInt64(messageLength)
             localOffset = bodyEnd
         }
+
+        // Tell the reassembler what has been consumed so its ceiling measures bytes
+        // still waiting for a gap rather than every byte ever carried.
+        reassembler.markConsumed(below: consumedByteCount)
 
         return decoded
     }

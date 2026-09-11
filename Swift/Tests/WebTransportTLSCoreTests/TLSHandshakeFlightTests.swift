@@ -63,3 +63,29 @@ func cryptoReassemblyStillJoinsOutOfOrderFragments() throws {
     try reassembler.append(offset: 0, data: Data([1, 2, 3, 4]))
     #expect(reassembler.contiguousBytes() == Data([1, 2, 3, 4, 5, 6, 7, 8]))
 }
+
+/// The ceiling bounds bytes *waiting for a gap*, not every byte the connection has
+/// ever carried.
+///
+/// Consumed bytes are retained so a conflicting retransmission is still detected, so
+/// counting rows made the ceiling a lifetime cap: a peer that completed a large
+/// handshake could no longer deliver a legitimate post-handshake message such as a
+/// NewSessionTicket or KeyUpdate, and was disconnected instead.
+@Test
+func cryptoReassemblyCeilingDoesNotBecomeALifetimeCap() throws {
+    var decoder = TLSHandshakeFlightDecoder()
+
+    var certificate = Data([0x0b, 0x00, 0x9c, 0x40])  // type 11, length 40_000
+    certificate.append(Data(repeating: 0x41, count: 40_000))
+    #expect(try decoder.receive(frame: .crypto(offset: 0, data: certificate)).count == 1)
+    #expect(decoder.consumedByteCount == 40_004)
+
+    var postHandshake = Data()
+    for _ in 0..<4_000 {
+        postHandshake.append(contentsOf: [0x14, 0x00, 0x00, 0x04, 1, 2, 3, 4])  // Finished
+    }
+    _ = try decoder.receive(frame: .crypto(offset: UInt64(certificate.count), data: postHandshake))
+
+    #expect(decoder.consumedByteCount > UInt64(64 * 1024))
+    #expect(decoder.reassembler.pendingByteCount == 0)
+}
