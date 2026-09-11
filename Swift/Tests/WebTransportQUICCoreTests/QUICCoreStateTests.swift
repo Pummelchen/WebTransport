@@ -460,7 +460,9 @@ func connectionIDStoreKeepsRetiredSequencesBelowTheWatermark() throws {
         connectionID: Data([0x03]),
         statelessResetToken: Data(repeating: 2, count: 16)
     )
-    #expect(second.isEmpty)
+    // RFC 9000 section 19.15 requires a RETIRE_CONNECTION_ID for the newly received
+    // sequence, even though this endpoint never held that connection ID.
+    #expect(second == [.retireConnectionID(sequence: 3)])
     #expect(store.active.keys.sorted() == [10])
     #expect(store.retiredSequences.contains(3))
     // The destination cannot be switched to a sequence below the watermark.

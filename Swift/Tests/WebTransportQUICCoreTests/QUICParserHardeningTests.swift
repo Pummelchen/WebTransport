@@ -147,34 +147,64 @@ func transportParameterValidationEnforcesRFC9000Section18Point2() throws {
 
     // Each violation is rejected.
     let cases: [(String, QUICTransportParameters)] = [
-        ("max_udp_payload_size below 1200", try parameters {
-            try $0.setInteger(1_199, for: QUICTransportParameterID.maxUDPPayloadSize)
-        }),
-        ("ack_delay_exponent above 20", try parameters {
-            try $0.setInteger(21, for: QUICTransportParameterID.ackDelayExponent)
-        }),
-        ("max_ack_delay at 2^14", try parameters {
-            try $0.setInteger(1 << 14, for: QUICTransportParameterID.maxAckDelay)
-        }),
-        ("active_connection_id_limit below 2", try parameters {
-            try $0.setInteger(1, for: QUICTransportParameterID.activeConnectionIDLimit)
-        }),
-        ("stateless_reset_token not 16 bytes", try parameters {
-            $0[QUICTransportParameterID.statelessResetToken] = Data(repeating: 0xab, count: 8)
-        }),
-        ("max_datagram_frame_size zero", try parameters {
-            try $0.setInteger(0, for: QUICTransportParameterID.maxDatagramFrameSize)
-        }),
-        ("connection ID of zero length", try parameters {
-            $0[QUICTransportParameterID.initialSourceConnectionID] = Data()
-        }),
-        ("connection ID longer than 20", try parameters {
-            $0[QUICTransportParameterID.retrySourceConnectionID] = Data(repeating: 0x01, count: 21)
-        }),
+        (
+            "max_udp_payload_size below 1200",
+            try parameters {
+                try $0.setInteger(1_199, for: QUICTransportParameterID.maxUDPPayloadSize)
+            }
+        ),
+        (
+            "ack_delay_exponent above 20",
+            try parameters {
+                try $0.setInteger(21, for: QUICTransportParameterID.ackDelayExponent)
+            }
+        ),
+        (
+            "max_ack_delay at 2^14",
+            try parameters {
+                try $0.setInteger(1 << 14, for: QUICTransportParameterID.maxAckDelay)
+            }
+        ),
+        (
+            "active_connection_id_limit below 2",
+            try parameters {
+                try $0.setInteger(1, for: QUICTransportParameterID.activeConnectionIDLimit)
+            }
+        ),
+        (
+            "stateless_reset_token not 16 bytes",
+            try parameters {
+                $0[QUICTransportParameterID.statelessResetToken] = Data(repeating: 0xab, count: 8)
+            }
+        ),
+        (
+            "original_destination_connection_id of zero length",
+            try parameters {
+                $0[QUICTransportParameterID.originalDestinationConnectionID] = Data()
+            }
+        ),
+        (
+            "connection ID longer than 20",
+            try parameters {
+                $0[QUICTransportParameterID.retrySourceConnectionID] = Data(repeating: 0x01, count: 21)
+            }
+        ),
     ]
     for (name, value) in cases {
         #expect(throws: (any Error).self, "expected \(name) to be rejected") {
             try value.validated()
         }
     }
+
+    // These are conforming and must be accepted. RFC 9000 section 7.3: "If a zero-length
+    // connection ID is selected, the corresponding transport parameter is included with
+    // a zero-length value." RFC 9221 section 3 makes an explicit zero
+    // max_datagram_frame_size mean "DATAGRAM frames are not supported", which is also
+    // the absent-parameter default.
+    let conforming = try parameters {
+        $0[QUICTransportParameterID.initialSourceConnectionID] = Data()
+        $0[QUICTransportParameterID.retrySourceConnectionID] = Data()
+        try $0.setInteger(0, for: QUICTransportParameterID.maxDatagramFrameSize)
+    }
+    try conforming.validated()
 }

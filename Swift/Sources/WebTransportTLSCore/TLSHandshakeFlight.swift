@@ -72,9 +72,6 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
     /// measure only what is still waiting for a gap.
     private var consumedByteCount: UInt64 = 0
 
-    /// Memoised ``pendingByteCount``; nil means "recompute on next read".
-    private var pendingByteCountCache: Int?
-
     public init(maximumBufferedBytes: Int = TLSCryptoStreamReassembler.defaultMaximumBufferedBytes) {
         self.bytesByOffset = [:]
         self.maximumBufferedBytes = max(1, maximumBufferedBytes)
@@ -97,18 +94,15 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
     /// the watermark never moves and this figure grows with every byte received —
     /// which is the attack the ceiling exists to stop.
     public var pendingByteCount: Int {
-        if let pendingByteCountCache {
-            return pendingByteCountCache
-        }
-        return recomputePendingByteCount()
+        recomputePendingByteCount()
     }
 
     /// Counts held bytes at or above the watermark.
     ///
-    /// Only called when the cache is cold: once per ``append(offset:data:)`` and once
-    /// per ``markConsumed(below:)``. Counting per byte inside a large frame would make
-    /// a 16 KB CRYPTO frame quadratic, which is the kind of peer-controlled cost the
-    /// ceiling exists to prevent.
+    /// `append` reads this once per frame and increments a local from there, so a large
+    /// frame is linear rather than quadratic. Recomputing per byte would make a 16 KB
+    /// CRYPTO frame cost hundreds of millions of dictionary probes, which is the kind of
+    /// peer-controlled cost the ceiling exists to prevent.
     private func recomputePendingByteCount() -> Int {
         guard consumedByteCount > 0 else {
             return bytesByOffset.count
@@ -127,7 +121,6 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
     public mutating func markConsumed(below offset: UInt64) {
         if offset > consumedByteCount {
             consumedByteCount = offset
-            pendingByteCountCache = nil
         }
     }
 
@@ -154,8 +147,6 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
             bytesByOffset[absoluteOffset] = byte
             pendingBytes += 1
         }
-        // The count moved; drop the memo so the next reader sees the new value.
-        pendingByteCountCache = nil
     }
 
     public func contiguousBytes(from offset: UInt64 = 0) -> Data {

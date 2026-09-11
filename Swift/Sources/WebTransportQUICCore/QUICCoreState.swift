@@ -143,10 +143,13 @@ public struct QUICConnectionIDStore: Equatable, Sendable {
         // endpoint actually held that connection ID, and the peer already told us to
         // stop using it. `retire` refuses an unknown sequence, so mark it directly.
         if sequence < largestRetirePriorTo {
+            active.removeValue(forKey: sequence)
             retiredSequences.insert(sequence)
-            if active.removeValue(forKey: sequence) != nil {
-                retireFrames.append(.retireConnectionID(sequence: sequence))
-            }
+            // RFC 9000 section 19.15: an endpoint receiving a sequence below a Retire
+            // Prior To it has already seen "MUST send a corresponding
+            // RETIRE_CONNECTION_ID frame ... unless it has already done so". The frame is
+            // owed even though this endpoint may never have held the connection ID.
+            retireFrames.append(.retireConnectionID(sequence: sequence))
             return retireFrames
         }
         if let existing = active[sequence] {

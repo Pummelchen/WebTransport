@@ -1176,15 +1176,6 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let accepted = try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
             try await self.acceptedConnections.dequeue()
         }
-        // A cancelled accept can still be handed a connection: the queue's removal of
-        // an abandoned waiter is asynchronous, so an `enqueue` that lands between the
-        // cancellation and the removal resumes it and the connection reaches here after
-        // its caller has already given up. Without this the connection's handler task
-        // would stay alive and hold the connection open with nothing left to serve it.
-        if Task.isCancelled {
-            accepted.inboundTask.cancel()
-            throw CancellationError()
-        }
         let connection = accepted.connection
         InteroperableQUICDebug.log("server acceptSession dequeued")
         InteroperableQUICDebug.log("server acceptSession connection state before wait: \(connection.state)")
@@ -1943,17 +1934,37 @@ private actor InteroperableQUICConnectionQueue {
         }
         if let accepted = queue.first {
             queue.removeFirst()
-            return accepted
+            return try releaseIfAbandoned(accepted)
         }
         let id = nextWaiterID
         nextWaiterID += 1
-        return try await withTaskCancellationHandler {
+        let accepted = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 waiters.append(Waiter(id: id, continuation: continuation))
             }
         } onCancel: {
             Task { await self.removeWaiter(id) }
         }
+        return try releaseIfAbandoned(accepted)
+    }
+
+    /// Hands a connection back if the task waiting for it has already been abandoned.
+    ///
+    /// `withTimeout` runs this `dequeue` in a separate unstructured task and, on expiry,
+    /// cancels *that* task and throws to its own caller. Removing the parked waiter is an
+    /// asynchronous actor hop, so an `enqueue` can win the race and resume the abandoned
+    /// waiter with a connection. The value is then discarded, and without this the
+    /// connection's handler task would keep the connection and its socket alive with
+    /// nothing left to serve them. The check has to happen here, in the task that
+    /// observes the cancellation — the caller's task is never cancelled.
+    private func releaseIfAbandoned(
+        _ accepted: InteroperableQUICAcceptedConnection
+    ) throws -> InteroperableQUICAcceptedConnection {
+        if Task.isCancelled {
+            accepted.inboundTask.cancel()
+            throw CancellationError()
+        }
+        return accepted
     }
 
     /// Detaches a waiter whose caller has stopped waiting, and lets it unwind.

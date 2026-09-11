@@ -48,22 +48,32 @@ public struct QUICTransportParameters: Equatable, Sendable {
         if let token = values[QUICTransportParameterID.statelessResetToken], token.count != 16 {
             throw QUICCodecError.malformed("stateless_reset_token must be 16 bytes, got \(token.count)")
         }
-        // A datagram frame size present but zero is invalid.
-        if let value = try integer(for: QUICTransportParameterID.maxDatagramFrameSize), value == 0 {
-            throw QUICCodecError.malformed("max_datagram_frame_size must not be zero when present")
+        // `max_datagram_frame_size` is deliberately not checked for zero: RFC 9221
+        // section 3 defines 0 as meaning "DATAGRAM frames are not supported", which is
+        // also the default when the parameter is absent, so an explicit zero is
+        // conforming rather than a violation.
+        // Connection IDs: RFC 9000 section 18.2 caps these at 20 bytes, and section 7.3
+        // says that "if a zero-length connection ID is selected, the corresponding
+        // transport parameter is included with a zero-length value" — so zero is valid
+        // for the parameters that carry the endpoint's own Source Connection ID.
+        // `original_destination_connection_id` is the exception: section 7.2 requires the
+        // client's first Destination Connection ID to be at least 8 bytes, so it is never
+        // zero.
+        if let original = values[QUICTransportParameterID.originalDestinationConnectionID],
+            original.isEmpty || original.count > 20
+        {
+            throw QUICCodecError.malformed(
+                "original_destination_connection_id must be 1...20 bytes, got \(original.count)"
+            )
         }
-        // Connection IDs are 1...20 bytes when present. Absence is not an error here:
-        // RFC 9000 section 7.3 makes initial_source_connection_id mandatory, but this
-        // codec is also used for hand-built parameter sets in tests and tooling, and
-        // requiring it would reject those. A caller that needs the mandatory check
-        // should test for the key explicitly.
         for (id, name) in [
-            (QUICTransportParameterID.originalDestinationConnectionID, "original_destination_connection_id"),
             (QUICTransportParameterID.initialSourceConnectionID, "initial_source_connection_id"),
             (QUICTransportParameterID.retrySourceConnectionID, "retry_source_connection_id"),
         ] {
-            if let connectionID = values[id], !(1...20).contains(connectionID.count) {
-                throw QUICCodecError.malformed("\(name) must be 1...20 bytes, got \(connectionID.count)")
+            if let connectionID = values[id], connectionID.count > 20 {
+                throw QUICCodecError.malformed(
+                    "\(name) must be at most 20 bytes, got \(connectionID.count)"
+                )
             }
         }
     }
