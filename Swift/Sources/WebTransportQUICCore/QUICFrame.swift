@@ -114,8 +114,13 @@ public enum QUICFrame: Equatable, Sendable {
             output.append(direction == .bidirectional ? 0x16 : 0x17)
             output.append(try QUICVarInt.encode(maximum))
         case .newConnectionID(let sequence, let retirePriorTo, let connectionID, let statelessResetToken):
-            guard connectionID.count <= 20 else {
-                throw QUICCodecError.valueOutOfRange("connection ID length exceeds 20")
+            // Symmetric with the decoder: RFC 9000 section 19.15 makes a length
+            // outside 1...20 a FRAME_ENCODING_ERROR, and the library must not be able
+            // to produce a frame it would refuse to read.
+            guard (1...20).contains(connectionID.count) else {
+                throw QUICCodecError.valueOutOfRange(
+                    "connection ID length must be 1...20, got \(connectionID.count)"
+                )
             }
             guard statelessResetToken.count == 16 else {
                 throw QUICCodecError.malformed("stateless reset token must be 16 bytes")

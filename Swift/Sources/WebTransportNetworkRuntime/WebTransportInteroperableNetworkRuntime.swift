@@ -1176,6 +1176,15 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let accepted = try await InteroperableQUICHelpers.withTimeout(timeoutMilliseconds) {
             try await self.acceptedConnections.dequeue()
         }
+        // A cancelled accept can still be handed a connection: the queue's removal of
+        // an abandoned waiter is asynchronous, so an `enqueue` that lands between the
+        // cancellation and the removal resumes it and the connection reaches here after
+        // its caller has already given up. Without this the connection's handler task
+        // would stay alive and hold the connection open with nothing left to serve it.
+        if Task.isCancelled {
+            accepted.inboundTask.cancel()
+            throw CancellationError()
+        }
         let connection = accepted.connection
         InteroperableQUICDebug.log("server acceptSession dequeued")
         InteroperableQUICDebug.log("server acceptSession connection state before wait: \(connection.state)")
@@ -1947,13 +1956,26 @@ private actor InteroperableQUICConnectionQueue {
         }
     }
 
-    /// Detaches a waiter whose caller has stopped waiting.
+    /// Detaches a waiter whose caller has stopped waiting, and lets it unwind.
     ///
-    /// Only the entry is removed. The continuation is deliberately left parked: the
-    /// task that owned it has gone, so there is nowhere to deliver a value, and with
-    /// the entry gone it can no longer consume a connection.
+    /// The continuation must be resumed, not merely dropped. `withTimeout` abandons
+    /// the operation task rather than awaiting it, so that task is still suspended on
+    /// this continuation: dropping the reference leaves it suspended for the process
+    /// lifetime and the Swift runtime reports a leaked continuation. Resuming with an
+    /// error lets it unwind; the caller has already stopped waiting, so the value is
+    /// discarded by its one-shot gate.
+    ///
+    /// This cannot resume twice: an entry is only ever resumed after it has been
+    /// removed from `waiters`, and ids are unique.
     func removeWaiter(_ id: UInt64) {
+        let removed = waiters.filter { $0.id == id }
+        guard !removed.isEmpty else {
+            return
+        }
         waiters.removeAll { $0.id == id }
+        for waiter in removed {
+            waiter.continuation.resume(throwing: CancellationError())
+        }
     }
 
     func fail(_ error: Error) {

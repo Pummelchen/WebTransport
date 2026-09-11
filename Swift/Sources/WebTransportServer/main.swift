@@ -118,10 +118,15 @@ private struct NetworkServerOptions {
     /// The value sizes an array of `Task`s, one per session, so it has to be bounded:
     /// without a cap an argument like `--max-sessions=1000000` commits memory
     /// proportional to the request and the process can be made to exhaust the machine
-    /// before it serves anything. The bound is far above any realistic test run and
-    /// matches the listener's own concurrency ceiling, so it cannot mask a legitimate
-    /// configuration.
-    static let maximumSessions = 4_096
+    /// before it serves anything.
+    ///
+    /// The bound exists to stop that, not to describe a concurrency ceiling — the
+    /// listener's own limit comes from the admission policy (`--max-sessions` *becomes*
+    /// that limit, via `maxConcurrentConnections`), so it is unrelated. The number is
+    /// chosen well above any smoke or soak run so that it cannot reject a legitimate
+    /// configuration; `Swift/run-soak.sh` passes `CONNECTIONS + 10`, and a soak of
+    /// tens of thousands of connections is the realistic upper end.
+    static let maximumSessions = 65_536
 
     var endpoint: WebTransportNetworkEndpoint
     var timeoutMilliseconds: Int32
@@ -230,10 +235,16 @@ private struct NetworkServerOptions {
                     timeoutMilliseconds = value
                 } else if argument.hasPrefix("--transport=") {
                     transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))
-                } else if argument.hasPrefix("--max-sessions="),
-                    let value = Int(argument.dropFirst("--max-sessions=".count)),
-                    (1...Self.maximumSessions).contains(value)
-                {
+                } else if argument.hasPrefix("--max-sessions=") {
+                    // Report the range for a bad value, matching the space-separated
+                    // form. Falling through to the generic parser would report only
+                    // "invalid payload", which does not say what would be accepted.
+                    let raw = String(argument.dropFirst("--max-sessions=".count))
+                    guard let value = Int(raw), (1...Self.maximumSessions).contains(value) else {
+                        throw WebTransportNetworkRuntimeError.invalidTransport(
+                            "--max-sessions requires an integer in 1...\(Self.maximumSessions), got \"\(raw)\""
+                        )
+                    }
                     maxSessions = value
                 } else if argument.hasPrefix("--authority=") {
                     let value = String(argument.dropFirst("--authority=".count))
