@@ -16,6 +16,58 @@ public struct QUICTransportParameters: Equatable, Sendable {
         values[id] = try QUICVarInt.encode(value)
     }
 
+    /// Enforces the value rules of RFC 9000 section 18.2.
+    ///
+    /// `decode` deliberately checks only framing and duplicates, because it is also the
+    /// parser for the TLS extension and a peer may legitimately send a parameter this
+    /// build does not model. Its errors do not say "this is a protocol violation", and
+    /// tightening it would change what the extension parser accepts. This is the
+    /// separate, opt-in entry point for a caller that wants the connection-error
+    /// judgement, so that a `TRANSPORT_PARAMETER_ERROR` is raised only where someone
+    /// asked for it.
+    ///
+    /// - Throws: ``QUICCodecError/malformed(_:)`` naming the offending parameter.
+    public func validated() throws {
+        // RFC 9000 section 18.2: max_udp_payload_size below 1200 is a violation.
+        if let value = try integer(for: QUICTransportParameterID.maxUDPPayloadSize), value < 1_200 {
+            throw QUICCodecError.malformed("max_udp_payload_size must be at least 1200, got \(value)")
+        }
+        // ack_delay_exponent must be at most 20.
+        if let value = try integer(for: QUICTransportParameterID.ackDelayExponent), value > 20 {
+            throw QUICCodecError.malformed("ack_delay_exponent must be at most 20, got \(value)")
+        }
+        // max_ack_delay must be less than 2^14 milliseconds.
+        if let value = try integer(for: QUICTransportParameterID.maxAckDelay), value >= 1 << 14 {
+            throw QUICCodecError.malformed("max_ack_delay must be below 16384, got \(value)")
+        }
+        // active_connection_id_limit must be at least 2.
+        if let value = try integer(for: QUICTransportParameterID.activeConnectionIDLimit), value < 2 {
+            throw QUICCodecError.malformed("active_connection_id_limit must be at least 2, got \(value)")
+        }
+        // A stateless_reset_token is exactly 16 bytes.
+        if let token = values[QUICTransportParameterID.statelessResetToken], token.count != 16 {
+            throw QUICCodecError.malformed("stateless_reset_token must be 16 bytes, got \(token.count)")
+        }
+        // A datagram frame size present but zero is invalid.
+        if let value = try integer(for: QUICTransportParameterID.maxDatagramFrameSize), value == 0 {
+            throw QUICCodecError.malformed("max_datagram_frame_size must not be zero when present")
+        }
+        // Connection IDs are 1...20 bytes when present. Absence is not an error here:
+        // RFC 9000 section 7.3 makes initial_source_connection_id mandatory, but this
+        // codec is also used for hand-built parameter sets in tests and tooling, and
+        // requiring it would reject those. A caller that needs the mandatory check
+        // should test for the key explicitly.
+        for (id, name) in [
+            (QUICTransportParameterID.originalDestinationConnectionID, "original_destination_connection_id"),
+            (QUICTransportParameterID.initialSourceConnectionID, "initial_source_connection_id"),
+            (QUICTransportParameterID.retrySourceConnectionID, "retry_source_connection_id"),
+        ] {
+            if let connectionID = values[id], !(1...20).contains(connectionID.count) {
+                throw QUICCodecError.malformed("\(name) must be 1...20 bytes, got \(connectionID.count)")
+            }
+        }
+    }
+
     public func integer(for id: UInt64) throws -> UInt64? {
         guard let value = values[id] else {
             return nil

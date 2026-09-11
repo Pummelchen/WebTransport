@@ -122,3 +122,59 @@ private func deterministicVarIntCorpus() -> [UInt64] {
     }
     return values
 }
+
+// MARK: - Transport parameter value validation
+
+/// `decode` deliberately checks only framing and duplicates, so a caller that needs the
+/// RFC 9000 section 18.2 value rules asks for them explicitly. Each case below is a
+/// value the RFC makes a `TRANSPORT_PARAMETER_ERROR`.
+@Test
+func transportParameterValidationEnforcesRFC9000Section18Point2() throws {
+    func parameters(_ configure: (inout QUICTransportParameters) throws -> Void) throws -> QUICTransportParameters {
+        var values = QUICTransportParameters()
+        try configure(&values)
+        return values
+    }
+
+    // A well-formed set passes.
+    let valid = try parameters {
+        try $0.setInteger(1_200, for: QUICTransportParameterID.maxUDPPayloadSize)
+        try $0.setInteger(3, for: QUICTransportParameterID.ackDelayExponent)
+        try $0.setInteger(25, for: QUICTransportParameterID.maxAckDelay)
+        try $0.setInteger(2, for: QUICTransportParameterID.activeConnectionIDLimit)
+    }
+    try valid.validated()
+
+    // Each violation is rejected.
+    let cases: [(String, QUICTransportParameters)] = [
+        ("max_udp_payload_size below 1200", try parameters {
+            try $0.setInteger(1_199, for: QUICTransportParameterID.maxUDPPayloadSize)
+        }),
+        ("ack_delay_exponent above 20", try parameters {
+            try $0.setInteger(21, for: QUICTransportParameterID.ackDelayExponent)
+        }),
+        ("max_ack_delay at 2^14", try parameters {
+            try $0.setInteger(1 << 14, for: QUICTransportParameterID.maxAckDelay)
+        }),
+        ("active_connection_id_limit below 2", try parameters {
+            try $0.setInteger(1, for: QUICTransportParameterID.activeConnectionIDLimit)
+        }),
+        ("stateless_reset_token not 16 bytes", try parameters {
+            $0[QUICTransportParameterID.statelessResetToken] = Data(repeating: 0xab, count: 8)
+        }),
+        ("max_datagram_frame_size zero", try parameters {
+            try $0.setInteger(0, for: QUICTransportParameterID.maxDatagramFrameSize)
+        }),
+        ("connection ID of zero length", try parameters {
+            $0[QUICTransportParameterID.initialSourceConnectionID] = Data()
+        }),
+        ("connection ID longer than 20", try parameters {
+            $0[QUICTransportParameterID.retrySourceConnectionID] = Data(repeating: 0x01, count: 21)
+        }),
+    ]
+    for (name, value) in cases {
+        #expect(throws: (any Error).self, "expected \(name) to be rejected") {
+            try value.validated()
+        }
+    }
+}

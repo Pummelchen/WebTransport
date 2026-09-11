@@ -22,6 +22,8 @@ Fixed:
 
 - `HKDF-Expand` is capped at `255 * HashLen` (8,160 bytes for SHA-256) as RFC 5869 section 2.3 requires. The guard allowed up to `UInt16.max`, so a larger request wrapped the block counter to zero and returned bytes that look well-formed but are not the RFC's stream.
 
+- `QUICTransportParameters.validated()` enforces the value rules of RFC 9000 section 18.2, which nothing did before: `max_udp_payload_size` below 1200, `ack_delay_exponent` above 20, `max_ack_delay` at or above 2^14, `active_connection_id_limit` below 2, a `stateless_reset_token` that is not 16 bytes, a zero `max_datagram_frame_size`, and connection-ID parameters outside 1...20 are now rejected. It is opt-in rather than folded into `decode`, because `decode` is also the TLS-extension parser and must keep accepting parameters this build does not model.
+
 - `--max-sessions` is bounded at 65,536. The value sizes an array of tasks, so `--max-sessions=1000000` committed memory proportional to the request until the process was killed; the parser accepted any positive integer. The bound stops that abuse and is deliberately well clear of `Swift/run-soak.sh`, which passes `CONNECTIONS + 10`.
 
 - `--listen` exits non-zero when it served no sessions. It previously exited zero after every session attempt failed, which a script or CI job reads as success.
