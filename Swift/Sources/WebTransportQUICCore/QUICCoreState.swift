@@ -94,6 +94,15 @@ public struct QUICConnectionIDStore: Equatable, Sendable {
     public private(set) var active: [UInt64: QUICConnectionID]
     public private(set) var retiredSequences: Set<UInt64>
 
+    /// The largest `retire_prior_to` value seen.
+    ///
+    /// RFC 9000 section 19.15 makes every sequence below a received Retire Prior To
+    /// permanently retired, and gives a later, smaller value no effect. Without
+    /// remembering the high-water mark, a subsequent frame naming a sequence below it
+    /// would be treated as new and re-activated, making a retired connection ID
+    /// usable again.
+    public private(set) var largestRetirePriorTo: UInt64 = 0
+
     public init(
         initialConnectionID: Data,
         activeConnectionIDLimit: Int = 8
@@ -123,8 +132,23 @@ public struct QUICConnectionIDStore: Equatable, Sendable {
         guard retirePriorTo <= sequence else {
             throw QUICStateError.invalidRetirePriorTo(sequence: sequence, retirePriorTo: retirePriorTo)
         }
+        if retirePriorTo > largestRetirePriorTo {
+            largestRetirePriorTo = retirePriorTo
+        }
 
         var retireFrames: [QUICFrame] = []
+        // A sequence below the watermark never becomes usable, even if the peer names
+        // it later with a smaller Retire Prior To. Recording it as retired is enough to
+        // keep it out of `active`; a RETIRE_CONNECTION_ID frame is only owed if this
+        // endpoint actually held that connection ID, and the peer already told us to
+        // stop using it. `retire` refuses an unknown sequence, so mark it directly.
+        if sequence < largestRetirePriorTo {
+            retiredSequences.insert(sequence)
+            if active.removeValue(forKey: sequence) != nil {
+                retireFrames.append(.retireConnectionID(sequence: sequence))
+            }
+            return retireFrames
+        }
         if let existing = active[sequence] {
             let incoming = try QUICConnectionID(
                 sequence: sequence,

@@ -432,3 +432,48 @@ func lossRecoveryStillRetransmitsStreamData() throws {
     )
     #expect(result.retransmittableFrames == [.stream(id: 0, offset: 0, fin: false, data: Data("keep".utf8))])
 }
+
+// MARK: - Connection ID retirement watermark
+
+/// RFC 9000 section 19.15: every sequence below a received Retire Prior To is retired
+/// permanently, and a later, smaller Retire Prior To has no effect. Without remembering
+/// the high-water mark a sequence below it could be re-activated and used again.
+@Test
+func connectionIDStoreKeepsRetiredSequencesBelowTheWatermark() throws {
+    var store = try QUICConnectionIDStore(initialConnectionID: Data([0x00]), activeConnectionIDLimit: 8)
+
+    let first = try store.applyNewConnectionID(
+        sequence: 10,
+        retirePriorTo: 5,
+        connectionID: Data([0x0a]),
+        statelessResetToken: Data(repeating: 1, count: 16)
+    )
+    #expect(first.count == 1)
+    #expect(store.largestRetirePriorTo == 5)
+    #expect(store.active.keys.sorted() == [10])
+
+    // A later frame naming a sequence below the watermark, with a lower Retire Prior To,
+    // must not make it usable.
+    let second = try store.applyNewConnectionID(
+        sequence: 3,
+        retirePriorTo: 0,
+        connectionID: Data([0x03]),
+        statelessResetToken: Data(repeating: 2, count: 16)
+    )
+    #expect(second.isEmpty)
+    #expect(store.active.keys.sorted() == [10])
+    #expect(store.retiredSequences.contains(3))
+    // The destination cannot be switched to a sequence below the watermark.
+    #expect(throws: (any Error).self) {
+        try store.useDestinationConnectionID(sequence: 3)
+    }
+
+    // A sequence at or above the watermark is still accepted normally.
+    _ = try store.applyNewConnectionID(
+        sequence: 11,
+        retirePriorTo: 5,
+        connectionID: Data([0x0b]),
+        statelessResetToken: Data(repeating: 3, count: 16)
+    )
+    #expect(store.active.keys.sorted() == [10, 11])
+}
