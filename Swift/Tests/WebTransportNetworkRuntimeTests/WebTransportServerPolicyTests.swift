@@ -132,3 +132,49 @@ func invalidPoliciesFailListenerConstructionRatherThanBindingSilently() {
         )
     }
 }
+
+// MARK: - Precedence between the legacy limit and an admission policy
+
+/// `maxConcurrentConnections` predates the admission policy. An explicit value must
+/// override the policy, and it must be validated on the same terms as the policy's own
+/// field.
+///
+/// The override used to be gated on `admission == .default`, so a caller passing both a
+/// policy and an explicit limit had the limit silently ignored — the policy's value won
+/// with no diagnostic, and an out-of-range limit was neither applied nor refused.
+@Test
+func explicitConcurrencyLimitOverridesANonDefaultPolicy() throws {
+    let endpoint = WebTransportNetworkEndpoint(host: "127.0.0.1", port: 0)
+
+    // A policy plus an explicit limit constructs, and the limit is applied.
+    let overriding = try WebTransportQUICServer(
+        endpoint: endpoint,
+        maxConcurrentConnections: 1,
+        authority: "localhost",
+        localOnly: false,
+        admission: .publicFacing
+    )
+    overriding.shutdown()
+
+    // An out-of-range explicit limit is refused rather than silently coerced to 1.
+    for invalid in [0, -1] {
+        #expect(throws: (any Error).self, "maxConcurrentConnections \(invalid) must be refused") {
+            _ = try WebTransportQUICServer(
+                endpoint: endpoint,
+                maxConcurrentConnections: invalid,
+                authority: "localhost",
+                localOnly: false,
+                admission: .publicFacing
+            )
+        }
+    }
+
+    // Leaving the limit at its default still lets the policy decide.
+    let policyDefault = try WebTransportQUICServer(
+        endpoint: endpoint,
+        authority: "localhost",
+        localOnly: false,
+        admission: .publicFacing
+    )
+    policyDefault.shutdown()
+}

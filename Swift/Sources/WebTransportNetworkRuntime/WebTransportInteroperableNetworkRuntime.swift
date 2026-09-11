@@ -997,11 +997,23 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         transportLimits: WebTransportTransportLimits = .default
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
-        // `maxConcurrentConnections` predates the admission policy. When a caller
-        // supplies a policy its value wins; otherwise the legacy argument is
-        // honoured so existing call sites behave identically.
+        // `maxConcurrentConnections` predates the admission policy. An explicit value
+        // overrides whatever the policy carries, and the default is left alone so a
+        // policy's own limit still applies when the caller did not ask for one.
+        //
+        // The condition used to be `admission == .default`, which meant that a caller
+        // passing both a policy and an explicit limit had its limit silently ignored.
+        // Tying the override to the default argument instead makes the precedence the
+        // same for every policy, and the value is validated on the same terms as the
+        // policy field so an out-of-range override is refused rather than accepted here
+        // and rejected elsewhere.
         var admission = try admission.validated()
-        if admission == .default, maxConcurrentConnections != 16 {
+        if maxConcurrentConnections != 16 {
+            guard maxConcurrentConnections > 0 else {
+                throw WebTransportNetworkRuntimeError.invalidTransport(
+                    "maxConcurrentConnections must be positive"
+                )
+            }
             admission.maxConcurrentConnections = maxConcurrentConnections
         }
         let transportLimits = try transportLimits.validated()
