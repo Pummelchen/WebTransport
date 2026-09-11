@@ -8,7 +8,7 @@ The project uses semantic versioning.
 
 Fixed:
 
-- An accept that times out no longer consumes the next connection. `acceptSession` bounds its wait on the connection queue with a timeout, and a cancelled `CheckedContinuation` is never resumed, so the abandoned waiter stayed at the head of the queue and was handed the next accepted connection — which was then dropped. Reachable from the documented accept loop, `while true { try await acceptSession() }`, whose one-second default plants an abandoned waiter on every idle timeout; once connections arrive slower than that, every connection is lost. The queue now tags each waiter so a caller that stops waiting removes its own entry.
+- An accept that times out no longer consumes the next connection. `acceptSession` bounds its wait on the connection queue with a timeout, and a cancelled `CheckedContinuation` is never resumed, so the abandoned waiter stayed at the head of the queue and was handed the next accepted connection — which was then dropped. Reachable from the documented accept loop, `while true { try await acceptSession() }`, whose one-second default plants an abandoned waiter on every idle timeout; once connections arrive slower than that, every connection is lost. The queue now tags each waiter so a caller that stops waiting removes its own entry and resumes it, which lets the abandoned task unwind; dropping the continuation instead would leak it. A cancelled accept also releases a connection that arrives after it gave up.
 
 - Shutdown now wakes a parked accept with a shutdown error instead of leaving it to block for its full timeout. That timeout was how the abandoned waiters above were created, so the two defects compounded.
 
@@ -16,11 +16,11 @@ Fixed:
 
 - DATAGRAM and PING frames are no longer classified as retransmittable. RFC 9221 section 5.2 states DATAGRAM frames are not retransmitted on loss detection, and RFC 9000 section 13.3 notes a lost PING needs no repair; a caller resending everything in `retransmittableFrames` re-sent an unreliable datagram and delivered it twice.
 
-- `NEW_CONNECTION_ID` rejects a zero-length connection ID. RFC 9000 section 19.15 makes anything outside 1...20 a `FRAME_ENCODING_ERROR`, and only the upper bound was checked, so an empty connection ID was accepted and stored as a usable identity.
+- `NEW_CONNECTION_ID` rejects a zero-length connection ID. RFC 9000 section 19.15 makes anything outside 1...20 a `FRAME_ENCODING_ERROR`, and only the upper bound was checked, so an empty connection ID was accepted and stored as a usable identity. The encoder enforces the same range, so the library can no longer produce a frame it would refuse to read.
 
 - `HKDF-Expand` is capped at `255 * HashLen` (8,160 bytes for SHA-256) as RFC 5869 section 2.3 requires. The guard allowed up to `UInt16.max`, so a larger request wrapped the block counter to zero and returned bytes that look well-formed but are not the RFC's stream.
 
-- `--max-sessions` is bounded at 4,096. The value sizes an array of tasks, so `--max-sessions=1000000` committed memory proportional to the request until the process was killed; the parser accepted any positive integer.
+- `--max-sessions` is bounded at 65,536. The value sizes an array of tasks, so `--max-sessions=1000000` committed memory proportional to the request until the process was killed; the parser accepted any positive integer. The bound stops that abuse and is deliberately well clear of `Swift/run-soak.sh`, which passes `CONNECTIONS + 10`.
 
 - `--listen` exits non-zero when it served no sessions. It previously exited zero after every session attempt failed, which a script or CI job reads as success.
 
