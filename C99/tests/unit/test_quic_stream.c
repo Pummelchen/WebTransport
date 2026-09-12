@@ -363,6 +363,28 @@ static void test_receiving_states(void) {
                    wt_quic_stream_on_data_read(&stream, 1U));
 }
 
+/* The four fields in a stream number (RFC 9000 section 2.1), which every rule about streams reads. */
+static void test_stream_id_fields(void) {
+  uint64_t id;
+
+  WT_EXPECT_U64("a client's bidirectional stream 3", 12U, wt_quic_stream_id_make(1, 1, 3U));
+  WT_EXPECT_U64("a server's bidirectional stream 0", 1U, wt_quic_stream_id_make(0, 1, 0U));
+  WT_EXPECT_U64("a client's unidirectional stream 0", 2U, wt_quic_stream_id_make(1, 0, 0U));
+  WT_EXPECT_U64("a server's unidirectional stream 0", 3U, wt_quic_stream_id_make(0, 0, 0U));
+  WT_EXPECT_INT("stream 0 is the client's", 1, wt_quic_stream_id_from_client(0U));
+  WT_EXPECT_INT("stream 1 is the server's", 0, wt_quic_stream_id_from_client(1U));
+  WT_EXPECT_INT("stream 0 is bidirectional", 1, wt_quic_stream_id_is_bidirectional(0U));
+  WT_EXPECT_INT("stream 2 is not", 0, wt_quic_stream_id_is_bidirectional(2U));
+  WT_EXPECT_U64("stream 12 is index 3", 3U, wt_quic_stream_id_index(12U));
+
+  for (id = 0U; id < 16U; id++) {
+    uint64_t rebuilt = wt_quic_stream_id_make(wt_quic_stream_id_from_client(id),
+                                             wt_quic_stream_id_is_bidirectional(id),
+                                             wt_quic_stream_id_index(id));
+    WT_EXPECT_U64("and every number is the one its fields describe", id, rebuilt);
+  }
+}
+
 int main(void) {
   test_send_states();
   test_reset_and_stop();
@@ -370,5 +392,6 @@ int main(void) {
   test_flow_control();
   test_receiving_states();
 
+  test_stream_id_fields();
   WT_TEST_MAIN_END("wt_quic_stream");
 }

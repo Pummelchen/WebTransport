@@ -215,4 +215,12 @@ const char *wt_quic_recv_state_name(wt_quic_recv_state_t state);
 }
 #endif
 
+/* The four fields RFC 9000 section 2.1 packs into one stream number: the low bit is the initiator,
+ * the next is the directionality, and the rest is an index within that class. Read and written in one
+ * place, so that no rule shifts bits at its own call site. */
+uint64_t wt_quic_stream_id_index(uint64_t stream_id);
+int wt_quic_stream_id_from_client(uint64_t stream_id);
+int wt_quic_stream_id_is_bidirectional(uint64_t stream_id);
+uint64_t wt_quic_stream_id_make(int from_client, int bidirectional, uint64_t index);
+
 #endif /* WEBTRANSPORT_QUIC_STREAM_H */

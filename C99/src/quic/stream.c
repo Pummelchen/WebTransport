@@ -369,3 +369,17 @@ const char *wt_quic_recv_state_name(wt_quic_recv_state_t state) {
       return "unknown";
   }
 }
+
+uint64_t wt_quic_stream_id_index(uint64_t stream_id) { return stream_id >> 2; }
+
+int wt_quic_stream_id_from_client(uint64_t stream_id) { return (stream_id & 0x01U) == 0U; }
+
+int wt_quic_stream_id_is_bidirectional(uint64_t stream_id) { return (stream_id & 0x02U) == 0U; }
+
+uint64_t wt_quic_stream_id_make(int from_client, int bidirectional, uint64_t index) {
+  uint64_t id = index << 2;
+  if (!from_client) id |= 0x01U;
+  if (!bidirectional) id |= 0x02U;
+  return id;
+}
+
