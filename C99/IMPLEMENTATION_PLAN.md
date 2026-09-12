@@ -721,6 +721,55 @@ synthetic test would have hidden: `wt_udp_address_loopback` wrote 127.0.0.0 for 
 case needed only its last byte set, and binding a network address fails with EADDRNOTAVAIL -- which a
 fake socket would have accepted.
 
+**Eighth part done: the connection runtime over the socket.** `quic/connection.h` and
+`src/quic/connection.c` are one connection: its three packet number spaces and the keys of each, the
+received sets and the acknowledgements they owe, the sent-packet list with loss detection and probe
+timeouts, the congestion controller, the close paths, and the UDP socket it borrows. The frames it does
+not own -- CRYPTO, STREAM, the flow control limits, NEW_CONNECTION_ID, DATAGRAM -- go to a
+caller-installed handler, which is the seam the handshake and the stream layer plug into. That seam is
+what let this part be tested against a real socket without a handshake, and it is what keeps a peer's
+frame types out of the packet layer.
+
+`now` is a parameter everywhere and the event loop is the caller's: `receive` reads one datagram,
+`flush` sends what is owed, `next_timeout` says how long the caller may wait and `on_timeout` does what
+the deadline was for. Nothing sleeps and nothing owns a thread, which is what makes the timers
+testable: a probe timeout, a time-threshold loss and an idle timeout are all checked by moving a number
+rather than by sleeping, and a test that slept would be asserting on the machine's load.
+
+Three rules came out of the work that are worth naming. **A connection with no round trip sample must
+still arm a probe timeout**: RFC 9002 section 6.2.1 uses a fixed initial round trip until the estimator
+has a sample, and a client whose first Initial is lost has no sample by definition -- an implementation
+that waited for one would never retransmit the very packet that would produce it, so `wt_quic_loss_pto`
+refusing before the first sample is answered by the runtime's own fallback. **An acknowledgement is
+owed by an ack-eliciting packet and not by any packet**: answering an ACK-only packet with an ACK-only
+packet is the storm RFC 9000 section 13.2.1 exists to prevent, so such a packet is recorded, arms no
+timer, and is covered by the next acknowledgement. And **an acknowledgement may be delayed** by up to
+this endpoint's own `max_ack_delay`, which is a deadline like any other -- zero in the Initial and
+Handshake spaces, and separate in the configuration from the peer's delay, because RFC 9002's round
+trip arithmetic uses the peer's number and RFC 9000's timer uses this endpoint's.
+
+`tests/unit/test_quic_connection.c` (291 checks) runs two connections over two loopback sockets, on
+IPv4 and on IPv6, with the Initial keys both ends derive from one connection ID (RFC 9001 section 5.2).
+The whole path is therefore exercised without a handshake: a CRYPTO payload is built, protected, sent,
+received, unprotected, walked frame by frame, acknowledged and accounted for; the round trip sample is
+checked against the clock the test chose; the congestion window grows in slow start; the packet
+threshold declares a loss and the descriptor names the bytes to send again; a probe is padded to what
+header protection needs (WT-72) and arrives; a close goes out in the highest space that has keys, ends
+the peer's connection and starts its draining period; an acknowledgement of a packet that was never
+sent is the protocol violation RFC 9000 section 13.1 makes it; and a datagram from an unknown address,
+one carrying another connection ID, one for a key this endpoint does not have, and an empty one are all
+discarded with nothing owed. Two findings were the runtime's rather than the test's: the peer's
+connection ID has to be the one the peer answers to and not the one it sends, and the wire's ACK Range
+Count counts only the ADDITIONAL ranges -- the first range is in Largest Acknowledged and First ACK
+Range -- which is worth knowing before writing a chain walk, because the frame codec's range accessor
+indexes the additional ranges and not the first one.
+
+What is not here yet, and what the phase still needs: the TLS handshake driven over CRYPTO frames, the
+stream frames and their flow control (both of which plug into the handler), the resource limits the
+task list names, cancellation, and the server's connection-ID issuance and Retry. The completion
+criterion -- local IPv4 and IPv6 loopback -- is now met at the packet level, which is what this part
+was for.
+
 Implement the production network state machine.
 
 Tasks:

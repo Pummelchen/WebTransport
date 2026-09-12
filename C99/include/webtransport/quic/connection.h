@@ -1,0 +1,269 @@
+/*
+ * The QUIC connection runtime: one connection, its timer, and its socket.
+ *
+ * WHAT THIS LAYER DECIDES AND WHAT IT DOES NOT. It owns everything RFC 9000 asks a connection to
+ * remember about packets: the four packet number spaces, the keys of each, the received sets and the
+ * acknowledgements they owe, the sent-packet list with loss detection and probe timeouts, the
+ * congestion controller, and the close paths. It does not own frames. A frame it does not have a rule
+ * for -- CRYPTO, STREAM, the flow control limits, NEW_CONNECTION_ID, DATAGRAM -- is handed to a
+ * handler the caller installs, which is where the TLS handshake, the stream layer and the WebTransport
+ * session live. That seam is deliberate: it is what lets the packet layer be tested against a real
+ * socket without a handshake, and it is what keeps the peer's frame types out of this file.
+ *
+ * THE EVENT LOOP IS THE CALLER'S, AND `now` IS A PARAMETER. There is no thread and no hidden timer:
+ * `wt_quic_connection_receive` reads one datagram, `wt_quic_connection_flush` sends what is owed,
+ * `wt_quic_connection_next_timeout` says how long the caller may wait, and `wt_quic_connection_on_timeout`
+ * does what the deadline was for. A connection that is driven by a scheduler, a poll loop or a test
+ * with a synthetic clock is the same connection, which is what makes the timer behavior testable at
+ * all -- a wall clock inside this file would make every timing test a test of the machine's load.
+ *
+ * THE SOCKET IS BORROWED, NOT OWNED. The connection is given an open socket and an address and never
+ * closes the descriptor: a caller that owns one socket and several connections (which is what a QUIC
+ * server does, and what a test with two connections does) must not have the first connection to finish
+ * close it. `wt_quic_connection_clear` zeroes the keys and nothing else.
+ */
+
+#ifndef WEBTRANSPORT_QUIC_CONNECTION_H
+#define WEBTRANSPORT_QUIC_CONNECTION_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "webtransport/quic/close.h"
+#include "webtransport/quic/congestion.h"
+#include "webtransport/quic/error.h"
+#include "webtransport/quic/frame.h"
+#include "webtransport/quic/loss.h"
+#include "webtransport/quic/packet.h"
+#include "webtransport/quic/pn_space.h"
+#include "webtransport/quic/protection.h"
+#include "webtransport/runtime/udp.h"
+#include "webtransport/status.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum wt_quic_role {
+  WT_QUIC_ROLE_CLIENT = 0,
+  WT_QUIC_ROLE_SERVER = 1
+} wt_quic_role_t;
+
+/* The packet number spaces of RFC 9000 section 12.3. 0-RTT and 1-RTT share the Application space, so
+ * there are three and not four. */
+typedef enum wt_quic_space {
+  WT_QUIC_SPACE_INITIAL = 0,
+  WT_QUIC_SPACE_HANDSHAKE = 1,
+  WT_QUIC_SPACE_APPLICATION = 2,
+  WT_QUIC_SPACE_COUNT = 3
+} wt_quic_space_t;
+
+/* How many packets can be remembered as carrying retransmittable frames. The loss list itself holds
+ * WT_QUIC_SENT_PACKETS_MAX, but a packet that carries nothing worth resending (an ACK, a PING) needs
+ * no descriptor, so this is the number of CRYPTO or STREAM payloads in flight and not the number of
+ * packets. A connection that reaches it refuses to send rather than sending something it cannot
+ * retransmit, because a payload that is silently not retransmitted is a handshake or a stream that
+ * stalls with nothing naming why. */
+#define WT_QUIC_CONNECTION_FRAMES_MAX 16U
+
+/* The wire bytes of the ranges of one ACK frame. Bounded because the alternative is a buffer sized by
+ * a peer's packet count; a received set with more gaps than this sends what fits and the rest is
+ * acknowledged by a later frame, which RFC 9000 section 13.2.4 allows. */
+#define WT_QUIC_CONNECTION_ACK_RANGES_MAX 256U
+
+typedef struct wt_quic_connection_config {
+  wt_quic_role_t role;
+  uint32_t version;
+  /* The connection IDs. `local` is what this endpoint answers to and what it puts in the Source
+   * Connection ID field; `peer` is what it sends to. Initial keys are bound to the *original*
+   * destination connection ID, which is the caller's business and not this file's. */
+  const uint8_t *local_connection_id;
+  size_t local_connection_id_length;
+  const uint8_t *peer_connection_id;
+  size_t peer_connection_id_length;
+  /* The AEAD every packet is protected with. RFC 9001 section 5.3 allows the *handshake* to negotiate
+   * a different one per packet number space, which the keys carry, so this is the connection's default
+   * and the one used when nothing else is set. */
+  wt_aead_t aead;
+  /* The two acknowledgement delays, which are different numbers and are confused easily. `max_ack_delay`
+   * is the PEER's transport parameter: it is how long the peer may sit on an acknowledgement, so it is
+   * what a round trip sample is allowed to subtract (RFC 9002 section 5.3). `local_max_ack_delay` is
+   * this endpoint's own: how long IT may delay an acknowledgement before sending one (RFC 9000 section
+   * 13.2.1), which is what arms the acknowledgement timer. */
+  uint64_t max_ack_delay;
+  uint64_t local_max_ack_delay;
+  uint64_t idle_timeout;
+  /* The largest packet this path will carry. RFC 9000 section 14.1 requires every datagram to hold at
+   * least WT_QUIC_MAX_PACKET, so a smaller value is refused rather than used. */
+  size_t max_datagram_size;
+} wt_quic_connection_config_t;
+
+/* What a sent packet carried, so that a loss can be reported to whoever can send it again. This is
+ * the caller's `tag` in the loss list's terms: the runtime keeps one per retransmittable packet and
+ * hands it back when that packet is lost. `in_use` is how a slot is reused. */
+typedef struct wt_quic_tx_frame {
+  int in_use;
+  wt_quic_space_t space;
+  /* A CRYPTO payload: `offset` and `length` describe bytes of the sender's handshake stream. Streams
+   * are the next layer's business and get their own descriptor there. */
+  int is_crypto;
+  uint64_t offset;
+  size_t length;
+} wt_quic_tx_frame_t;
+
+/* A frame this layer does not act on. The return value stops the walk of that packet: WT_OK continues,
+ * anything else ends it and is returned by the receive call, which is how a handler reports a protocol
+ * error. The frame is reused by the decoder between calls, so a handler that keeps one must copy it. */
+typedef wt_status_t (*wt_quic_frame_handler_fn)(void *context, wt_quic_space_t space,
+                                                const wt_quic_frame_t *frame);
+
+/* A packet that was declared lost, and what it carried. Only packets with a descriptor are reported:
+ * an acknowledgement has nothing to send again. */
+typedef void (*wt_quic_frame_lost_fn)(void *context, const wt_quic_tx_frame_t *frame);
+
+typedef struct wt_quic_connection {
+  wt_quic_connection_config_t config;
+
+  wt_udp_socket_t socket;
+  wt_udp_address_t peer;
+  int has_peer;
+
+  /* The connection IDs, copied out of the configuration so that the caller's buffers may go away. */
+  uint8_t local_connection_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  size_t local_connection_id_length;
+  uint8_t peer_connection_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  size_t peer_connection_id_length;
+
+  /* One key set per space and direction. A direction that has not been installed -- the Handshake
+   * keys before the handshake produces them -- means a packet for that space cannot be read or sent,
+   * which is reported rather than guessed. */
+  wt_quic_packet_keys_t keys_in[WT_QUIC_SPACE_COUNT];
+  wt_quic_packet_keys_t keys_out[WT_QUIC_SPACE_COUNT];
+  int has_keys_in[WT_QUIC_SPACE_COUNT];
+  int has_keys_out[WT_QUIC_SPACE_COUNT];
+
+  wt_quic_pn_space_t spaces[WT_QUIC_SPACE_COUNT];
+  wt_quic_loss_t loss;
+  wt_quic_congestion_t congestion;
+  wt_quic_close_state_t close;
+
+  wt_quic_tx_frame_t frames[WT_QUIC_CONNECTION_FRAMES_MAX];
+
+  wt_quic_frame_handler_fn handler;
+  void *handler_context;
+  wt_quic_frame_lost_fn lost_handler;
+  void *lost_context;
+
+  /* When the last packet arrived or was sent, for the idle timeout, and when the packet that was
+   * acknowledged most recently arrived in each space, which is the delay an acknowledgement reports. */
+  uint64_t last_activity;
+  uint64_t received_at[WT_QUIC_SPACE_COUNT];
+
+  uint64_t packets_sent;
+  uint64_t packets_received;
+  uint64_t bytes_sent;
+  uint64_t bytes_received;
+  /* Whether the handshake is confirmed, which RFC 9002 section 5.3 requires before an acknowledgement
+   * delay is subtracted from a round trip sample. */
+  int handshake_confirmed;
+  /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
+   * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is
+   * how "do not send" and "have not sent yet" are told apart. */
+  int close_sent;
+
+  /* The close the peer sent. It is separate from `close` above, which is this endpoint's own intent:
+   * the peer's close ends the connection without this endpoint sending anything, and a caller that
+   * wanted to know why needs the peer's code rather than its own. The reason phrase is copied, because
+   * the frame's bytes are the decrypted packet buffer and do not outlive the datagram. */
+  int peer_closed;
+  wt_quic_close_kind_t peer_close_kind;
+  uint64_t peer_error_code;
+  uint64_t peer_frame_type;
+  uint8_t peer_reason[64];
+  size_t peer_reason_length;
+
+  /* Packets dropped before they were read: a destination connection ID that is not this endpoint's,
+   * or a failure that RFC 9001 section 5.3 says to discard for rather than to act on. */
+  uint64_t packets_discarded;
+} wt_quic_connection_t;
+
+/* Set the connection up. The configuration is copied; the connection IDs it points at are copied too,
+ * so a caller may let its own buffer go. Refuses a null connection or configuration, a connection ID
+ * longer than twenty bytes, a datagram size below WT_QUIC_MAX_PACKET, and an AEAD of none. */
+wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
+                                    const wt_quic_connection_config_t *config);
+
+/* Borrow `socket` and send to `peer`. A null `peer` is allowed only for a server that learns its
+ * peer's address from the first packet, which is what RFC 9000 section 7.2's server does. */
+wt_status_t wt_quic_connection_attach(wt_quic_connection_t *connection,
+                                      const wt_udp_socket_t *socket,
+                                      const wt_udp_address_t *peer);
+
+/* Install one direction's keys for a space. The keys are copied and zeroed by
+ * `wt_quic_connection_clear`. */
+wt_status_t wt_quic_connection_set_keys(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                        int inbound, const wt_quic_packet_keys_t *keys);
+
+/* Install the frame and loss handlers. Both are optional; without the first, frames this layer does
+ * not act on are ignored -- which is correct for a connection whose owner has nothing to do with them
+ * yet, and wrong for a connection that needs them. */
+void wt_quic_connection_set_handlers(wt_quic_connection_t *connection,
+                                     wt_quic_frame_handler_fn handler, void *handler_context,
+                                     wt_quic_frame_lost_fn lost_handler, void *lost_context);
+
+/* Send one CRYPTO payload in one packet. The bytes are not copied: the descriptor records where they
+ * are in the handshake stream, and a loss is reported to the lost handler so that the owner can send
+ * them again from the buffer it owns. Returns WT_ERR_AGAIN when the congestion window or the loss
+ * list has no room, which is the caller's signal to try later; WT_ERR_LIMIT when every retransmission
+ * slot is taken. */
+wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                           uint64_t offset, const uint8_t *data, size_t length,
+                                           uint64_t now);
+
+/* Send an acknowledgement if one is owed in this space, and a probe (an ack-eliciting PING) if one is
+ * owed because a probe timeout fired. Returns WT_OK whether or not anything was sent; the count of
+ * packets sent is the caller's way to tell. */
+wt_status_t wt_quic_connection_flush(wt_quic_connection_t *connection, uint64_t now);
+
+/* Read and process one datagram. WT_ERR_AGAIN when none is waiting, which is not a failure.
+ *
+ * A packet that fails authentication ends the datagram: RFC 9001 section 5.3 discards it, and the
+ * packets coalesced after it cannot be found reliably once one has been skipped. A protocol error in a
+ * frame closes the connection and is reported. */
+wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_t now);
+
+/* How long the caller may wait before calling `wt_quic_connection_on_timeout`, and WT_ERR_STATE when
+ * no timer is armed -- which is not the same as a zero delay: a connection with nothing in flight
+ * waits for the application, indefinitely. */
+wt_status_t wt_quic_connection_next_timeout(wt_quic_connection_t *connection, uint64_t now,
+                                           uint64_t *out_micros);
+
+/* Do what the deadline was armed for: declare packets lost, send a probe, or end an idle or draining
+ * period. */
+wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint64_t now);
+
+/* Close, sending a CONNECTION_CLOSE frame if one has not been sent. RFC 9000 section 10.2: the intent
+ * to close is a frame, so this sends it and then waits out the draining period. A reason phrase is a
+ * view and must outlive the call, which is why it is passed and not stored. */
+wt_status_t wt_quic_connection_close(wt_quic_connection_t *connection, uint64_t error_code,
+                                     uint64_t frame_type, const uint8_t *reason, size_t reason_length,
+                                     uint64_t now);
+
+/* Whether the peer closed, so that nothing but PADDING and the close's own frames is processed. */
+int wt_quic_connection_is_closed(const wt_quic_connection_t *connection);
+
+/* Whether the draining period has passed, after which the connection is gone and its state may be
+ * released. */
+int wt_quic_connection_is_drained(const wt_quic_connection_t *connection, uint64_t now);
+
+/* Zero the keys and forget the peer. Does not close the socket, which the connection never owned. */
+void wt_quic_connection_clear(wt_quic_connection_t *connection);
+
+/* The name of a space, for diagnostics: "initial", "handshake", "application". Never NULL. */
+const char *wt_quic_space_name(wt_quic_space_t space);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* WEBTRANSPORT_QUIC_CONNECTION_H */

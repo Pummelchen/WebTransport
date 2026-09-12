@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 34 unit test files and 74,872 checks, run by `ctest` and again under
+- 35 unit test files and 75,163 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -185,6 +185,16 @@ What is here:
   `WT_ERR_TRUNCATED` with no length reported rather than a short read that would let QUIC parse the
   prefix of a packet (WT-36). A link-local address carries its scope id, because dropping it is the
   difference between reaching the peer and reaching nobody.
+- **The connection runtime** (Phase 4, eighth part): `quic/connection.h` is one connection over one
+  borrowed socket -- its three packet number spaces and their keys, the received sets and the
+  acknowledgements they owe, the sent-packet list with loss detection and probe timeouts, NewReno, the
+  close paths and the acknowledgement-delay timer. The frames it does not own (CRYPTO, STREAM, the
+  limits, DATAGRAM) go to a caller-installed handler, which is the seam the handshake and the stream
+  layer plug into. `now` is a parameter and the event loop is the caller's, so the timers are tested by
+  moving a number rather than by sleeping. `tests/unit/test_quic_connection.c` runs two connections over
+  two real loopback sockets on IPv4 and on IPv6 with Initial keys both ends derive from one connection
+  ID, so a packet travels the whole path -- build, protect, send, receive, unprotect, walk, acknowledge,
+  account -- without a handshake.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
