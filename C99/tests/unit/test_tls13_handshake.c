@@ -445,7 +445,7 @@ static void test_extension_refusals(void) {
     static const uint8_t trailing[] = {
         0x00, 0x05, 0x00, 0x2b, 0x00, 0x00, 0xff};
     cursor = wt_cursor_init(trailing, sizeof(trailing));
-    WT_EXPECT_STATUS("a block with trailing bytes is refused", WT_ERR_TRUNCATED,
+    WT_EXPECT_STATUS("a block with trailing bytes is refused", WT_ERR_PROTOCOL,
                      wt_tls_extensions_parse(&cursor, &list));
   }
   /* An extension header that claims more than the block holds. */
@@ -453,7 +453,7 @@ static void test_extension_refusals(void) {
     static const uint8_t oversized[] = {0x00, 0x04, 0x00, 0x2b, 0x00, 0x10};
     cursor = wt_cursor_init(oversized, sizeof(oversized));
     WT_EXPECT_STATUS("an extension longer than its block is refused",
-                     WT_ERR_TRUNCATED, wt_tls_extensions_parse(&cursor, &list));
+                     WT_ERR_PROTOCOL, wt_tls_extensions_parse(&cursor, &list));
   }
   /* More extensions than the list can hold. The count is a peer's choice, so this is
    * the bound rather than an impossible input. */
@@ -505,7 +505,9 @@ static void test_message_refusals(void) {
   uint8_t message[WT_RFC8448_CLIENT_HELLO_LEN];
   const wt_tls_extension_t *extension;
 
-  /* A message whose header length is not its size. */
+  /* A message whose header length is not its size, and then the fields inside a message
+   * whose framing is complete: an inner length that overruns its region is a decode error
+   * rather than truncation, because the bytes are all there and the length is wrong. */
   memcpy(message, WT_RFC8448_CLIENT_HELLO, sizeof(message));
   message[3] = (uint8_t)(message[3] - 1U);
   WT_EXPECT_STATUS("a ClientHello whose length is short is refused",
@@ -585,7 +587,7 @@ static void test_message_refusals(void) {
     bogus.type = WT_TLS_EXTENSION_SUPPORTED_VERSIONS;
     bogus.data = odd;
     bogus.len = 1U;
-    WT_EXPECT_STATUS("a one-byte server version is refused", WT_ERR_TRUNCATED,
+    WT_EXPECT_STATUS("a one-byte server version is refused", WT_ERR_PROTOCOL,
                      wt_tls_supported_versions_server(&bogus, &version));
 
     bogus.type = WT_TLS_EXTENSION_KEY_SHARE;
@@ -596,7 +598,7 @@ static void test_message_refusals(void) {
     bogus.data = short_key;
     bogus.len = sizeof(short_key);
     WT_EXPECT_STATUS("a key share shorter than its key is refused",
-                     WT_ERR_TRUNCATED, wt_tls_key_share_server(&bogus, &share));
+                     WT_ERR_PROTOCOL, wt_tls_key_share_server(&bogus, &share));
     WT_EXPECT_STATUS("a NULL key share output is refused", WT_ERR_INVALID_ARGUMENT,
                      wt_tls_key_share_server(&bogus, NULL));
     WT_EXPECT_STATUS("a NULL extension is refused", WT_ERR_INVALID_ARGUMENT,
@@ -671,6 +673,167 @@ static void test_message_refusals(void) {
   }
 }
 
+
+static void test_certificate_messages(void) {
+  wt_tls_certificate_t certificate;
+  wt_tls_certificate_verify_t verify;
+  uint8_t rebuilt[WT_RFC8448_CERTIFICATE_LEN + 16U];
+  uint8_t finished[WT_TLS13_FINISHED_LEN];
+  wt_writer_t w;
+
+  /* RFC 8448's Certificate: one entry, an empty request context, and the DER of a real
+   * certificate. */
+  WT_EXPECT_OK("the RFC's Certificate parses",
+               wt_tls_certificate_parse(WT_RFC8448_CERTIFICATE,
+                                        WT_RFC8448_CERTIFICATE_LEN, &certificate));
+  WT_EXPECT_U64("with no request context", 0U,
+                (uint64_t)certificate.request_context_len);
+  WT_EXPECT_U64("one entry", 1U, (uint64_t)certificate.count);
+  WT_EXPECT_U64("whose DER is 432 bytes", 432U,
+                (uint64_t)certificate.entries[0].der_len);
+  WT_EXPECT_U64("an X.509 SEQUENCE", 0x30U,
+                (uint64_t)certificate.entries[0].der[0]);
+  WT_EXPECT_U64("with no entry extensions", 0U,
+                (uint64_t)certificate.entries[0].extensions_len);
+
+  w = wt_writer_init(rebuilt, sizeof(rebuilt));
+  WT_EXPECT_OK("and it re-encodes", wt_tls_certificate_encode(&certificate, &w));
+  WT_EXPECT_U64("to the same length", (uint64_t)WT_RFC8448_CERTIFICATE_LEN,
+                (uint64_t)wt_writer_offset(&w));
+  WT_EXPECT_BYTES("and the same bytes", WT_RFC8448_CERTIFICATE, rebuilt,
+                  WT_RFC8448_CERTIFICATE_LEN);
+
+  /* A client with nothing to offer sends an empty chain, which RFC 8446 section 4.4.2
+   * requires rather than allowing the message to be omitted. */
+  {
+    wt_tls_certificate_params_t params;
+    wt_tls_certificate_t parsed;
+    uint8_t message[16];
+    size_t message_len = 0U;
+    memset(&params, 0, sizeof(params));
+    WT_EXPECT_OK("an empty chain builds",
+                 wt_tls_certificate_build(&params, message, sizeof(message),
+                                          &message_len));
+    WT_EXPECT_U64("as eight bytes", 8U, (uint64_t)message_len);
+    WT_EXPECT_OK("and parses back",
+                 wt_tls_certificate_parse(message, message_len, &parsed));
+    WT_EXPECT_U64("with no entries", 0U, (uint64_t)parsed.count);
+  }
+
+  /* CertificateVerify: the RFC's scheme is rsa_pss_rsae_sha256 over a 128-byte
+   * signature. */
+  WT_EXPECT_OK("the RFC's CertificateVerify parses",
+               wt_tls_certificate_verify_parse(WT_RFC8448_CERTIFICATE_VERIFY,
+                                               WT_RFC8448_CERTIFICATE_VERIFY_LEN,
+                                               &verify));
+  WT_EXPECT_U64("with the scheme the RFC used",
+                (uint64_t)WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256,
+                (uint64_t)verify.scheme);
+  WT_EXPECT_U64("and a 128-byte signature", 128U,
+                (uint64_t)verify.signature_len);
+  w = wt_writer_init(rebuilt, sizeof(rebuilt));
+  WT_EXPECT_OK("and it re-encodes",
+               wt_tls_certificate_verify_encode(&verify, &w));
+  WT_EXPECT_U64("to the same length",
+                (uint64_t)WT_RFC8448_CERTIFICATE_VERIFY_LEN,
+                (uint64_t)wt_writer_offset(&w));
+  WT_EXPECT_BYTES("and the same bytes", WT_RFC8448_CERTIFICATE_VERIFY, rebuilt,
+                  WT_RFC8448_CERTIFICATE_VERIFY_LEN);
+
+  /* Finished: the RFC's message carries the verify data the key schedule test uses. */
+  WT_EXPECT_OK("the RFC's Finished parses",
+               wt_tls_finished_parse(WT_RFC8448_SERVER_FINISHED_MESSAGE,
+                                     WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN,
+                                     finished));
+  WT_EXPECT_BYTES("to the verify data the key schedule derives",
+                  WT_RFC8448_SERVER_FINISHED, finished, WT_TLS13_FINISHED_LEN);
+  {
+    uint8_t message[WT_TLS13_FINISHED_LEN + WT_TLS_HANDSHAKE_HEADER_LEN];
+    size_t message_len = 0U;
+    WT_EXPECT_OK("and it builds",
+                 wt_tls_finished_build(WT_RFC8448_SERVER_FINISHED, message,
+                                       sizeof(message), &message_len));
+    WT_EXPECT_BYTES("byte for byte", WT_RFC8448_SERVER_FINISHED_MESSAGE, message,
+                    WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN);
+  }
+
+  /* The refusals. */
+  {
+    uint8_t broken[WT_RFC8448_CERTIFICATE_LEN];
+    uint8_t small[8];
+    size_t small_len = 0U;
+    memcpy(broken, WT_RFC8448_CERTIFICATE, sizeof(broken));
+
+    /* The list length claims more than the body holds. */
+    broken[5] = (uint8_t)(broken[5] + 1U);
+    WT_EXPECT_STATUS("a certificate list that overruns is refused", WT_ERR_PROTOCOL,
+                     wt_tls_certificate_parse(broken, sizeof(broken), &certificate));
+
+    /* A Finished whose body is not Hash.length. */
+    memcpy(broken, WT_RFC8448_SERVER_FINISHED_MESSAGE,
+           WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN > sizeof(broken)
+               ? sizeof(broken)
+               : WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN);
+    broken[3] = 31U; /* a body one byte short */
+    WT_EXPECT_STATUS("a short Finished is refused", WT_ERR_PROTOCOL,
+                     wt_tls_finished_parse(broken, 35U, finished));
+    WT_EXPECT_STATUS("a NULL Finished output is refused", WT_ERR_INVALID_ARGUMENT,
+                     wt_tls_finished_parse(WT_RFC8448_SERVER_FINISHED_MESSAGE,
+                                           WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN,
+                                           NULL));
+
+    {
+      wt_tls_certificate_entry_t entry;
+      wt_tls_certificate_params_t params;
+      entry.der = WT_RFC8448_CERTIFICATE + 8U; /* the DER inside the RFC's message */
+      entry.der_len = 432U;
+      entry.extensions = NULL;
+      entry.extensions_len = 0U;
+      params.request_context = NULL;
+      params.request_context_len = 0U;
+      params.entries = &entry;
+      params.count = 1U;
+      WT_EXPECT_STATUS("a buffer too small for a certificate is refused", WT_ERR_LIMIT,
+                       wt_tls_certificate_build(&params, small, sizeof(small),
+                                                &small_len));
+      WT_EXPECT_U64("and no length is reported", 0U, (uint64_t)small_len);
+      WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
+                       wt_tls_certificate_build(&params, NULL, 0U, &small_len));
+      WT_EXPECT_STATUS("a NULL length output is refused", WT_ERR_INVALID_ARGUMENT,
+                       wt_tls_certificate_build(&params, small, sizeof(small), NULL));
+    }
+
+    /* A certificate entry with no DER is not an empty chain. */
+    {
+      wt_tls_certificate_entry_t entry;
+      wt_tls_certificate_params_t params;
+      uint8_t message[64];
+      size_t message_len = 0U;
+      entry.der = NULL;
+      entry.der_len = 0U;
+      entry.extensions = NULL;
+      entry.extensions_len = 0U;
+      params.request_context = NULL;
+      params.request_context_len = 0U;
+      params.entries = &entry;
+      params.count = 1U;
+      WT_EXPECT_STATUS("an entry with no certificate is refused",
+                       WT_ERR_INVALID_ARGUMENT,
+                       wt_tls_certificate_build(&params, message, sizeof(message),
+                                                &message_len));
+    }
+
+    /* A CertificateVerify whose signature length overruns its body. */
+    {
+      static const uint8_t overrun[] = {0x0fU, 0x00U, 0x00U, 0x06U,
+                                        0x08U, 0x04U, 0x00U, 0x10U, 0x00U, 0x00U};
+      WT_EXPECT_STATUS("a signature that overruns is refused", WT_ERR_PROTOCOL,
+                       wt_tls_certificate_verify_parse(overrun, sizeof(overrun),
+                                                       &verify));
+    }
+  }
+}
+
 int main(void) {
   test_handshake_framing();
   test_client_hello_from_rfc();
@@ -678,6 +841,7 @@ int main(void) {
   test_build_and_parse_back();
   test_extension_refusals();
   test_message_refusals();
+  test_certificate_messages();
 
   WT_TEST_MAIN_END("wt_tls13_handshake");
 }

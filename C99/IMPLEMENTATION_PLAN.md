@@ -408,9 +408,27 @@ private, server public) must equal the ECDHE value RFC 8448's key schedule consu
 both public keys must be X25519(private, 9), so the key agreement and the schedule cannot
 disagree without a test saying so.
 
-What remains in this phase: the certificate messages, certificate chain validation
-through OpenSSL, the trust policy, and the client and server state machines that sequence
-them.
+**Fourth part done: the certificate messages.**
+`tls/handshake.h` now carries Certificate, CertificateVerify and Finished: a parsed chain
+is a list of DER views with the per-entry extension block RFC 8446 section 4.4.2 defines,
+CertificateVerify is a scheme and a signature, and Finished is exactly Hash.length bytes
+and nothing else. Nothing here validates anything -- framing is this layer's question and
+trust is the layer above -- which is what lets the codec be tested against RFC 8448's own
+444-byte Certificate and 136-byte CertificateVerify, both re-encoded byte for byte. A
+client with no certificate to offer builds an empty chain rather than omitting the
+message, which is what section 4.4.2 requires.
+
+Building this part settled an error-semantics question the earlier parts had left
+inconsistent: a read past the end of a region whose length has already been validated is
+WT_ERR_PROTOCOL, not WT_ERR_TRUNCATED. Every parser here is handed a complete message --
+its outer framing is checked first -- so an inner length that overruns is a length that
+lies rather than bytes that have not arrived, and the difference decides whether a
+receiver gives up on the connection or waits for more. Truncation is now what it says:
+the buffer is shorter than the framing itself.
+
+What remains in this phase: certificate chain validation through OpenSSL, the
+CertificateVerify signature check, the trust policy, and the client and server state
+machines that sequence them.
 
 Port the Swift TLS behavior into portable C99 state machines.
 

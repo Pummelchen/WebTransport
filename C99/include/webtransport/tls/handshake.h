@@ -37,6 +37,7 @@
 #include "webtransport/cursor.h"
 #include "webtransport/status.h"
 #include "webtransport/tls/extension.h"
+#include "webtransport/tls/keyschedule.h"
 #include "webtransport/writer.h"
 
 #ifdef __cplusplus
@@ -140,6 +141,81 @@ typedef struct wt_tls_client_hello_params {
 wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params,
                                       uint8_t *out, size_t capacity,
                                       size_t *out_len);
+
+/* ------------------------------------------- Certificate, CertificateVerify, Finished
+ *
+ * The three messages that carry a peer's identity and prove it holds the key. Nothing
+ * here validates anything: the certificate entries are DER views and the signature is a
+ * byte string, and what checks them is the trust layer above. That split is what lets
+ * this file be tested against a document, and it is also why a Certificate whose DER is
+ * garbage parses: "well framed" and "trustworthy" are different questions and this layer
+ * answers only the first.
+ */
+
+/* How many certificates a chain may hold. A server sends one to three in practice; eight
+ * is a bound on a peer's message rather than a statement about certificate chains. */
+#define WT_TLS_CERTIFICATE_MAX_ENTRIES 8U
+
+typedef struct wt_tls_certificate_entry {
+  /* The DER encoding of one X.509 certificate, as a view. */
+  const uint8_t *der;
+  size_t der_len;
+  /* The entry's own extension block, which is empty for every certificate TLS 1.3
+   * defines (RFC 8446 section 4.4.2). */
+  const uint8_t *extensions;
+  size_t extensions_len;
+} wt_tls_certificate_entry_t;
+
+typedef struct wt_tls_certificate {
+  /* The CertificateRequest context: empty in a server's Certificate, and the echo of the
+   * request in a client's (RFC 8446 section 4.4.2). */
+  const uint8_t *request_context;
+  size_t request_context_len;
+  wt_tls_certificate_entry_t entries[WT_TLS_CERTIFICATE_MAX_ENTRIES];
+  size_t count;
+} wt_tls_certificate_t;
+
+wt_status_t wt_tls_certificate_parse(const uint8_t *message, size_t len,
+                                     wt_tls_certificate_t *out);
+wt_status_t wt_tls_certificate_encode(const wt_tls_certificate_t *certificate,
+                                      wt_writer_t *w);
+
+/* What our side sends. A client with no certificate to offer sends an empty chain with an
+ * empty context, which is what RFC 8446 section 4.4.2 requires rather than an omission. */
+typedef struct wt_tls_certificate_params {
+  const uint8_t *request_context;
+  size_t request_context_len;
+  const wt_tls_certificate_entry_t *entries;
+  size_t count;
+} wt_tls_certificate_params_t;
+
+wt_status_t wt_tls_certificate_build(const wt_tls_certificate_params_t *params,
+                                     uint8_t *out, size_t capacity, size_t *out_len);
+
+/* CertificateVerify: the signature over the transcript, and the scheme that produced it
+ * (RFC 8446 section 4.4.3). The signature is checked against the transcript and the
+ * certificate's public key by the trust layer; this carries the bytes. */
+typedef struct wt_tls_certificate_verify {
+  uint16_t scheme;
+  const uint8_t *signature;
+  size_t signature_len;
+} wt_tls_certificate_verify_t;
+
+wt_status_t wt_tls_certificate_verify_parse(
+    const uint8_t *message, size_t len, wt_tls_certificate_verify_t *out);
+wt_status_t wt_tls_certificate_verify_encode(
+    const wt_tls_certificate_verify_t *certificate_verify, wt_writer_t *w);
+wt_status_t wt_tls_certificate_verify_build(uint16_t scheme,
+                                            const uint8_t *signature,
+                                            size_t signature_len, uint8_t *out,
+                                            size_t capacity, size_t *out_len);
+
+/* Finished: a body of exactly Hash.length bytes, with nothing else in it (RFC 8446
+ * section 4.4.4). */
+wt_status_t wt_tls_finished_parse(const uint8_t *message, size_t len,
+                                  uint8_t out[WT_TLS13_FINISHED_LEN]);
+wt_status_t wt_tls_finished_build(const uint8_t verify_data[WT_TLS13_FINISHED_LEN],
+                                  uint8_t *out, size_t capacity, size_t *out_len);
 
 /* ---------------------------------------------------------------- ServerHello */
 

@@ -10,7 +10,7 @@ scaffolding.
 
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
 complete, and Phase 3 is under way: its key schedule, transcript, handshake message
-codecs and X25519 key agreement are done.**
+codecs (Hellos and certificates) and X25519 key agreement are done.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -36,7 +36,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 23 unit test files and 73,569 checks, run by `ctest` and again under
+- 23 unit test files and 73,601 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -112,6 +112,11 @@ What is here:
   implementation can complete, so it is the only one a client should advertise: a group
   offered without a key share invites a HelloRetryRequest, which this implementation
   refuses.
+- **The certificate messages** (Phase 3, fourth part): Certificate and CertificateVerify
+  are parsed as framing -- a chain of DER views and a scheme with a signature -- and
+  Finished is exactly Hash.length bytes. Nothing here validates anything, which is what
+  lets the codec be pinned to RFC 8448's own certificate message byte for byte; the trust
+  layer is a separate question that this layer deliberately does not answer.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

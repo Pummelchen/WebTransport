@@ -4,13 +4,17 @@
 
 #include <string.h>
 
-/* A length-prefixed field is read by asking the cursor for it and then checking that
- * the field the length promised is inside the cursor. `wt_cursor_t` is sticky: the
- * first read past the end fails and every later read is a no-op, so the check after
- * the reads is the only one needed. */
+/* A length-delimited region of the message as its own cursor.
+ *
+ * WT_ERR_PROTOCOL when the region does not fit, NOT WT_ERR_TRUNCATED: every caller of
+ * this function has already checked that the framing outside the region is complete --
+ * a handshake message whose declared length is the buffer's, an extension block whose
+ * declared length is the cursor's -- so a region that overruns is a length that lies
+ * rather than bytes that have not arrived yet. The distinction is the one that decides
+ * whether a receiver gives up on the connection or waits for more. */
 static wt_status_t sub_cursor(wt_cursor_t *cursor, size_t len, wt_cursor_t *out) {
   const uint8_t *bytes = wt_cursor_bytes(cursor, len);
-  if (bytes == NULL) return WT_ERR_TRUNCATED;
+  if (bytes == NULL) return WT_ERR_PROTOCOL;
   *out = wt_cursor_init(bytes, len);
   return WT_OK;
 }
@@ -24,8 +28,11 @@ wt_status_t wt_tls_extensions_parse(wt_cursor_t *cursor,
   if (cursor == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
   memset(out, 0, sizeof(*out));
   total = wt_cursor_u16(cursor);
-  if (wt_cursor_failed(cursor)) return WT_ERR_TRUNCATED;
-  if (sub_cursor(cursor, (size_t)total, &block) != WT_OK) return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(cursor)) return WT_ERR_PROTOCOL;
+  {
+    wt_status_t region = sub_cursor(cursor, (size_t)total, &block);
+    if (region != WT_OK) return region;
+  }
 
   while (!wt_cursor_at_end(&block)) {
     uint16_t type;
@@ -34,9 +41,10 @@ wt_status_t wt_tls_extensions_parse(wt_cursor_t *cursor,
     if (out->count == WT_TLS_MAX_EXTENSIONS) return WT_ERR_LIMIT;
     type = wt_cursor_u16(&block);
     length = wt_cursor_u16(&block);
-    if (wt_cursor_failed(&block)) return WT_ERR_TRUNCATED;
-    if (sub_cursor(&block, (size_t)length, &body) != WT_OK) {
-      return WT_ERR_TRUNCATED;
+    if (wt_cursor_failed(&block)) return WT_ERR_PROTOCOL;
+    {
+      wt_status_t region = sub_cursor(&block, (size_t)length, &body);
+      if (region != WT_OK) return region;
     }
     /* RFC 8446 section 4.2: "There MUST NOT be more than one extension of the same
      * type in a given extension block." A second one is not "the last wins": the two
@@ -128,7 +136,7 @@ wt_status_t wt_tls_supported_versions_client(const wt_tls_extension_t *extension
   status = extension_cursor(extension, &cursor);
   if (status != WT_OK) return status;
   length = wt_cursor_u8(&cursor);
-  if (wt_cursor_failed(&cursor)) return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(&cursor)) return WT_ERR_PROTOCOL;
   /* RFC 8446 section 4.2.1: the vector is 2..254 bytes, so its length is even and
    * not zero. */
   if (length == 0U || (length % 2U) != 0U) return WT_ERR_PROTOCOL;
@@ -137,7 +145,7 @@ wt_status_t wt_tls_supported_versions_client(const wt_tls_extension_t *extension
   for (i = 0U; i < entries; i++) {
     versions[i] = wt_cursor_u16(&cursor);
   }
-  if (wt_cursor_failed(&cursor)) return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(&cursor)) return WT_ERR_PROTOCOL;
   *count = entries;
   return extension_end(&cursor);
 }
@@ -151,7 +159,7 @@ wt_status_t wt_tls_supported_versions_server(const wt_tls_extension_t *extension
   status = extension_cursor(extension, &cursor);
   if (status != WT_OK) return status;
   *version = wt_cursor_u16(&cursor);
-  if (wt_cursor_failed(&cursor)) return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(&cursor)) return WT_ERR_PROTOCOL;
   return extension_end(&cursor);
 }
 
@@ -171,7 +179,7 @@ wt_status_t wt_tls_u16_list_parse(const wt_tls_extension_t *extension,
   status = extension_cursor(extension, &cursor);
   if (status != WT_OK) return status;
   length = wt_cursor_u16(&cursor);
-  if (wt_cursor_failed(&cursor)) return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(&cursor)) return WT_ERR_PROTOCOL;
   /* RFC 8446 sections 4.2.7 and 4.2.3: the vector is 2..2^16-2 bytes, so it is even
    * and not empty. */
   if (length == 0U || (length % 2U) != 0U) return WT_ERR_PROTOCOL;
@@ -180,7 +188,7 @@ wt_status_t wt_tls_u16_list_parse(const wt_tls_extension_t *extension,
   for (i = 0U; i < entries; i++) {
     values[i] = wt_cursor_u16(&cursor);
   }
-  if (wt_cursor_failed(&cursor)) return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(&cursor)) return WT_ERR_PROTOCOL;
   *count = entries;
   return extension_end(&cursor);
 }
@@ -192,12 +200,12 @@ static wt_status_t key_share_entry(wt_cursor_t *cursor, wt_tls_key_share_t *out)
 
   out->group = wt_cursor_u16(cursor);
   key_len = wt_cursor_u16(cursor);
-  if (wt_cursor_failed(cursor)) return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(cursor)) return WT_ERR_PROTOCOL;
   /* RFC 8446 section 4.2.8: key_exchange is 1..2^16-1 bytes. A zero-length share is
    * not an empty share, it is a malformed one. */
   if (key_len == 0U) return WT_ERR_PROTOCOL;
   key = wt_cursor_bytes(cursor, (size_t)key_len);
-  if (key == NULL) return WT_ERR_TRUNCATED;
+  if (key == NULL) return WT_ERR_PROTOCOL;
   out->key = key;
   out->key_len = (size_t)key_len;
   return WT_OK;
@@ -218,9 +226,10 @@ wt_status_t wt_tls_key_share_client(const wt_tls_extension_t *extension,
   status = extension_cursor(extension, &cursor);
   if (status != WT_OK) return status;
   total = wt_cursor_u16(&cursor);
-  if (wt_cursor_failed(&cursor)) return WT_ERR_TRUNCATED;
-  if (sub_cursor(&cursor, (size_t)total, &block) != WT_OK) {
-    return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(&cursor)) return WT_ERR_PROTOCOL;
+  {
+    wt_status_t region = sub_cursor(&cursor, (size_t)total, &block);
+    if (region != WT_OK) return region;
   }
   while (!wt_cursor_at_end(&block)) {
     if (*count == capacity) return WT_ERR_LIMIT;
@@ -257,24 +266,25 @@ wt_status_t wt_tls_alpn_parse(const wt_tls_extension_t *extension,
   status = extension_cursor(extension, &cursor);
   if (status != WT_OK) return status;
   total = wt_cursor_u16(&cursor);
-  if (wt_cursor_failed(&cursor)) return WT_ERR_TRUNCATED;
+  if (wt_cursor_failed(&cursor)) return WT_ERR_PROTOCOL;
   /* RFC 7301 section 3.1: ProtocolNameList is 2..2^16-1 bytes and carries at least
    * one name. */
   if (total < 2U) return WT_ERR_PROTOCOL;
-  if (sub_cursor(&cursor, (size_t)total, &block) != WT_OK) {
-    return WT_ERR_TRUNCATED;
+  {
+    wt_status_t region = sub_cursor(&cursor, (size_t)total, &block);
+    if (region != WT_OK) return region;
   }
   while (!wt_cursor_at_end(&block)) {
     uint8_t length;
     const uint8_t *name;
     if (out->count == WT_TLS_MAX_PROTOCOLS) return WT_ERR_LIMIT;
     length = wt_cursor_u8(&block);
-    if (wt_cursor_failed(&block)) return WT_ERR_TRUNCATED;
+    if (wt_cursor_failed(&block)) return WT_ERR_PROTOCOL;
     /* A protocol name is 1..255 bytes; an empty one would make "no ALPN" and "ALPN
      * with an empty name" the same bytes. */
     if (length == 0U) return WT_ERR_PROTOCOL;
     name = wt_cursor_bytes(&block, (size_t)length);
-    if (name == NULL) return WT_ERR_TRUNCATED;
+    if (name == NULL) return WT_ERR_PROTOCOL;
     out->names[out->count] = name;
     out->lengths[out->count] = length;
     out->count++;
