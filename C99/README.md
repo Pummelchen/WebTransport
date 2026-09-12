@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,555 checks, run by `ctest` and again under
+- 38 unit test files and 75,581 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -234,6 +234,10 @@ What is here:
   `wt_quic_connection_send_max_data` sends an RFC 9000 section 19.9 MAX_DATA frame and the connection
   seeds and reads the value -- the other direction from the peer limits, and one that may only ever rise,
   because section 4.1 makes a limit that decreases a protocol error.
+- **The stream counts this endpoint grants** (Phase 4, sixteenth part):
+  `wt_quic_connection_send_max_streams` sends an RFC 9000 section 19.11 MAX_STREAMS frame, with the same
+  only-ever-rising rule as MAX_DATA and a count per direction, since a bidirectional stream costs the peer
+  one of its own and a unidirectional one only ours.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

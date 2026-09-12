@@ -172,6 +172,8 @@ typedef struct wt_quic_connection {
   /* The connection-level limit this endpoint grants the peer, and whether it has been seeded. */
   uint64_t local_max_data;
   int local_max_data_set;
+  uint64_t local_max_streams[2]; /* indexed by wt_quic_stream_direction_t */
+  int local_max_streams_set[2];
   /* The datagrams that have arrived and not been read, bounded and with the newest discarded when it
    * is full (RFC 9221's frames are unreliable, so dropping one is not an error). */
   wt_quic_datagram_queue_t datagrams;
@@ -306,6 +308,20 @@ wt_status_t wt_quic_connection_set_max_data(wt_quic_connection_t *connection, ui
 wt_status_t wt_quic_connection_send_max_data(wt_quic_connection_t *connection, uint64_t maximum,
                                              uint64_t now);
 uint64_t wt_quic_connection_max_data(const wt_quic_connection_t *connection);
+
+/* The stream-count limits this endpoint grants, the same shape as the connection-level one above and for
+ * the same reason: RFC 9000 section 4.6 makes a MAX_STREAMS that decreases a protocol error, because the
+ * peer has already been told it may open that many. The two directions have separate counts, since a
+ * bidirectional stream costs the peer one of its own and one of ours while a unidirectional one costs
+ * only ours. `direction` is the direction of the streams being granted, which is what the frame carries. */
+wt_status_t wt_quic_connection_set_max_streams(wt_quic_connection_t *connection,
+                                               wt_quic_stream_direction_t direction,
+                                               uint64_t maximum);
+wt_status_t wt_quic_connection_send_max_streams(wt_quic_connection_t *connection,
+                                                wt_quic_stream_direction_t direction,
+                                                uint64_t maximum, uint64_t now);
+uint64_t wt_quic_connection_max_streams(const wt_quic_connection_t *connection,
+                                        wt_quic_stream_direction_t direction);
 
 /* The largest DATAGRAM payload this connection may send right now: the smaller of the peer's frame
  * limit and what the path carries, with the frame's own length field accounted for. Zero when the peer

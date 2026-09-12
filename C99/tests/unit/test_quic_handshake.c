@@ -49,6 +49,8 @@ static size_t g_stream_length;
 static int g_stream_fin;
 static uint8_t g_stream_data[64];
 static uint64_t g_max_data;
+static uint64_t g_max_streams;
+static int g_max_streams_direction;
 static size_t g_parameters_len;
 static uint64_t g_now;
 
@@ -247,6 +249,10 @@ static wt_status_t endpoint_on_frame(void *context, wt_quic_space_t space,
   }
   if (frame->kind == WT_QUIC_FRAME_KIND_MAX_DATA) {
     g_max_data = frame->as.max_data.maximum;
+  }
+  if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAMS) {
+    g_max_streams = frame->as.max_streams.maximum;
+    g_max_streams_direction = (int)frame->as.max_streams.direction;
   }
   if (frame->kind == WT_QUIC_FRAME_KIND_DATAGRAM) {
     return wt_quic_connection_on_datagram(&endpoint->connection, frame->as.datagram.data,
@@ -480,6 +486,46 @@ static void test_handshake(wt_udp_family_t family) {
       g_max_data = 0U;
       WT_EXPECT_STATUS("and a null connection is refused", WT_ERR_INVALID_ARGUMENT,
                        wt_quic_connection_set_max_data(NULL, 1U));
+    }
+
+    /* The stream counts this endpoint grants have the same shape and the same rule: they may only rise
+     * (RFC 9000 section 4.6), and the two directions are counted separately. */
+    {
+      int arrived = 0;
+      WT_EXPECT_STATUS("a stream count before the seed is a state error", WT_ERR_STATE,
+                       wt_quic_connection_send_max_streams(&server.connection,
+                                                           WT_QUIC_STREAM_BIDIRECTIONAL, 8U, now));
+      WT_EXPECT_OK("the server seeds the bidirectional count",
+                   wt_quic_connection_set_max_streams(&server.connection,
+                                                      WT_QUIC_STREAM_BIDIRECTIONAL, 4U));
+      WT_EXPECT_OK("and the unidirectional one",
+                   wt_quic_connection_set_max_streams(&server.connection,
+                                                      WT_QUIC_STREAM_UNIDIRECTIONAL, 2U));
+      WT_EXPECT_U64("which read back separately", 4U,
+                    wt_quic_connection_max_streams(&server.connection,
+                                                   WT_QUIC_STREAM_BIDIRECTIONAL));
+      WT_EXPECT_U64("as they should", 2U,
+                    wt_quic_connection_max_streams(&server.connection,
+                                                   WT_QUIC_STREAM_UNIDIRECTIONAL));
+      WT_EXPECT_STATUS("lowering one is refused", WT_ERR_LIMIT,
+                       wt_quic_connection_send_max_streams(&server.connection,
+                                                           WT_QUIC_STREAM_BIDIRECTIONAL, 3U, now));
+      WT_EXPECT_OK("raising it is what accepting streams does",
+                   wt_quic_connection_send_max_streams(&server.connection,
+                                                       WT_QUIC_STREAM_BIDIRECTIONAL, 8U, now));
+      WT_EXPECT_U64("and is remembered", 8U,
+                    wt_quic_connection_max_streams(&server.connection,
+                                                   WT_QUIC_STREAM_BIDIRECTIONAL));
+      now += 1000U;
+      g_now = now;
+      WT_EXPECT_OK("the client reads the frame", pump(&client, now, &arrived));
+      WT_EXPECT_INT("which arrived", 1, arrived);
+      WT_EXPECT_U64("with the new count", 8U, g_max_streams);
+      WT_EXPECT_U64("for bidirectional streams", (uint64_t)WT_QUIC_STREAM_BIDIRECTIONAL,
+                    (uint64_t)g_max_streams_direction);
+      WT_EXPECT_STATUS("and a direction that is not one is refused", WT_ERR_INVALID_ARGUMENT,
+                       wt_quic_connection_send_max_streams(&server.connection,
+                                                           (wt_quic_stream_direction_t)7, 9U, now));
     }
 
     /* A datagram travels under the application keys and is not retransmitted. */

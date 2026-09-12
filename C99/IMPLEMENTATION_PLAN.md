@@ -917,6 +917,21 @@ protocol error arriving from the other side.
 `tests/unit/test_quic_handshake.c` (214 checks) now carries a handshake, a datagram, a STREAM frame and a
 MAX_DATA frame over loopback, with the peer's composed handler recording what each carried.
 
+**Sixteenth part done: the stream counts this endpoint grants.** `wt_quic_connection_send_max_streams`
+sends an RFC 9000 section 19.11 MAX_STREAMS frame, with the same shape and the same rule as the
+connection-level limit: it may only rise, because section 4.6 makes a count that decreases a protocol
+error -- the peer has already been told it may open that many. The two directions are counted separately,
+since a bidirectional stream costs the peer one of its own and one of ours while a unidirectional one
+costs only ours, and the frame carries the direction it is about.
+
+With this the advertisable half of the limits is complete: the connection knows what the peer granted
+(parsed from its transport parameters), what it grants the peer in bytes, and what it grants in streams,
+in both directions. What is not here is the accounting that decides WHEN to raise them, which is the
+stream layer's: it is the layer that knows a stream was closed and that its slot is free again.
+
+`tests/unit/test_quic_handshake.c` (240 checks) now carries a handshake, a datagram, a STREAM frame, a
+MAX_DATA frame and a MAX_STREAMS frame over loopback.
+
 Implement the production network state machine.
 
 Tasks:

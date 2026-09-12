@@ -767,6 +767,61 @@ wt_status_t wt_quic_connection_send_max_data(wt_quic_connection_t *connection, u
   return sent ? WT_OK : WT_ERR_STATE;
 }
 
+static int direction_index(wt_quic_stream_direction_t direction) {
+  return direction == WT_QUIC_STREAM_BIDIRECTIONAL ? 0 : 1;
+}
+
+wt_status_t wt_quic_connection_set_max_streams(wt_quic_connection_t *connection,
+                                               wt_quic_stream_direction_t direction,
+                                               uint64_t maximum) {
+  int index;
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (direction != WT_QUIC_STREAM_BIDIRECTIONAL && direction != WT_QUIC_STREAM_UNIDIRECTIONAL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  index = direction_index(direction);
+  if (connection->local_max_streams_set[index] && maximum < connection->local_max_streams[index]) {
+    return WT_ERR_LIMIT;
+  }
+  connection->local_max_streams[index] = maximum;
+  connection->local_max_streams_set[index] = 1;
+  return WT_OK;
+}
+
+uint64_t wt_quic_connection_max_streams(const wt_quic_connection_t *connection,
+                                        wt_quic_stream_direction_t direction) {
+  if (connection == NULL) return 0U;
+  if (direction != WT_QUIC_STREAM_BIDIRECTIONAL && direction != WT_QUIC_STREAM_UNIDIRECTIONAL) {
+    return 0U;
+  }
+  return connection->local_max_streams[direction_index(direction)];
+}
+
+wt_status_t wt_quic_connection_send_max_streams(wt_quic_connection_t *connection,
+                                                wt_quic_stream_direction_t direction,
+                                                uint64_t maximum, uint64_t now) {
+  wt_quic_frame_t frame;
+  int index;
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (direction != WT_QUIC_STREAM_BIDIRECTIONAL && direction != WT_QUIC_STREAM_UNIDIRECTIONAL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  index = direction_index(direction);
+  if (!connection->local_max_streams_set[index]) return WT_ERR_STATE;
+  if (maximum < connection->local_max_streams[index]) return WT_ERR_LIMIT;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_STREAMS);
+  frame.as.max_streams.direction = direction;
+  frame.as.max_streams.maximum = maximum;
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+  if (status != WT_OK) return status;
+  if (sent) connection->local_max_streams[index] = maximum;
+  return sent ? WT_OK : WT_ERR_STATE;
+}
+
 /* Whether `stream_id` is one this endpoint is allowed to open, given what the peer granted. A stream
  * number is four fields in one (RFC 9000 section 2.1): the least significant bit is the initiator and
  * the next one is the directionality, so whether a limit applies at all depends on who opened the
