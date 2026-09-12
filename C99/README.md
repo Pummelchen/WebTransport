@@ -10,7 +10,7 @@ scaffolding.
 
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
 complete, and Phase 3 is under way: its key schedule, transcript, handshake message
-codecs (Hellos and certificates) and X25519 key agreement are done.**
+codecs (Hellos and certificates), X25519 key agreement and peer authentication are done.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -36,7 +36,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 23 unit test files and 73,601 checks, run by `ctest` and again under
+- 24 unit test files and 73,677 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -117,6 +117,12 @@ What is here:
   Finished is exactly Hash.length bytes. Nothing here validates anything, which is what
   lets the codec be pinned to RFC 8448's own certificate message byte for byte; the trust
   layer is a separate question that this layer deliberately does not answer.
+- **Peer authentication** (Phase 3, fifth part): `tls/trust.h` validates a certificate
+  chain through OpenSSL and verifies a CertificateVerify signature, with a prompt-free
+  policy that mirrors the Swift library -- system trust, a caller-supplied store, pinned
+  leaf fingerprints, and a development bypass that is restricted to loopback names because
+  the restriction is part of the mode. The chain is parsed, validated and discarded inside
+  one call, so no X.509 object outlives it and no OpenSSL type appears in a public header.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

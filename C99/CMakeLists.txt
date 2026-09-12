@@ -87,6 +87,7 @@ set(WT_TLS_SOURCES
   src/tls/extension.c
   src/tls/handshake.c
   src/tls/keyshare.c
+  src/tls/trust.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_CRYPTO_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_QUIC_SOURCES})
@@ -116,6 +117,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/tls/extension.h
   include/webtransport/tls/handshake.h
   include/webtransport/tls/keyshare.h
+  include/webtransport/tls/trust.h
 )
 
 # The sanitizer flags are added to every target when the option is on, including

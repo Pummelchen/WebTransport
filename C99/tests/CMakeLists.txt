@@ -30,6 +30,7 @@ set(WT_UNIT_TESTS
   test_tls13_keyschedule
   test_tls13_handshake
   test_tls13_keyshare
+  test_tls13_trust
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
@@ -47,3 +48,9 @@ foreach(test IN LISTS WT_UNIT_TESTS)
   endif()
   add_test(NAME ${test} COMMAND ${test})
 endforeach()
+
+# One test validates certificate chains, so it needs the path to the fixtures it validates
+# against. Passed at configure time rather than guessed from the working directory, which
+# differs between ctest and a direct run.
+target_compile_definitions(test_tls13_trust PRIVATE
+  WT_TRUST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vectors/trust")
