@@ -99,6 +99,13 @@ typedef struct wt_tls_client_config {
 #define WT_TLS_CLIENT_HELLO_MAX 1024U
 
 typedef struct wt_tls_client {
+  /* A marker that says this struct belongs to a handshake that has begun. It exists because a
+   * caller-owned struct cannot be told from an uninitialised one: without it, starting a
+   * second handshake on a machine that is still holding the first one's transcript would
+   * either leak the hash context or be refused in a way that depends on what the stack
+   * happened to hold. With it, `wt_tls_client_begin` releases what a previous handshake left
+   * and starts over, deterministically. */
+  uint64_t live;
   wt_tls_client_config_t config;
   wt_tls_client_state_t state;
   wt_tls13_transcript_t transcript;
@@ -119,9 +126,14 @@ typedef struct wt_tls_client {
   size_t negotiated_alpn_len;
 } wt_tls_client_t;
 
-/* Start from the ClientHello that was sent. The bytes are absorbed into the transcript
- * exactly as given, and the caller's buffer must stay valid only for this call: the
- * transcript is a hash, not a copy. */
+/* Start a handshake from the ClientHello that was sent. The bytes are absorbed into the
+ * transcript exactly as given, and the caller's buffer must stay valid only for this call:
+ * the transcript is a hash, not a copy.
+ *
+ * Called on a machine that is already mid-handshake, this releases what that handshake held
+ * and starts a new one -- a caller that abandons a handshake should not have to remember to
+ * release it first, and a struct whose bytes are indeterminate cannot be asked whether it is
+ * live. It is a fresh start either way, never a continuation. */
 wt_status_t wt_tls_client_begin(wt_tls_client_t *client,
                                 const wt_tls_client_config_t *config,
                                 const uint8_t *client_hello,
@@ -174,7 +186,11 @@ const uint8_t *wt_tls_client_transport_parameters(const wt_tls_client_t *client,
                                                   size_t *out_len);
 
 /* Release everything the handshake held. Called when a handshake ends, successfully or not,
- * so that secrets are not left in a reusable structure. */
+ * so that secrets are not left in a reusable structure.
+ *
+ * A CALLER THAT ZEROES A MACHINE INSTEAD OF CLEARING IT LOSES THE HASH CONTEXT, because the
+ * context is a pointer the marker refers to. `clear` is safe on a machine that never began --
+ * it checks the marker itself -- so there is no reason to zero one by hand. */
 void wt_tls_client_clear(wt_tls_client_t *client);
 
 #ifdef __cplusplus

@@ -346,6 +346,7 @@ static void test_built_client_hello(void) {
   config.session_id = session_id;
   config.session_id_len = sizeof(session_id);
 
+  memset(&client, 0, sizeof(client));
   WT_EXPECT_OK("the ClientHello builds",
                wt_tls_client_begin_built(&client, &config, hello, sizeof(hello),
                                          &hello_len));
@@ -397,6 +398,7 @@ static void test_built_client_hello(void) {
     wt_tls_key_share_t first_share;
     wt_tls_key_share_t second_share;
 
+    memset(&other, 0, sizeof(other));
     WT_EXPECT_OK("a second ClientHello builds",
                  wt_tls_client_begin_built(&other, &config, other_hello,
                                            sizeof(other_hello), &other_len));
@@ -417,9 +419,13 @@ static void test_built_client_hello(void) {
     wt_tls_client_clear(&other);
   }
 
-  /* A caller error is a caller error rather than a failed handshake. */
+  /* A caller error is a caller error rather than a failed handshake. The machine is CLEARED
+   * between attempts rather than memset, because it may be holding a transcript: zeroing a
+   * live machine would lose the hash context, which is the one thing `clear` exists to
+   * release. */
   {
     size_t out_len = 0U;
+    wt_tls_client_clear(&client);
     WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
                      wt_tls_client_begin_built(&client, &config, NULL, 64U, &out_len));
     WT_EXPECT_STATUS("a NULL config is refused", WT_ERR_INVALID_ARGUMENT,
@@ -427,6 +433,16 @@ static void test_built_client_hello(void) {
                                                &out_len));
     WT_EXPECT_STATUS("a buffer too small is refused", WT_ERR_LIMIT,
                      wt_tls_client_begin_built(&client, &config, hello, 4U, &out_len));
+    /* A failed begin holds nothing, so the next attempt is allowed without a clear; and a
+     * machine that is mid-handshake may also start over, because beginning again releases
+     * what the abandoned handshake held rather than leaking it. */
+    WT_EXPECT_OK("and the machine can be used again",
+                 wt_tls_client_begin_built(&client, &config, hello, sizeof(hello),
+                                           &out_len));
+    WT_EXPECT_OK("and may start over mid-handshake",
+                 wt_tls_client_begin_built(&client, &config, hello, sizeof(hello),
+                                           &out_len));
+    wt_tls_client_clear(&client);
     {
       wt_tls_client_config_t bad = config;
       uint8_t too_long[64];
@@ -435,6 +451,7 @@ static void test_built_client_hello(void) {
       WT_EXPECT_STATUS("a session id that is too long is refused", WT_ERR_LIMIT,
                        wt_tls_client_begin_built(&client, &bad, hello, sizeof(hello),
                                                  &out_len));
+      wt_tls_client_clear(&client);
     }
   }
   wt_tls_client_clear(&client);

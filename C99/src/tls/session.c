@@ -10,9 +10,20 @@
  * (RFC 8446 section 9.1 makes it mandatory). */
 #define WT_TLS_CIPHER_SUITE WT_TLS_CIPHER_AES_128_GCM_SHA256
 
+/* The marker `wt_tls_client_t.live` carries. An arbitrary constant: it only has to be a value
+ * a zeroed or uninitialised struct is unlikely to hold. */
+#define WT_TLS_CLIENT_LIVE UINT64_C(0x5a17e7c3d94b0286)
+
 /* A message that the handshake refuses moves the machine here, so a caller cannot keep
- * feeding it and cannot read a secret out of a failed handshake. */
+ * feeding it and cannot read a secret out of a failed handshake.
+ *
+ * A FAILED MACHINE HOLDS NOTHING. The transcript is released rather than left for a caller to
+ * release, because the one thing a caller does after a failure is move on, and a hash context
+ * that only a `clear` call would free is a leak waiting for the caller who does not make it.
+ * LeakSanitizer on the Linux CI leg found exactly that: a test that reused a client struct
+ * after a failed begin leaked the context the begin had allocated. */
 static wt_status_t fail(wt_tls_client_t *client, wt_status_t status) {
+  wt_tls13_transcript_clear(&client->transcript);
   client->state = WT_TLS_CLIENT_FAILED;
   return status;
 }
@@ -322,6 +333,13 @@ static wt_status_t begin_common(wt_tls_client_t *client,
       config->transport_parameters_len != 0U) {
     return WT_ERR_INVALID_ARGUMENT;
   }
+  /* Anything a previous handshake on this machine left is released first: beginning again is
+   * a fresh start, and the marker is what makes that a release rather than a leak. For a
+   * struct the caller has not used yet the marker will not match, so nothing is released and
+   * nothing uninitialised is read beyond the marker itself. */
+  if (client->live == WT_TLS_CLIENT_LIVE) {
+    wt_tls13_transcript_clear(&client->transcript);
+  }
   memset(client, 0, sizeof(*client));
   client->config = *config;
   if (config->x25519_private != NULL) {
@@ -332,6 +350,8 @@ static wt_status_t begin_common(wt_tls_client_t *client,
     status = wt_tls_key_share_generate(WT_TLS_GROUP_X25519, client->private_key,
                                        client->public_key);
   }
+  /* Neither failure below has anything to release: the key pair is bytes in the caller's
+   * struct and the transcript is not initialised until the last line. */
   if (status != WT_OK) {
     client->state = WT_TLS_CLIENT_FAILED;
     return status;
@@ -341,6 +361,10 @@ static wt_status_t begin_common(wt_tls_client_t *client,
     client->state = WT_TLS_CLIENT_FAILED;
     return status;
   }
+  /* Marked last, once there is something to release: a machine that failed before this point
+   * holds nothing, and a marker set early would make the next begin release a context that
+   * was never made. */
+  client->live = WT_TLS_CLIENT_LIVE;
   return WT_OK;
 }
 
@@ -353,18 +377,14 @@ wt_status_t wt_tls_client_begin(wt_tls_client_t *client,
   status = begin_common(client, config);
   if (status != WT_OK) return status;
   if (client_hello == NULL || client_hello_len == 0U) {
-    client->state = WT_TLS_CLIENT_FAILED;
-    return WT_ERR_INVALID_ARGUMENT;
+    return fail(client, WT_ERR_INVALID_ARGUMENT);
   }
   /* The transcript is over the bytes that were sent. A ClientHello that is not a
    * ClientHello is refused here rather than after a round trip, because every secret this
    * handshake derives depends on these bytes being the ones the server saw. */
   status = wt_tls13_transcript_append(&client->transcript, client_hello,
                                       client_hello_len);
-  if (status != WT_OK) {
-    client->state = WT_TLS_CLIENT_FAILED;
-    return status;
-  }
+  if (status != WT_OK) return fail(client, status);
   client->state = WT_TLS_CLIENT_WAIT_SERVER_HELLO;
   return WT_OK;
 }
@@ -391,10 +411,7 @@ wt_status_t wt_tls_client_begin_built(wt_tls_client_t *client,
   if (status != WT_OK) return status;
 
   status = wt_random_bytes(random, sizeof(random));
-  if (status != WT_OK) {
-    client->state = WT_TLS_CLIENT_FAILED;
-    return status;
-  }
+  if (status != WT_OK) return fail(client, status);
   share.group = WT_TLS_GROUP_X25519;
   share.key = client->public_key;
   share.key_len = sizeof(client->public_key);
@@ -419,21 +436,14 @@ wt_status_t wt_tls_client_begin_built(wt_tls_client_t *client,
   /* Built into a local first, so that a refusal leaves the caller's buffer untouched and
    * the transcript is only seeded with a message that exists. */
   status = wt_tls_client_hello_build(&params, hello, sizeof(hello), &hello_len);
-  if (status != WT_OK) {
-    client->state = WT_TLS_CLIENT_FAILED;
-    return status;
-  }
-  if (out_capacity < hello_len) {
-    client->state = WT_TLS_CLIENT_FAILED;
-    return WT_ERR_LIMIT;
-  }
+  if (status != WT_OK) return fail(client, status);
+  /* The buffer is checked before anything is copied or absorbed, so a refusal here leaves
+   * the caller's bytes untouched and the machine holding nothing. */
+  if (out_capacity < hello_len) return fail(client, WT_ERR_LIMIT);
   memcpy(out, hello, hello_len);
   *out_len = hello_len;
   status = wt_tls13_transcript_append(&client->transcript, out, hello_len);
-  if (status != WT_OK) {
-    client->state = WT_TLS_CLIENT_FAILED;
-    return status;
-  }
+  if (status != WT_OK) return fail(client, status);
   client->state = WT_TLS_CLIENT_WAIT_SERVER_HELLO;
   return WT_OK;
 }
