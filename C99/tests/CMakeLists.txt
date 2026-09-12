@@ -21,6 +21,7 @@ set(WT_UNIT_TESTS
   test_quic_varint
   test_quic_packet_number
   test_quic_frame
+  test_quic_packet
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

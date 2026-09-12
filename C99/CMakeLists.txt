@@ -58,6 +58,7 @@ set(WT_QUIC_SOURCES
   src/quic/varint.c
   src/quic/packet_number.c
   src/quic/frame.c
+  src/quic/packet.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_QUIC_SOURCES})
 
@@ -76,6 +77,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/varint.h
   include/webtransport/quic/packet_number.h
   include/webtransport/quic/frame.h
+  include/webtransport/quic/packet.h
 )
 
 # The sanitizer flags are added to every target when the option is on, including
