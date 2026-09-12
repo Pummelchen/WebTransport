@@ -27,16 +27,22 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
 The Swift conformance matrix passes in full. The C99 implementation is **Phases 0
-to 2 complete**: it builds with CMake as a static and shared library with three CLI
-tools, carries a tested core (checked arithmetic, byte cursors, a two-pass writer, a
-bounded buffer, an allocator interface, a monotonic clock) and a tested QUIC wire
-core and crypto layer (varints, frames, packets, transport parameters, connection
-IDs, HKDF, AES-GCM and ChaCha20-Poly1305 packet protection with header protection,
-and key update), and installs as a CMake package with a consumer test. The
-cryptographic and packet-protection tests are driven by RFC 9001 appendix A's own
-vectors, extracted from the RFC text rather than transcribed. It implements no
-WebTransport protocol yet -- the TLS, HTTP/3, QPACK and WebTransport phases are not
-started -- and its draft-16 score is therefore still 0%. See
+to 3 complete, with Phase 4 in progress**: it builds with CMake as a static and shared
+library with three CLI tools, carries a tested core (checked arithmetic, byte cursors,
+a two-pass writer, a bounded buffer, an allocator interface, a monotonic clock), a tested
+QUIC wire core and crypto layer (varints, frames, packets, transport parameters,
+connection IDs, HKDF, AES-GCM and ChaCha20-Poly1305 packet protection with header
+protection, and key update), a TLS 1.3 handshake that runs end to end (the key schedule,
+the handshake and extension codecs, X25519, certificate chain validation, and both halves
+of the handshake), and the parts of the QUIC connection runtime that are not I/O: packet
+number spaces with ACK generation, loss detection and probe timeouts, NewReno congestion
+control, stream state machines and flow control, QUIC DATAGRAM, the close paths, and the
+packet build/read seam. It installs as a CMake package with a consumer test. The
+cryptographic and packet-protection tests are driven by RFC 9001 appendix A's and RFC
+8448's own vectors, extracted from the RFC text rather than transcribed. The IPv4/IPv6 UDP
+runtime that completes Phase 4 is not written yet, and no WebTransport protocol is
+implemented -- HTTP/3, QPACK and the draft-16 session layer come after it -- so its
+draft-16 score is still 0%. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).
 

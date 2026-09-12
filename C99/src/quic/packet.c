@@ -90,6 +90,88 @@ static wt_status_t wt_quic_read_connection_id(
   return WT_OK;
 }
 
+wt_status_t wt_quic_protected_pn_offset(const uint8_t *data, size_t length,
+                                        size_t local_connection_id_len,
+                                        size_t *out_offset, size_t *out_total_len,
+                                        int *out_short_header) {
+  wt_cursor_t c;
+  uint8_t first;
+  uint32_t type_bits;
+  uint64_t length_field = 0U;
+  uint64_t token_len = 0U;
+  size_t narrowed = 0U;
+  const uint8_t *token;
+
+  if (data == NULL || out_offset == NULL || out_total_len == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  *out_offset = 0U;
+  *out_total_len = 0U;
+  if (length == 0U) return WT_ERR_TRUNCATED;
+  if (out_short_header != NULL) *out_short_header = 0;
+
+  first = data[0];
+  if ((first & WT_QUIC_LONG_HEADER_BIT) == 0U) {
+    /* A short header: one first byte, then the connection ID whose length is not on the wire, then the
+     * packet number. There is nothing to walk and nothing to validate -- the first byte's low bits are
+     * masked, so reading them here would be reading the mask. */
+    if (out_short_header != NULL) *out_short_header = 1;
+    if (local_connection_id_len > WT_QUIC_MAX_CID_LEN) return WT_ERR_INVALID_ARGUMENT;
+    /* Two bytes beyond the first byte and the ID are needed even for the shortest packet number, so a
+     * datagram that cannot hold them is short rather than interesting. */
+    if (length < 1U + local_connection_id_len + 1U) return WT_ERR_TRUNCATED;
+    *out_offset = 1U + local_connection_id_len;
+    *out_total_len = length;
+    return WT_OK;
+  }
+
+  c = wt_cursor_init(data, length);
+  (void)wt_cursor_u8(&c); /* the first byte, whose low bits the mask owns */
+  {
+    const uint8_t *version = wt_cursor_bytes(&c, WT_BE32_SIZE);
+    if (version == NULL) return WT_ERR_TRUNCATED;
+    if (wt_load_be32(version) == WT_QUIC_VERSION_NEGOTIATION) {
+      /* A Version Negotiation is a long header with version zero and no Length field, so this walk
+       * would read its version list as one. */
+      return WT_ERR_INVALID_ARGUMENT;
+    }
+  }
+  type_bits = (uint32_t)((first >> 4) & 0x03U);
+  if ((wt_quic_packet_type_t)type_bits == WT_QUIC_PACKET_RETRY) {
+    /* A Retry has no packet number: its last sixteen bytes are an integrity tag, and the low bits of
+     * its first byte are the unused 0b1111 rather than a length. */
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+
+  /* The destination connection ID, then the source connection ID, each a length byte and that many
+   * bytes: the same reader the decoder uses, so the twenty-byte rule is stated once. */
+  {
+    const uint8_t *id = NULL;
+    size_t id_len = 0U;
+    wt_status_t status = wt_quic_read_connection_id(&c, &id, &id_len, NULL);
+    if (status != WT_OK) return status;
+    status = wt_quic_read_connection_id(&c, &id, &id_len, NULL);
+    if (status != WT_OK) return status;
+  }
+
+  if ((wt_quic_packet_type_t)type_bits == WT_QUIC_PACKET_INITIAL) {
+    if (wt_quic_varint_decode(&c, &token_len) != WT_OK) return WT_ERR_TRUNCATED;
+    if (wt_checked_narrow_u64_to_size(token_len, &narrowed) != WT_OK) return WT_ERR_OVERFLOW;
+    if (narrowed > wt_cursor_remaining(&c)) return WT_ERR_TRUNCATED;
+    token = wt_cursor_bytes(&c, narrowed);
+    if (token == NULL) return WT_ERR_TRUNCATED;
+  }
+
+  if (wt_quic_varint_decode(&c, &length_field) != WT_OK) return WT_ERR_TRUNCATED;
+  if (wt_checked_narrow_u64_to_size(length_field, &narrowed) != WT_OK) return WT_ERR_OVERFLOW;
+  *out_offset = c.offset;
+  /* The Length field covers the packet number and the payload, so the packet ends that many bytes
+   * after the field -- and a length the datagram cannot hold is a truncation rather than a packet. */
+  if (narrowed > length - c.offset) return WT_ERR_TRUNCATED;
+  *out_total_len = c.offset + narrowed;
+  return WT_OK;
+}
+
 wt_status_t wt_quic_long_header_decode(wt_cursor_t *c,
                                        wt_quic_long_header_t *out,
                                        wt_quic_error_t *out_error) {
@@ -345,18 +427,19 @@ static void wt_quic_write_connection_id(wt_writer_t *w, const uint8_t *id,
   wt_writer_bytes(w, id, id_len);
 }
 
-wt_status_t wt_quic_long_header_encode(wt_writer_t *w,
-                                       wt_quic_packet_type_t type,
-                                       uint32_t version,
-                                       const uint8_t *destination_connection_id,
-                                       size_t destination_connection_id_len,
-                                       const uint8_t *source_connection_id,
-                                       size_t source_connection_id_len,
-                                       const uint8_t *token, size_t token_len,
-                                       uint64_t packet_number,
-                                       size_t packet_number_len,
-                                       const uint8_t *payload,
-                                       size_t payload_len) {
+/* The body both encoders share. `with_payload` is 0 for the prefix form, where the caller is going
+ * to produce the payload itself and only needs the header -- and the Length field, which is computed
+ * here from the payload length the caller states, so the two forms cannot disagree about it. */
+static wt_status_t long_header_encode(wt_writer_t *w, wt_quic_packet_type_t type,
+                                      uint32_t version,
+                                      const uint8_t *destination_connection_id,
+                                      size_t destination_connection_id_len,
+                                      const uint8_t *source_connection_id,
+                                      size_t source_connection_id_len,
+                                      const uint8_t *token, size_t token_len,
+                                      uint64_t packet_number,
+                                      size_t packet_number_len, const uint8_t *payload,
+                                      size_t payload_len, int with_payload) {
   uint8_t first;
   uint8_t packet_number_bytes[4];
   size_t length_field;
@@ -388,7 +471,9 @@ wt_status_t wt_quic_long_header_encode(wt_writer_t *w,
     return WT_ERR_INVALID_ARGUMENT;
   }
   if (token_len != 0U && token == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (payload_len != 0U && payload == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (with_payload && payload_len != 0U && payload == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
 
   first = (uint8_t)((unsigned int)WT_QUIC_LONG_HEADER_BIT |
                     (unsigned int)WT_QUIC_FIXED_BIT |
@@ -421,8 +506,38 @@ wt_status_t wt_quic_long_header_encode(wt_writer_t *w,
   }
   (void)wt_quic_writer_varint(w, (uint64_t)length_field);
   wt_writer_bytes(w, packet_number_bytes, packet_number_len);
-  wt_writer_bytes(w, payload, payload_len);
+  if (with_payload) wt_writer_bytes(w, payload, payload_len);
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
+}
+
+wt_status_t wt_quic_long_header_encode(wt_writer_t *w,
+                                       wt_quic_packet_type_t type,
+                                       uint32_t version,
+                                       const uint8_t *destination_connection_id,
+                                       size_t destination_connection_id_len,
+                                       const uint8_t *source_connection_id,
+                                       size_t source_connection_id_len,
+                                       const uint8_t *token, size_t token_len,
+                                       uint64_t packet_number,
+                                       size_t packet_number_len,
+                                       const uint8_t *payload,
+                                       size_t payload_len) {
+  return long_header_encode(w, type, version, destination_connection_id,
+                            destination_connection_id_len, source_connection_id,
+                            source_connection_id_len, token, token_len, packet_number,
+                            packet_number_len, payload, payload_len, 1);
+}
+
+wt_status_t wt_quic_long_header_encode_prefix(
+    wt_writer_t *w, wt_quic_packet_type_t type, uint32_t version,
+    const uint8_t *destination_connection_id, size_t destination_connection_id_len,
+    const uint8_t *source_connection_id, size_t source_connection_id_len,
+    const uint8_t *token, size_t token_len, uint64_t packet_number,
+    size_t packet_number_len, size_t payload_len) {
+  return long_header_encode(w, type, version, destination_connection_id,
+                            destination_connection_id_len, source_connection_id,
+                            source_connection_id_len, token, token_len, packet_number,
+                            packet_number_len, NULL, payload_len, 0);
 }
 
 wt_status_t wt_quic_short_header_encode(wt_writer_t *w,
@@ -445,7 +560,9 @@ wt_status_t wt_quic_short_header_encode(wt_writer_t *w,
   if (packet_number_len == 0U || packet_number_len > 4U) {
     return WT_ERR_INVALID_ARGUMENT;
   }
-  if (payload_len != 0U && payload == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (payload_len != 0U && payload == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
   if (wt_quic_packet_number_encode(packet_number, packet_number_len,
                                    packet_number_bytes) != packet_number_len) {
     return WT_ERR_INVALID_ARGUMENT;

@@ -167,6 +167,27 @@ wt_status_t wt_quic_short_header_decode(wt_cursor_t *c,
                                         wt_quic_short_header_t *out,
                                         wt_quic_error_t *out_error);
 
+/* Where the packet number begins in a header that is STILL PROTECTED, and how long the packet is.
+ *
+ * This exists because neither decoder can answer it for a protected header, and that is not a gap in
+ * them: the packet number's own length is the low two bits of the first byte, which the header
+ * protection mask owns, and so are the two reserved bits the decoders refuse -- so a header whose mask
+ * is still on cannot be decoded, and the offset the mask's sample is measured from (RFC 9001 section
+ * 5.4.2) has to come from the layout instead. The walk below is the same layout the decoders use,
+ * which is why it lives here beside them: two copies of it would be two answers.
+ *
+ * `local_connection_id_len` is the endpoint's own connection ID length, which a short header does not
+ * carry; it is ignored for a long header. `out_short_header` reports which form was found, so a caller
+ * need not ask separately.
+ *
+ * Refuses what is not protected this way: a Retry (no packet number at all) and a Version Negotiation
+ * (no Length field), both WT_ERR_INVALID_ARGUMENT because they have their own parsers.
+ * WT_ERR_TRUNCATED when the datagram ends before the walk does. */
+wt_status_t wt_quic_protected_pn_offset(const uint8_t *data, size_t length,
+                                        size_t local_connection_id_len,
+                                        size_t *out_offset, size_t *out_total_len,
+                                        int *out_short_header);
+
 /* Parse a Retry packet. It occupies the rest of the datagram, so the caller must
  * pass a cursor over exactly one datagram. */
 wt_status_t wt_quic_retry_packet_decode(const uint8_t *data, size_t length,
@@ -194,6 +215,20 @@ wt_status_t wt_quic_long_header_encode(wt_writer_t *w,
                                        size_t packet_number_len,
                                        const uint8_t *payload,
                                        size_t payload_len);
+
+/* Encode a long header WITHOUT its payload, for a caller that will produce the payload itself.
+ *
+ * A packet builder needs this because of the order the two protections impose: the AEAD's associated
+ * data is the header through the packet number, so the header has to exist before the payload can be
+ * sealed -- and the payload's length has to be known before the header can be written, because the
+ * Length field covers it. This writes the header and the Length field for a payload of `payload_len`
+ * bytes that the caller has not produced yet. */
+wt_status_t wt_quic_long_header_encode_prefix(
+    wt_writer_t *w, wt_quic_packet_type_t type, uint32_t version,
+    const uint8_t *destination_connection_id, size_t destination_connection_id_len,
+    const uint8_t *source_connection_id, size_t source_connection_id_len,
+    const uint8_t *token, size_t token_len, uint64_t packet_number,
+    size_t packet_number_len, size_t payload_len);
 
 /* Encode a short header and its protected payload. */
 wt_status_t wt_quic_short_header_encode(wt_writer_t *w,

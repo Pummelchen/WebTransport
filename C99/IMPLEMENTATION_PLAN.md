@@ -639,6 +639,41 @@ once the connection has closed. Two findings were in the tests: a ring test that
 iteration and popped every other one was checking the queue's depth rather than its order, and a block
 that reused a queue the previous block had left entries in.
 
+**Sixth part done: the wire seam.** `quic/packet_io.h` and `src/quic/packet_io.c` are the one place
+where frames become a datagram and a datagram becomes frames, and the order of the two protections is
+what they exist to fix. `wt_quic_packet_build` writes the header, seals the frames with that header
+through the packet number as associated data, appends the tag, and applies header protection last;
+`wt_quic_packet_read` removes header protection first, reconstructs the packet number against the
+largest this endpoint has seen, and only then authenticates and decrypts -- because the header
+protection sample is ciphertext (RFC 9001 section 5.4.2) and the packet number's own length is behind
+the mask. A round trip is therefore not enough to test this: a builder and a reader that shared one
+mistake would agree with each other, so the tests here also flip every byte of a packet and check that
+the frames never come back, which is what makes the order a checked property rather than a convention.
+
+Making the read possible needed two additions to the packet codec. `wt_quic_long_header_encode_prefix`
+writes a long header and its Length field for a payload the caller has not produced yet, because the
+AEAD's associated data has to exist before the payload can be sealed and the payload's length has to be
+known before the header can be written; the two forms share one body so they cannot disagree about the
+Length field. And `wt_quic_protected_pn_offset` walks a
+header that is *still protected* by its layout alone -- first byte, version, both connection IDs, the
+Initial token, the Length field -- because no decoder can. The packet number length lives in the low
+two bits of the first byte and so do the two reserved bits the decoders rightly refuse, both of which
+the mask owns, so a decode before unprotection is a decode of the mask. It lives in `packet.c` beside
+the decoders it mirrors, so the layout is written once, and it yields both the sample's offset and the
+packet's own end inside a datagram that may hold several coalesced packets.
+
+`tests/unit/test_quic_packet_io.c` (148 checks) covers the round trip for both header forms, an Initial
+with a token (where the packet number's offset is not a fixed distance from the start), the packet
+number reconstruction across the cases where the truncated bytes differ from the number itself, the
+tamper sweep, the wrong local connection ID length, and the refusals: a datagram cut short at every
+length, a Version Negotiation, a Retry (neither is protected by these keys, and both have their own
+parsers), and a build with no room. Three findings were in the tests: a failed tag is reported as
+WT_ERR_PROTOCOL by the protection layer, not WT_ERR_AUTHENTICATION, and the read's contract now says
+so; a wrong local connection ID length is refused by whichever check the wrong sample offset breaks,
+which is a protocol error either way; and an empty payload cannot be protected at all with a one-byte
+packet number -- with an eight-byte connection ID the sample needs the full four bytes -- which is a
+real minimum and one of the reasons a QUIC datagram has a size floor.
+
 Implement the production network state machine.
 
 Tasks:

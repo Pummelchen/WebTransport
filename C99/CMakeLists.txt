@@ -89,6 +89,7 @@ set(WT_QUIC_RUNTIME_SOURCES
   src/quic/stream.c
   src/quic/datagram.c
   src/quic/close.c
+  src/quic/packet_io.c
 )
 set(WT_TLS_SOURCES
   src/tls/keyschedule.c
@@ -128,6 +129,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/stream.h
   include/webtransport/quic/datagram.h
   include/webtransport/quic/close.h
+  include/webtransport/quic/packet_io.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
   include/webtransport/tls/extension.h

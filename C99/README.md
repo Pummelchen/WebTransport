@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 32 unit test files and 74,544 checks, run by `ctest` and again under
+- 33 unit test files and 74,692 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -166,6 +166,17 @@ What is here:
   and a bounded receive queue whose discard policy is the newest rather than the oldest.
   `quic/close.h` is the two forms of CONNECTION_CLOSE, which are different messages, and the draining
   period of three probe timeouts.
+- **The wire seam** (Phase 4, sixth part): `quic/packet_io.h` is where frames become a datagram and a
+  datagram becomes frames. `wt_quic_packet_build` writes the header, seals the frames with the header
+  through the packet number as associated data, appends the tag, and applies header protection last;
+  `wt_quic_packet_read` removes header protection first, reconstructs the packet number against the
+  largest this endpoint has seen, and only then authenticates and decrypts -- because the header
+  protection sample is ciphertext and the packet number's own length is behind the mask. Two codec
+  additions came out of it: `wt_quic_long_header_encode_prefix` writes a long header for a payload the
+  caller has not produced yet, and `wt_quic_protected_pn_offset` walks a header that is *still
+  protected* by its layout alone, which no decoder can do because the masked first byte hides both the
+  packet number length and the two reserved bits. Because a round trip would let a shared mistake pass,
+  the test flips every byte of a packet and requires that the frames never come back.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
