@@ -456,8 +456,36 @@ found while writing it, both in this part: a failure path freed a certificate st
 caller also freed (a double free that segfaulted the test), and the SubjectPublicKeyInfo was
 written into a caller's buffer before its length was checked.
 
-What remains in this phase: the client and server state machines that sequence the whole
-handshake.
+**Sixth part done: the client state machine, and with it Phase 3's completion criteria.**
+`tls/session.h` and `src/tls/session.c` sequence the handshake: the ClientHello is absorbed
+as the bytes that were sent, the ServerHello is checked for the version, the ciphersuite, the
+session id echo and the key share, the EncryptedExtensions are checked for the ALPN the
+caller asked for and the transport parameters a QUIC handshake requires, the Certificate goes
+through the trust policy, the CertificateVerify is checked over the transcript through the
+Certificate, the server's Finished is verified over the transcript through CertificateVerify,
+and the client's Finished is produced over the transcript through the server's. The
+application secrets are derived at the last of those steps and are available in no earlier
+state, which is the phase's first completion criterion; every failure is a status and the
+policy is the one from the previous part, which is the second.
+
+The machine takes the ClientHello as bytes rather than building one and assuming it was sent,
+because the transcript is over the bytes the server saw and nothing else. That is what makes
+RFC 8448's recorded flight usable as evidence: `tests/unit/test_tls13_session.c` (79 checks)
+starts the machine with the RFC's ClientHello and the RFC's client private key, feeds it the
+RFC's server messages in order, and requires the handshake secrets, the application secrets
+and the client's Finished to be the RFC's own. A mistake shared by the transcript, the
+schedule, the signature check and the Finished construction would be invisible; a mistake in
+any one of them cannot pass.
+
+That test found three real defects, all of them one message out of step and all of them
+invisible without a recorded flight: the Early Secret was never derived (the handshake
+secret was computed from its own output buffer), the handshake traffic secrets were read from
+a transcript that did not yet include the ServerHello, and the client's Finished was over a
+transcript that did not yet include the server's Finished. Each produces secrets that are
+well formed and verify against nothing.
+
+What remains in this phase: the server side of the same handshake, which needs a certificate
+and key to sign with and the flight-building order that mirrors the client's checks.
 
 Port the Swift TLS behavior into portable C99 state machines.
 

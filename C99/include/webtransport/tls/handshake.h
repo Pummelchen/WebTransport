@@ -142,6 +142,21 @@ wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params
                                       uint8_t *out, size_t capacity,
                                       size_t *out_len);
 
+/* ----------------------------------------------------- EncryptedExtensions
+ *
+ * EncryptedExtensions is a body of nothing but an extension list (RFC 8446 section 4.3.1),
+ * which is why it has a parser and a builder and no structure of its own: everything it
+ * says is in the extensions, and every rule about them belongs to the layer that knows what
+ * the extensions mean.
+ */
+wt_status_t wt_tls_encrypted_extensions_parse(const uint8_t *message, size_t len,
+                                              wt_tls_extension_list_t *out);
+wt_status_t wt_tls_encrypted_extensions_encode(
+    const wt_tls_extension_list_t *extensions, wt_writer_t *w);
+wt_status_t wt_tls_encrypted_extensions_build(
+    const wt_tls_extension_list_t *extensions, uint8_t *out, size_t capacity,
+    size_t *out_len);
+
 /* ------------------------------------------- Certificate, CertificateVerify, Finished
  *
  * The three messages that carry a peer's identity and prove it holds the key. Nothing

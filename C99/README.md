@@ -10,7 +10,8 @@ scaffolding.
 
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
 complete, and Phase 3 is under way: its key schedule, transcript, handshake message
-codecs (Hellos and certificates), X25519 key agreement and peer authentication are done.**
+codecs (Hellos and certificates), X25519 key agreement, peer authentication and the client
+handshake are done.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -36,7 +37,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 24 unit test files and 73,677 checks, run by `ctest` and again under
+- 25 unit test files and 73,756 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -123,6 +124,15 @@ What is here:
   leaf fingerprints, and a development bypass that is restricted to loopback names because
   the restriction is part of the mode. The chain is parsed, validated and discarded inside
   one call, so no X.509 object outlives it and no OpenSSL type appears in a public header.
+- **The client handshake** (Phase 3, sixth part): `tls/session.h` sequences the whole
+  handshake -- the ClientHello as bytes, the ServerHello's version, ciphersuite, session id
+  echo and key share, ALPN and the transport parameters QUIC requires, the certificate chain
+  through the trust policy, CertificateVerify over the transcript through the Certificate,
+  the server's Finished over the transcript through CertificateVerify, and the client's
+  Finished over the transcript through the server's. The application secrets exist in no
+  state before the last of those, so every security condition is a precondition for them.
+  The machine is driven end to end by RFC 8448's recorded flight: it is started with the
+  RFC's ClientHello and client key and must produce the RFC's own secrets and Finished.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

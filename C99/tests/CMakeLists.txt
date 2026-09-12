@@ -31,6 +31,7 @@ set(WT_UNIT_TESTS
   test_tls13_handshake
   test_tls13_keyshare
   test_tls13_trust
+  test_tls13_session
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

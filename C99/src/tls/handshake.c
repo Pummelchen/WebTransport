@@ -849,3 +849,53 @@ wt_status_t wt_tls_finished_parse(const uint8_t *message, size_t len,
   memcpy(out, verify_data, WT_TLS13_FINISHED_LEN);
   return wt_cursor_at_end(&body) ? WT_OK : WT_ERR_PROTOCOL;
 }
+
+wt_status_t wt_tls_encrypted_extensions_encode(
+    const wt_tls_extension_list_t *extensions, wt_writer_t *w) {
+  wt_writer_t measure;
+  size_t body_len;
+
+  if (extensions == NULL || w == NULL) return WT_ERR_INVALID_ARGUMENT;
+  measure = wt_writer_measure();
+  (void)wt_tls_extensions_encode(&measure, extensions);
+  if (!wt_writer_ok(&measure)) return WT_ERR_LIMIT;
+  body_len = wt_writer_offset(&measure);
+  if (body_len > WT_TLS_HANDSHAKE_MAX_BODY) return WT_ERR_LIMIT;
+  if (wt_tls_handshake_header_encode(w, WT_TLS_HANDSHAKE_ENCRYPTED_EXTENSIONS,
+                                     body_len) != WT_OK) {
+    return WT_ERR_LIMIT;
+  }
+  if (wt_tls_extensions_encode(w, extensions) != WT_OK) return WT_ERR_LIMIT;
+  return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
+}
+
+wt_status_t wt_tls_encrypted_extensions_build(
+    const wt_tls_extension_list_t *extensions, uint8_t *out, size_t capacity,
+    size_t *out_len) {
+  wt_writer_t w;
+  wt_status_t status;
+
+  if (extensions == NULL || out == NULL || out_len == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  *out_len = 0U;
+  w = wt_writer_init(out, capacity);
+  status = wt_tls_encrypted_extensions_encode(extensions, &w);
+  if (status != WT_OK) return status;
+  *out_len = wt_writer_offset(&w);
+  return WT_OK;
+}
+
+wt_status_t wt_tls_encrypted_extensions_parse(const uint8_t *message, size_t len,
+                                              wt_tls_extension_list_t *out) {
+  wt_cursor_t body;
+  wt_status_t status;
+
+  if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+  status = message_body(message, len, WT_TLS_HANDSHAKE_ENCRYPTED_EXTENSIONS, &body);
+  if (status != WT_OK) return status;
+  status = wt_tls_extensions_parse(&body, out);
+  if (status != WT_OK) return status;
+  return wt_cursor_at_end(&body) ? WT_OK : WT_ERR_PROTOCOL;
+}
