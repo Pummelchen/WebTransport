@@ -577,6 +577,28 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
     case WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION:
       visit->saw_close = 1;
       return handle_connection_close(connection, frame, visit->now);
+    case WT_QUIC_FRAME_KIND_MAX_DATA:
+      /* The peer raising the connection-level limit it grants. RFC 9000 section 4.1 makes a limit that
+       * decreases a protocol error, because this endpoint has already been told it may send that much;
+       * raising it is the ordinary way an application that has read data says so. */
+      if (frame->as.max_data.maximum < connection->peer_limits.initial_max_data) {
+        return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, WT_QUIC_FRAME_MAX_DATA,
+                          visit->now);
+      }
+      connection->peer_limits.initial_max_data = frame->as.max_data.maximum;
+      return WT_OK;
+    case WT_QUIC_FRAME_KIND_MAX_STREAMS: {
+      /* The same for the stream counts, with the direction the frame names: RFC 9000 section 4.6. */
+      uint64_t *granted = frame->as.max_streams.direction == WT_QUIC_STREAM_BIDIRECTIONAL
+                              ? &connection->peer_limits.initial_max_streams_bidi
+                              : &connection->peer_limits.initial_max_streams_uni;
+      if (frame->as.max_streams.maximum < *granted) {
+        return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, WT_QUIC_FRAME_MAX_STREAMS_BIDI,
+                          visit->now);
+      }
+      *granted = frame->as.max_streams.maximum;
+      return WT_OK;
+    }
     case WT_QUIC_FRAME_KIND_PING:
     case WT_QUIC_FRAME_KIND_CRYPTO:
     case WT_QUIC_FRAME_KIND_STREAM:
@@ -584,9 +606,7 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
     case WT_QUIC_FRAME_KIND_RESET_STREAM_AT:
     case WT_QUIC_FRAME_KIND_STOP_SENDING:
     case WT_QUIC_FRAME_KIND_NEW_TOKEN:
-    case WT_QUIC_FRAME_KIND_MAX_DATA:
     case WT_QUIC_FRAME_KIND_MAX_STREAM_DATA:
-    case WT_QUIC_FRAME_KIND_MAX_STREAMS:
     case WT_QUIC_FRAME_KIND_DATA_BLOCKED:
     case WT_QUIC_FRAME_KIND_STREAM_DATA_BLOCKED:
     case WT_QUIC_FRAME_KIND_STREAMS_BLOCKED:

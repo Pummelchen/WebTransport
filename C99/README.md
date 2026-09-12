@@ -238,6 +238,9 @@ What is here:
   `wt_quic_connection_send_max_streams` sends an RFC 9000 section 19.11 MAX_STREAMS frame, with the same
   only-ever-rising rule as MAX_DATA and a count per direction, since a bidirectional stream costs the peer
   one of its own and a unidirectional one only ours.
+- **The peer's limits are acted on** (Phase 4, seventeenth part): a received MAX_DATA or MAX_STREAMS is
+  applied by the connection itself -- what the peer grants is what this endpoint may send -- and a limit
+  that falls is the PROTOCOL_VIOLATION RFC 9000 sections 4.1 and 4.6 make it, with the frame type named.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

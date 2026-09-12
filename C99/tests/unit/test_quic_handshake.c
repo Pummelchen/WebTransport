@@ -482,8 +482,10 @@ static void test_handshake(wt_udp_family_t family) {
       g_now = now;
       WT_EXPECT_OK("the client reads the frame", pump(&client, now, &arrived));
       WT_EXPECT_INT("which arrived", 1, arrived);
-      WT_EXPECT_U64("with the new limit", 200000U, g_max_data);
-      g_max_data = 0U;
+      /* The connection ACTS on the frame rather than handing it to the handler: the limit the peer
+       * grants is what this endpoint may send, so it is the connection's business. */
+      WT_EXPECT_U64("with the raised limit taken as the peer's", 200000U,
+                    wt_quic_connection_peer_limits(&client.connection)->initial_max_data);
       WT_EXPECT_STATUS("and a null connection is refused", WT_ERR_INVALID_ARGUMENT,
                        wt_quic_connection_set_max_data(NULL, 1U));
     }
@@ -520,9 +522,12 @@ static void test_handshake(wt_udp_family_t family) {
       g_now = now;
       WT_EXPECT_OK("the client reads the frame", pump(&client, now, &arrived));
       WT_EXPECT_INT("which arrived", 1, arrived);
-      WT_EXPECT_U64("with the new count", 8U, g_max_streams);
-      WT_EXPECT_U64("for bidirectional streams", (uint64_t)WT_QUIC_STREAM_BIDIRECTIONAL,
-                    (uint64_t)g_max_streams_direction);
+      /* The direction the frame names is the one that moves: the bidirectional count is the new one and
+       * the unidirectional count is still what the handshake's parameters said. */
+      WT_EXPECT_U64("with the raised bidirectional count", 8U,
+                    wt_quic_connection_peer_limits(&client.connection)->initial_max_streams_bidi);
+      WT_EXPECT_U64("and the other direction untouched", 4U,
+                    wt_quic_connection_peer_limits(&client.connection)->initial_max_streams_uni);
       WT_EXPECT_STATUS("and a direction that is not one is refused", WT_ERR_INVALID_ARGUMENT,
                        wt_quic_connection_send_max_streams(&server.connection,
                                                            (wt_quic_stream_direction_t)7, 9U, now));

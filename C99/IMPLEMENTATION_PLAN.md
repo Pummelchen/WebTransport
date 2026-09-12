@@ -932,6 +932,19 @@ stream layer's: it is the layer that knows a stream was closed and that its slot
 `tests/unit/test_quic_handshake.c` (240 checks) now carries a handshake, a datagram, a STREAM frame, a
 MAX_DATA frame and a MAX_STREAMS frame over loopback.
 
+**Seventeenth part done: the peer's limits are acted on, not just parsed.** The connection now handles a
+received MAX_DATA and MAX_STREAMS itself rather than handing them to a handler: what the peer grants is
+what this endpoint may send, so raising it is a fact about the connection and not about the application
+above it. Both are checked against RFC 9000 section 4.1's and section 4.6's rule that a limit may only
+ever rise -- a peer that sends a lower one has contradicted an earlier promise, which is a
+PROTOCOL_VIOLATION and closes the connection with the frame type named -- and a MAX_STREAMS moves only
+the direction it names, which is why the frame carries one.
+
+This closes the loop the previous parts opened: the limits the peer granted are parsed from its transport
+parameters, its raising of them is applied as it arrives, and what this endpoint grants is advertised and
+raised with `wt_quic_connection_send_max_data` and `wt_quic_connection_send_max_streams`. What is still
+missing is the accounting that decides WHEN to raise them, which is the stream layer's.
+
 Implement the production network state machine.
 
 Tasks:
