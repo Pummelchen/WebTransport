@@ -40,6 +40,7 @@ set(WT_UNIT_TESTS
   test_tls13_trust
   test_tls13_session
   test_tls13_server
+  test_runtime_udp
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

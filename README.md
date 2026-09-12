@@ -40,8 +40,9 @@ control, stream state machines and flow control, QUIC DATAGRAM, the close paths,
 packet build/read seam. It installs as a CMake package with a consumer test. The
 cryptographic and packet-protection tests are driven by RFC 9001 appendix A's and RFC
 8448's own vectors, extracted from the RFC text rather than transcribed. The IPv4/IPv6 UDP
-runtime that completes Phase 4 is not written yet, and no WebTransport protocol is
-implemented -- HTTP/3, QPACK and the draft-16 session layer come after it -- so its
+runtime that completes Phase 4 is under way -- its UDP socket layer exists, with IPv4 and IPv6
+loopback round trips tested, and the connection runtime that drives it does not -- and no WebTransport
+protocol is implemented -- HTTP/3, QPACK and the draft-16 session layer come after it -- so its
 draft-16 score is still 0%. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).

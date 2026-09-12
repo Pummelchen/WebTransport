@@ -34,6 +34,8 @@ const char *wt_status_name(wt_status_t status) {
       return "unsupported";
     case WT_ERR_AUTHENTICATION:
       return "authentication";
+    case WT_ERR_IO:
+      return "io";
     default:
       /* A value that is not a status reaches here from a caller that cast
        * something else, or from a header mismatch across an ABI change. A name

@@ -65,9 +65,14 @@ function(wt_set_c99 target)
     C_STANDARD_REQUIRED ON
     C_EXTENSIONS OFF
   )
-  # clock_gettime and the rest of POSIX are not in ISO C99; the time source in
-  # src/core/time.c is the only place a platform API is called, and it needs the
-  # feature macro to be visible on Linux.
+  # clock_gettime and the rest of POSIX are not in ISO C99. Two places call a
+  # platform API: the monotonic clock in src/core/time.c and the UDP socket layer
+  # in src/runtime/udp.c (WT-13), and both need the feature macro to be visible on
+  # Linux. It is set for the whole library rather than per file because it decides
+  # which names the libc exposes, and a header that changed meaning depending on
+  # which translation unit included it would be a worse hazard than the macro.
+  # Deliberately not set on Apple, where the default is already the full set and
+  # setting it once removed INADDR_LOOPBACK (WT-14).
   if(UNIX AND NOT APPLE)
     target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
   endif()

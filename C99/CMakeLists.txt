@@ -91,6 +91,13 @@ set(WT_QUIC_RUNTIME_SOURCES
   src/quic/close.c
   src/quic/packet_io.c
 )
+# The runtime is the POSIX part of the tree (WT-13): sockets, poll, the monotonic clock. It is the
+# same library because a consumer links one thing and a test must not be able to build a different
+# socket layer than the library ships.
+set(WT_RUNTIME_SOURCES
+  src/runtime/udp.c
+)
+
 set(WT_TLS_SOURCES
   src/tls/keyschedule.c
   src/tls/extension.c
@@ -103,6 +110,7 @@ list(APPEND WT_CORE_SOURCES ${WT_CRYPTO_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_QUIC_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_QUIC_RUNTIME_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_TLS_SOURCES})
+list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 
 set(WT_PUBLIC_HEADERS
   include/webtransport/status.h
@@ -137,6 +145,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/tls/keyshare.h
   include/webtransport/tls/trust.h
   include/webtransport/tls/session.h
+  include/webtransport/runtime/udp.h
 )
 
 # The sanitizer flags are added to every target when the option is on, including

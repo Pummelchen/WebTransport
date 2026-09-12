@@ -687,6 +687,40 @@ which is a protocol error either way; and an empty payload cannot be protected a
 packet number -- with an eight-byte connection ID the sample needs the full four bytes -- which is a
 real minimum and one of the reasons a QUIC datagram has a size floor.
 
+**Seventh part done: the UDP socket layer.** `runtime/udp.h` and `src/runtime/udp.c` are the platform,
+and they are deliberately the only file in the tree that is POSIX rather than ISO C99 (WT-13): C99 has
+no sockets, so this is where the syscall enters and it is the reason the build sets a feature-test
+macro at all. It moves whole datagrams between two addresses on IPv4 and IPv6 and knows nothing about
+QUIC -- the connection runtime drives it, which is why a failure is a status rather than a closed
+socket and why nothing blocks an event loop longer than the caller asked. Every classification of a
+platform failure is in one place, `map_errno`, so that a caller can act on WT_ERR_AGAIN or WT_ERR_LIMIT
+without knowing which kernel refused it; the failures this layer cannot classify are reported as a
+status added for the purpose, `WT_ERR_IO`, because a caller that reads "limit" or "closed" acts on it
+and inventing a diagnosis is worse than admitting the layer does not have one.
+
+Two decisions are stated in the header rather than left to the platform. IPv6 sockets set `IPV6_V6ONLY`
+explicitly, because Linux and the BSDs disagree about the default and a socket that is sometimes
+dual-stack would make "which family is this connection" depend on the host -- so an IPv4 address needs
+an IPv4 socket, and a mismatched send is a caller error rather than a second way to reach the same
+peer. And **truncation is reported, not hidden** (WT-36): a datagram larger than the caller's buffer is
+`WT_ERR_TRUNCATED` with the length zeroed, because a QUIC packet cut in half is a different packet and
+a caller that parsed the prefix of one would turn a truncation into a parsing bug. The peer's address
+is filled in even then, because "who sent what I could not receive" is the useful half of the report;
+`WT_UDP_MAX_DATAGRAM` is the buffer size that cannot truncate. The scope id of a link-local address is
+part of the address type, since two interfaces can carry the same `fe80::` address and dropping the
+scope is the difference between reaching the peer and reaching nobody.
+
+`tests/unit/test_runtime_udp.c` (177 checks) is the one test that uses the real network, and it is a
+unit test because the subject is a syscall wrapper: a fake socket would test the fake. It runs on the
+loopback interface only, opens two real sockets per case, and lets the kernel choose every port, so it
+needs no network, no privileges and no free port. Both families are checked through a round trip, a
+zero-length datagram, two datagrams that must not merge, a datagram too large for the buffer in both
+directions, and every refusal -- an unopened socket, a closed one, a mismatched family, a datagram
+above the UDP maximum, and the arguments. One defect came out of it and it is exactly the kind a
+synthetic test would have hidden: `wt_udp_address_loopback` wrote 127.0.0.0 for IPv4 because the IPv6
+case needed only its last byte set, and binding a network address fails with EADDRNOTAVAIL -- which a
+fake socket would have accepted.
+
 Implement the production network state machine.
 
 Tasks:

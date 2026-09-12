@@ -21,6 +21,7 @@ int main(void) {
                 wt_status_name(WT_ERR_PROTOCOL));
   WT_EXPECT_STR("tls is named", "tls", wt_status_name(WT_ERR_TLS));
   WT_EXPECT_STR("closed is named", "closed", wt_status_name(WT_ERR_CLOSED));
+  WT_EXPECT_STR("io is named", "io", wt_status_name(WT_ERR_IO));
   WT_EXPECT_STR("again is named", "again", wt_status_name(WT_ERR_AGAIN));
   WT_EXPECT_STR("truncated is named", "truncated",
                 wt_status_name(WT_ERR_TRUNCATED));

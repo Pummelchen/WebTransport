@@ -103,7 +103,17 @@ typedef enum wt_status {
    * The authenticated data is discarded, never parsed. Added after the values
    * above so that a caller compiled against an earlier header keeps the meaning
    * it was compiled with. */
-  WT_ERR_AUTHENTICATION
+  WT_ERR_AUTHENTICATION,
+
+  /* The platform refused an I/O operation for a reason this layer does not
+   * classify. Added when the POSIX socket layer arrived: a syscall can fail for
+   * reasons that are neither the caller's argument, nor the protocol, nor a
+   * resource this library watches, and mapping those onto a name that means
+   * something else would turn "the kernel said no" into a wrong diagnosis. A
+   * caller that needs the reason asks the platform; a caller that needs to
+   * classify has the specific statuses above. Appended for the same ABI reason
+   * as WT_ERR_AUTHENTICATION. */
+  WT_ERR_IO
 } wt_status_t;
 
 /* A short, stable, lower-case name for a status: "ok", "protocol", and so on.
