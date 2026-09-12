@@ -1028,6 +1028,20 @@ for an unseen stream OPEN it, with the granted counts as the bound -- a peer tha
 endpoint's MAX_STREAMS allows is the STREAM_LIMIT_ERROR of section 4.6 -- and MAX_STREAM_DATA then raises
 the one stream's allowance.
 
+**Twenty-fourth part done: a stream is created by its first frame, and the limits that bound it.** RFC 9000
+section 3.2 makes a received frame for a peer-initiated stream this endpoint has never seen OPEN it -- no
+separate message announces a stream -- and the connection now does that, with the two rules that decide
+whether it is allowed, both of them the peer's fault when they are not: a frame for one of this endpoint's
+OWN numbers that was never opened is the STREAM_STATE_ERROR of section 19.8, and a peer-initiated stream
+beyond the count this endpoint granted is the STREAM_LIMIT_ERROR of section 4.6. A full table is neither,
+because it is this endpoint's own bound. MAX_STREAM_DATA then raises the one stream's send allowance, which
+is the per-stream counterpart of MAX_DATA and the first piece of flow control that the receive path
+applies rather than merely checks.
+
+`tests/unit/test_quic_connection.c` (475 checks) covers all four: the stream appearing in the table as the
+peer's and bidirectional, the limit error with the frame named, the state error for an unopened local
+number, and the allowance moving.
+
 Implement the production network state machine.
 
 Tasks:

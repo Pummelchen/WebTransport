@@ -897,6 +897,117 @@ static void test_open_stream(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 section 3.2 and 4.6: a frame for a peer-initiated stream this endpoint has never seen OPENS
+ * it, bounded by the count this endpoint granted; more than that is STREAM_LIMIT_ERROR, and a frame for
+ * one of this endpoint's own numbers that was never opened is STREAM_STATE_ERROR. MAX_STREAM_DATA then
+ * raises one stream's send allowance. */
+static void send_frame_to(const connection_pair_t *pair, const wt_quic_frame_t *frame,
+                          const wt_quic_packet_keys_t *keys, uint64_t packet_number, uint64_t now) {
+  uint8_t payload[128];
+  uint8_t datagram[256];
+  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+  size_t len;
+  size_t datagram_len = 0U;
+  wt_quic_packet_build_t build;
+
+  WT_EXPECT_OK("the frame encodes", wt_quic_frame_encode(&w, frame));
+  len = wt_writer_offset(&w);
+  memset(&build, 0, sizeof(build));
+  build.short_header = 1;
+  build.version = WT_QUIC_VERSION_1;
+  build.destination_connection_id = k_dcid;
+  build.destination_connection_id_len = sizeof(k_dcid);
+  build.packet_number = packet_number;
+  build.packet_number_length = 1U;
+  build.payload = payload;
+  build.payload_len = len;
+  build.keys = keys;
+  WT_EXPECT_OK("the packet builds",
+               wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("and is sent",
+               wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
+  (void)now;
+}
+
+static void test_peer_opens_stream(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 90000000U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x40U + i);
+  WT_EXPECT_OK("application keys derive",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the client sends with them",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads with them",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  /* This endpoint grants two bidirectional streams, which is what the peer may open. */
+  WT_EXPECT_OK("a grant of two",
+               wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
+
+  /* Stream 0 is the peer's first bidirectional stream, and the frame creates it. */
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
+  frame.as.stream.id = 0U;
+  frame.as.stream.offset = 0U;
+  frame.as.stream.data = (const uint8_t *)"\x01\x02\x03";
+  frame.as.stream.length = 3U;
+  frame.as.stream.has_length = 1;
+  send_frame_to(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U, now);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("the server is not closed by it", 0, wt_quic_connection_is_closed(&pair.server));
+  {
+    wt_quic_stream_t *stream = wt_quic_connection_stream(&pair.server, 0U);
+    WT_EXPECT_TRUE("and the stream now exists", stream != NULL);
+    if (stream != NULL) {
+      WT_EXPECT_INT("as the peer's", 0, stream->initiated_by_us);
+      WT_EXPECT_INT("and bidirectional", 1, stream->bidirectional);
+    }
+  }
+
+  /* Stream 8 is the third bidirectional one, beyond the two granted. */
+  frame.as.stream.id = 8U;
+  send_frame_to(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 1U, now);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("a stream beyond the grant closes the connection", 1,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a stream limit error", (uint64_t)WT_QUIC_STREAM_LIMIT_ERROR,
+                pair.server.close.error_code);
+  WT_EXPECT_U64("naming the STREAM frame", WT_QUIC_FRAME_STREAM_BASE,
+                pair.server.close.frame_type);
+
+  close_pair(&pair);
+
+  /* A frame for one of this endpoint's OWN numbers that was never opened is a different error. */
+  open_pair(WT_UDP_IPV4, &pair);
+  WT_EXPECT_OK("the client sends with them",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads with them",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  /* A server's own bidirectional streams are 1, 5, 9, ... -- none of which it has opened. */
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
+  frame.as.stream.id = 1U;
+  frame.as.stream.offset = 0U;
+  frame.as.stream.data = (const uint8_t *)"\x01\x02\x03";
+  frame.as.stream.length = 3U;
+  frame.as.stream.has_length = 1;
+  send_frame_to(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U, now);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("an unopened local number closes the connection", 1,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a stream state error", (uint64_t)WT_QUIC_STREAM_STATE_ERROR,
+                pair.server.close.error_code);
+
+  wt_quic_packet_keys_clear(&keys);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -912,5 +1023,6 @@ int main(void) {
   test_garbage(WT_UDP_IPV6);
 
   test_open_stream();
+  test_peer_opens_stream();
   WT_TEST_MAIN_END("wt_quic_connection");
 }
