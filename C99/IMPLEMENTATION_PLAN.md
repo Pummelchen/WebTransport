@@ -1,5 +1,10 @@
 # C99 WebTransport Implementation Plan
 
+**Phase status is recorded in the wiki project tracker**, as `WT-54` to `WT-67`
+under "C99 implementation phases", which is the only task list for this
+repository. A phase is marked complete there when its completion criteria below
+are met, and the status line in each phase says which commit did it.
+
 This plan describes how to build a portable C99 implementation from the completed Swift implementation.
 
 Target protocol: `draft-ietf-webtrans-http3-16`
@@ -157,6 +162,18 @@ Requirements:
 - Shutdown must free every owned resource deterministically.
 
 ## Phase 0: Foundation
+
+**Status: complete**, on `main` at `a922521` and `fe70487`. The build is CMake
+with static and shared libraries, the three CLI executables and a `find_package`
+config; the core utilities are `status`, `checked`, `endian`, `cursor`, `writer`,
+`buffer`, `allocator`, `log`, `time` and `version`; 10 test files with 5,392
+checks pass under CTest and under AddressSanitizer and UndefinedBehaviorSanitizer,
+on macOS and on Linux; `scripts/check-package.sh` builds a consumer against the
+installed package; and `C99 CI` runs the matrix. Two things the criteria named
+are deliberately part of this status rather than outstanding: the CLI tools are
+stubs that exit 3 rather than 0, because a tool with no protocol must not read as
+a successful run, and "at least one smoke test" is the ten unit test files rather
+than one.
 
 Create the C99 project skeleton.
 
