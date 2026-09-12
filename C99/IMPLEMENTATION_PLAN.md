@@ -990,6 +990,17 @@ the close rule -- because a second copy is a second thing to keep in step with t
 `tests/unit/test_quic_connection.c` proves the rule with a STREAM frame in an Initial packet, the case the
 table rules out most plainly, and the connection closes naming STREAM.
 
+**Twenty-first part done: the four fields in a stream number.** RFC 9000 section 2.1 packs four things into
+one number -- who opened the stream, whether it is bidirectional, and an index within that class -- and
+every rule about streams turns on them: whether a count limit applies at all, whether a stream may be
+reset, which end owns it. `quic/stream.h` now reads and writes those fields in one place
+(`wt_quic_stream_id_index`, `_from_client`, `_is_bidirectional`, `_make`) instead of every call site
+shifting bits itself, and the connection's own stream-number check -- written before the helpers existed,
+with its arithmetic inline -- now uses them. The test checks the four classes, the inverse round trip for
+the first sixteen numbers, and the two accessors that are easy to get backwards (the initiator bit is the
+LOW one and the directionality is the next). It is a small part on purpose: it is the first piece of the
+stream layer, and the layer's table will read these fields for every rule it enforces.
+
 Implement the production network state machine.
 
 Tasks:
