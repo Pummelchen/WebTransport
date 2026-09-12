@@ -26,7 +26,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
-The Swift conformance matrix passes in full. C99 and C++ directories contain planning material only; they are not protocol implementations.
+The Swift conformance matrix passes in full. The C99 directory contains planning material only; it is not a protocol implementation.
 
 1.3.0 added server TLS identity injection, graceful shutdown, connection admission
 limits, and certificate expiry reporting, and was the first release verified end to
