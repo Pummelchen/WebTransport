@@ -363,6 +363,83 @@ static void test_receiving_states(void) {
                    wt_quic_stream_on_data_read(&stream, 1U));
 }
 
+/* The stream table: bounded, per-class counts, and the refusal that keeps a peer from choosing this
+ * endpoint's memory. */
+static void test_stream_table(void) {
+  wt_quic_stream_table_t table;
+  wt_quic_stream_t *stream;
+  uint64_t i;
+
+  wt_quic_stream_table_init(&table);
+  WT_EXPECT_U64("a fresh table is empty", 0U, (uint64_t)wt_quic_stream_table_count(&table));
+  WT_EXPECT_TRUE("and holds nothing", wt_quic_stream_table_find(&table, 0U) == NULL);
+
+  /* Four client-initiated bidirectional streams, which is what the limit allows. */
+  for (i = 0U; i < 4U; i++) {
+    WT_EXPECT_OK("a stream opens",
+                 wt_quic_stream_table_open(&table, wt_quic_stream_id_make(1, 1, i), 1, 4U));
+  }
+  WT_EXPECT_U64("four are live", 4U, (uint64_t)wt_quic_stream_table_count(&table));
+  WT_EXPECT_U64("and counted for this endpoint", 4U,
+                wt_quic_stream_table_opened_by_us(&table, 1));
+  WT_EXPECT_STATUS("a fifth is beyond the limit", WT_ERR_LIMIT,
+                   wt_quic_stream_table_open(&table, wt_quic_stream_id_make(1, 1, 4U), 1, 4U));
+  WT_EXPECT_STATUS("and opening one twice is a state error", WT_ERR_STATE,
+                   wt_quic_stream_table_open(&table, wt_quic_stream_id_make(1, 1, 0U), 1, 8U));
+
+  stream = wt_quic_stream_table_find(&table, wt_quic_stream_id_make(1, 1, 2U));
+  WT_EXPECT_TRUE("a stream is found by number", stream != NULL);
+  if (stream != NULL) {
+    WT_EXPECT_U64("with the number it was opened with", wt_quic_stream_id_make(1, 1, 2U), stream->id);
+    WT_EXPECT_INT("as this endpoint's", 1, stream->initiated_by_us);
+    WT_EXPECT_INT("and bidirectional", 1, stream->bidirectional);
+  }
+  WT_EXPECT_TRUE("an unopened number is not in the table",
+                 wt_quic_stream_table_find(&table, wt_quic_stream_id_make(1, 1, 9U)) == NULL);
+
+  /* The other direction is counted separately, and a peer's stream costs the peer's allowance. */
+  WT_EXPECT_OK("a unidirectional stream opens",
+               wt_quic_stream_table_open(&table, wt_quic_stream_id_make(1, 0, 0U), 1, 4U));
+  WT_EXPECT_U64("counted on its own", 1U, wt_quic_stream_table_opened_by_us(&table, 0));
+  WT_EXPECT_U64("leaving the bidirectional count alone", 4U,
+                wt_quic_stream_table_opened_by_us(&table, 1));
+  WT_EXPECT_STATUS("a peer's stream needs the peer's allowance", WT_ERR_LIMIT,
+                   wt_quic_stream_table_open(&table, wt_quic_stream_id_make(0, 1, 0U), 0, 0U));
+  WT_EXPECT_OK("which it has when it granted one",
+               wt_quic_stream_table_open(&table, wt_quic_stream_id_make(0, 1, 0U), 0, 1U));
+  WT_EXPECT_U64("and that is counted for the peer", 1U,
+                wt_quic_stream_table_opened_by_peer(&table, 1));
+  WT_EXPECT_U64("not for this endpoint", 4U, wt_quic_stream_table_opened_by_us(&table, 1));
+
+  /* An open stream cannot be forgotten, and one that is not there cannot either. */
+  WT_EXPECT_STATUS("an unfinished stream stays in the table", WT_ERR_STATE,
+                   wt_quic_stream_table_close(&table, wt_quic_stream_id_make(1, 1, 0U)));
+  WT_EXPECT_STATUS("and closing nothing is a state error", WT_ERR_STATE,
+                   wt_quic_stream_table_close(&table, wt_quic_stream_id_make(1, 1, 9U)));
+
+  /* The bound: a peer cannot choose this endpoint's memory. */
+  {
+    wt_quic_stream_table_t small;
+    wt_quic_stream_table_init(&small);
+    for (i = 0U; i < WT_QUIC_STREAM_TABLE_MAX; i++) {
+      WT_EXPECT_OK("the table fills", wt_quic_stream_table_open(&small, wt_quic_stream_id_make(1, 1, i),
+                                                               1, 1000U));
+    }
+    WT_EXPECT_U64("to its bound", (uint64_t)WT_QUIC_STREAM_TABLE_MAX,
+                  (uint64_t)wt_quic_stream_table_count(&small));
+    WT_EXPECT_STATUS("and refuses one more", WT_ERR_LIMIT,
+                     wt_quic_stream_table_open(&small, wt_quic_stream_id_make(1, 1,
+                                                                              WT_QUIC_STREAM_TABLE_MAX),
+                                               1, 1000U));
+  }
+
+  WT_EXPECT_STATUS("a null table is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_stream_table_open(NULL, 0U, 1, 1U));
+  WT_EXPECT_U64("and has no count", 0U, (uint64_t)wt_quic_stream_table_count(NULL));
+  WT_EXPECT_TRUE("nor streams", wt_quic_stream_table_at(NULL, 0U) == NULL);
+  WT_EXPECT_TRUE("nor a const find", wt_quic_stream_table_find_const(NULL, 0U) == NULL);
+}
+
 int main(void) {
   test_send_states();
   test_reset_and_stop();
