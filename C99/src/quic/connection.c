@@ -563,10 +563,37 @@ typedef struct wt_quic_visit {
   int saw_close;
 } wt_quic_visit_t;
 
+/* The wire type of the frames a closed connection still reads. The rule itself lives in `close.h` --
+ * `wt_quic_close_accepts_frame_type` is the one statement of it, and this maps a decoded kind onto the
+ * wire value it asks about. Anything else maps to a type the rule refuses: an unknown frame type is
+ * exactly what "not accepted here" means, and using one rather than repeating the list is what keeps a
+ * second copy from drifting. */
+static uint64_t wire_type_when_closed(wt_quic_frame_type_t kind) {
+  if (kind == WT_QUIC_FRAME_KIND_PADDING) return WT_QUIC_FRAME_PADDING;
+  if (kind == WT_QUIC_FRAME_KIND_PING) return WT_QUIC_FRAME_PING;
+  if (kind == WT_QUIC_FRAME_KIND_ACK) return WT_QUIC_FRAME_ACK;
+  if (kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT) {
+    return WT_QUIC_FRAME_CONNECTION_CLOSE_TRANSPORT;
+  }
+  if (kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION) {
+    return WT_QUIC_FRAME_CONNECTION_CLOSE_APPLICATION;
+  }
+  return 0x3fU; /* not a frame type this implementation knows, which the rule refuses */
+}
+
 static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
   wt_quic_visit_t *visit = context;
   wt_quic_connection_t *connection = visit->connection;
   wt_status_t status;
+
+  /* RFC 9000 section 10.2.1: once the connection is closed, only PADDING, the close's own frames and the
+   * frames a probe needs may still be processed -- everything else is ignored, and ignoring it STOPS the
+   * walk rather than failing it, because a peer's late frame is not this endpoint's error and the
+   * connection is already closed. */
+  if (wt_quic_connection_is_closed(connection) &&
+      !wt_quic_close_accepts_frame_type(wire_type_when_closed(frame->kind))) {
+    return WT_OK;
+  }
 
   switch (frame->kind) {
     case WT_QUIC_FRAME_KIND_PADDING:

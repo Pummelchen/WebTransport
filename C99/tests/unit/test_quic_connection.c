@@ -20,6 +20,7 @@
 
 #include "webtransport/quic/connection.h"
 #include "webtransport/quic/packet_io.h"
+#include "webtransport/quic/transport_parameters.h"
 #include "webtransport/quic/protection.h"
 #include "webtransport/runtime/udp.h"
 
@@ -467,6 +468,62 @@ static void test_close_paths(void) {
     WT_EXPECT_INT("the connection is not drained before it", 0,
                   wt_quic_connection_is_drained(&pair.server, now + drain - 1U));
     WT_EXPECT_INT("and is after", 1, wt_quic_connection_is_drained(&pair.server, now + drain));
+  }
+
+  /* RFC 9000 section 10.2.1: a frame that arrives after the connection closed is not processed. The
+   * server is peer-closed by now, and a MAX_DATA frame from the client must not move the limit it
+   * grants -- the packet is read, because a closed connection still reads PADDING and closes, and the
+   * frame inside it is ignored. */
+  {
+    wt_quic_frame_t max_data = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_DATA);
+    uint8_t payload[64];
+    uint8_t datagram[128];
+    wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+    size_t payload_len;
+    size_t datagram_len = 0U;
+    wt_quic_packet_build_t build;
+    uint64_t granted;
+    /* The server is told what its peer grants it, so that the frame below has something to move. It is
+     * the PEER's limit, not this endpoint's: one is what it may send, the other what it allows. */
+    {
+      wt_quic_transport_parameters_t params;
+      wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+      wt_quic_transport_parameters_init(&params);
+      WT_EXPECT_OK("a peer limit to be contradicted",
+                   wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_DATA,
+                                                            50000U));
+      WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
+      WT_EXPECT_OK("and is parsed by the server",
+                   wt_quic_connection_set_peer_parameters(&pair.server, payload,
+                                                          wt_writer_offset(&pw)));
+    }
+    granted = wt_quic_connection_peer_limits(&pair.server)->initial_max_data;
+    WT_EXPECT_U64("the server knows what the peer granted", 50000U, granted);
+    max_data.as.max_data.maximum = 90000U;
+    WT_EXPECT_OK("a MAX_DATA frame encodes", wt_quic_frame_encode(&w, &max_data));
+    payload_len = wt_writer_offset(&w);
+
+    memset(&build, 0, sizeof(build));
+    build.type = WT_QUIC_PACKET_INITIAL;
+    build.version = WT_QUIC_VERSION_1;
+    build.destination_connection_id = k_dcid;
+    build.destination_connection_id_len = sizeof(k_dcid);
+    build.source_connection_id = k_server_scid;
+    build.source_connection_id_len = sizeof(k_server_scid);
+    build.packet_number = 9U;
+    build.packet_number_length = 1U;
+    build.payload = payload;
+    build.payload_len = payload_len;
+    /* The keys the server reads with, so that only the close can be the reason this is ignored. */
+    build.keys = &pair.server.keys_in[WT_QUIC_SPACE_INITIAL];
+    WT_EXPECT_OK("the packet builds",
+                 wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+    WT_EXPECT_OK("and is sent from the client's socket",
+                 wt_udp_send(&pair.client_socket, &pair.server_address, datagram, datagram_len));
+    now += 1000U;
+    receive_on(&pair.server, &pair.server_socket, now);
+    WT_EXPECT_U64("whose frame is ignored rather than applied", granted,
+                  wt_quic_connection_peer_limits(&pair.server)->initial_max_data);
   }
 
   /* The idle timeout is a silent close: nothing is sent and the state says so. */

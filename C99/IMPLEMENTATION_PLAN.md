@@ -945,6 +945,20 @@ parameters, its raising of them is applied as it arrives, and what this endpoint
 raised with `wt_quic_connection_send_max_data` and `wt_quic_connection_send_max_streams`. What is still
 missing is the accounting that decides WHEN to raise them, which is the stream layer's.
 
+**Eighteenth part done: a closed connection stops processing frames.** RFC 9000 section 10.2.1 says that
+once a connection is closed, only PADDING, the close's own frames and the frames a probe needs may still
+be processed. The connection now enforces that in its frame walk: a decoded kind is mapped onto the wire
+type the close rule asks about, `wt_quic_close_accepts_frame_type` answers -- ONE statement of the rule,
+in the module that owns it, rather than a second list here that could drift -- and anything refused STOPS
+the walk rather than failing it, because a peer's late frame is not this endpoint's error and the
+connection is already closed. Before this, a MAX_DATA or a STREAM frame that arrived after a close was
+still applied, which is exactly the "MUST NOT process" the section names.
+
+`tests/unit/test_quic_connection.c` proves it with a packet built for the occasion: a peer-closed server
+is sent a readable packet carrying a larger MAX_DATA than the peer had granted, and the limit it may send
+does not move -- while the packet itself is still read, because a closed connection still reads PADDING
+and closes.
+
 Implement the production network state machine.
 
 Tasks:

@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,581 checks, run by `ctest` and again under
+- 38 unit test files and 75,591 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -241,6 +241,10 @@ What is here:
 - **The peer's limits are acted on** (Phase 4, seventeenth part): a received MAX_DATA or MAX_STREAMS is
   applied by the connection itself -- what the peer grants is what this endpoint may send -- and a limit
   that falls is the PROTOCOL_VIOLATION RFC 9000 sections 4.1 and 4.6 make it, with the frame type named.
+- **A closed connection stops processing frames** (Phase 4, eighteenth part): RFC 9000 section 10.2.1
+  allows only PADDING, the close's own frames and the probes once a connection is closed, and the frame
+  walk now enforces it -- through `wt_quic_close_accepts_frame_type`, so the rule is stated once, in the
+  module that owns it.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
