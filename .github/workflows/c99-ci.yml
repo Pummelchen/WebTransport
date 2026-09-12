@@ -74,9 +74,13 @@ jobs:
       # sanitizers in a directory that was configured without them does nothing.
       - name: Sanitizer build and tests
         if: matrix.cc == 'clang'
+        # One env block, because a step with two of them is a workflow file
+        # GitHub rejects outright -- the run fails before any job exists, with
+        # no job list and only "This run likely failed because of a workflow
+        # file issue" to go on. PyYAML accepted it silently, taking the last
+        # key, which is why the local check did not catch it.
         env:
           CC: ${{ matrix.cc }}
-        env:
           # LeakSanitizer runs at exit on Linux and is where a leak in this
           # project is caught: the first run of this job found a 4-byte leak in
           # a test that had passed every assertion. Darwin's ASan has no
