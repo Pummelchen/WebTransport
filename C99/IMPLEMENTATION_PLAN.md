@@ -581,6 +581,23 @@ finding was in the tests: the packet threshold's boundary and the time threshold
 inclusive comparisons, so an off-by-one in either direction is a test that passes for the wrong
 reason.
 
+**Third part done: congestion control.** `quic/congestion.h` and `src/quic/congestion.c` are RFC
+9002 section 7's NewReno: the initial window's formula with its 14720-byte bound, slow start,
+congestion avoidance's `mds * acked / cwnd` increment, the recovery epoch that makes a burst of
+losses cost one halving rather than one per packet, the two-datagram floor, and persistent
+congestion as an effect the caller asks for. What is not here is stated rather than implied: the
+pacing rate and HyStart++ are optional in the RFC, and the application-limited rule is something the
+caller knows and this file does not.
+
+The epoch is the part the tests are mostly about, because both ways of getting it wrong are quiet: a
+controller that halves once per packet of a burst collapses to the floor and looks like a dead path,
+and one that lets an acknowledgement from before the period grow the window grows it during the
+recovery it is recovering from. `tests/unit/test_quic_congestion.c` (88 checks) sends the burst and
+checks that the window moved exactly once, then checks that a later loss does reduce it again. Three
+findings were in the tests and one in a comment: the increment is `mds * acked / cwnd` with integer
+division, so a small acknowledgement adds nothing while a large one adds a *fraction* of a datagram
+rather than a whole one, and repeated losses only collapse the window if each is a new event.
+
 Implement the production network state machine.
 
 Tasks:

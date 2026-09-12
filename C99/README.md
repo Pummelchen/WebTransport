@@ -11,7 +11,7 @@ scaffolding.
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
 complete, and Phase 3 is under way: its key schedule, transcript, handshake message
 codecs (Hellos and certificates), X25519 key agreement, peer authentication and both halves of
-the handshake are done, and Phase 4 has its packet number space and loss detection.**
+the handshake are done, and Phase 4 has its packet number space, loss detection and congestion control.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -37,7 +37,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 28 unit test files and 74,191 checks, run by `ctest` and again under
+- 29 unit test files and 74,279 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -150,6 +150,11 @@ What is here:
   flight the congestion controller will read, and the probe timeout with its backoff. The list is
   bounded and being at the bound is an error rather than a drop, because a forgotten packet is one
   that is never retransmitted.
+- **Congestion control** (Phase 4, third part): `quic/congestion.h` is RFC 9002 section 7's NewReno
+  -- the initial window with its 14720-byte bound, slow start, congestion avoidance's fractional
+  increment, the recovery epoch that makes a burst of losses cost one halving, the two-datagram
+  floor, and persistent congestion. It reads the bytes in flight from the loss module rather than
+  counting them, so the two cannot disagree after a retransmission.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
