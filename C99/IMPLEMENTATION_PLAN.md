@@ -194,6 +194,20 @@ Completion criteria:
 
 ## Phase 1: QUIC Wire Core
 
+**Status: complete** on `main` at `f793d4d` and the commit that follows it. The
+codecs are `quic/varint.c`, `quic/packet_number.c`, `quic/frame.c`,
+`quic/packet.c`, `quic/transport_parameters.c` and `quic/connection_id.c`, with
+their headers under `include/webtransport/quic/`. The vectors include RFC 9000's
+varint and packet number examples and RFC 9001 appendix A.2's client Initial --
+both its header and the CRYPTO frame inside it, extracted from the RFC text by
+`tests/vectors/extract_rfc9001_client_initial.py` rather than transcribed. The
+malformed-input corpus in `tests/unit/test_quic_malformed.c` drives every parser
+with a fixed pseudo-random stream and is run under the sanitizers. Four defects
+were found while building this phase and each is recorded in the commit that
+fixed it; the one worth naming here is that the long header's reported size
+excluded the packet number, which would have made phase 2's AEAD authenticate the
+wrong bytes.
+
 Port Swift QUIC primitives first.
 
 Tasks:

@@ -22,6 +22,9 @@ set(WT_UNIT_TESTS
   test_quic_packet_number
   test_quic_frame
   test_quic_packet
+  test_quic_transport_parameters
+  test_quic_connection_id
+  test_quic_malformed
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

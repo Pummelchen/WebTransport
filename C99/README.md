@@ -8,8 +8,8 @@ scaffolding.
 
 ## Current Status
 
-**Phase 0 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) is complete.**
-Phases 1 to 14 are not started.
+**Phases 0 and 1 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
+complete.** Phases 2 to 14 are not started.
 
 What is here:
 
@@ -34,10 +34,35 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 10 unit test files, 5,392 checks, run by `ctest` and again under
-  AddressSanitizer and UndefinedBehaviorSanitizer. Note that Darwin has no
-  LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by
-  a local run on this machine; that is how the first one was found. Most of that count is two
+- 18 unit test files and 72,577 checks, run by `ctest` and again under
+  AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
+  malformed-input corpus, which drives every parser with a fixed pseudo-random
+  byte stream: a random buffer is a better generator of the case nobody thought
+  of than a list of cases somebody did, and under the sanitizers an out-of-bounds
+  read is a failure rather than a plausible value. Note that Darwin has no
+  LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by a
+  local run on this machine; that is how the first one was found.
+- **The QUIC wire core** (Phase 1), which is everything QUIC needs before there
+  is a connection:
+  - `quic/varint.h` — variable-length integers, encoding shortest and decoding
+    any form, with the RFC's four examples in the test.
+  - `quic/packet_number.h` — packet number encoding from the reconstruction
+    window and decoding by RFC 9000 appendix A.2, including its overflow guard
+    near the top of the 62-bit range.
+  - `quic/frame.h` — every RFC 9000 frame, the RFC 9221 DATAGRAM pair and
+    `RESET_STREAM_AT`, parsed into a tagged union whose payloads are views, so
+    parsing a packet allocates nothing. Each field rule the RFC states is a
+    refusal with the transport error code the peer must be told.
+  - `quic/packet.h` — long, short and Retry headers, with the Length field
+    computed on encode so a caller cannot disagree with itself, and the consumed
+    size reported so a coalesced datagram can be walked.
+  - `quic/transport_parameters.h` — the parameter codec, with framing and
+    duplicates refused here and the section 18.2 value rules a separate opt-in
+    check, because the same bytes are parsed as a TLS extension by a layer that
+    must not refuse them itself.
+  - `quic/connection_id.h` — connection ID storage and retirement, enforcing the
+    peer's `active_connection_id_limit`, `retire_prior_to` and the
+    `CONNECTION_ID_LIMIT_ERROR` of RFC 9000 section 5.1.1. Most of that count is two
   loops rather than two thousand hand-written cases: 4,096 of them come from
   appending a byte at a time to prove buffer growth is logarithmic, and about
   2,000 from reading a monotonic clock and checking the deadline arithmetic does
@@ -45,9 +70,10 @@ What is here:
 - A package consumer test: the library is installed and a separate CMake project
   links it, which is the only way to know the install tree works.
 
-What is not here: any QUIC, TLS, HTTP/3, QPACK or WebTransport code, the CLI
-tools' actual behavior, external interoperability evidence, and the platform
-runtimes.
+What is not here: TLS, HTTP/3, QPACK and WebTransport, the QUIC connection
+runtime, the CLI tools' actual behavior, external interoperability evidence, and
+the platform runtimes. The wire core parses and builds QUIC messages; nothing yet
+decides what to send.
 
 ## Building
 
