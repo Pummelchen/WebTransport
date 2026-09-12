@@ -138,9 +138,16 @@ int main(void) {
     WT_EXPECT_STATUS("and reports out of memory", WT_ERR_OUT_OF_MEMORY, status);
 
     probe.refuse = 0;
-    WT_EXPECT_TRUE("a NULL allocator selects the default",
-                   wt_alloc(NULL, 4U) != NULL);
-    wt_dealloc(NULL, wt_alloc(NULL, 4U), 4U);
+
+    /* Every block that is allocated here is released here. An earlier version
+     * of this file allocated one inside a WT_EXPECT_TRUE and never freed it,
+     * which LeakSanitizer on the Linux CI leg reported as "8 byte(s) leaked in
+     * 2 allocation(s)" -- a defect in the test rather than in the library, and
+     * one that only a sanitizer that runs at exit can see, since the process
+     * had already passed every assertion. */
+    block = wt_alloc(NULL, 4U);
+    WT_EXPECT_TRUE("a NULL allocator selects the default", block != NULL);
+    wt_dealloc(NULL, block, 4U);
 
     /* A partially filled allocator is a caller's bug, and the safe reading of
      * it is "use the default" rather than a call through a NULL pointer. */
@@ -149,9 +156,10 @@ int main(void) {
       size_t before = probe.allocations;
       memset(&partial, 0, sizeof(partial));
       partial.alloc = wt_probe_alloc;
+      block = wt_alloc(&partial, 4U);
       WT_EXPECT_TRUE("a partial allocator falls back to the default",
-                     wt_alloc(&partial, 4U) != NULL);
-      wt_dealloc(&partial, wt_alloc(&partial, 4U), 4U);
+                     block != NULL);
+      wt_dealloc(&partial, block, 4U);
       WT_EXPECT_U64("and never reached the probe", before, probe.allocations);
     }
 

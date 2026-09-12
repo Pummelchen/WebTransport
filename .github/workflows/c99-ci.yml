@@ -76,6 +76,14 @@ jobs:
         if: matrix.cc == 'clang'
         env:
           CC: ${{ matrix.cc }}
+        env:
+          # LeakSanitizer runs at exit on Linux and is where a leak in this
+          # project is caught: the first run of this job found a 4-byte leak in
+          # a test that had passed every assertion. Darwin's ASan has no
+          # LeakSanitizer and aborts if asked for one, which is why the local
+          # script asks for it only on Linux and why this job's Linux leg is the
+          # one that matters for leaks.
+          ASAN_OPTIONS: detect_leaks=1
         run: |
           cmake -S C99 -B C99/out/ci/sanitize -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \

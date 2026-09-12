@@ -43,9 +43,25 @@ build_one() {
   # The Darwin sanitizer symbolizer hangs on the reports this code can produce
   # and prints nothing useful when it does; disabling it costs stack names and
   # not the report.
+  #
+  # The leak pass is asked for only where it exists. On Linux it runs at exit
+  # and caught a 4-byte leak in a test that had already passed every assertion;
+  # on Darwin LeakSanitizer is not implemented, and asking for it aborts the
+  # process with "detect_leaks is not supported on this platform" rather than
+  # ignoring the request -- which is how this conditional came to be written.
+  # So a leak in this project is found on the Linux CI leg and not by a local
+  # run here, which is worth knowing before trusting a green local run.
   if [ "$name" = "build-sanitize" ]; then
-    ASAN_OPTIONS=symbolize=0 UBSAN_OPTIONS=symbolize=0 \
-      ctest --test-dir "$build_dir" --output-on-failure
+    case "$(uname -s)" in
+      Linux)
+        ASAN_OPTIONS=symbolize=0:detect_leaks=1 UBSAN_OPTIONS=symbolize=0 \
+          ctest --test-dir "$build_dir" --output-on-failure
+        ;;
+      *)
+        ASAN_OPTIONS=symbolize=0 UBSAN_OPTIONS=symbolize=0 \
+          ctest --test-dir "$build_dir" --output-on-failure
+        ;;
+    esac
   else
     ctest --test-dir "$build_dir" --output-on-failure
   fi

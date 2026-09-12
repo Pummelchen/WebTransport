@@ -35,7 +35,9 @@ What is here:
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
 - 10 unit test files, 5,392 checks, run by `ctest` and again under
-  AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is two
+  AddressSanitizer and UndefinedBehaviorSanitizer. Note that Darwin has no
+  LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by
+  a local run on this machine; that is how the first one was found. Most of that count is two
   loops rather than two thousand hand-written cases: 4,096 of them come from
   appending a byte at a time to prove buffer growth is logarithmic, and about
   2,000 from reading a monotonic clock and checking the deadline arithmetic does
