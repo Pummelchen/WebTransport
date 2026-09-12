@@ -25,6 +25,7 @@ set(WT_UNIT_TESTS
   test_quic_transport_parameters
   test_quic_connection_id
   test_quic_malformed
+  test_quic_pn_space
   test_crypto
   test_quic_protection
   test_tls13_keyschedule

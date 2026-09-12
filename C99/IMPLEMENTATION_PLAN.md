@@ -543,6 +543,25 @@ Completion criteria:
 
 ## Phase 4: QUIC Connection Runtime
 
+**First part done: the packet number space.** `quic/pn_space.h` and `src/quic/pn_space.c` are what
+one packet number space remembers: the received set as a bounded list of ranges (so a peer cannot
+choose this endpoint's memory by sending packets), the ACK frame that set produces, the
+acknowledgement debt that decides whether to send promptly or wait, and RFC 9002 section 5's round
+trip estimator with the probe timeout that comes from it. There is no I/O and no policy in it,
+which is why it can be tested exhaustively: the ranges are checked for the property that matters
+most -- the same packets inserted in any order produce the same set -- the ACK frame is checked by
+decoding it back with the Phase 1 frame codec, and the RTT arithmetic is checked against values
+worked out by hand from section 5.3.
+
+Two defects came out of that test, both in the merging logic: a packet that bridged a gap extended
+the range above it without joining the range below, leaving two ranges where the set has one (an
+ACK that describes a gap that does not exist); and the bound dropped the *newest* range rather than
+the oldest, because the list is kept largest-first and "the last one" is the oldest. A third
+finding was in the test: the ACK gap field is RFC 9000 section 19.3.1's "contiguous unacknowledged
+packets preceding the packet number one lower than the smallest in the preceding range", which is
+one less than the number of missing packets -- the round trip through the decoder is what settles
+it.
+
 Implement the production network state machine.
 
 Tasks:

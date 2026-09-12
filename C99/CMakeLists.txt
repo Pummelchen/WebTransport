@@ -82,6 +82,9 @@ set(WT_QUIC_SOURCES
   src/quic/connection_id.c
   src/quic/protection.c
 )
+set(WT_QUIC_RUNTIME_SOURCES
+  src/quic/pn_space.c
+)
 set(WT_TLS_SOURCES
   src/tls/keyschedule.c
   src/tls/extension.c
@@ -92,6 +95,7 @@ set(WT_TLS_SOURCES
 )
 list(APPEND WT_CORE_SOURCES ${WT_CRYPTO_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_QUIC_SOURCES})
+list(APPEND WT_CORE_SOURCES ${WT_QUIC_RUNTIME_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_TLS_SOURCES})
 
 set(WT_PUBLIC_HEADERS
@@ -113,6 +117,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/transport_parameters.h
   include/webtransport/quic/connection_id.h
   include/webtransport/quic/protection.h
+  include/webtransport/quic/pn_space.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
   include/webtransport/tls/extension.h
