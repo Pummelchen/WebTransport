@@ -609,7 +609,39 @@ static void test_garbage(wt_udp_family_t family) {
   close_pair(&pair);
 }
 
+/* Discarding a space's keys is what RFC 9001 section 4.9 requires and what makes a packet of that
+ * level stop being readable: the space is zeroed, a send there is refused, and doing it twice is not an
+ * error. */
+static void test_key_discard(void) {
+  connection_pair_t pair;
+  static const uint8_t payload[] = {0x01U, 0x02U};
+
+  open_pair(WT_UDP_IPV4, &pair);
+  WT_EXPECT_OK("a payload is sent in the Initial space",
+               wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 0U, payload,
+                                              sizeof(payload), 1000U));
+  WT_EXPECT_OK("the Initial keys are discarded",
+               wt_quic_connection_discard_keys(&pair.client, WT_QUIC_SPACE_INITIAL));
+  WT_EXPECT_INT("in both directions", 0, pair.client.has_keys_in[WT_QUIC_SPACE_INITIAL]);
+  WT_EXPECT_INT("so nothing more can be sent there", 0,
+                pair.client.has_keys_out[WT_QUIC_SPACE_INITIAL]);
+  WT_EXPECT_STATUS("which a send reports", WT_ERR_STATE,
+                   wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 2U, payload,
+                                                  sizeof(payload), 2000U));
+  WT_EXPECT_OK("discarding again is not an error",
+               wt_quic_connection_discard_keys(&pair.client, WT_QUIC_SPACE_INITIAL));
+  /* A space that never had keys, and the arguments. */
+  WT_EXPECT_OK("a space with no keys is not an error either",
+               wt_quic_connection_discard_keys(&pair.client, WT_QUIC_SPACE_HANDSHAKE));
+  WT_EXPECT_STATUS("a space that is not one is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_connection_discard_keys(&pair.client, WT_QUIC_SPACE_COUNT));
+  WT_EXPECT_STATUS("and a null connection is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_connection_discard_keys(NULL, WT_QUIC_SPACE_INITIAL));
+  close_pair(&pair);
+}
+
 int main(void) {
+  test_key_discard();
   test_round_trip(WT_UDP_IPV4);
   test_round_trip(WT_UDP_IPV6);
   test_short_packet_is_padded(WT_UDP_IPV4);

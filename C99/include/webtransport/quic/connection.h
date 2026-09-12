@@ -284,6 +284,15 @@ wt_status_t wt_quic_connection_receive_datagram(wt_quic_connection_t *connection
                                                 size_t capacity, size_t *out_length,
                                                 uint64_t *out_received_at);
 
+/* Discard one space's keys, in both directions. RFC 9001 section 4.9 makes this a MUST, not a
+ * tidy-up: the Initial keys are derived from a connection ID both ends can see, so an endpoint that
+ * keeps them stays readable to anyone who saw the first packet, and the Handshake keys are no better
+ * once the handshake is confirmed. The connection does it by itself where the RFC says when -- the
+ * Initial keys go when a Handshake packet is first received or sent, the Handshake keys when the
+ * handshake is confirmed -- and this is exposed because a caller that ends a connection early has to be
+ * able to do it too. Idempotent, and a space that never had keys is not an error. */
+wt_status_t wt_quic_connection_discard_keys(wt_quic_connection_t *connection, wt_quic_space_t space);
+
 /* Install the frame and loss handlers. Both are optional; without the first, frames this layer does
  * not act on are ignored -- which is correct for a connection whose owner has nothing to do with them
  * yet, and wrong for a connection that needs them. */

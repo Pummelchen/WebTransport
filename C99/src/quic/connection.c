@@ -440,6 +440,21 @@ static int ack_covers(const wt_quic_frame_t *frame, uint64_t packet_number) {
   return 0;
 }
 
+wt_status_t wt_quic_connection_discard_keys(wt_quic_connection_t *connection, wt_quic_space_t space) {
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (space >= WT_QUIC_SPACE_COUNT) return WT_ERR_INVALID_ARGUMENT;
+  /* Zeroed rather than marked unused: the key material must not be left in memory a caller can read,
+   * and `has_keys` is what makes the layer treat the space as gone. A packet for a discarded space is
+   * then discarded by the receive path, which is what RFC 9001 section 4.9.3 asks for. Idempotent, so
+   * the two places that discard the Initial keys -- a Handshake packet in either direction -- cannot
+   * disagree. */
+  wt_quic_packet_keys_clear(&connection->keys_in[space]);
+  wt_quic_packet_keys_clear(&connection->keys_out[space]);
+  connection->has_keys_in[space] = 0;
+  connection->has_keys_out[space] = 0;
+  return WT_OK;
+}
+
 static wt_status_t close_with(wt_quic_connection_t *connection, uint64_t error_code,
                               uint64_t frame_type, uint64_t now) {
   return wt_quic_connection_close(connection, error_code, frame_type, NULL, 0U, now);
@@ -1005,6 +1020,15 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
     status = process_packet(connection, space, packet.payload, packet.payload_len, &ack_eliciting,
                             now);
     if (status != WT_OK) return status;
+
+    /* RFC 9001 section 4.9.1: the Initial keys are discarded when the first Handshake packet is
+     * successfully processed. Both ends can derive them from a connection ID either can see, so keeping
+     * them would leave the connection readable by anyone who saw its first packet -- and the packet
+     * that proves the peer has the handshake keys is that first Handshake packet, which is why this is
+     * the moment and not the moment the keys were installed. */
+    if (space == WT_QUIC_SPACE_HANDSHAKE) {
+      (void)wt_quic_connection_discard_keys(connection, WT_QUIC_SPACE_INITIAL);
+    }
 
     /* The received set is updated after the frames are processed, because whether the acknowledgement
      * is urgent depends on what they carried. A packet that turned out not to be ack-eliciting is still

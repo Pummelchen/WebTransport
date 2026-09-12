@@ -872,6 +872,22 @@ frame is for. `tests/unit/test_quic_handshake.c` now installs such a handler (ha
 datagram queue) and carries a real handshake followed by a datagram exchange and an oversized refusal,
 which is also what proves the two halves compose.
 
+**Thirteenth part done: the key lifecycle RFC 9001 section 4.9 makes a MUST.** `wt_quic_connection_discard_keys`
+zeroes a space's two key sets and marks the space gone, and the connection calls it at the two moments
+the RFC names: the Initial keys go when the first Handshake packet is successfully processed -- not when
+the Handshake keys were installed, because both ends can derive the Initial keys from a connection ID
+either of them can see, and the proof that the peer has the handshake is the Handshake packet itself --
+and the Handshake keys go when the handshake is confirmed, which for a client is the server's
+HANDSHAKE_DONE and for a server is the client's verified Finished. What is left is the application
+level, which is the only one an attacker who saw the first packet cannot derive.
+
+The receive path already discarded a packet for a space without keys (RFC 9001 section 4.9.3), so the
+observable effect is that a late Initial packet is dropped rather than read, and the tests now say so:
+`tests/unit/test_quic_handshake.c` requires the Initial and Handshake keys to be gone on both ends after
+a real handshake with the application keys kept, and `tests/unit/test_quic_connection.c` checks the
+discard itself -- idempotent, a send in a discarded space refused with WT_ERR_STATE, a space that never
+had keys not an error, and the arguments.
+
 Implement the production network state machine.
 
 Tasks:

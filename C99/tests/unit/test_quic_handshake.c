@@ -365,6 +365,23 @@ static void test_handshake(wt_udp_family_t family) {
     WT_EXPECT_INT("and the client does too", 1, client.handshake.confirmed);
     WT_EXPECT_INT("which is what the connection records", 1, client.connection.handshake_confirmed);
 
+    /* RFC 9001 section 4.9's discards are a MUST, and they are visible from outside: the Initial keys
+     * go when a Handshake packet is first processed, and the Handshake keys when the handshake is
+     * confirmed. What is left is the application level. */
+    WT_EXPECT_INT("the client's Initial keys are gone", 0,
+                  client.connection.has_keys_in[WT_QUIC_SPACE_INITIAL]);
+    WT_EXPECT_INT("in both directions", 0,
+                  client.connection.has_keys_out[WT_QUIC_SPACE_INITIAL]);
+    WT_EXPECT_INT("and so are its Handshake keys", 0,
+                  client.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE]);
+    WT_EXPECT_INT("the server's too", 0, server.connection.has_keys_in[WT_QUIC_SPACE_INITIAL]);
+    WT_EXPECT_INT("and its Handshake keys", 0,
+                  server.connection.has_keys_out[WT_QUIC_SPACE_HANDSHAKE]);
+    WT_EXPECT_INT("with the application keys kept", 1,
+                  client.connection.has_keys_out[WT_QUIC_SPACE_APPLICATION]);
+    WT_EXPECT_INT("on both ends", 1,
+                  server.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION]);
+
     /* The parameters the handshake carried become the limits each end obeys. */
     WT_EXPECT_OK("the client parses the server's parameters",
                  wt_quic_connection_set_peer_parameters(&client.connection, g_parameters,

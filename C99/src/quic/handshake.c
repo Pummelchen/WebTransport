@@ -296,6 +296,9 @@ static wt_status_t process_messages(wt_quic_handshake_t *handshake, wt_quic_spac
         handshake->state = WT_QUIC_HANDSHAKE_CONNECTED;
         handshake->confirmed = 1;
         handshake->handshake_done_pending = 1;
+        /* RFC 9001 section 4.9.2: the Handshake keys are discarded when the handshake is confirmed,
+         * which for a server is the moment it has verified the client's Finished. */
+        (void)wt_quic_connection_discard_keys(handshake->connection, WT_QUIC_SPACE_HANDSHAKE);
       }
     }
   }
@@ -397,6 +400,9 @@ wt_status_t wt_quic_handshake_on_frame(void *context, wt_quic_space_t space,
       if (handshake->is_client && handshake->connection != NULL) {
         handshake->connection->handshake_confirmed = 1;
         handshake->confirmed = 1;
+        /* Confirmed for the client by the server's HANDSHAKE_DONE, which is the same moment
+         * RFC 9001 section 4.9.2 names. */
+        (void)wt_quic_connection_discard_keys(handshake->connection, WT_QUIC_SPACE_HANDSHAKE);
       }
       return WT_OK;
     case WT_QUIC_FRAME_KIND_PADDING:
