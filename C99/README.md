@@ -9,7 +9,8 @@ scaffolding.
 ## Current Status
 
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
-complete, and Phase 3 is under way: its key schedule and transcript are done.**
+complete, and Phase 3 is under way: its key schedule, transcript and handshake
+message codecs are done.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -35,7 +36,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 21 unit test files and 73,388 checks, run by `ctest` and again under
+- 22 unit test files and 73,519 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -94,6 +95,16 @@ What is here:
     a transcript is a few hundred bytes whatever the peer's certificate chain
     weighs; a message whose framing disagrees with its length is refused rather than
     hashed.
+- **The TLS handshake messages and extensions** (Phase 3, second part):
+  - `tls/handshake.h` — the four-byte handshake framing and the ClientHello and
+    ServerHello, parsed into views, re-encoded byte for byte and built from
+    parameters. A parsed message keeps extensions this implementation does not
+    implement, which is what lets a server answer a shape it does not interpret.
+  - `tls/extension.h` — the extension list codec and the typed readers and writers for
+    the extensions a QUIC handshake uses: `server_name`, `supported_groups`,
+    `signature_algorithms`, `supported_versions`, `key_share`,
+    `psk_key_exchange_modes`, ALPN and `quic_transport_parameters`. Every list a peer
+    can grow is bounded by a capacity and refused rather than written past.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

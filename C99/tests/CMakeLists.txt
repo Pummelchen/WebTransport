@@ -28,6 +28,7 @@ set(WT_UNIT_TESTS
   test_crypto
   test_quic_protection
   test_tls13_keyschedule
+  test_tls13_handshake
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

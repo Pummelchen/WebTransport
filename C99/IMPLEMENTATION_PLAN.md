@@ -357,9 +357,38 @@ cover -- an all-zero shared secret, a Finished with one bit of one byte changed
 (tried for every bit of every byte), a message whose framing lies, a transcript used
 before it was initialised or after it was cleared.
 
-What remains in this phase: the handshake messages and extensions, the key share,
-certificate chain validation through OpenSSL, the trust policy, and the client and
-server state machines that sequence them.
+**Second part done: the handshake messages and extensions.**
+`tls/extension.h` and `tls/handshake.h` carry the four-byte handshake framing, the
+extension list codec and the typed readers and writers for the extensions a QUIC
+handshake uses (`server_name`, `supported_groups`, `signature_algorithms`,
+`supported_versions`, `key_share`, `psk_key_exchange_modes`, ALPN and
+`quic_transport_parameters`), and the ClientHello and ServerHello in both directions:
+parse into views, re-encode byte for byte, and build from parameters.
+
+Parsing is view-based and building is parameter-based, and that asymmetry is the
+design rather than an accident: a peer's message is read once and used, while what we
+send is built from values we chose. Both directions run the same body function through
+the two-pass writer, so a built message and a parsed message have the same layout by
+construction rather than by having been written out twice -- the encoder measures the
+body with the same code that writes it, so a length field cannot disagree with what
+follows it. Every list a peer can grow is bounded by a capacity argument and refused
+with `WT_ERR_LIMIT` rather than written past, and every field TLS 1.3 gives exactly one
+legal value (`legacy_version`, `legacy_compression_methods`) is refused when it is
+anything else.
+
+The vectors are RFC 8448's own ClientHello and ServerHello, parsed and re-encoded byte
+for byte -- including the two extensions this implementation does not implement, which
+is what makes "unknown extensions survive a round trip" a check rather than a claim.
+`tests/unit/test_tls13_handshake.c` (131 checks) also drives each typed reader with the
+RFC's real extension bodies, checks the builder by parsing back what it built, and
+refuses what the vectors cannot contain: a duplicated extension, an extension block
+with trailing bytes, an extension longer than its block, more extensions than the list
+holds, a two-method compression list, a zero-length key share, and an odd-length value
+list.
+
+What remains in this phase: the key share, certificate chain validation through
+OpenSSL, the trust policy, and the client and server state machines that sequence
+them.
 
 Port the Swift TLS behavior into portable C99 state machines.
 
