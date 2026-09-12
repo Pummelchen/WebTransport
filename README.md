@@ -20,7 +20,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.3.5](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.5) |
+| Latest release | [1.3.6](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.6) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -35,6 +35,16 @@ twice, which a QUIC connection never legitimately does. 1.3.3 attributes the
 remaining establishment failures to the transport and names them in the error it
 reports. 1.3.4 brings the QPACK Required Insert Count onto the encoding RFC 9204
 specifies and bounds the CRYPTO reassembly buffer. The code audit for the 1.3 series was performed by Claude Opus 5.
+
+1.3.6 is a defect-fix release from a further audit of the codecs, the runtime and the
+command-line tools. The one with the widest reach is a **timed-out accept**, which used
+to leave a waiter at the head of the connection queue and swallow the next connection:
+under the documented accept loop every client arriving slower than the one-second
+timeout was lost. Several conformance gaps are closed too — `NEW_CONNECTION_ID` and
+long-header validity, HKDF output length, transport-parameter values, and the
+`retire_prior_to` watermark — and a PKCS#12 bundle whose certificate carries explicit
+curve parameters now throws a catchable error instead of terminating the process. See
+the [changelog](CHANGELOG.md) for the full list.
 
 One change is deliberately not backwards compatible: the built-in development
 certificate is now **refused on any non-loopback bind address**. A server that
@@ -63,7 +73,7 @@ before adopting this in production.
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.3.5"
+    exact: "1.3.6"
 )
 ```
 
@@ -123,7 +133,7 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 
 ## Prebuilt binaries
 
-The [1.3.5 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.5)
+The [1.3.6 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.6)
 ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
 binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
 later. They are ad-hoc signed rather than Developer ID signed, and are not
