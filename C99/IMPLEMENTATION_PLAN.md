@@ -975,6 +975,21 @@ zeros of a connection that had been closed by something else -- an idle timeout 
 three PADDING bytes in the test's payload, and the lesson is that a test whose packet cannot be built
 proves nothing while looking like a failure of the thing under test.
 
+**Twentieth part done: a frame that arrives in the wrong packet type is refused.** RFC 9000 section 12.4
+makes a frame that may not appear in the packet type it arrived in a PROTOCOL_VIOLATION, and section
+12.5's table is what says which may. The runtime can tell the two facts that table turns on: the frames
+allowed in every space (PADDING, PING, ACK and the two CONNECTION_CLOSE forms), and the frames allowed
+only where the application level is -- STREAM, the flow control limits, NEW_TOKEN, the connection ID
+frames, the path frames, HANDSHAKE_DONE and DATAGRAM. CRYPTO is the one frame the other way round: it
+belongs to the handshake's own spaces, so a CRYPTO frame arriving at the application level is refused,
+which is what stops a peer from injecting handshake data into a connection that has finished
+handshaking. The refused frame's own type is named in the close, so the peer can see which one.
+
+One map now answers "what wire type is this kind" for both rules that speak in wire terms -- this one and
+the close rule -- because a second copy is a second thing to keep in step with the codec.
+`tests/unit/test_quic_connection.c` proves the rule with a STREAM frame in an Initial packet, the case the
+table rules out most plainly, and the connection closes naming STREAM.
+
 Implement the production network state machine.
 
 Tasks:

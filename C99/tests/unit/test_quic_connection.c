@@ -786,7 +786,63 @@ static void test_handshake_done_role(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 section 12.4: a frame that may not appear in the packet type it arrived in is a
+ * PROTOCOL_VIOLATION. A STREAM frame in an Initial packet is the case the table rules out most plainly --
+ * stream data has no meaning before the handshake is done -- and the connection names the frame it
+ * refused. The packet is padded to the three bytes header protection needs (WT-72). */
+static void test_frame_permission(void) {
+  connection_pair_t pair;
+  uint64_t now = 70000000U;
+  uint8_t payload[32];
+  uint8_t datagram[128];
+  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+  size_t payload_len;
+  size_t datagram_len = 0U;
+  wt_quic_packet_build_t build;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  {
+    static const uint8_t data[4] = {1U, 2U, 3U, 4U};
+    wt_quic_frame_t stream = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
+    stream.as.stream.id = 0U;
+    stream.as.stream.offset = 0U;
+    stream.as.stream.length = sizeof(data);
+    stream.as.stream.has_length = 1;
+    stream.as.stream.data = data;
+    WT_EXPECT_OK("a STREAM frame encodes", wt_quic_frame_encode(&w, &stream));
+  }
+  while (wt_writer_offset(&w) < 3U) wt_writer_u8(&w, 0U);
+  payload_len = wt_writer_offset(&w);
+
+  memset(&build, 0, sizeof(build));
+  build.type = WT_QUIC_PACKET_INITIAL;
+  build.version = WT_QUIC_VERSION_1;
+  build.destination_connection_id = k_dcid;
+  build.destination_connection_id_len = sizeof(k_dcid);
+  build.source_connection_id = k_server_scid;
+  build.source_connection_id_len = sizeof(k_server_scid);
+  build.packet_number = 0U;
+  build.packet_number_length = 1U;
+  build.payload = payload;
+  build.payload_len = payload_len;
+  build.keys = &pair.server.keys_in[WT_QUIC_SPACE_INITIAL];
+  WT_EXPECT_OK("the packet builds",
+               wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("the client sends it",
+               wt_udp_send(&pair.client_socket, &pair.server_address, datagram, datagram_len));
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("the server refuses it", 1, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a protocol violation", (uint64_t)WT_QUIC_PROTOCOL_VIOLATION,
+                pair.server.close.error_code);
+  WT_EXPECT_U64("naming the STREAM frame", WT_QUIC_FRAME_STREAM_BASE,
+                pair.server.close.frame_type);
+
+  close_pair(&pair);
+}
+
 int main(void) {
+  test_frame_permission();
   test_handshake_done_role();
   test_key_discard();
   test_round_trip(WT_UDP_IPV4);

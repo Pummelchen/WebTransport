@@ -563,22 +563,54 @@ typedef struct wt_quic_visit {
   int saw_close;
 } wt_quic_visit_t;
 
-/* The wire type of the frames a closed connection still reads. The rule itself lives in `close.h` --
- * `wt_quic_close_accepts_frame_type` is the one statement of it, and this maps a decoded kind onto the
- * wire value it asks about. Anything else maps to a type the rule refuses: an unknown frame type is
- * exactly what "not accepted here" means, and using one rather than repeating the list is what keeps a
- * second copy from drifting. */
-static uint64_t wire_type_when_closed(wt_quic_frame_type_t kind) {
+/* The wire type of a decoded frame kind, which is what the rules that speak in wire terms ask about
+ * (the close rule and the frame-permission rule of RFC 9000 section 12.4). One map rather than one per
+ * rule: a second copy is a second thing to keep in step with the codec. */
+static uint64_t wire_type_of(wt_quic_frame_type_t kind) {
   if (kind == WT_QUIC_FRAME_KIND_PADDING) return WT_QUIC_FRAME_PADDING;
   if (kind == WT_QUIC_FRAME_KIND_PING) return WT_QUIC_FRAME_PING;
   if (kind == WT_QUIC_FRAME_KIND_ACK) return WT_QUIC_FRAME_ACK;
+  if (kind == WT_QUIC_FRAME_KIND_RESET_STREAM) return WT_QUIC_FRAME_RESET_STREAM;
+  if (kind == WT_QUIC_FRAME_KIND_STOP_SENDING) return WT_QUIC_FRAME_STOP_SENDING;
+  if (kind == WT_QUIC_FRAME_KIND_CRYPTO) return WT_QUIC_FRAME_CRYPTO;
+  if (kind == WT_QUIC_FRAME_KIND_NEW_TOKEN) return WT_QUIC_FRAME_NEW_TOKEN;
+  if (kind == WT_QUIC_FRAME_KIND_STREAM) return WT_QUIC_FRAME_STREAM_BASE;
+  if (kind == WT_QUIC_FRAME_KIND_MAX_DATA) return WT_QUIC_FRAME_MAX_DATA;
+  if (kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA) return WT_QUIC_FRAME_MAX_STREAM_DATA;
+  if (kind == WT_QUIC_FRAME_KIND_MAX_STREAMS) return WT_QUIC_FRAME_MAX_STREAMS_BIDI;
+  if (kind == WT_QUIC_FRAME_KIND_DATA_BLOCKED) return WT_QUIC_FRAME_DATA_BLOCKED;
+  if (kind == WT_QUIC_FRAME_KIND_STREAM_DATA_BLOCKED) return WT_QUIC_FRAME_STREAM_DATA_BLOCKED;
+  if (kind == WT_QUIC_FRAME_KIND_STREAMS_BLOCKED) return WT_QUIC_FRAME_STREAMS_BLOCKED_BIDI;
+  if (kind == WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID) return WT_QUIC_FRAME_NEW_CONNECTION_ID;
+  if (kind == WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID) return WT_QUIC_FRAME_RETIRE_CONNECTION_ID;
+  if (kind == WT_QUIC_FRAME_KIND_PATH_CHALLENGE) return WT_QUIC_FRAME_PATH_CHALLENGE;
+  if (kind == WT_QUIC_FRAME_KIND_PATH_RESPONSE) return WT_QUIC_FRAME_PATH_RESPONSE;
   if (kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT) {
     return WT_QUIC_FRAME_CONNECTION_CLOSE_TRANSPORT;
   }
   if (kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION) {
     return WT_QUIC_FRAME_CONNECTION_CLOSE_APPLICATION;
   }
-  return 0x3fU; /* not a frame type this implementation knows, which the rule refuses */
+  if (kind == WT_QUIC_FRAME_KIND_HANDSHAKE_DONE) return WT_QUIC_FRAME_HANDSHAKE_DONE;
+  if (kind == WT_QUIC_FRAME_KIND_RESET_STREAM_AT) return WT_QUIC_FRAME_RESET_STREAM_AT;
+  if (kind == WT_QUIC_FRAME_KIND_DATAGRAM) return WT_QUIC_FRAME_DATAGRAM;
+  return 0x3fU; /* not a frame type this implementation knows, which every rule refuses */
+}
+
+/* RFC 9000 section 12.4: a frame that is not permitted in the packet type it arrived in is a
+ * PROTOCOL_VIOLATION. Section 12.5's table, as the two facts this runtime can tell: the frames that are
+ * allowed in any space, and the frames that are allowed only where the application level is (0-RTT and
+ * 1-RTT, which this runtime treats as one space because it refuses 0-RTT packets by name). CRYPTO is the
+ * one frame that is the other way round: it belongs to the handshake's own spaces and must not appear
+ * once the handshake is over. */
+static int frame_forbidden_in_space(wt_quic_frame_type_t kind, wt_quic_space_t space) {
+  if (kind == WT_QUIC_FRAME_KIND_PADDING || kind == WT_QUIC_FRAME_KIND_PING ||
+      kind == WT_QUIC_FRAME_KIND_ACK || kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT ||
+      kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION) {
+    return 0; /* section 12.5 allows these in every packet type */
+  }
+  if (kind == WT_QUIC_FRAME_KIND_CRYPTO) return space == WT_QUIC_SPACE_APPLICATION;
+  return space != WT_QUIC_SPACE_APPLICATION;
 }
 
 /* Hand one frame to the caller's handler, which is where everything this layer does not own goes. A
@@ -610,8 +642,14 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
    * walk rather than failing it, because a peer's late frame is not this endpoint's error and the
    * connection is already closed. */
   if (wt_quic_connection_is_closed(connection) &&
-      !wt_quic_close_accepts_frame_type(wire_type_when_closed(frame->kind))) {
+      !wt_quic_close_accepts_frame_type(wire_type_of(frame->kind))) {
     return WT_OK;
+  }
+
+  /* RFC 9000 section 12.4: a frame that may not appear in this packet type is a PROTOCOL_VIOLATION,
+   * named by the frame's own type so the peer can see which one. */
+  if (frame_forbidden_in_space(frame->kind, visit->space)) {
+    return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, wire_type_of(frame->kind), visit->now);
   }
 
   switch (frame->kind) {

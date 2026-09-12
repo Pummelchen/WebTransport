@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,624 checks, run by `ctest` and again under
+- 38 unit test files and 75,647 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -248,6 +248,10 @@ What is here:
 - **HANDSHAKE_DONE only reaches a client** (Phase 4, nineteenth part): RFC 9000 section 19.20 makes a
   server that receives one refuse the connection with a PROTOCOL_VIOLATION, which the connection now does
   while a client still has the frame handed on to the handshake layer.
+- **Frames are refused in the wrong packet type** (Phase 4, twentieth part): RFC 9000 section 12.4 makes a
+  frame that may not appear where it arrived a PROTOCOL_VIOLATION, and the connection now enforces section
+  12.5's table -- including that a CRYPTO frame at the application level is refused, which is what stops a
+  peer injecting handshake data into a finished connection.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
