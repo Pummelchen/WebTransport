@@ -234,6 +234,73 @@ Completion criteria:
 
 ## Phase 2: Crypto and Packet Protection
 
+**Status: complete.** The crypto provider is `src/crypto/crypto_openssl.c` behind
+`include/webtransport/crypto/crypto.h` -- SHA-256 (streaming and one-shot), HMAC,
+HKDF extract, expand and expand-label, AES-128-GCM and ChaCha20-Poly1305 with the
+tag verified inside the AEAD, the AES block and ChaCha20 keystream that header
+protection is built on, a constant-time comparison and a secure zero -- and
+`src/quic/protection.c` turns those into QUIC's two protections: the Initial
+secret and packet keys, the traffic-secret and key-update derivations, the packet
+nonce, the header protection sample, mask, protect and unprotect, and the payload
+seal and open. Handshake and 1-RTT keys are the same function as Initial keys,
+differing only in where the secret comes from, which is why this phase has no
+separate 1-RTT code path to test: `wt_quic_packet_keys_from_secret` is what phases
+3 and 4 will call.
+
+The vectors are RFC 9001 appendix A, all five parts: the Initial secrets and keys
+(A.1), the client Initial (A.2), the server Initial (A.3) and the
+ChaCha20-Poly1305 short header packet (A.5), including their header protection
+samples, masks, packet numbers and the short header's nonce. They are extracted
+from the RFC text by `tests/vectors/extract_rfc9001_keys.py`, which refuses to
+write a value that does not re-derive: the Initial secret is recomputed from the
+version-1 salt and the connection ID, every key from its traffic secret, each
+sample is checked to be the packet's bytes at `pn_offset + 4`, each mask is
+checked to turn the printed unprotected header into the printed protected one,
+and the nonce is recomputed from the IV and the packet number. The mask itself is
+the one value taken on the RFC's word, because checking it would mean a second
+implementation of AES inside the extractor.
+
+`tests/unit/test_crypto.c` (249 checks) pins the primitives to published vectors
+rather than to round trips: NIST's SHA-256 and GCM cases, RFC 4231's HMAC-SHA256
+including the 131-byte key, RFC 5869's HKDF, RFC 8439's ChaCha20 keystream and
+ChaCha20-Poly1305, and FIPS 197's AES block. `tests/unit/test_quic_protection.c`
+(170 checks) takes each RFC 9001 packet apart and puts it back together, so a
+wrong nonce, AAD or sample offset that was symmetric between seal and open would
+fail the second direction; it also checks that a damaged tag, a damaged
+ciphertext, a changed AAD, the wrong packet number and the other direction's keys
+are all refused with `WT_ERR_PROTOCOL` *and* that the plaintext buffer is cleared
+when they are. One test exists only because the RFC's vectors cannot catch the
+defect it covers: both published AES masks have a zero in the bit that separates a
+four-bit mask from a five-bit one, so it builds packets whose masks set that bit
+and checks the long and short header widths separately.
+
+Four defects were found while building this phase, all of them in code that had
+never been executed because this phase added the first tests that call it:
+
+- `wt_aead_open` was designed to return the computed tag for the caller to
+  compare, which OpenSSL 3 cannot do: its provider GCM produces a tag only from a
+  finalisation that already succeeded, which needs the expected tag. Measured, not
+  assumed, and the API was changed to an authenticated open returning
+  `WT_ERR_AUTHENTICATION`, which clears the plaintext -- so the caller that could
+  forget to compare no longer exists.
+- HKDF-Expand was built on `EVP_KDF` with its mode passed as a four-byte string,
+  which that parameter rejects; every derivation in the library returned
+  `WT_ERR_UNSUPPORTED`. It is now the RFC 5869 HMAC chain, which is what the
+  extract half already used, and both halves are checked against RFC 5869.
+- The streaming SHA-256 context had no initialised marker, so update or final on a
+  context that had never been initialised dereferenced whatever was in the
+  caller's array and crashed inside libcrypto. It now carries a marker and answers
+  `WT_ERR_STATE`.
+- The installed CMake package did not declare its OpenSSL dependency, so
+  `find_package(webtransport_c99)` failed for a consumer of the static library
+  with an error inside a generated file. `scripts/check-package.sh` caught it.
+
+Two test vectors were also written wrong in the way this project treats as the
+worst kind: RFC 4231's cases 6 and 7 were given invented message bytes beside the
+RFC's published digests, and NIST's GCM case 5 was given 64-byte buffers for a
+60-byte plaintext. Both would have passed a round trip and failed the published
+value, which is exactly what they did.
+
 Implement the crypto provider layer.
 
 Tasks:

@@ -25,14 +25,18 @@ set(WT_UNIT_TESTS
   test_quic_transport_parameters
   test_quic_connection_id
   test_quic_malformed
+  test_crypto
+  test_quic_protection
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
   add_executable(${test} unit/${test}.c)
   wt_set_c99(${test})
   wt_apply_warnings(${test})
+  # `vectors` holds the generated RFC vectors, which tests include by plain name
+  # so that moving a file does not mean editing every test that reads it.
   target_include_directories(${test} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit
-    ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
+    vectors ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
   target_link_libraries(${test} PRIVATE ${WT_LINK_TARGET})
   if(WT_SANITIZER_FLAGS)
     target_compile_options(${test} PRIVATE ${WT_SANITIZER_FLAGS})

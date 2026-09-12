@@ -61,6 +61,13 @@ jobs:
       - name: Unit tests
         run: ctest --test-dir C99/out/ci/build --output-on-failure
 
+      # The RFC vectors are generated, and this is what keeps them generated: the
+      # extractors re-derive every value from the RFC text and fail if the
+      # committed header is not what the document says. A test that passes against
+      # a hand-edited vector is worse than no test, and nothing else would notice.
+      - name: RFC vectors match the documents
+        run: C99/scripts/check-vectors.sh
+
       - name: Release build
         env:
           CC: ${{ matrix.cc }}

@@ -24,6 +24,21 @@ include(WTCompilerWarnings)
 # pass, so those scripts are the documented interface rather than something that
 # has to be kept in step by hand. BUILD_SHARED_LIBS is CMake's own variable for
 # the same question and is honoured as well.
+# The crypto backend. OpenSSL 3.x is the plan's production dependency for the
+# portable platforms; a freestanding target would select a different one, which is
+# why the choice is an option rather than a hard-coded find_package. REQUIRED
+# because a library that silently built without a crypto backend would fail at the
+# first handshake instead of at configure time.
+set(WEBTRANSPORT_C99_CRYPTO "openssl" CACHE STRING
+  "Cryptographic backend: openssl (a freestanding target would add another)")
+set_property(CACHE WEBTRANSPORT_C99_CRYPTO PROPERTY STRINGS openssl)
+if(NOT WEBTRANSPORT_C99_CRYPTO STREQUAL "openssl")
+  message(FATAL_ERROR
+    "WEBTRANSPORT_C99_CRYPTO=${WEBTRANSPORT_C99_CRYPTO} is not implemented; "
+    "only openssl is")
+endif()
+find_package(OpenSSL 3.0 REQUIRED)
+
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 option(WEBTRANSPORT_C99_BUILD_STATIC "Build the static library" ON)
 option(WEBTRANSPORT_C99_BUILD_APPS "Build the CLI applications" ON)
@@ -53,6 +68,10 @@ set(WT_CORE_SOURCES
 # The QUIC wire core. One list with the core rather than a separate target: it
 # is the same library, a consumer links it as a unit, and splitting it would let
 # a test link a different build of the QUIC code than the library ships.
+set(WT_CRYPTO_SOURCES
+  src/crypto/crypto_openssl.c
+)
+
 set(WT_QUIC_SOURCES
   src/quic/error.c
   src/quic/varint.c
@@ -61,7 +80,9 @@ set(WT_QUIC_SOURCES
   src/quic/packet.c
   src/quic/transport_parameters.c
   src/quic/connection_id.c
+  src/quic/protection.c
 )
+list(APPEND WT_CORE_SOURCES ${WT_CRYPTO_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_QUIC_SOURCES})
 
 set(WT_PUBLIC_HEADERS
@@ -82,6 +103,8 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/packet.h
   include/webtransport/quic/transport_parameters.h
   include/webtransport/quic/connection_id.h
+  include/webtransport/quic/protection.h
+  include/webtransport/crypto/crypto.h
 )
 
 # The sanitizer flags are added to every target when the option is on, including
@@ -107,6 +130,11 @@ function(wt_configure_library target)
       $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
       $<INSTALL_INTERFACE:include>
   )
+  # OpenSSL is linked PRIVATE: no OpenSSL type appears in a public header, so a
+  # consumer of this library does not have to find OpenSSL to use it. A static
+  # archive is the exception -- its symbols are unresolved until a final link --
+  # which is what INTERFACE_LINK_LIBRARIES below handles.
+  target_link_libraries(${target} PRIVATE OpenSSL::Crypto)
   wt_set_c99(${target})
   wt_apply_warnings(${target})
   if(WT_SANITIZER_FLAGS)
@@ -122,6 +150,9 @@ endfunction()
 if(WEBTRANSPORT_C99_BUILD_STATIC)
   add_library(webtransport_static STATIC ${WT_CORE_SOURCES})
   wt_configure_library(webtransport_static)
+  # A static archive carries no link information, so a consumer has to be told
+  # about OpenSSL even though no public header mentions it.
+  target_link_libraries(webtransport_static INTERFACE OpenSSL::Crypto)
   # EXPORT_NAME is what a consumer writes. The target is called
   # webtransport_static because a target literally named `static` is a trap for
   # anything that treats target names as paths, and the alias and the exported
@@ -195,6 +226,12 @@ endforeach()
 # CMake package" in the plan's release phase means. Written now rather than
 # later because the install rules and the config file have to agree, and the
 # cheap time to make them agree is when the install rules are written.
+#
+# The config file is generated from cmake/webtransport_c99Config.cmake.in rather
+# than written out here, because it has to declare this project's own dependency
+# on OpenSSL before the targets file names it -- see that file. Writing it as a
+# string is what let the static archive install a package whose imported target
+# referred to an OpenSSL target a consumer had never been told about.
 install(EXPORT webtransport_c99Targets
   FILE webtransport_c99Targets.cmake
   NAMESPACE WebTransport::
@@ -205,8 +242,11 @@ write_basic_package_version_file(
   VERSION ${PROJECT_VERSION}
   COMPATIBILITY SameMajorVersion
 )
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/webtransport_c99Config.cmake"
-  "include(\"\${CMAKE_CURRENT_LIST_DIR}/webtransport_c99Targets.cmake\")\n")
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/webtransport_c99Config.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/webtransport_c99Config.cmake"
+  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/webtransport_c99
+)
 install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/webtransport_c99Config.cmake"
   "${CMAKE_CURRENT_BINARY_DIR}/webtransport_c99ConfigVersion.cmake"

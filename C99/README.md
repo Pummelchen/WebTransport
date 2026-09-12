@@ -8,8 +8,8 @@ scaffolding.
 
 ## Current Status
 
-**Phases 0 and 1 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
-complete.** Phases 2 to 14 are not started.
+**Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
+complete.** Phases 3 to 14 are not started.
 
 What is here:
 
@@ -34,14 +34,18 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 18 unit test files and 72,577 checks, run by `ctest` and again under
+- 20 unit test files and 73,012 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
   of than a list of cases somebody did, and under the sanitizers an out-of-bounds
-  read is a failure rather than a plausible value. Note that Darwin has no
-  LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by a
-  local run on this machine; that is how the first one was found.
+  read is a failure rather than a plausible value. Two more of the large counts
+  are loops rather than hand-written cases: 4,160 checks in `test_buffer`, 4,096
+  of them from appending a byte at a time to prove buffer growth is logarithmic,
+  and 1,013 in `test_time` from stepping a monotonic clock and checking the
+  deadline arithmetic does not wrap near the counter's top. Note that Darwin has
+  no LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by
+  a local run on this machine; that is how the first one was found.
 - **The QUIC wire core** (Phase 1), which is everything QUIC needs before there
   is a connection:
   - `quic/varint.h` — variable-length integers, encoding shortest and decoding
@@ -62,18 +66,38 @@ What is here:
     must not refuse them itself.
   - `quic/connection_id.h` — connection ID storage and retirement, enforcing the
     peer's `active_connection_id_limit`, `retire_prior_to` and the
-    `CONNECTION_ID_LIMIT_ERROR` of RFC 9000 section 5.1.1. Most of that count is two
-  loops rather than two thousand hand-written cases: 4,096 of them come from
-  appending a byte at a time to prove buffer growth is logarithmic, and about
-  2,000 from reading a monotonic clock and checking the deadline arithmetic does
-  not wrap near the counter's top. The hand-written cases are around 200.
+    `CONNECTION_ID_LIMIT_ERROR` of RFC 9000 section 5.1.1.
+- **Crypto and packet protection** (Phase 2), which turns bytes into a QUIC
+  packet an observer cannot read:
+  - `crypto/crypto.h` — one interface, one backend. SHA-256, HMAC, HKDF extract,
+    expand and expand-label, AES-128-GCM and ChaCha20-Poly1305, the AES block and
+    ChaCha20 keystream header protection is built from, a constant-time comparison
+    and a secure zero. `wt_aead_open` verifies the tag itself and clears the
+    plaintext when it does not, so there is no way for a caller to act on
+    unauthenticated bytes by forgetting a comparison.
+  - `quic/protection.h` — the Initial secret and packet keys, the traffic-secret
+    and key-update derivations, the packet nonce, and the four header protection
+    operations. The order is the documented part: a sample of the payload masks the
+    header, and the unmasked header carries the packet number the payload's nonce
+    needs, so the receive path cannot be reordered.
+- The vectors are RFC 9001 appendix A, extracted from the RFC text rather than
+  transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
+  writes -- the Initial secret from the version-1 salt and the connection ID, each
+  key from its traffic secret, each header protection sample as the packet's bytes
+  at `pn_offset + 4`, each mask by turning the printed unprotected header into the
+  printed protected one, and the short header's nonce from the IV and the packet
+  number -- and refuses to write one that does not check. The tests then take each
+  protected packet apart and put it back together, so a mistake that was symmetric
+  between the two directions fails the second one.
 - A package consumer test: the library is installed and a separate CMake project
-  links it, which is the only way to know the install tree works.
+  links it, which is the only way to know the install tree works. It found that the
+  installed config did not declare its OpenSSL dependency, which no build inside
+  this tree could have noticed.
 
 What is not here: TLS, HTTP/3, QPACK and WebTransport, the QUIC connection
 runtime, the CLI tools' actual behavior, external interoperability evidence, and
-the platform runtimes. The wire core parses and builds QUIC messages; nothing yet
-decides what to send.
+the platform runtimes. The wire core parses and builds QUIC messages and the crypto
+layer protects them; nothing yet decides what to send.
 
 ## Building
 
@@ -83,6 +107,7 @@ C99/scripts/build-and-test.sh --release    # Release
 C99/scripts/build-and-test.sh --sanitize   # Debug with ASan and UBSan
 C99/scripts/build-and-test.sh --all        # all three
 C99/scripts/check-package.sh               # install and build a consumer
+C99/scripts/check-vectors.sh               # re-extract the RFC vectors and compare
 ```
 
 Output goes under `C99/out/<platform>/`, which is gitignored; see
@@ -94,6 +119,9 @@ Output goes under `C99/out/<platform>/`, which is gitignored; see
 ```text
 include/webtransport/   public headers, installed
 src/core/               the Phase 0 utilities
+src/crypto/             the OpenSSL-backed crypto provider
+src/quic/               the QUIC wire core and packet protection
+tests/vectors/          generated RFC vectors and the scripts that extract them
 apps/                   wt-client-c99, wt-server-c99, wt-conformance-c99
 tests/unit/             one file per module, registered with CTest
 tests/package/          a consumer of the installed package
@@ -101,6 +129,6 @@ scripts/                the development loop
 platform/               per-OS packaging entry points
 ```
 
-The protocol phases add `src/quic`, `src/tls`, `src/crypto`, `src/http3` and
-`src/runtime` beside `src/core`, and their headers under the matching
+The remaining protocol phases add `src/tls`, `src/http3` and `src/runtime` beside
+`src/core`, `src/crypto` and `src/quic`, and their headers under the matching
 `include/webtransport/` directories, which already exist.

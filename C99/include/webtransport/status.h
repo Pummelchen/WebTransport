@@ -94,7 +94,16 @@ typedef enum wt_status {
   /* Something is not implemented or not compiled in. Returned rather than
    * asserted so that a caller on a platform without a feature can degrade
    * deliberately. */
-  WT_ERR_UNSUPPORTED
+  WT_ERR_UNSUPPORTED,
+
+  /* An authentication tag did not verify. Deliberately not WT_ERR_PROTOCOL: the
+   * bytes may be perfectly well formed and were simply not produced by the
+   * holder of the key -- forged, or corrupted in transit, which is the ordinary
+   * case on a lossy or hostile network rather than a violation of the protocol.
+   * The authenticated data is discarded, never parsed. Added after the values
+   * above so that a caller compiled against an earlier header keeps the meaning
+   * it was compiled with. */
+  WT_ERR_AUTHENTICATION
 } wt_status_t;
 
 /* A short, stable, lower-case name for a status: "ok", "protocol", and so on.
