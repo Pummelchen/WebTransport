@@ -841,6 +841,62 @@ static void test_frame_permission(void) {
   close_pair(&pair);
 }
 
+/* Opening a stream: the number comes from the counts, the peer's grant bounds it, and the two flow
+ * control limits are the two directions'. */
+static void test_open_stream(void) {
+  connection_pair_t pair;
+  uint8_t payload[64];
+  wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+  wt_quic_transport_parameters_t params;
+  uint64_t id = 0U;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  WT_EXPECT_STATUS("before the peer's parameters nothing is known", WT_ERR_STATE,
+                   wt_quic_connection_open_stream(&pair.client, 1, &id));
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("a grant of two streams each way",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI,
+                                                        2U));
+  WT_EXPECT_OK("and one unidirectional",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI,
+                                                        1U));
+  WT_EXPECT_OK("with stream data",
+               wt_quic_transport_parameters_add_integer(
+                   &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, 4096U));
+  WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
+  WT_EXPECT_OK("and is parsed",
+               wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+
+  WT_EXPECT_OK("the first bidirectional stream opens",
+               wt_quic_connection_open_stream(&pair.client, 1, &id));
+  WT_EXPECT_U64("numbered zero, because this end is the client", 0U, id);
+  WT_EXPECT_OK("the second", wt_quic_connection_open_stream(&pair.client, 1, &id));
+  WT_EXPECT_U64("numbered four, the next in its class", 4U, id);
+  WT_EXPECT_STATUS("and the third is beyond the peer's grant", WT_ERR_LIMIT,
+                   wt_quic_connection_open_stream(&pair.client, 1, &id));
+
+  WT_EXPECT_OK("a unidirectional stream opens", wt_quic_connection_open_stream(&pair.client, 0, &id));
+  WT_EXPECT_U64("numbered two, its class's first", 2U, id);
+  WT_EXPECT_STATUS("with only the one granted", WT_ERR_LIMIT,
+                   wt_quic_connection_open_stream(&pair.client, 0, &id));
+
+  {
+    wt_quic_stream_t *stream = wt_quic_connection_stream(&pair.client, 0U);
+    WT_EXPECT_TRUE("the stream is in the table", stream != NULL);
+    if (stream != NULL) {
+      WT_EXPECT_U64("with the peer's send limit as what it may send", 4096U,
+                    stream->peer_max_stream_data);
+      WT_EXPECT_INT("and it is this endpoint's", 1, stream->initiated_by_us);
+    }
+    WT_EXPECT_TRUE("and the streams are reachable from the connection",
+                   wt_quic_connection_streams(&pair.client) != NULL);
+  }
+  WT_EXPECT_STATUS("a null output is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_connection_open_stream(&pair.client, 1, NULL));
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -855,5 +911,6 @@ int main(void) {
   test_garbage(WT_UDP_IPV4);
   test_garbage(WT_UDP_IPV6);
 
+  test_open_stream();
   WT_TEST_MAIN_END("wt_quic_connection");
 }

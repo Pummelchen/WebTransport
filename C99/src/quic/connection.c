@@ -770,6 +770,7 @@ wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
   }
   wt_quic_loss_init(&connection->loss);
   wt_quic_datagram_queue_init(&connection->datagrams);
+  wt_quic_stream_table_init(&connection->streams);
   wt_quic_congestion_init(&connection->congestion, (uint64_t)config->max_datagram_size);
   wt_quic_close_state_init(&connection->close);
   return WT_OK;
@@ -968,6 +969,52 @@ wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uin
   status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
+}
+
+wt_status_t wt_quic_connection_open_stream(wt_quic_connection_t *connection, int bidirectional,
+                                           uint64_t *out_stream_id) {
+  uint64_t index;
+  uint64_t limit;
+  uint64_t stream_id;
+  wt_status_t status;
+
+  if (connection == NULL || out_stream_id == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (!connection->peer_limits.set) return WT_ERR_STATE;
+  *out_stream_id = 0U;
+
+  /* The number comes from the count of what this endpoint has already opened in that class, so it is
+   * never reused and never chosen by the caller (RFC 9000 section 2.1). */
+  index = wt_quic_stream_table_opened_by_us(&connection->streams, bidirectional);
+  stream_id = wt_quic_stream_id_make(connection->config.role == WT_QUIC_ROLE_CLIENT, bidirectional,
+                                     index);
+  limit = bidirectional ? connection->peer_limits.initial_max_streams_bidi
+                        : connection->peer_limits.initial_max_streams_uni;
+  status = wt_quic_stream_table_open(&connection->streams, stream_id, 1, limit);
+  if (status != WT_OK) return status;
+
+  /* The two flow control limits are the two directions': this endpoint's own for what it will receive,
+   * the peer's for what it may send. They are different numbers and are set from different places. */
+  {
+    wt_quic_stream_t *stream = wt_quic_stream_table_find(&connection->streams, stream_id);
+    if (stream != NULL) {
+      stream->max_stream_data = connection->config.local_max_stream_data;
+      stream->window = connection->config.local_max_stream_data;
+      stream->peer_max_stream_data =
+          bidirectional ? connection->peer_limits.initial_max_stream_data_bidi_remote
+                        : connection->peer_limits.initial_max_stream_data_uni;
+    }
+  }
+  *out_stream_id = stream_id;
+  return WT_OK;
+}
+
+wt_quic_stream_table_t *wt_quic_connection_streams(wt_quic_connection_t *connection) {
+  return connection == NULL ? NULL : &connection->streams;
+}
+
+wt_quic_stream_t *wt_quic_connection_stream(wt_quic_connection_t *connection, uint64_t stream_id) {
+  if (connection == NULL) return NULL;
+  return wt_quic_stream_table_find(&connection->streams, stream_id);
 }
 
 uint64_t wt_quic_connection_max_datagram_payload(const wt_quic_connection_t *connection) {

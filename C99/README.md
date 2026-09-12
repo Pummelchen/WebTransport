@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,734 checks, run by `ctest` and again under
+- 38 unit test files and 75,768 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -259,6 +259,10 @@ What is here:
   machines -- the resource limit the plan names -- with per-class counts, a full table refusing a new
   stream rather than dropping a live one, and a stream forgotten only when both halves are done
   (RFC 9000 section 3.3). The limit is the opener's, so a peer's stream costs the peer's allowance.
+- **Opening a stream** (Phase 4, twenty-third part): the connection owns a stream table and
+  `wt_quic_connection_open_stream` derives the number from the table's counts, bounds it by the peer's
+  `initial_max_streams_*`, and starts the stream with the two directions' flow control limits -- this
+  endpoint's own for receiving, the peer's for sending.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

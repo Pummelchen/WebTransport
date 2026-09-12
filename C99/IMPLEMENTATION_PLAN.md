@@ -1015,6 +1015,19 @@ streams are still alive, which is what the receive path needs before it can hand
 machine. Its first attempt did not link because the stream-number helpers it reads had been lost from the
 header; landed again after those were restored, it passes.
 
+**Twenty-third part done: the connection owns the table, and a stream can be opened.** The connection now
+holds a stream table and `wt_quic_connection_open_stream` derives the number from the counts the table
+keeps -- a client's bidirectional streams are 0, 4, 8, so a number is never reused or chosen by the caller
+(RFC 9000 section 2.1) -- checks it against the peer's `initial_max_streams_*`, and starts the stream with
+the two flow control limits that are the two directions': this endpoint's own for what it will receive and
+the peer's `initial_max_stream_data_*` for what it may send. Those are different numbers from different
+places, which is why they are set together in one place here rather than by each caller.
+
+The receive side is not wired yet, and that is the next piece: RFC 9000 section 3.2 makes a received frame
+for an unseen stream OPEN it, with the granted counts as the bound -- a peer that opens more than this
+endpoint's MAX_STREAMS allows is the STREAM_LIMIT_ERROR of section 4.6 -- and MAX_STREAM_DATA then raises
+the one stream's allowance.
+
 Implement the production network state machine.
 
 Tasks:

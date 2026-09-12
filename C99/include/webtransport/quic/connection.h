@@ -38,6 +38,7 @@
 #include "webtransport/quic/packet.h"
 #include "webtransport/quic/pn_space.h"
 #include "webtransport/quic/protection.h"
+#include "webtransport/quic/stream.h"
 #include "webtransport/runtime/udp.h"
 #include "webtransport/status.h"
 
@@ -113,6 +114,10 @@ typedef struct wt_quic_connection_config {
    * 13.2.1), which is what arms the acknowledgement timer. */
   uint64_t max_ack_delay;
   uint64_t local_max_ack_delay;
+  /* The largest amount of stream data this endpoint will receive on ONE stream before raising the
+   * limit: the receive-side counterpart of the peer's initial_max_stream_data_*, and zero -- which
+   * grants nothing -- until a caller that knows what it can buffer sets it. */
+  uint64_t local_max_stream_data;
   uint64_t idle_timeout;
   /* The largest packet this path will carry. RFC 9000 section 14.1 requires every datagram to hold at
    * least WT_QUIC_MAX_PACKET, so a smaller value is refused rather than used. */
@@ -172,6 +177,8 @@ typedef struct wt_quic_connection {
   /* The connection-level limit this endpoint grants the peer, and whether it has been seeded. */
   uint64_t local_max_data;
   int local_max_data_set;
+  /* The streams this connection has, bounded by the table. */
+  wt_quic_stream_table_t streams;
   uint64_t local_max_streams[2]; /* indexed by wt_quic_stream_direction_t */
   int local_max_streams_set[2];
   /* The datagrams that have arrived and not been read, bounded and with the newest discarded when it
@@ -271,6 +278,25 @@ const wt_quic_peer_limits_t *wt_quic_connection_peer_limits(const wt_quic_connec
  * no room. */
 wt_status_t wt_quic_connection_send_datagram(wt_quic_connection_t *connection, const uint8_t *data,
                                              size_t length, uint64_t now);
+
+/* Open a stream this endpoint initiates, and report its number.
+ *
+ * The number is derived from the counts the table keeps -- a client's bidirectional streams are 0, 4, 8
+ * and so on, its unidirectional ones 2, 6, 10 (RFC 9000 section 2.1) -- so a number is never reused and
+ * never invented by the caller. The new stream starts with the flow control this endpoint's
+ * configuration grants: its own `local_max_stream_data` for receiving and the peer's
+ * `initial_max_stream_data_*` for sending, which is where the two directions' different limits come
+ * from.
+ *
+ * WT_ERR_STATE before the peer's transport parameters have been parsed (nothing is known about what it
+ * will accept), WT_ERR_LIMIT when the peer's `initial_max_streams_*` does not allow one more, and
+ * WT_ERR_LIMIT when the table is full -- the caller tells those apart by reading the counts. */
+wt_status_t wt_quic_connection_open_stream(wt_quic_connection_t *connection, int bidirectional,
+                                           uint64_t *out_stream_id);
+
+/* The connection's streams, and the table's own answers. */
+wt_quic_stream_table_t *wt_quic_connection_streams(wt_quic_connection_t *connection);
+wt_quic_stream_t *wt_quic_connection_stream(wt_quic_connection_t *connection, uint64_t stream_id);
 
 /* Send one STREAM frame (RFC 9000 section 19.8) carrying `length` bytes of `stream_id` at `offset`,
  * with FIN when this is the end of the stream.
