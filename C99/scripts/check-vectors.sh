@@ -52,3 +52,16 @@ if [ ! -f "$rfc8448" ]; then
   fi
 fi
 python3 "$c99_root/tests/vectors/extract_rfc8448_keyschedule.py" "$rfc8448" --check
+
+# RFC 7748's X25519 vectors, which the key agreement is checked against.
+rfc7748="$rfc_dir/rfc7748.txt"
+if [ ! -f "$rfc7748" ]; then
+  url7748=https://www.rfc-editor.org/rfc/rfc7748.txt
+  echo "check-vectors: fetching $url7748"
+  if ! curl -fsSL "$url7748" -o "$rfc7748"; then
+    rm -f "$rfc7748"
+    echo "check-vectors: could not fetch $url7748" >&2
+    exit 2
+  fi
+fi
+python3 "$c99_root/tests/vectors/extract_rfc7748_x25519.py" "$rfc7748" --check

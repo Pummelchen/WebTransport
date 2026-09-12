@@ -386,8 +386,30 @@ with trailing bytes, an extension longer than its block, more extensions than th
 holds, a two-method compression list, a zero-length key share, and an odd-length value
 list.
 
-What remains in this phase: the key share, certificate chain validation through
-OpenSSL, the trust policy, and the client and server state machines that sequence
+**Third part done: the X25519 key agreement.**
+`tls/keyshare.h` and `tls/keyshare.c` carry RFC 7748's primitive, key generation, the
+public key a private key produces, and the shared secret, and refuse an all-zero secret
+at the point it is computed -- RFC 8446 section 7.4.2 makes a point of small order a
+handshake failure, and OpenSSL's X25519 refuses it by failing the derivation rather than
+by returning zeroes, which is reported as the same failure. X25519 is the only group
+this implementation can complete, so it should be the only one a client advertises:
+offering a group without a key share invites a HelloRetryRequest, and this implementation
+refuses HelloRetryRequest rather than handling it.
+
+The vectors are RFC 7748's, extracted by `tests/vectors/extract_rfc7748_x25519.py`,
+which carries a ladder implemented from section 5 of the same document as an oracle: the
+oracle must reproduce both of section 5.2's scalar-multiplication vectors (where the
+u-coordinate is not the base point) and all five values of section 6.1's Diffie-Hellman
+example before anything is written, so a vector read from the wrong place -- the
+identical labels of the X448 block sit directly below the Curve25519 one -- fails
+generation. `tests/unit/test_tls13_keyshare.c` (50 checks) drives the implementation
+through those values and adds the one that ties two documents together: X25519(client
+private, server public) must equal the ECDHE value RFC 8448's key schedule consumes, and
+both public keys must be X25519(private, 9), so the key agreement and the schedule cannot
+disagree without a test saying so.
+
+What remains in this phase: the certificate messages, certificate chain validation
+through OpenSSL, the trust policy, and the client and server state machines that sequence
 them.
 
 Port the Swift TLS behavior into portable C99 state machines.

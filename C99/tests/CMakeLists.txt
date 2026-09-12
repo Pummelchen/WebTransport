@@ -29,6 +29,7 @@ set(WT_UNIT_TESTS
   test_quic_protection
   test_tls13_keyschedule
   test_tls13_handshake
+  test_tls13_keyshare
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
