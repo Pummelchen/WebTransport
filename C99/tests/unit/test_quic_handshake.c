@@ -26,6 +26,8 @@
 
 #include "webtransport/quic/connection.h"
 #include "webtransport/quic/handshake.h"
+#include "webtransport/quic/transport_parameters.h"
+#include "webtransport/writer.h"
 #include "webtransport/quic/packet_io.h"
 #include "webtransport/quic/protection.h"
 #include "webtransport/runtime/udp.h"
@@ -35,7 +37,37 @@
 #endif
 
 static const uint8_t k_connection_id[8] = {0x83U, 0x94U, 0xc8U, 0xf0U, 0x3eU, 0x51U, 0x57U, 0x08U};
-static const uint8_t k_transport_parameters[] = {0x01U, 0x02U, 0x03U, 0x04U, 0x05U};
+/* The transport parameters BOTH ends send, built with the codec rather than written by hand: they are
+ * the real thing now, so the limits the connection parses out of the peer's copy are the limits the
+ * handshake carrier. `g_now` is the clock the composed frame handler hands to the connection. */
+static uint8_t g_parameters[256];
+static size_t g_parameters_len;
+static uint64_t g_now;
+
+static void build_test_parameters(void) {
+  wt_quic_transport_parameters_t params;
+  wt_writer_t w = wt_writer_init(g_parameters, sizeof(g_parameters));
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("initial_max_data", wt_quic_transport_parameters_add_integer(
+                                       &params, WT_QUIC_TP_INITIAL_MAX_DATA, 100000U));
+  WT_EXPECT_OK("initial_max_stream_data_bidi_local",
+               wt_quic_transport_parameters_add_integer(
+                   &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, 1000U));
+  WT_EXPECT_OK("initial_max_stream_data_uni",
+               wt_quic_transport_parameters_add_integer(
+                   &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI, 1000U));
+  WT_EXPECT_OK("initial_max_streams_bidi", wt_quic_transport_parameters_add_integer(
+                                               &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 4U));
+  WT_EXPECT_OK("initial_max_streams_uni", wt_quic_transport_parameters_add_integer(
+                                              &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 4U));
+  WT_EXPECT_OK("max_datagram_frame_size",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE,
+                                                        1200U));
+  WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&w, &params));
+  g_parameters_len = wt_writer_offset(&w);
+  WT_EXPECT_TRUE("with bytes in them", g_parameters_len > 0U);
+}
 /* The protocol name as bytes: a string literal is char, which this tree treats as the different type it
  * is, and this one is compared byte for byte with what the handshake negotiated. */
 static const uint8_t k_alpn_h3[2] = {'h', '3'};
@@ -122,8 +154,8 @@ static void client_tls_config(wt_tls_client_config_t *config, const fixtures_t *
   config->alpn = alpn_h3;
   config->alpn_count = 1U;
   config->require_transport_parameters = 1;
-  config->transport_parameters = k_transport_parameters;
-  config->transport_parameters_len = sizeof(k_transport_parameters);
+  config->transport_parameters = g_parameters;
+  config->transport_parameters_len = g_parameters_len;
   config->trust.mode = WT_TLS_TRUST_STORE;
   config->trust.ca_bundle = fixtures->ca_bundle;
   config->trust.ca_bundle_len = fixtures->ca_bundle_len;
@@ -144,8 +176,8 @@ static void server_tls_config(wt_tls_server_config_t *config, const fixtures_t *
   config->identity = identity;
   config->alpn = "h3";
   config->require_transport_parameters = 1;
-  config->transport_parameters = k_transport_parameters;
-  config->transport_parameters_len = sizeof(k_transport_parameters);
+  config->transport_parameters = g_parameters;
+  config->transport_parameters_len = g_parameters_len;
 }
 
 /* Bring one endpoint up: a socket on loopback, a connection with the Initial keys both ends derive from
@@ -185,6 +217,22 @@ static void open_endpoint(wt_udp_family_t family, endpoint_t *endpoint, endpoint
   WT_EXPECT_OK("and are installed",
                wt_quic_connection_set_keys(&endpoint->connection, WT_QUIC_SPACE_INITIAL, 1, &keys));
   wt_quic_packet_keys_clear(&keys);
+}
+
+/* The frame handler a real application installs: the handshake layer first, then whatever the
+ * application needs. A DATAGRAM frame is not the handshake's business, so the driver answers WT_OK for
+ * it and this hands it to the connection's bounded queue. */
+static wt_status_t endpoint_on_frame(void *context, wt_quic_space_t space,
+                                     const wt_quic_frame_t *frame) {
+  endpoint_t *endpoint = context;
+  wt_status_t status = wt_quic_handshake_on_frame(&endpoint->handshake, space, frame);
+
+  if (status != WT_OK) return status;
+  if (frame->kind == WT_QUIC_FRAME_KIND_DATAGRAM) {
+    return wt_quic_connection_on_datagram(&endpoint->connection, frame->as.datagram.data,
+                                          frame->as.datagram.length, g_now);
+  }
+  return WT_OK;
 }
 
 static void close_endpoint(endpoint_t *endpoint) {
@@ -258,6 +306,7 @@ static void test_handshake(wt_udp_family_t family) {
 
   WT_EXPECT_INT("the trust fixtures load", 1, load_fixtures(&fixtures));
   if (fixtures.leaf_len == 0U) return;
+  build_test_parameters();
 
   memset(&client, 0, sizeof(client));
   memset(&server, 0, sizeof(server));
@@ -273,9 +322,9 @@ static void test_handshake(wt_udp_family_t family) {
   /* The driver is the connection's frame handler and its lost handler, which is the seam the connection
    * layer was built with: the packet layer knows nothing about TLS and the handshake knows nothing
    * about packets. */
-  wt_quic_connection_set_handlers(&client.connection, wt_quic_handshake_on_frame, &client.handshake,
+  wt_quic_connection_set_handlers(&client.connection, endpoint_on_frame, &client,
                                   wt_quic_handshake_on_lost, &client.handshake);
-  wt_quic_connection_set_handlers(&server.connection, wt_quic_handshake_on_frame, &server.handshake,
+  wt_quic_connection_set_handlers(&server.connection, endpoint_on_frame, &server,
                                   wt_quic_handshake_on_lost, &server.handshake);
 
   WT_EXPECT_OK("the server handshake starts",
@@ -307,14 +356,65 @@ static void test_handshake(wt_udp_family_t family) {
     /* The peer's transport parameters survived the handshake unchanged, which is what the QUIC layer
      * will read its limits out of. */
     parameters = wt_quic_handshake_peer_transport_parameters(&client.handshake, &parameters_len);
-    WT_EXPECT_U64("the client has the server's parameters", (uint64_t)sizeof(k_transport_parameters),
+    WT_EXPECT_U64("the client has the server's parameters", (uint64_t)g_parameters_len,
                   (uint64_t)parameters_len);
-    WT_EXPECT_BYTES("unchanged", k_transport_parameters, parameters, parameters_len);
+    WT_EXPECT_BYTES("unchanged", g_parameters, parameters, parameters_len);
 
     /* The server confirmed the handshake, and the client learned it from HANDSHAKE_DONE. */
     WT_EXPECT_INT("the server considers the handshake confirmed", 1, server.handshake.confirmed);
     WT_EXPECT_INT("and the client does too", 1, client.handshake.confirmed);
     WT_EXPECT_INT("which is what the connection records", 1, client.connection.handshake_confirmed);
+
+    /* The parameters the handshake carried become the limits each end obeys. */
+    WT_EXPECT_OK("the client parses the server's parameters",
+                 wt_quic_connection_set_peer_parameters(&client.connection, g_parameters,
+                                                        g_parameters_len));
+    WT_EXPECT_OK("and the server parses the client's",
+                 wt_quic_connection_set_peer_parameters(&server.connection, g_parameters,
+                                                        g_parameters_len));
+    WT_EXPECT_U64("with the data limit they state", 100000U,
+                  wt_quic_connection_peer_limits(&client.connection)->initial_max_data);
+    WT_EXPECT_U64("and the stream count", 4U,
+                  wt_quic_connection_peer_limits(&client.connection)->initial_max_streams_bidi);
+    WT_EXPECT_U64("and the datagram size", 1200U,
+                  wt_quic_connection_peer_limits(&client.connection)->max_datagram_frame_size);
+    /* The bigger of the two bounds is the peer's frame limit, so the payload is that limit minus the
+     * packet overhead this connection reserves for the header, the packet number, the frame's own
+     * fields and the tag. */
+    WT_EXPECT_U64("so a datagram payload is bounded by both limits", 1200U - 64U,
+                  wt_quic_connection_max_datagram_payload(&client.connection));
+
+    /* A datagram travels under the application keys and is not retransmitted. */
+    {
+      static const uint8_t k_datagram[5] = {0xdeU, 0xadU, 0xbeU, 0xefU, 0x01U};
+      uint8_t received[64];
+      size_t received_len = 0U;
+      uint64_t received_at = 0U;
+      int arrived = 0;
+
+      WT_EXPECT_OK("the client sends a datagram",
+                   wt_quic_connection_send_datagram(&client.connection, k_datagram,
+                                                    sizeof(k_datagram), now));
+      now += 1000U;
+      g_now = now;
+      WT_EXPECT_OK("the server reads a datagram", pump(&server, now, &arrived));
+      WT_EXPECT_INT("which arrived", 1, arrived);
+      WT_EXPECT_OK("and is queued",
+                   wt_quic_connection_receive_datagram(&server.connection, received,
+                                                       sizeof(received), &received_len,
+                                                       &received_at));
+      WT_EXPECT_U64("whole", (uint64_t)sizeof(k_datagram), (uint64_t)received_len);
+      WT_EXPECT_BYTES("byte for byte", k_datagram, received, sizeof(k_datagram));
+      WT_EXPECT_U64("with the time it arrived", now, received_at);
+      WT_EXPECT_STATUS("and no second one", WT_ERR_AGAIN,
+                       wt_quic_connection_receive_datagram(&server.connection, received,
+                                                           sizeof(received), &received_len,
+                                                           &received_at));
+      /* A datagram larger than the peer's limit is refused before it is sent. */
+      WT_EXPECT_STATUS("an oversized datagram is a limit", WT_ERR_LIMIT,
+                       wt_quic_connection_send_datagram(&client.connection, received,
+                                                        (size_t)WT_QUIC_DATAGRAM_MAX + 1U, now));
+    }
 
     /* Both directions' application keys work: a frame the client sends under them is read by the
      * server, which is the whole point of the handshake having produced them. */

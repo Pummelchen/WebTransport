@@ -854,6 +854,24 @@ codec round trip, the defaults for an empty list, both directions of the idle ti
 the connection's own timer rather than a field), and the refusals: a too-small payload size, a truncated
 list, and the arguments.
 
+**Twelfth part done: QUIC DATAGRAM over the connection.** `wt_quic_connection_send_datagram` sends an
+RFC 9221 DATAGRAM frame in the Application space, and the payload is bounded by BOTH the peer's
+`max_datagram_frame_size`, which the previous part put on the connection, and what the path will carry;
+`wt_quic_connection_max_datagram_payload` answers which bound applies. A peer that never offered
+DATAGRAM gets `WT_ERR_UNSUPPORTED` rather than a limit error, because the difference matters: one means
+"smaller", the other means "it does not speak this". A datagram carries NO retransmission descriptor,
+which is what makes it unreliable -- a caller that needs the bytes uses a stream -- and the receive half
+is a bounded queue (`wt_quic_connection_on_datagram`) whose policy is the module's: when it is full the
+newest is discarded and counted, because a datagram that was never guaranteed to arrive is not an error
+when it does not.
+
+The receive half is a function rather than something the connection does by itself, and that is the
+layering decision this part makes concrete: a frame handler composed of several consumers -- the
+handshake, the datagram queue, and later the stream layer and the WebTransport session -- decides what a
+frame is for. `tests/unit/test_quic_handshake.c` now installs such a handler (handshake first, then the
+datagram queue) and carries a real handshake followed by a datagram exchange and an oversized refusal,
+which is also what proves the two halves compose.
+
 Implement the production network state machine.
 
 Tasks:

@@ -18,6 +18,7 @@
 
 #include <string.h>
 
+#include "webtransport/quic/frame.h"
 #include "webtransport/quic/packet_io.h"
 #include "webtransport/quic/transport_parameters.h"
 #include "webtransport/writer.h"
@@ -652,6 +653,7 @@ wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
     wt_quic_pn_space_init(&connection->spaces[i]);
   }
   wt_quic_loss_init(&connection->loss);
+  wt_quic_datagram_queue_init(&connection->datagrams);
   wt_quic_congestion_init(&connection->congestion, (uint64_t)config->max_datagram_size);
   wt_quic_close_state_init(&connection->close);
   return WT_OK;
@@ -713,6 +715,65 @@ wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_
   status = send_one_frame(connection, space, &frame, 1, 1, 1, offset, length, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
+}
+
+/* The packet overhead a DATAGRAM frame's payload has to leave room for: the short header with the
+ * longest connection ID and packet number this endpoint may use, the frame's own type and length field,
+ * and the tag. Being generous here costs a few bytes of payload and never a packet that does not fit. */
+#define WT_QUIC_DATAGRAM_PACKET_OVERHEAD 64U
+
+uint64_t wt_quic_connection_max_datagram_payload(const wt_quic_connection_t *connection) {
+  if (connection == NULL || !connection->peer_limits.set) return 0U;
+  if (connection->peer_limits.max_datagram_frame_size == 0U) return 0U;
+  return wt_quic_datagram_max_payload(connection->peer_limits.max_datagram_frame_size,
+                                      (uint64_t)connection->config.max_datagram_size,
+                                      WT_QUIC_DATAGRAM_PACKET_OVERHEAD);
+}
+
+wt_status_t wt_quic_connection_send_datagram(wt_quic_connection_t *connection, const uint8_t *data,
+                                             size_t length, uint64_t now) {
+  wt_quic_frame_t frame;
+  uint64_t maximum;
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (!connection->peer_limits.set) return WT_ERR_STATE;
+  if (connection->peer_limits.max_datagram_frame_size == 0U) {
+    /* The peer did not offer DATAGRAM at all (RFC 9221 section 3): sending one would be answered with
+     * a protocol violation, so it is refused here by name. */
+    return WT_ERR_UNSUPPORTED;
+  }
+  maximum = wt_quic_connection_max_datagram_payload(connection);
+  if ((uint64_t)length > maximum) return WT_ERR_LIMIT;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_DATAGRAM);
+  frame.as.datagram.data = data;
+  frame.as.datagram.length = length;
+  /* No descriptor: a DATAGRAM frame is never sent again, which is the whole point of it. */
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+  if (status != WT_OK) return status;
+  return sent ? WT_OK : WT_ERR_STATE;
+}
+
+wt_status_t wt_quic_connection_on_datagram(wt_quic_connection_t *connection, const uint8_t *data,
+                                           size_t length, uint64_t now) {
+  int discarded = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  status = wt_quic_datagram_queue_push(&connection->datagrams, data, length, now, &discarded);
+  return status;
+}
+
+wt_status_t wt_quic_connection_receive_datagram(wt_quic_connection_t *connection, uint8_t *out,
+                                                size_t capacity, size_t *out_length,
+                                                uint64_t *out_received_at) {
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  return wt_quic_datagram_queue_pop(&connection->datagrams, out, capacity, out_length,
+                                    out_received_at);
 }
 
 wt_status_t wt_quic_connection_send_frame(wt_quic_connection_t *connection, wt_quic_space_t space,

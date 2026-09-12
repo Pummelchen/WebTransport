@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 #include "webtransport/quic/close.h"
+#include "webtransport/quic/datagram.h"
 #include "webtransport/quic/congestion.h"
 #include "webtransport/quic/error.h"
 #include "webtransport/quic/frame.h"
@@ -168,6 +169,9 @@ typedef struct wt_quic_connection {
   wt_quic_close_state_t close;
   /* The peer's limits, parsed from the transport parameters its handshake carried. */
   wt_quic_peer_limits_t peer_limits;
+  /* The datagrams that have arrived and not been read, bounded and with the newest discarded when it
+   * is full (RFC 9221's frames are unreliable, so dropping one is not an error). */
+  wt_quic_datagram_queue_t datagrams;
 
   wt_quic_tx_frame_t frames[WT_QUIC_CONNECTION_FRAMES_MAX];
 
@@ -250,6 +254,35 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
  * them: `set` is 0 before the handshake has produced them, and a limit the peer did not send is zero,
  * which is the RFC's default and means "none granted". */
 const wt_quic_peer_limits_t *wt_quic_connection_peer_limits(const wt_quic_connection_t *connection);
+
+/* Send one DATAGRAM frame (RFC 9221). The payload is bounded by BOTH the peer's
+ * `max_datagram_frame_size` -- zero means it does not accept datagrams at all, which is
+ * WT_ERR_UNSUPPORTED rather than a limit -- and what the path will carry, and the smaller of the two is
+ * what is enforced. A datagram is not retransmitted and carries no retransmission descriptor: that is
+ * what makes it unreliable, and a caller that needs the bytes to arrive uses a stream.
+ *
+ * WT_ERR_LIMIT when the payload is larger than either bound, WT_ERR_STATE before the peer's parameters
+ * have been parsed (nothing is known about what it accepts), WT_ERR_AGAIN when the congestion window has
+ * no room. */
+wt_status_t wt_quic_connection_send_datagram(wt_quic_connection_t *connection, const uint8_t *data,
+                                             size_t length, uint64_t now);
+
+/* The largest DATAGRAM payload this connection may send right now: the smaller of the peer's frame
+ * limit and what the path carries, with the frame's own length field accounted for. Zero when the peer
+ * does not accept datagrams. */
+uint64_t wt_quic_connection_max_datagram_payload(const wt_quic_connection_t *connection);
+
+/* A received DATAGRAM frame, for a caller's frame handler to hand to the connection: this is the
+ * receive half of the same API, and it is a function rather than something this layer does by itself so
+ * that a frame handler composed of several consumers can decide what to do with it. A datagram the queue
+ * cannot hold is discarded and counted, never refused, because a datagram is not guaranteed to arrive. */
+wt_status_t wt_quic_connection_on_datagram(wt_quic_connection_t *connection, const uint8_t *data,
+                                           size_t length, uint64_t now);
+
+/* Take the oldest datagram that arrived. WT_ERR_AGAIN when there is none. */
+wt_status_t wt_quic_connection_receive_datagram(wt_quic_connection_t *connection, uint8_t *out,
+                                                size_t capacity, size_t *out_length,
+                                                uint64_t *out_received_at);
 
 /* Install the frame and loss handlers. Both are optional; without the first, frames this layer does
  * not act on are ignored -- which is correct for a connection whose owner has nothing to do with them

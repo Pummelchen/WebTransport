@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,425 checks, run by `ctest` and again under
+- 38 unit test files and 75,522 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -214,6 +214,12 @@ What is here:
   an absent parameter and a zero one are different facts. The effective idle timeout becomes the smaller
   of the two ends', because RFC 9000 section 10.1 makes it the minimum. This is the other half of every
   resource limit the stream and datagram work will enforce.
+- **QUIC DATAGRAM over the connection** (Phase 4, twelfth part): `wt_quic_connection_send_datagram`
+  sends an RFC 9221 frame bounded by both the peer's `max_datagram_frame_size` and what the path carries,
+  with no retransmission descriptor -- that is what makes it unreliable -- and the receive half is a
+  bounded queue whose newest datagram is discarded when it is full. The receive path is a function a
+  composed frame handler calls, which is the layering the handshake, the stream layer and the session
+  layer all use.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
