@@ -770,6 +770,30 @@ task list names, cancellation, and the server's connection-ID issuance and Retry
 criterion -- local IPv4 and IPv6 loopback -- is now met at the packet level, which is what this part
 was for.
 
+**Ninth part done: the CRYPTO stream.** `quic/crypto_stream.h` and `src/quic/crypto_stream.c` are the
+handshake bytes, which do not arrive in order. A CRYPTO frame names its own offset and its own length
+(RFC 9000 section 19.6), so the receive half is a window of bytes with a bitmap saying which have
+arrived, delivering only up to the first hole -- which is what makes a ClientHello split across two
+packets readable -- and the send half keeps what was sent so a lost packet can be sent again. The
+bitmap is what avoids an allocation per gap, and the window slides when the consumer takes bytes, so
+the bound is a subtraction rather than a growing index.
+
+Both halves are bounded, and the bound is the point: a peer chooses the offsets, so a frame that does
+not fit the buffer is refused WHOLE -- nothing is stored, which is what lets the caller close the
+connection with `WT_QUIC_CRYPTO_BUFFER_EXCEEDED`, the transport error code RFC 9000 section 20.1 gives
+this case -- and an offset beyond the protocol's own bound is refused as the overflow it is. The send
+half deliberately keeps bytes after they are first sent: RFC 9002 section 6.1 can declare a packet lost
+by a time threshold after a later one was acknowledged, and those bytes are still the peer's only copy.
+
+`tests/unit/test_quic_crypto_stream.c` (97 checks) checks the two ways a receiver is attacked: an
+out-of-order split that must deliver nothing until the hole is filled, and offsets a peer picks
+arbitrarily, including one that would need memory beyond the buffer (refused, with the state
+unchanged), one that ends exactly at the buffer's end (accepted), and one past RFC 9000's bound
+(refused as an overflow). It also checks the property that makes the bound workable -- after the
+consumer takes bytes, the peer may send more at the offset it reached, which is the sliding window a
+fixed buffer needs -- and that a duplicate, an overlapping retransmission and a repeat of what was
+already delivered are all ordinary rather than errors.
+
 Implement the production network state machine.
 
 Tasks:

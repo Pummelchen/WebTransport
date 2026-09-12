@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 35 unit test files and 75,163 checks, run by `ctest` and again under
+- 36 unit test files and 75,260 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -195,6 +195,13 @@ What is here:
   two real loopback sockets on IPv4 and on IPv6 with Initial keys both ends derive from one connection
   ID, so a packet travels the whole path -- build, protect, send, receive, unprotect, walk, acknowledge,
   account -- without a handshake.
+- **The CRYPTO stream** (Phase 4, ninth part): `quic/crypto_stream.h` is the handshake bytes, which
+  arrive by offset rather than in order. The receive half is a window with a bitmap of what has
+  arrived, delivering only up to the first hole, so a ClientHello split across two packets reads
+  correctly; the send half keeps what was sent, because a packet can be declared lost after a later one
+  was acknowledged and its bytes are the peer's only copy. Both are bounded and a frame that does not
+  fit is refused whole, which is what lets the connection answer with the transport error code
+  RFC 9000 gives this case.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
