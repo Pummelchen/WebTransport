@@ -86,6 +86,7 @@ set(WT_QUIC_RUNTIME_SOURCES
   src/quic/pn_space.c
   src/quic/loss.c
   src/quic/congestion.c
+  src/quic/stream.c
 )
 set(WT_TLS_SOURCES
   src/tls/keyschedule.c
@@ -122,6 +123,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/pn_space.h
   include/webtransport/quic/loss.h
   include/webtransport/quic/congestion.h
+  include/webtransport/quic/stream.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
   include/webtransport/tls/extension.h

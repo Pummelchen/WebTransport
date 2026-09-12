@@ -11,7 +11,8 @@ scaffolding.
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
 complete, and Phase 3 is under way: its key schedule, transcript, handshake message
 codecs (Hellos and certificates), X25519 key agreement, peer authentication and both halves of
-the handshake are done, and Phase 4 has its packet number space, loss detection and congestion control.**
+the handshake are done, and Phase 4 has its packet number space, loss detection, congestion control and the stream
+machines.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -37,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 29 unit test files and 74,279 checks, run by `ctest` and again under
+- 30 unit test files and 74,388 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -155,6 +156,11 @@ What is here:
   increment, the recovery epoch that makes a burst of losses cost one halving, the two-datagram
   floor, and persistent congestion. It reads the bytes in flight from the loss module rather than
   counting them, so the two cannot disagree after a retransmission.
+- **Stream state machines and flow control** (Phase 4, fourth part): `quic/stream.h` carries RFC 9000
+  sections 2, 3 and 4 -- both halves' state machines, the final size as the boundary that stops a
+  peer appending to an ended stream, RESET_STREAM and STOP_SENDING, and flow control at the
+  connection's level and the stream's. Flow control counts *offsets* rather than delivered bytes,
+  which is the RFC's model: a gap cannot be used to escape the accounting.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

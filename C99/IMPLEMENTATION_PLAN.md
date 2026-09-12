@@ -598,6 +598,28 @@ findings were in the tests and one in a comment: the increment is `mds * acked /
 division, so a small acknowledgement adds nothing while a large one adds a *fraction* of a datagram
 rather than a whole one, and repeated losses only collapse the window if each is a new event.
 
+**Fourth part done: the stream state machines and flow control.** `quic/stream.h` and
+`src/quic/stream.c` carry RFC 9000 sections 2, 3 and 4: the send half's five states and the receive
+half's five, the final size that bounds everything after it is known, RESET_STREAM and STOP_SENDING
+in both directions, and flow control at both levels -- the connection's and the stream's -- in both
+directions. The two halves are independent, because a stream that is reset one way stays usable the
+other, and the final size is treated as the security boundary it is: data at or beyond it is
+FINAL_SIZE_ERROR, and so is a FIN that contradicts it, which is what stops a peer appending to a
+stream it has already ended.
+
+Flow control counts **offsets rather than delivered bytes**, which is the RFC's model and the reason
+the code says "credit" rather than "new bytes": a peer that writes ten bytes at offset one million
+has spent a million bytes of the connection's credit even though ten arrived, so a gap cannot be used
+to escape the accounting. The limits in the sending direction are checked before a frame is written
+rather than after, because a frame that is written and then refused has already counted.
+
+`tests/unit/test_quic_stream.c` (109 checks) walks both state machines through their legal moves and
+refuses the illegal ones -- writing after a FIN, a second FIN, reading a reset stream as if it were
+data -- and checks the flow control cases where only one of the two levels is exhausted. One finding
+was a gap in the API rather than a bug: a reset receive half had no way to become *read*, so a stream
+whose reset had arrived could never be forgotten; `wt_quic_stream_on_reset_read` is the transition
+RFC 9000 section 3.2 puts between them.
+
 Implement the production network state machine.
 
 Tasks:
