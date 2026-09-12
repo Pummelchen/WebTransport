@@ -11,7 +11,7 @@ scaffolding.
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
 complete, and Phase 3 is under way: its key schedule, transcript, handshake message
 codecs (Hellos and certificates), X25519 key agreement, peer authentication and both halves of
-the handshake are done, and Phase 4 has begun with the packet number space.**
+the handshake are done, and Phase 4 has its packet number space and loss detection.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -37,7 +37,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 27 unit test files and 74,022 checks, run by `ctest` and again under
+- 28 unit test files and 74,191 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -145,6 +145,11 @@ What is here:
   decides prompt or delayed, and RFC 9002 section 5's round trip estimator with its probe
   timeout. No I/O, no policy -- which is why the ranges are checked for order-independence and
   the RTT arithmetic against section 5.3 worked out by hand.
+- **Loss detection and probe timeouts** (Phase 4, second part): `quic/loss.h` holds the sent-packet
+  list, RFC 9002 section 6's packet and time thresholds, the loss timer they imply, the bytes in
+  flight the congestion controller will read, and the probe timeout with its backoff. The list is
+  bounded and being at the bound is an error rather than a drop, because a forgotten packet is one
+  that is never retransmitted.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

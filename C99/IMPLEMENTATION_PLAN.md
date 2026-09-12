@@ -562,6 +562,25 @@ packets preceding the packet number one lower than the smallest in the preceding
 one less than the number of missing packets -- the round trip through the decoder is what settles
 it.
 
+**Second part done: loss detection and probe timeouts.** `quic/loss.h` and `src/quic/loss.c` hold
+RFC 9002 section 6: the sent-packet list with the caller's own tag on each packet, the packet
+threshold (three numbers higher acknowledged) and the time threshold (9/8 of the larger of the
+smoothed and latest round trip times), the loss timer that comes from the time threshold, bytes in
+flight for the congestion controller to read, and the probe timeout with its exponential backoff.
+The list is bounded and being at the bound is WT_ERR_LIMIT rather than a silent drop: a forgotten
+packet is one that is never retransmitted, and the stall it causes names nothing. What has to be
+retransmitted is frames, and frames belong to the connection -- this file hands back a lost
+packet's number and the caller's tag rather than keeping a second copy of the send state.
+
+`tests/unit/test_quic_loss.c` (169 checks) pins both thresholds at their boundaries: three numbers
+higher is lost and two is not, and a packet sent one microsecond inside 9/8 of the round trip time
+is not yet lost while one at the threshold is. It also checks the two things the probe timeout is
+easy to get wrong -- it exists only while something ack-eliciting is in flight, and its backoff is
+reset by acknowledging an ack-eliciting packet rather than by any acknowledgement at all. One
+finding was in the tests: the packet threshold's boundary and the time threshold's clock are both
+inclusive comparisons, so an off-by-one in either direction is a test that passes for the wrong
+reason.
+
 Implement the production network state machine.
 
 Tasks:
