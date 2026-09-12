@@ -50,6 +50,17 @@ set(WT_CORE_SOURCES
   src/core/version.c
 )
 
+# The QUIC wire core. One list with the core rather than a separate target: it
+# is the same library, a consumer links it as a unit, and splitting it would let
+# a test link a different build of the QUIC code than the library ships.
+set(WT_QUIC_SOURCES
+  src/quic/error.c
+  src/quic/varint.c
+  src/quic/packet_number.c
+  src/quic/frame.c
+)
+list(APPEND WT_CORE_SOURCES ${WT_QUIC_SOURCES})
+
 set(WT_PUBLIC_HEADERS
   include/webtransport/status.h
   include/webtransport/checked.h
@@ -61,6 +72,10 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/log.h
   include/webtransport/time.h
   include/webtransport/version.h
+  include/webtransport/quic/error.h
+  include/webtransport/quic/varint.h
+  include/webtransport/quic/packet_number.h
+  include/webtransport/quic/frame.h
 )
 
 # The sanitizer flags are added to every target when the option is on, including
@@ -160,7 +175,15 @@ install(TARGETS ${WT_INSTALL_TARGETS}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
-install(FILES ${WT_PUBLIC_HEADERS} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/webtransport)
+# The headers are installed keeping their subdirectory, so that a public header
+# includes its siblings by the path it was written with
+# ("webtransport/quic/varint.h") and a consumer's include path is one directory.
+foreach(header IN LISTS WT_PUBLIC_HEADERS)
+  file(RELATIVE_PATH header_relative "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}/${header}")
+  get_filename_component(header_dir "${header_relative}" DIRECTORY)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/${header}"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${header_dir}")
+endforeach()
 
 # A package a consumer can find_package(), which is what "consumed as a normal
 # CMake package" in the plan's release phase means. Written now rather than

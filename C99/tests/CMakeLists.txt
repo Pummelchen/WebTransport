@@ -17,13 +17,18 @@ set(WT_UNIT_TESTS
   test_log
   test_time
   test_version
+  test_quic_error
+  test_quic_varint
+  test_quic_packet_number
+  test_quic_frame
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
   add_executable(${test} unit/${test}.c)
   wt_set_c99(${test})
   wt_apply_warnings(${test})
-  target_include_directories(${test} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit)
+  target_include_directories(${test} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit
+    ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
   target_link_libraries(${test} PRIVATE ${WT_LINK_TARGET})
   if(WT_SANITIZER_FLAGS)
     target_compile_options(${test} PRIVATE ${WT_SANITIZER_FLAGS})
