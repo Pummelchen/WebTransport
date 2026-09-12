@@ -223,4 +223,47 @@ int wt_quic_stream_id_from_client(uint64_t stream_id);
 int wt_quic_stream_id_is_bidirectional(uint64_t stream_id);
 uint64_t wt_quic_stream_id_make(int from_client, int bidirectional, uint64_t index);
 
+/* ------------------------------------------------------------------- the table
+ *
+ * ONE STREAM IS A STATE MACHINE; A CONNECTION HAS MANY. The table is bounded, which is the resource
+ * limit the plan names: a peer chooses how many streams it opens, so a receiver that allocated a
+ * structure per stream number would let the peer choose its memory. A full table refuses a new stream
+ * rather than dropping an old one, because a stream that is silently forgotten is data the application
+ * never sees, and a stream is only forgotten when BOTH halves are done, which is what RFC 9000 section
+ * 3.3 requires before its number is never seen again.
+ *
+ * It owns the state and nothing else: no frames, no bytes, no policy about when to send. What it answers
+ * is which stream a frame is about, whether one more may be opened, and which streams are still alive.
+ */
+#define WT_QUIC_STREAM_TABLE_MAX 32U
+
+typedef struct wt_quic_stream_table {
+  wt_quic_stream_t streams[WT_QUIC_STREAM_TABLE_MAX];
+  uint8_t used[WT_QUIC_STREAM_TABLE_MAX];
+  size_t count;
+  uint64_t opened_by_us_bidi;
+  uint64_t opened_by_us_uni;
+  uint64_t opened_by_peer_bidi;
+  uint64_t opened_by_peer_uni;
+} wt_quic_stream_table_t;
+
+void wt_quic_stream_table_init(wt_quic_stream_table_t *table);
+/* Open a stream. `limit` is the OPENER's stream-count limit: a peer-initiated stream costs the peer one
+ * of its allowance, not this endpoint one of its own (RFC 9000 section 4.6). WT_ERR_LIMIT when the table
+ * is full or the limit does not allow one more -- one answer, because the caller's reaction is the same
+ * -- and WT_ERR_STATE for a stream that is already in the table. The new stream has NO flow control
+ * credit: the caller sets the two limits from the transport parameters, which this layer does not know. */
+wt_status_t wt_quic_stream_table_open(wt_quic_stream_table_t *table, uint64_t stream_id,
+                                      int initiated_by_us, uint64_t limit);
+wt_quic_stream_t *wt_quic_stream_table_find(wt_quic_stream_table_t *table, uint64_t stream_id);
+const wt_quic_stream_t *wt_quic_stream_table_find_const(const wt_quic_stream_table_t *table,
+                                                        uint64_t stream_id);
+/* Forget a stream whose two halves are done, which frees its slot. WT_ERR_STATE for a stream that is
+ * still open, or one that is not there. */
+wt_status_t wt_quic_stream_table_close(wt_quic_stream_table_t *table, uint64_t stream_id);
+wt_quic_stream_t *wt_quic_stream_table_at(wt_quic_stream_table_t *table, size_t index);
+size_t wt_quic_stream_table_count(const wt_quic_stream_table_t *table);
+uint64_t wt_quic_stream_table_opened_by_us(const wt_quic_stream_table_t *table, int bidirectional);
+uint64_t wt_quic_stream_table_opened_by_peer(const wt_quic_stream_table_t *table, int bidirectional);
+
 #endif /* WEBTRANSPORT_QUIC_STREAM_H */

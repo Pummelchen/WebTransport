@@ -1001,6 +1001,20 @@ the first sixteen numbers, and the two accessors that are easy to get backwards 
 LOW one and the directionality is the next). It is a small part on purpose: it is the first piece of the
 stream layer, and the layer's table will read these fields for every rule it enforces.
 
+**Twenty-second part done: the stream table.** `quic/stream.h` carries a bounded table of stream state
+machines, which is the resource limit the plan names: a peer chooses how many streams it opens, so a
+receiver that allocated a structure per stream number would let the peer choose its memory. A full table
+refuses a new stream rather than dropping an old one -- a stream that is silently forgotten is data the
+application never sees -- the per-class counts are kept so a MAX_STREAMS can be raised from them, and a
+stream is only forgotten when BOTH halves are done, which is what RFC 9000 section 3.3 requires before its
+number is never seen again. One rule is worth naming because it is easy to invert: the limit is the
+OPENER's, so a peer-initiated stream costs the peer one of its allowance and not this endpoint one of its
+own (section 4.6). The table owns the state and nothing else -- no frames, no bytes, no policy about when
+to send -- so what it answers is which stream a frame is about, whether one more may be opened, and which
+streams are still alive, which is what the receive path needs before it can hand a frame to a state
+machine. Its first attempt did not link because the stream-number helpers it reads had been lost from the
+header; landed again after those were restored, it passes.
+
 Implement the production network state machine.
 
 Tasks:

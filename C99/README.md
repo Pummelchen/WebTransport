@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,672 checks, run by `ctest` and again under
+- 38 unit test files and 75,734 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -255,6 +255,10 @@ What is here:
 - **The four fields in a stream number** (Phase 4, twenty-first part): `quic/stream.h` reads and writes
   RFC 9000 section 2.1's initiator bit, directionality bit and index in one place, and the connection's
   stream-number check uses them instead of shifting at the call site. The first piece of the stream layer.
+- **The stream table** (Phase 4, twenty-second part): `quic/stream.h` holds a bounded table of stream state
+  machines -- the resource limit the plan names -- with per-class counts, a full table refusing a new
+  stream rather than dropping a live one, and a stream forgotten only when both halves are done
+  (RFC 9000 section 3.3). The limit is the opener's, so a peer's stream costs the peer's allowance.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
