@@ -10,8 +10,8 @@ scaffolding.
 
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
 complete, and Phase 3 is under way: its key schedule, transcript, handshake message
-codecs (Hellos and certificates), X25519 key agreement, peer authentication and the client
-handshake are done.**
+codecs (Hellos and certificates), X25519 key agreement, peer authentication and both halves of
+the handshake are done.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -37,7 +37,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 25 unit test files and 73,758 checks, run by `ctest` and again under
+- 26 unit test files and 73,846 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -133,6 +133,13 @@ What is here:
   state before the last of those, so every security condition is a precondition for them.
   The machine is driven end to end by RFC 8448's recorded flight: it is started with the
   RFC's ClientHello and client key and must produce the RFC's own secrets and Finished.
+- **The server handshake** (Phase 3, seventh part): `tls/session.h` also carries the server --
+  the ClientHello's version, ciphersuite, key share, ALPN and transport parameters checked, the
+  flight built in the order the client's checks expect, the signature over the transcript
+  through the Certificate, and the client's Finished gating the application secrets. The flight
+  is two calls because QUIC has two encryption levels. `tests/unit/test_tls13_server.c` runs a
+  whole handshake between the two halves and requires that they agree, including that each end's
+  application secret is the other's in the opposite direction.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

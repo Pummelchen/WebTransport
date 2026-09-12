@@ -57,6 +57,11 @@ for name in leaf leaf-other-host leaf-unknown-ca; do
   openssl x509 -in "$name.pem" -outform DER -out "$name.der"
 done
 
+# The leaf's private key in DER, which is the form the server identity takes: the handshake
+# layer deals in bytes, and a PEM reader in the library would be a second file format to get
+# right for no gain.
+openssl pkey -in leaf-key.pem -outform DER -out leaf-key.der
+
 rm -f leaf.csr leaf-other-host.csr leaf-unknown-ca.csr ca.srl other-ca.srl
 
 echo "make-fixtures: wrote the PEM certificates, their DER forms, and the PEM bundle"

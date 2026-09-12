@@ -361,3 +361,65 @@ done:
   EVP_PKEY_free(key);
   return status;
 }
+
+wt_status_t wt_tls_signature_sign(const uint8_t *private_key, size_t private_key_len,
+                                  uint16_t scheme, const uint8_t *content,
+                                  size_t content_len, uint8_t *signature_out,
+                                  size_t capacity, size_t *signature_len) {
+  const unsigned char *cursor;
+  EVP_PKEY *key = NULL;
+  EVP_MD_CTX *ctx = NULL;
+  EVP_PKEY_CTX *pkey_ctx = NULL;
+  const EVP_MD *digest;
+  wt_status_t status = WT_ERR_UNSUPPORTED;
+  size_t needed = 0U;
+  int ok;
+
+  if (private_key == NULL || content == NULL || signature_out == NULL ||
+      signature_len == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  *signature_len = 0U;
+  if (!wt_tls_signature_scheme_supported(scheme)) return WT_ERR_UNSUPPORTED;
+  digest = scheme_digest(scheme);
+
+  cursor = private_key;
+  key = d2i_AutoPrivateKey(NULL, &cursor, (long)private_key_len);
+  if (key == NULL) return WT_ERR_PROTOCOL;
+  if ((size_t)(cursor - private_key) != private_key_len) {
+    EVP_PKEY_free(key);
+    return WT_ERR_PROTOCOL;
+  }
+
+  ctx = EVP_MD_CTX_new();
+  if (ctx == NULL) {
+    EVP_PKEY_free(key);
+    return WT_ERR_OUT_OF_MEMORY;
+  }
+  if (EVP_DigestSignInit(ctx, &pkey_ctx, digest, NULL, key) != 1) goto done;
+  if (scheme_is_rsa_pss(scheme)) {
+    if (EVP_PKEY_CTX_set_rsa_padding(pkey_ctx, RSA_PKCS1_PSS_PADDING) != 1) goto done;
+    if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pkey_ctx, RSA_PSS_SALTLEN_DIGEST) != 1) {
+      goto done;
+    }
+    if (EVP_PKEY_CTX_set_rsa_mgf1_md(pkey_ctx, digest) != 1) goto done;
+  }
+  /* Measured before anything is written, so a signature larger than the caller's buffer is a
+   * refusal rather than an overflow. */
+  if (EVP_DigestSign(ctx, NULL, &needed, content, content_len) != 1) goto done;
+  if (needed > capacity) {
+    status = WT_ERR_LIMIT;
+    goto done;
+  }
+  ok = EVP_DigestSign(ctx, signature_out, &needed, content, content_len);
+  if (ok == 1) {
+    *signature_len = needed;
+    status = WT_OK;
+  }
+
+done:
+  EVP_MD_CTX_free(ctx);
+  EVP_PKEY_free(key);
+  if (status != WT_OK) memset(signature_out, 0, capacity);
+  return status;
+}

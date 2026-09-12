@@ -36,6 +36,14 @@ wt_status_t wt_tls_handshake_header_encode(wt_writer_t *w, uint8_t type,
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
 
+size_t wt_tls_handshake_message_len(const uint8_t *buffer, size_t len) {
+  size_t body;
+  if (buffer == NULL || len < WT_TLS_HANDSHAKE_HEADER_LEN) return 0U;
+  body = ((size_t)buffer[1] << 16) | ((size_t)buffer[2] << 8) | (size_t)buffer[3];
+  if (body > len - WT_TLS_HANDSHAKE_HEADER_LEN) return 0U;
+  return body + WT_TLS_HANDSHAKE_HEADER_LEN;
+}
+
 const char *wt_tls_handshake_type_name(uint8_t type) {
   switch (type) {
     case WT_TLS_HANDSHAKE_CLIENT_HELLO:

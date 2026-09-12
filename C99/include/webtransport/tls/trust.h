@@ -127,6 +127,20 @@ wt_status_t wt_tls_signature_verify(const uint8_t *spki, size_t spki_len,
                                     size_t content_len, const uint8_t *signature,
                                     size_t signature_len);
 
+/* Sign `content` with a private key, for the server's CertificateVerify. The mirror of
+ * `wt_tls_signature_verify`, and the reason a client and a server here cannot disagree about
+ * what a scheme means: both take the digest from the scheme and both set RSA-PSS's parameters
+ * the same way.
+ *
+ * `private_key` is a DER private key (PKCS#8 or PKCS#1, which OpenSSL tells apart itself).
+ * WT_ERR_LIMIT when the signature does not fit, WT_ERR_UNSUPPORTED for a scheme this
+ * implementation does not carry or a key that does not match it, WT_ERR_PROTOCOL for a key
+ * that is not a key. */
+wt_status_t wt_tls_signature_sign(const uint8_t *private_key, size_t private_key_len,
+                                  uint16_t scheme, const uint8_t *content,
+                                  size_t content_len, uint8_t *signature_out,
+                                  size_t capacity, size_t *signature_len);
+
 /* Whether a scheme is one this implementation can verify, for a caller assembling the
  * signature_algorithms extension from the same list. */
 int wt_tls_signature_scheme_supported(uint16_t scheme);

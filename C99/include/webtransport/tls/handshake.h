@@ -83,6 +83,16 @@ wt_status_t wt_tls_handshake_header_parse(wt_cursor_t *cursor,
 wt_status_t wt_tls_handshake_header_encode(wt_writer_t *w, uint8_t type,
                                            size_t body_len);
 
+/* The length of the handshake message at the start of `buffer`, header included, or 0 when the
+ * buffer does not hold a whole one.
+ *
+ * THIS IS HOW A CRYPTO STREAM IS WALKED. A QUIC CRYPTO stream is a concatenation of handshake
+ * messages, and `wt_tls_handshake_header_parse` deliberately refuses a buffer longer than the
+ * message it describes -- which is what stops a parse from reading the next message's bytes as
+ * this one's body. So the walker reads the four bytes itself, and a caller slices the message
+ * out before handing it to a parser. */
+size_t wt_tls_handshake_message_len(const uint8_t *buffer, size_t len);
+
 /* The name of a handshake type, for a diagnostic. Not for logs that carry size: a
  * name is three to twenty characters and says nothing a peer chose. */
 const char *wt_tls_handshake_type_name(uint8_t type);

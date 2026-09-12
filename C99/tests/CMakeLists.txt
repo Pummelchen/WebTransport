@@ -32,6 +32,7 @@ set(WT_UNIT_TESTS
   test_tls13_keyshare
   test_tls13_trust
   test_tls13_session
+  test_tls13_server
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
@@ -54,4 +55,8 @@ endforeach()
 # against. Passed at configure time rather than guessed from the working directory, which
 # differs between ctest and a direct run.
 target_compile_definitions(test_tls13_trust PRIVATE
+  WT_TRUST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vectors/trust")
+# The server test needs the same fixtures, because the certificate it sends is the one the
+# client validates.
+target_compile_definitions(test_tls13_server PRIVATE
   WT_TRUST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vectors/trust")

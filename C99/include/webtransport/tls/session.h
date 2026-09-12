@@ -193,6 +193,127 @@ const uint8_t *wt_tls_client_transport_parameters(const wt_tls_client_t *client,
  * it checks the marker itself -- so there is no reason to zero one by hand. */
 void wt_tls_client_clear(wt_tls_client_t *client);
 
+/* ============================================================== the server
+ *
+ * The other half of the same handshake, and deliberately the same shape: the ClientHello is
+ * checked for the version, a key share, the ciphersuite, the ALPN the server is willing to
+ * speak and the transport parameters QUIC requires; the flight is built in the order the
+ * client's checks expect; the client's Finished gates the application secrets exactly as the
+ * server's does on the client. A server that skipped one of those checks would complete a
+ * handshake whose secrets a client would refuse, and the mismatch would surface as a tag
+ * failure rather than as the missing check.
+ *
+ * THE FLIGHT IS TWO CALLS BECAUSE QUIC HAS TWO LEVELS. The ServerHello is protected with the
+ * Initial keys, which both sides derive from the connection ID before TLS says anything; the
+ * rest of the flight is protected with the handshake keys the ServerHello itself derives. A
+ * server that returned one buffer would leave the caller to parse TLS framing to find the
+ * boundary, and a caller that got it wrong would send the handshake records under the wrong
+ * keys -- a failure that looks like a broken cipher rather than a misplaced boundary.
+ */
+
+typedef struct wt_tls_server_identity {
+  /* The chain to send, leaf first. DER views into the caller's memory. */
+  const uint8_t *certificate[WT_TLS_CERTIFICATE_MAX_ENTRIES];
+  size_t certificate_len[WT_TLS_CERTIFICATE_MAX_ENTRIES];
+  size_t certificate_count;
+  /* The private key for the leaf, as DER (PKCS#8 or PKCS#1), and the scheme to sign with. */
+  const uint8_t *private_key;
+  size_t private_key_len;
+  uint16_t signature_scheme;
+} wt_tls_server_identity_t;
+
+typedef struct wt_tls_server_config {
+  const wt_tls_server_identity_t *identity;
+  /* The protocol to select. It must be one the client offered, and the server sends exactly
+   * one: a QUIC server sets this to "h3". */
+  const char *alpn;
+  /* Whether the client must send quic_transport_parameters, and what we send. */
+  int require_transport_parameters;
+  const uint8_t *transport_parameters;
+  size_t transport_parameters_len;
+  /* The x25519 private key to use for this handshake. NULL means generate one. */
+  const uint8_t *x25519_private;
+} wt_tls_server_config_t;
+
+typedef enum wt_tls_server_state {
+  WT_TLS_SERVER_START = 0,
+  WT_TLS_SERVER_WAIT_CLIENT_HELLO,
+  /* The ServerHello has been produced; the rest of the flight is fetched with
+   * `wt_tls_server_flight`, and the client's Finished is what ends the handshake. */
+  WT_TLS_SERVER_WAIT_CLIENT_FINISHED,
+  WT_TLS_SERVER_CONNECTED,
+  WT_TLS_SERVER_FAILED
+} wt_tls_server_state_t;
+
+typedef struct wt_tls_server {
+  uint64_t live;
+  wt_tls_server_config_t config;
+  wt_tls_server_state_t state;
+  wt_tls13_transcript_t transcript;
+  uint8_t private_key[WT_TLS_X25519_KEY_LEN];
+  uint8_t public_key[WT_TLS_X25519_KEY_LEN];
+  uint8_t handshake_secret[WT_TLS13_SECRET_LEN];
+  uint8_t master_secret[WT_TLS13_SECRET_LEN];
+  uint8_t client_handshake_secret[WT_TLS13_SECRET_LEN];
+  uint8_t server_handshake_secret[WT_TLS13_SECRET_LEN];
+  uint8_t client_application_secret[WT_TLS13_SECRET_LEN];
+  uint8_t server_application_secret[WT_TLS13_SECRET_LEN];
+  uint8_t server_random[WT_TLS_RANDOM_LEN];
+  uint8_t session_id[WT_TLS_SESSION_ID_MAX];
+  size_t session_id_len;
+  /* Whether the flight after the ServerHello has been built. It is built once: the
+   * CertificateVerify's signature is not deterministic for RSA-PSS, so a second flight would
+   * not match the transcript the first one signed, and QUIC retransmits CRYPTO data from its
+   * own send buffer rather than by asking TLS again. */
+  int flight_built;
+  /* The client's transport parameters, a view valid until the next call. */
+  const uint8_t *peer_transport_parameters;
+  size_t peer_transport_parameters_len;
+  const uint8_t *negotiated_alpn;
+  size_t negotiated_alpn_len;
+} wt_tls_server_t;
+
+/* Start a handshake. Nothing is sent until a ClientHello arrives. */
+wt_status_t wt_tls_server_begin(wt_tls_server_t *server,
+                                const wt_tls_server_config_t *config);
+
+/* Consume a handshake message from the client. On the ClientHello it writes the ServerHello and
+ * moves to the state where the rest of the flight can be fetched; on the client's Finished it
+ * verifies it, derives the application secrets, and writes nothing.
+ *
+ * A machine that is already mid-handshake may be restarted, exactly as the client's may. */
+wt_status_t wt_tls_server_receive(wt_tls_server_t *server, const uint8_t *message,
+                                  size_t len, uint8_t *out, size_t out_capacity,
+                                  size_t *out_len);
+
+/* The rest of the flight -- EncryptedExtensions, Certificate, CertificateVerify and Finished,
+ * concatenated -- which the caller sends under handshake keys after the ServerHello. Valid once
+ * the ClientHello has been processed, and buildable once: an RSA-PSS signature is randomised, so
+ * a second flight would not match the transcript the first one signed, and QUIC retransmits
+ * CRYPTO data from its own send buffer rather than by asking TLS again. A second call is
+ * WT_ERR_STATE. */
+wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out,
+                                 size_t out_capacity, size_t *out_len);
+
+wt_tls_server_state_t wt_tls_server_state(const wt_tls_server_t *server);
+
+/* The handshake traffic secrets, available once the ClientHello has been processed: the read
+ * secret is the client's, the write secret is the server's. */
+wt_status_t wt_tls_server_handshake_secrets(const wt_tls_server_t *server,
+                                            uint8_t read_out[WT_TLS13_SECRET_LEN],
+                                            uint8_t write_out[WT_TLS13_SECRET_LEN]);
+
+/* The application traffic secrets, available only in the CONNECTED state, which is reached only
+ * after the client's Finished has verified. */
+wt_status_t wt_tls_server_application_secrets(const wt_tls_server_t *server,
+                                              uint8_t read_out[WT_TLS13_SECRET_LEN],
+                                              uint8_t write_out[WT_TLS13_SECRET_LEN]);
+
+const uint8_t *wt_tls_server_alpn(const wt_tls_server_t *server, size_t *out_len);
+const uint8_t *wt_tls_server_transport_parameters(const wt_tls_server_t *server,
+                                                  size_t *out_len);
+void wt_tls_server_clear(wt_tls_server_t *server);
+
 #ifdef __cplusplus
 }
 #endif

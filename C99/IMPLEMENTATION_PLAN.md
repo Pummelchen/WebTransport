@@ -484,8 +484,35 @@ a transcript that did not yet include the ServerHello, and the client's Finished
 transcript that did not yet include the server's Finished. Each produces secrets that are
 well formed and verify against nothing.
 
-What remains in this phase: the server side of the same handshake, which needs a certificate
-and key to sign with and the flight-building order that mirrors the client's checks.
+**Seventh part done, and Phase 3 with it: the server handshake.**
+`wt_tls_server_*` mirrors the client's checks and order: the ClientHello is checked for the
+version, the ciphersuite, an x25519 key share, the ALPN the server speaks and the transport
+parameters QUIC requires; the ServerHello is answered with the handshake secrets derived from
+the transcript through it; the rest of the flight (EncryptedExtensions, Certificate,
+CertificateVerify, Finished) is built in the order the client's checks expect, with the
+signature over the transcript through the Certificate; and the client's Finished gates the
+application secrets exactly as the server's does on the client. The flight is two calls because
+QUIC has two encryption levels -- the ServerHello goes under Initial keys and the rest under
+handshake keys -- and it is buildable once, because an RSA-PSS signature is randomised and a
+second flight would not match the transcript the first one signed.
+
+The signer is `wt_tls_signature_sign`, the mirror of the verifier in the trust layer, and the
+reason the two halves here cannot disagree about what a scheme means: both take the digest from
+the scheme and both set RSA-PSS's parameters the same way.
+
+`tests/unit/test_tls13_server.c` (88 checks) runs a whole handshake between the two halves and
+requires that they agree: the ALPN and the transport parameters survive both directions, the
+certificate validates against the generated CA, and the application secrets each end derives are
+the other end's in the opposite direction -- the property neither half can check alone. The
+server's own gates are tested as refusals, and a client that will not accept the server's chain
+stops at the Certificate.
+
+Two defects came out of that test, both in the server and both invisible to a single half: the
+ALPN extension was written as a bare name where RFC 7301 defines a ProtocolNameList, so the
+client's parser refused it; and the test itself walked a concatenation of handshake messages
+with the header parser, which refuses a buffer longer than the message it describes -- which is
+why `wt_tls_handshake_message_len` now exists for walking a CRYPTO stream, as the QUIC runtime
+will have to.
 
 Port the Swift TLS behavior into portable C99 state machines.
 
