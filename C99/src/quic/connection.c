@@ -737,6 +737,36 @@ wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_
  * and the tag. Being generous here costs a few bytes of payload and never a packet that does not fit. */
 #define WT_QUIC_DATAGRAM_PACKET_OVERHEAD 64U
 
+wt_status_t wt_quic_connection_set_max_data(wt_quic_connection_t *connection, uint64_t maximum) {
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (connection->local_max_data_set && maximum < connection->local_max_data) return WT_ERR_LIMIT;
+  connection->local_max_data = maximum;
+  connection->local_max_data_set = 1;
+  return WT_OK;
+}
+
+uint64_t wt_quic_connection_max_data(const wt_quic_connection_t *connection) {
+  return connection == NULL ? 0U : connection->local_max_data;
+}
+
+wt_status_t wt_quic_connection_send_max_data(wt_quic_connection_t *connection, uint64_t maximum,
+                                             uint64_t now) {
+  wt_quic_frame_t frame;
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (!connection->local_max_data_set) return WT_ERR_STATE;
+  if (maximum < connection->local_max_data) return WT_ERR_LIMIT;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_DATA);
+  frame.as.max_data.maximum = maximum;
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+  if (status != WT_OK) return status;
+  if (sent) connection->local_max_data = maximum;
+  return sent ? WT_OK : WT_ERR_STATE;
+}
+
 /* Whether `stream_id` is one this endpoint is allowed to open, given what the peer granted. A stream
  * number is four fields in one (RFC 9000 section 2.1): the least significant bit is the initiator and
  * the next one is the directionality, so whether a limit applies at all depends on who opened the

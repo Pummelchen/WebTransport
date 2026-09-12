@@ -904,6 +904,19 @@ now carries a handshake, a datagram and a STREAM frame over loopback, checks the
 as the peer's composed handler sees them, that a stream beyond the peer's grant is refused, and that a
 peer-initiated stream is sendable.
 
+**Fifteenth part done: the connection-level limit this endpoint grants.** `wt_quic_connection_send_max_data`
+sends an RFC 9000 section 19.9 MAX_DATA frame, and `wt_quic_connection_set_max_data`/`_max_data` seed and
+read it. This is the OTHER DIRECTION from the peer limits: what the peer granted this endpoint is parsed
+from its transport parameters, and what this endpoint grants the peer has to be advertised and raised as
+the application reads. RFC 9000 section 4.1 makes a limit that only ever decreases a protocol error, so a
+sender must never lower one; the function refuses a limit below the last one it sent for exactly that
+reason, and it refuses to send at all before the caller has seeded the value this endpoint advertised in
+its own transport parameters -- a MAX_DATA frame that contradicted that parameter would be the same
+protocol error arriving from the other side.
+
+`tests/unit/test_quic_handshake.c` (214 checks) now carries a handshake, a datagram, a STREAM frame and a
+MAX_DATA frame over loopback, with the peer's composed handler recording what each carried.
+
 Implement the production network state machine.
 
 Tasks:

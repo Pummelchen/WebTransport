@@ -48,6 +48,7 @@ static uint64_t g_stream_offset;
 static size_t g_stream_length;
 static int g_stream_fin;
 static uint8_t g_stream_data[64];
+static uint64_t g_max_data;
 static size_t g_parameters_len;
 static uint64_t g_now;
 
@@ -243,6 +244,9 @@ static wt_status_t endpoint_on_frame(void *context, wt_quic_space_t space,
     if (frame->as.stream.length <= sizeof(g_stream_data) && frame->as.stream.data != NULL) {
       memcpy(g_stream_data, frame->as.stream.data, frame->as.stream.length);
     }
+  }
+  if (frame->kind == WT_QUIC_FRAME_KIND_MAX_DATA) {
+    g_max_data = frame->as.max_data.maximum;
   }
   if (frame->kind == WT_QUIC_FRAME_KIND_DATAGRAM) {
     return wt_quic_connection_on_datagram(&endpoint->connection, frame->as.datagram.data,
@@ -451,6 +455,31 @@ static void test_handshake(wt_udp_family_t family) {
       WT_EXPECT_OK("and reaches the peer", pump(&server, now, &arrived));
       WT_EXPECT_INT("on the stream it names", 1, arrived);
       WT_EXPECT_U64("whose number is the peer's", 3U, g_stream_id);
+    }
+
+    /* The limit this endpoint GRANTS the peer is the other direction from the one it obeys: it has to
+     * be seeded with what this endpoint advertised, may only ever rise (RFC 9000 section 4.1 makes a
+     * limit that falls a protocol error), and travels as a MAX_DATA frame. */
+    {
+      int arrived = 0;
+      WT_EXPECT_STATUS("a limit before the seed is a state error", WT_ERR_STATE,
+                       wt_quic_connection_send_max_data(&server.connection, 200000U, now));
+      WT_EXPECT_OK("the server seeds its limit",
+                   wt_quic_connection_set_max_data(&server.connection, 100000U));
+      WT_EXPECT_U64("which reads back", 100000U, wt_quic_connection_max_data(&server.connection));
+      WT_EXPECT_STATUS("lowering it is refused", WT_ERR_LIMIT,
+                       wt_quic_connection_send_max_data(&server.connection, 99999U, now));
+      WT_EXPECT_OK("raising it is what a reader does",
+                   wt_quic_connection_send_max_data(&server.connection, 200000U, now));
+      WT_EXPECT_U64("and is remembered", 200000U, wt_quic_connection_max_data(&server.connection));
+      now += 1000U;
+      g_now = now;
+      WT_EXPECT_OK("the client reads the frame", pump(&client, now, &arrived));
+      WT_EXPECT_INT("which arrived", 1, arrived);
+      WT_EXPECT_U64("with the new limit", 200000U, g_max_data);
+      g_max_data = 0U;
+      WT_EXPECT_STATUS("and a null connection is refused", WT_ERR_INVALID_ARGUMENT,
+                       wt_quic_connection_set_max_data(NULL, 1U));
     }
 
     /* A datagram travels under the application keys and is not retransmitted. */

@@ -169,6 +169,9 @@ typedef struct wt_quic_connection {
   wt_quic_close_state_t close;
   /* The peer's limits, parsed from the transport parameters its handshake carried. */
   wt_quic_peer_limits_t peer_limits;
+  /* The connection-level limit this endpoint grants the peer, and whether it has been seeded. */
+  uint64_t local_max_data;
+  int local_max_data_set;
   /* The datagrams that have arrived and not been read, bounded and with the newest discarded when it
    * is full (RFC 9221's frames are unreliable, so dropping one is not an error). */
   wt_quic_datagram_queue_t datagrams;
@@ -284,6 +287,25 @@ wt_status_t wt_quic_connection_send_datagram(wt_quic_connection_t *connection, c
 wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uint64_t stream_id,
                                            uint64_t offset, const uint8_t *data, size_t length,
                                            int fin, uint64_t now);
+
+/* Send one MAX_DATA frame (RFC 9000 section 19.9): the connection-level flow control limit this
+ * endpoint grants the peer, counted in bytes of stream data received in total.
+ *
+ * This is the limit this endpoint ADVERTISES, which is the other direction from `peer_limits`: what the
+ * peer granted this endpoint is parsed from its transport parameters, and what this endpoint grants the
+ * peer needs to be raised as the application reads. RFC 9000 section 4.1 makes a limit that only ever
+ * decreases a protocol error, so a caller must not lower one; this function refuses a limit below the
+ * last one it sent for exactly that reason, and the caller that owns the receive accounting is the one
+ * that knows when there is more room.
+ *
+ * The initial value is the one this endpoint sent in its own `initial_max_data` transport parameter,
+ * which this layer does not send, so `wt_quic_connection_set_max_data` seeds it: a caller that parses its
+ * own parameters (or simply knows what it advertised) sets it there and this function then only ever
+ * raises it. WT_ERR_STATE before that seed, WT_ERR_LIMIT for a limit that does not advance. */
+wt_status_t wt_quic_connection_set_max_data(wt_quic_connection_t *connection, uint64_t maximum);
+wt_status_t wt_quic_connection_send_max_data(wt_quic_connection_t *connection, uint64_t maximum,
+                                             uint64_t now);
+uint64_t wt_quic_connection_max_data(const wt_quic_connection_t *connection);
 
 /* The largest DATAGRAM payload this connection may send right now: the smaller of the peer's frame
  * limit and what the path carries, with the frame's own length field accounted for. Zero when the peer
