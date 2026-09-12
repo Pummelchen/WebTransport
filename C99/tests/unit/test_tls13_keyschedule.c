@@ -264,6 +264,7 @@ static void test_traffic_keys_and_finished(void) {
   uint8_t key[WT_TLS13_KEY_LEN];
   uint8_t iv[WT_TLS13_IV_LEN];
   uint8_t finished[WT_TLS13_FINISHED_LEN];
+  uint8_t secret_out[WT_TLS13_SECRET_LEN];
 
   memcpy(client_hs, WT_RFC8448_CLIENT_HANDSHAKE_SECRET, WT_TLS13_SECRET_LEN);
   memcpy(server_hs, WT_RFC8448_SERVER_HANDSHAKE_SECRET, WT_TLS13_SECRET_LEN);
@@ -352,12 +353,16 @@ static void test_traffic_keys_and_finished(void) {
   WT_EXPECT_STATUS("a NULL Finished key output is refused",
                    WT_ERR_INVALID_ARGUMENT,
                    wt_tls13_finished_key(client_hs, NULL));
+  /* These two take a secret-length output, not a key-length one: passing the 16-byte
+   * `key` buffer here was a 32-into-16 stack overflow that GCC found with
+   * -Wstringop-overflow. The refusal happens before anything is written, but a test
+   * may not rely on that to keep its own frame intact. */
   WT_EXPECT_STATUS("a NULL derive-secret label is refused",
                    WT_ERR_INVALID_ARGUMENT,
-                   wt_tls13_derive_secret(client_hs, NULL, client_hs, key));
+                   wt_tls13_derive_secret(client_hs, NULL, client_hs, secret_out));
   WT_EXPECT_STATUS("a NULL next traffic secret is refused",
                    WT_ERR_INVALID_ARGUMENT,
-                   wt_tls13_next_traffic_secret(NULL, key));
+                   wt_tls13_next_traffic_secret(NULL, secret_out));
 }
 
 static void test_finished_check(void) {
