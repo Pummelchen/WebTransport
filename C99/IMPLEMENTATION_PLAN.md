@@ -959,6 +959,22 @@ is sent a readable packet carrying a larger MAX_DATA than the peer had granted, 
 does not move -- while the packet itself is still read, because a closed connection still reads PADDING
 and closes.
 
+**Nineteenth part done: HANDSHAKE_DONE only reaches a client.** RFC 9000 section 19.20 says a server that
+receives a HANDSHAKE_DONE frame must treat it as a PROTOCOL_VIOLATION: the frame is what tells a client
+its handshake is confirmed, so a client that sends one is confused about which end of the connection it
+is. The connection refuses it there, naming the frame, and a client that receives one still has it handed
+on, because whether the handshake is now confirmed is the handshake layer's business. The frame dispatch
+that the handler path used is now one function (`deliver_to_handler`), so the "hand the rest to the
+caller" branch and the HANDSHAKE_DONE case share one statement of what a handler's refusal means.
+
+THE TEST THAT PROVES IT TOOK THREE ATTEMPTS, AND THE REASON IS WORTH RECORDING: a HANDSHAKE_DONE frame is
+one byte, and a packet whose payload is shorter than three bytes cannot be header-protected with a
+one-byte packet number (WT-72's minimum). The first two attempts built a packet that was refused as
+truncated, so nothing was sent, the server was never closed by the rule, and the assertions read the
+zeros of a connection that had been closed by something else -- an idle timeout -- instead. The fix is
+three PADDING bytes in the test's payload, and the lesson is that a test whose packet cannot be built
+proves nothing while looking like a failure of the thing under test.
+
 Implement the production network state machine.
 
 Tasks:

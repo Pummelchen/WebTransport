@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,591 checks, run by `ctest` and again under
+- 38 unit test files and 75,624 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -245,6 +245,9 @@ What is here:
   allows only PADDING, the close's own frames and the probes once a connection is closed, and the frame
   walk now enforces it -- through `wt_quic_close_accepts_frame_type`, so the rule is stated once, in the
   module that owns it.
+- **HANDSHAKE_DONE only reaches a client** (Phase 4, nineteenth part): RFC 9000 section 19.20 makes a
+  server that receives one refuse the connection with a PROTOCOL_VIOLATION, which the connection now does
+  while a client still has the frame handed on to the handshake layer.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

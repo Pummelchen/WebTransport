@@ -581,10 +581,29 @@ static uint64_t wire_type_when_closed(wt_quic_frame_type_t kind) {
   return 0x3fU; /* not a frame type this implementation knows, which the rule refuses */
 }
 
+/* Hand one frame to the caller's handler, which is where everything this layer does not own goes. A
+ * handler that refuses a frame is refusing the connection, and the code it named -- if it named one --
+ * is what the peer is told. */
+static wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_visit_t *visit,
+                                      const wt_quic_frame_t *frame) {
+  wt_status_t status;
+
+  visit->ack_eliciting = 1;
+  if (connection->handler == NULL) return WT_OK;
+  status = connection->handler(connection->handler_context, visit->space, frame);
+  if (status == WT_OK) return WT_OK;
+  {
+    uint64_t code = connection->close_code_set ? connection->close_code : WT_QUIC_INTERNAL_ERROR;
+    uint64_t type = connection->close_code_set ? connection->close_frame_type : 0U;
+    connection->close_code_set = 0;
+    (void)close_with(connection, code, type, visit->now);
+  }
+  return status;
+}
+
 static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
   wt_quic_visit_t *visit = context;
   wt_quic_connection_t *connection = visit->connection;
-  wt_status_t status;
 
   /* RFC 9000 section 10.2.1: once the connection is closed, only PADDING, the close's own frames and the
    * frames a probe needs may still be processed -- everything else is ignored, and ignoring it STOPS the
@@ -626,6 +645,17 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
       *granted = frame->as.max_streams.maximum;
       return WT_OK;
     }
+    case WT_QUIC_FRAME_KIND_HANDSHAKE_DONE:
+      /* RFC 9000 section 19.20: only a CLIENT may receive this frame. A server that receives one has a
+       * peer that believes it is the server, which is a PROTOCOL_VIOLATION rather than something to
+       * ignore -- this frame is what tells a client its handshake is confirmed, so a client sending one
+       * is confused about which end of the connection it is. A client's use of it is the handshake
+       * layer's business, so it is still handed on. */
+      if (connection->config.role == WT_QUIC_ROLE_SERVER) {
+        return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, WT_QUIC_FRAME_HANDSHAKE_DONE,
+                          visit->now);
+      }
+      return deliver_to_handler(connection, visit, frame);
     case WT_QUIC_FRAME_KIND_PING:
     case WT_QUIC_FRAME_KIND_CRYPTO:
     case WT_QUIC_FRAME_KIND_STREAM:
@@ -641,24 +671,10 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
     case WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID:
     case WT_QUIC_FRAME_KIND_PATH_CHALLENGE:
     case WT_QUIC_FRAME_KIND_PATH_RESPONSE:
-    case WT_QUIC_FRAME_KIND_HANDSHAKE_DONE:
     case WT_QUIC_FRAME_KIND_DATAGRAM:
       /* Everything that is not PADDING, an acknowledgement or a close makes the packet
        * ack-eliciting, whether or not this layer acts on it itself (RFC 9000 section 13.2.1). */
-      visit->ack_eliciting = 1;
-      if (connection->handler == NULL) return WT_OK;
-      status = connection->handler(connection->handler_context, visit->space, frame);
-      if (status != WT_OK) {
-        /* A handler that refuses a frame is refusing the connection: there is no way to accept a
-         * packet that its owner could not process. The code it named, if it named one, is what the
-         * peer is told. */
-        uint64_t code = connection->close_code_set ? connection->close_code : WT_QUIC_INTERNAL_ERROR;
-        uint64_t type = connection->close_code_set ? connection->close_frame_type : 0U;
-        connection->close_code_set = 0;
-        (void)close_with(connection, code, type, visit->now);
-        return status;
-      }
-      return WT_OK;
+      return deliver_to_handler(connection, visit, frame);
   }
   /* A kind this layer does not know cannot come from the decoder, which refuses unknown types, so
    * this is a header/library mismatch rather than peer data. */

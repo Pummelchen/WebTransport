@@ -697,7 +697,97 @@ static void test_key_discard(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 section 19.20: a client sends HANDSHAKE_DONE only if it believes it is the server, and a
+ * server that receives one must close the connection with a PROTOCOL_VIOLATION naming the frame. A client
+ * that receives one is doing exactly what the frame is for, so it is not an error there.
+ *
+ * No handshake is needed: both ends are given application keys derived from one secret, so the packet the
+ * test builds is one the receiver can read and the rule is the only thing that can refuse it. The payload
+ * is padded to the three bytes header protection needs (WT-72) -- a bare one-byte HANDSHAKE_DONE frame
+ * cannot be protected with a one-byte packet number, and a packet that cannot be built is a test that
+ * proves nothing. */
+static void test_handshake_done_role(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 60000000U;
+  uint8_t payload[8];
+  uint8_t datagram[128];
+  wt_writer_t w;
+  size_t payload_len;
+  size_t datagram_len = 0U;
+  wt_quic_packet_build_t build;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x20U + i);
+  WT_EXPECT_OK("application keys derive",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the client sends with them",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads with them",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("the server sends with them too",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("and the client reads with them",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+
+  /* A HANDSHAKE_DONE frame, then PADDING to what header protection needs. */
+  w = wt_writer_init(payload, sizeof(payload));
+  {
+    wt_quic_frame_t done = wt_quic_frame_make(WT_QUIC_FRAME_KIND_HANDSHAKE_DONE);
+    WT_EXPECT_OK("a HANDSHAKE_DONE encodes", wt_quic_frame_encode(&w, &done));
+  }
+  while (wt_writer_offset(&w) < 4U) wt_writer_u8(&w, 0U);
+  payload_len = wt_writer_offset(&w);
+
+  memset(&build, 0, sizeof(build));
+  build.short_header = 1;
+  build.version = WT_QUIC_VERSION_1;
+  build.destination_connection_id = k_dcid;
+  build.destination_connection_id_len = sizeof(k_dcid);
+  build.packet_number = 0U;
+  build.packet_number_length = 1U;
+  build.payload = payload;
+  build.payload_len = payload_len;
+  build.keys = &pair.client.keys_out[WT_QUIC_SPACE_APPLICATION];
+  WT_EXPECT_OK("the packet builds",
+               wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("and the client sends it",
+               wt_udp_send(&pair.client_socket, &pair.server_address, datagram, datagram_len));
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("the server is closed by it", 1, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a protocol violation", (uint64_t)WT_QUIC_PROTOCOL_VIOLATION,
+                pair.server.close.error_code);
+  WT_EXPECT_U64("naming the frame", WT_QUIC_FRAME_HANDSHAKE_DONE, pair.server.close.frame_type);
+
+  /* The other direction: a client that receives one is doing what the frame is for. */
+  memset(&build, 0, sizeof(build));
+  build.short_header = 1;
+  build.version = WT_QUIC_VERSION_1;
+  build.destination_connection_id = k_dcid;
+  build.destination_connection_id_len = sizeof(k_dcid);
+  build.packet_number = 1U;
+  build.packet_number_length = 1U;
+  build.payload = payload;
+  build.payload_len = payload_len;
+  build.keys = &pair.server.keys_out[WT_QUIC_SPACE_APPLICATION];
+  datagram_len = 0U;
+  WT_EXPECT_OK("a packet to the client builds",
+               wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("and the server sends it",
+               wt_udp_send(&pair.server_socket, &pair.client_address, datagram, datagram_len));
+  now += 1000U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_INT("the client is not closed by it", 0, wt_quic_connection_is_closed(&pair.client));
+
+  wt_quic_packet_keys_clear(&keys);
+  close_pair(&pair);
+}
+
 int main(void) {
+  test_handshake_done_role();
   test_key_discard();
   test_round_trip(WT_UDP_IPV4);
   test_round_trip(WT_UDP_IPV6);
