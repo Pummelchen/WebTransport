@@ -581,6 +581,19 @@ finding was in the tests: the packet threshold's boundary and the time threshold
 inclusive comparisons, so an off-by-one in either direction is a test that passes for the wrong
 reason.
 
+**A contract defect fixed on the way to the runtime: a failed tag is an authentication failure.** The
+Phase 2 protection layer returned `WT_ERR_PROTOCOL` from `wt_quic_unprotect_frames` when the AEAD's tag
+did not verify, and `status.h` says the opposite in the status's own definition: `WT_ERR_AUTHENTICATION`
+exists for exactly this case and is "deliberately not `WT_ERR_PROTOCOL`", because the packet is well
+formed and simply was not produced by the holder of the key -- forged or corrupted in transit, which is
+the ordinary case on a hostile network rather than a violation. The two could not both be right, and
+the connection runtime is where it would have bitten: a caller cannot decide whether to discard a
+datagram or to close a connection if both are reported as the same protocol error. `unprotect_frames`
+now returns `WT_ERR_AUTHENTICATION`, its header states that the choice of remedy belongs to the caller,
+and `wt_quic_packet_read` passes it through unchanged. The five expectations in the Phase 2 test that
+pinned the old value were the thing that was wrong, which is the one case where a test is worth less
+than nothing: it was holding a defect in place.
+
 **Third part done: congestion control.** `quic/congestion.h` and `src/quic/congestion.c` are RFC
 9002 section 7's NewReno: the initial window's formula with its 14720-byte bound, slow start,
 congestion avoidance's `mds * acked / cwnd` increment, the recovery epoch that makes a burst of

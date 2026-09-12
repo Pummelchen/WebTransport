@@ -260,20 +260,22 @@ static void test_tamper_is_refused(void) {
     }
   }
 
-  /* The tag itself. A failed tag is reported as WT_ERR_PROTOCOL, which is the protection layer's
-   * documented answer and not this layer's invention: a packet that cannot be authenticated is
-   * discarded, and the caller cannot tell a corrupt datagram from a hostile one. */
+  /* The tag itself. A tag that does not verify is WT_ERR_AUTHENTICATION and not WT_ERR_PROTOCOL:
+   * status.h reserves the latter for bytes that violate the protocol, and a packet that was not
+   * produced by the holder of the key is the ordinary case on a hostile network. Whether that is a
+   * discarded datagram or a closed connection is the caller's decision, which is why this layer does
+   * not make it. */
   memcpy(packet, saved, packet_len);
   packet[packet_len - 1U] ^= 0x80U;
   memset(&received, 0, sizeof(received));
-  WT_EXPECT_STATUS("a flipped tag is refused", WT_ERR_PROTOCOL,
+  WT_EXPECT_STATUS("a flipped tag fails authentication", WT_ERR_AUTHENTICATION,
                    wt_quic_packet_read(packet, packet_len, &keys, 0U, sizeof(k_dcid), &received));
 
   /* And one byte of the connection ID: a packet for another connection is refused, not returned. */
   memcpy(packet, saved, packet_len);
   packet[1] ^= 0xffU;
   memset(&received, 0, sizeof(received));
-  WT_EXPECT_STATUS("a packet for another connection is refused", WT_ERR_PROTOCOL,
+  WT_EXPECT_STATUS("a packet for another connection fails authentication", WT_ERR_AUTHENTICATION,
                    wt_quic_packet_read(packet, packet_len, &keys, 0U, sizeof(k_dcid), &received));
 
   wt_quic_packet_keys_clear(&keys);
@@ -301,17 +303,19 @@ static void test_wrong_connection_id_len(void) {
   WT_EXPECT_OK("the packet builds",
                wt_quic_packet_build(&build, packet, sizeof(packet), &packet_len));
 
-  /* Both lengths are refused, and the refusal comes from whichever check the wrong offset breaks:
-   * the mask is taken from the wrong place, so the unmasked first byte is whatever the mask makes it
-   * -- which the decoder may reject as a reserved bit or a wrong form -- and if it survives that, the
-   * packet number and associated data are wrong and the tag does not verify. Both are WT_ERR_PROTOCOL,
-   * and the property that matters is that no datagram is read as a packet. */
+  /* Both lengths must be refused, and WHICH CHECK REFUSES THEM IS A PROPERTY OF THE MASK, so the test
+   * pins the refusal rather than its name: the sample is taken from the wrong offset, so the unmasked
+   * first byte is arbitrary -- the decoder may refuse it as a reserved bit or a wrong form, which is
+   * WT_ERR_PROTOCOL -- and if it survives that, the packet number and the associated data are wrong
+   * and the tag fails, which is WT_ERR_AUTHENTICATION. What must never happen is a packet. */
   memset(&received, 0, sizeof(received));
-  WT_EXPECT_STATUS("a shorter connection ID than the packet's is refused", WT_ERR_PROTOCOL,
-                   wt_quic_packet_read(packet, packet_len, &keys, 0U, 4U, &received));
+  WT_EXPECT_TRUE("a shorter connection ID than the packet's is refused",
+                 wt_quic_packet_read(packet, packet_len, &keys, 0U, 4U, &received) != WT_OK);
+  WT_EXPECT_U64("and nothing was read", 0U, (uint64_t)received.payload_len);
   memset(&received, 0, sizeof(received));
-  WT_EXPECT_STATUS("and a longer one does too", WT_ERR_PROTOCOL,
-                   wt_quic_packet_read(packet, packet_len, &keys, 0U, 12U, &received));
+  WT_EXPECT_TRUE("and a longer one is refused too",
+                 wt_quic_packet_read(packet, packet_len, &keys, 0U, 12U, &received) != WT_OK);
+  WT_EXPECT_U64("and nothing was read", 0U, (uint64_t)received.payload_len);
 
   wt_quic_packet_keys_clear(&keys);
 }

@@ -169,11 +169,16 @@ wt_status_t wt_quic_protect_frames(const wt_quic_packet_keys_t *keys,
  * excluding the tag, which is passed separately because the caller has already
  * decided that it belongs to this packet.
  *
- * Returns WT_OK when the tag matches and WT_ERR_PROTOCOL when it does not, and in
+ * Returns WT_OK when the tag matches and WT_ERR_AUTHENTICATION when it does not, and in
  * the second case the plaintext written to `packet` is cleared before returning.
  * THAT IS THE WHOLE POINT OF THIS FUNCTION'S SHAPE: a caller cannot forget to
  * compare the tag, cannot act on unauthenticated plaintext, and cannot leak what
- * a failed decryption produced. The comparison is constant time. */
+ * a failed decryption produced. The comparison is constant time.
+ *
+ * WT_ERR_AUTHENTICATION rather than WT_ERR_PROTOCOL, which status.h reserves for bytes
+ * that violate the protocol: a tag that does not verify means the packet was not produced
+ * by the holder of the key -- forged or corrupted in transit -- and the caller decides
+ * whether that is a discarded datagram or a closed connection (RFC 9001 section 5.3). */
 wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys,
                                      uint64_t packet_number, const uint8_t *aad,
                                      size_t aad_len, uint8_t *packet,

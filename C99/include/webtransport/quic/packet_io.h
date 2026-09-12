@@ -110,13 +110,13 @@ typedef struct wt_quic_received_packet {
  * for one -- and it is ignored rather than required to be zero because a caller that does not know
  * which form it is holding is the ordinary case.
  *
- * WT_ERR_PROTOCOL when the tag does not verify, which is reported by the protection layer and is the
- * ordinary outcome for a packet that is not for this connection or not for this key -- so a caller
- * must not read it as "the peer broke the protocol", only as "this datagram is discarded". The rest:
- * WT_ERR_TRUNCATED when the datagram is too short to hold what its header claims or too short to carry
- * a header protection sample at all, WT_ERR_PROTOCOL for a header this implementation refuses, and
- * WT_ERR_INVALID_ARGUMENT for a Version Negotiation or a Retry, neither of which is protected by the
- * keys this takes and both of which have their own parsers.
+ * WT_ERR_AUTHENTICATION when the tag does not verify, which is the ordinary outcome for a packet that
+ * is not for this connection or not for this key, and is not the same as a protocol violation: the
+ * caller discards the datagram or closes the connection, and this layer does not decide which. The
+ * rest: WT_ERR_TRUNCATED when the datagram is too short to hold what its header claims or too short to
+ * carry a header protection sample at all, WT_ERR_PROTOCOL for a header this implementation refuses,
+ * and WT_ERR_INVALID_ARGUMENT for a Version Negotiation or a Retry, neither of which is protected by
+ * the keys this takes and both of which have their own parsers.
  *
  * Nothing of the plaintext survives a failed tag: the buffer holds the unmasked header and zeroed
  * ciphertext, never unauthenticated frames (see wt_quic_unprotect_frames). */

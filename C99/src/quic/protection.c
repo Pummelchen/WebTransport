@@ -352,7 +352,13 @@ wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys,
   wt_secure_zero(nonce, sizeof(nonce));
   if (status == WT_ERR_AUTHENTICATION) {
     if (len != 0U) wt_secure_zero(packet, len);
-    return WT_ERR_PROTOCOL;
+    /* Reported as the authentication failure it is, not as WT_ERR_PROTOCOL: status.h reserves that
+     * name for bytes that violate the protocol, and a tag that does not verify is the ordinary
+     * outcome of a lossy or hostile network -- the packet is well formed and simply was not produced
+     * by the holder of the key. WHETHER TO DISCARD QUIETLY OR TO CLOSE THE CONNECTION IS THE CALLER'S
+     * DECISION (RFC 9001 section 5.3 discards; a connection may also treat it as a violation), so this
+     * layer reports the fact and does not make the policy call for it. */
+    return WT_ERR_AUTHENTICATION;
   }
   return status;
 }

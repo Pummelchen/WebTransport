@@ -444,7 +444,7 @@ static void test_client_initial_packet(void) {
     memcpy(copy, WT_RFC9001_CLIENT_INITIAL_PACKET, sizeof(copy));
     memcpy(protected_header, copy, CLIENT_INITIAL_HEADER_LEN);
     WT_EXPECT_STATUS("the protected header as AAD is refused",
-                     WT_ERR_PROTOCOL,
+                     WT_ERR_AUTHENTICATION,
                      wt_quic_unprotect_frames(
                          &keys, CLIENT_INITIAL_PN, protected_header,
                          CLIENT_INITIAL_HEADER_LEN,
@@ -467,7 +467,7 @@ static void test_client_initial_packet(void) {
                        WT_AEAD_AES_128_GCM, keys.hp, keys.hp_len, copy,
                        sizeof(copy), CLIENT_INITIAL_PN_OFFSET, NULL));
       copy[CLIENT_INITIAL_TAG_OFFSET + damage] ^= 0x80U;
-      WT_EXPECT_STATUS("a damaged tag is refused", WT_ERR_PROTOCOL,
+      WT_EXPECT_STATUS("a damaged tag is refused", WT_ERR_AUTHENTICATION,
                        wt_quic_unprotect_frames(
                            &keys, CLIENT_INITIAL_PN, copy,
                            CLIENT_INITIAL_HEADER_LEN,
@@ -487,7 +487,7 @@ static void test_client_initial_packet(void) {
                      WT_AEAD_AES_128_GCM, keys.hp, keys.hp_len, copy,
                      sizeof(copy), CLIENT_INITIAL_PN_OFFSET, NULL));
     copy[CLIENT_INITIAL_HEADER_LEN + 1U] ^= 0x01U;
-    WT_EXPECT_STATUS("a damaged ciphertext is refused", WT_ERR_PROTOCOL,
+    WT_EXPECT_STATUS("a damaged ciphertext is refused", WT_ERR_AUTHENTICATION,
                      wt_quic_unprotect_frames(
                          &keys, CLIENT_INITIAL_PN, copy,
                          CLIENT_INITIAL_HEADER_LEN,
@@ -507,7 +507,7 @@ static void test_client_initial_packet(void) {
                  wt_quic_unprotect_header(
                      WT_AEAD_AES_128_GCM, keys.hp, keys.hp_len, copy,
                      sizeof(copy), CLIENT_INITIAL_PN_OFFSET, NULL));
-    WT_EXPECT_STATUS("the wrong packet number is refused", WT_ERR_PROTOCOL,
+    WT_EXPECT_STATUS("the wrong packet number is refused", WT_ERR_AUTHENTICATION,
                      wt_quic_unprotect_frames(
                          &keys, CLIENT_INITIAL_PN + 1U, copy,
                          CLIENT_INITIAL_HEADER_LEN,
@@ -523,7 +523,7 @@ static void test_client_initial_packet(void) {
                      sizeof(copy), CLIENT_INITIAL_PN_OFFSET, NULL));
     WT_EXPECT_OK("the server Initial keys", server_initial_keys(&server));
     WT_EXPECT_STATUS("the server keys cannot read a client packet",
-                     WT_ERR_PROTOCOL,
+                     WT_ERR_AUTHENTICATION,
                      wt_quic_unprotect_frames(
                          &server, CLIENT_INITIAL_PN, copy,
                          CLIENT_INITIAL_HEADER_LEN,
