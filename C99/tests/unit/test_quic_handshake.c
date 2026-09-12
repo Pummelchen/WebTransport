@@ -41,6 +41,13 @@ static const uint8_t k_connection_id[8] = {0x83U, 0x94U, 0xc8U, 0xf0U, 0x3eU, 0x
  * the real thing now, so the limits the connection parses out of the peer's copy are the limits the
  * handshake carrier. `g_now` is the clock the composed frame handler hands to the connection. */
 static uint8_t g_parameters[256];
+/* What the server's composed handler saw of the last STREAM frame: the wire half of sending on a
+ * stream is what this records. */
+static uint64_t g_stream_id;
+static uint64_t g_stream_offset;
+static size_t g_stream_length;
+static int g_stream_fin;
+static uint8_t g_stream_data[64];
 static size_t g_parameters_len;
 static uint64_t g_now;
 
@@ -228,6 +235,15 @@ static wt_status_t endpoint_on_frame(void *context, wt_quic_space_t space,
   wt_status_t status = wt_quic_handshake_on_frame(&endpoint->handshake, space, frame);
 
   if (status != WT_OK) return status;
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) {
+    g_stream_id = frame->as.stream.id;
+    g_stream_offset = frame->as.stream.offset;
+    g_stream_length = frame->as.stream.length;
+    g_stream_fin = frame->as.stream.fin;
+    if (frame->as.stream.length <= sizeof(g_stream_data) && frame->as.stream.data != NULL) {
+      memcpy(g_stream_data, frame->as.stream.data, frame->as.stream.length);
+    }
+  }
   if (frame->kind == WT_QUIC_FRAME_KIND_DATAGRAM) {
     return wt_quic_connection_on_datagram(&endpoint->connection, frame->as.datagram.data,
                                           frame->as.datagram.length, g_now);
@@ -400,6 +416,42 @@ static void test_handshake(wt_udp_family_t family) {
      * fields and the tag. */
     WT_EXPECT_U64("so a datagram payload is bounded by both limits", 1200U - 64U,
                   wt_quic_connection_max_datagram_payload(&client.connection));
+
+    /* The wire half of sending on a stream: the frame's fields are the ones the caller gave, and the
+     * stream number is bounded by what the peer granted. */
+    {
+      static const uint8_t k_stream[6] = {0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U};
+      int arrived = 0;
+
+      g_stream_length = 0U;
+      WT_EXPECT_OK("the client sends stream data",
+                   wt_quic_connection_send_stream(&client.connection, 0U, 0U, k_stream,
+                                                  sizeof(k_stream), 1, now));
+      now += 1000U;
+      g_now = now;
+      WT_EXPECT_OK("the server reads a datagram", pump(&server, now, &arrived));
+      WT_EXPECT_INT("which arrived", 1, arrived);
+      WT_EXPECT_U64("with the stream it was sent on", 0U, g_stream_id);
+      WT_EXPECT_U64("at its offset", 0U, g_stream_offset);
+      WT_EXPECT_U64("with its bytes", (uint64_t)sizeof(k_stream), (uint64_t)g_stream_length);
+      WT_EXPECT_BYTES("byte for byte", k_stream, g_stream_data, sizeof(k_stream));
+      WT_EXPECT_INT("and the end of the stream marked", 1, g_stream_fin);
+
+      /* A stream number the peer did not grant is refused: the parameters above grant four
+       * client-initiated bidirectional streams, so index four is one too many. */
+      WT_EXPECT_STATUS("a stream beyond the peer's grant is a limit", WT_ERR_LIMIT,
+                       wt_quic_connection_send_stream(&client.connection, 16U, 0U, k_stream, 1U, 0,
+                                                      now));
+      /* A peer-initiated stream is theirs, so sending on it is not bounded by their grant. */
+      WT_EXPECT_OK("a peer-initiated stream is always sendable",
+                   wt_quic_connection_send_stream(&client.connection, 3U, 0U, k_stream, 1U,
+                                                              0, now));
+      now += 1000U;
+      g_now = now;
+      WT_EXPECT_OK("and reaches the peer", pump(&server, now, &arrived));
+      WT_EXPECT_INT("on the stream it names", 1, arrived);
+      WT_EXPECT_U64("whose number is the peer's", 3U, g_stream_id);
+    }
 
     /* A datagram travels under the application keys and is not retransmitted. */
     {

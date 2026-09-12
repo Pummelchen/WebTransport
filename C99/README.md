@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,509 checks, run by `ctest` and again under
+- 38 unit test files and 75,535 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -225,6 +225,11 @@ What is here:
   keys when the first Handshake packet is processed, the Handshake keys when the handshake is confirmed.
   Both are a MUST, not a tidy-up: the Initial keys come from a connection ID either end can see, so
   keeping them leaves the connection readable to anyone who saw its first packet.
+- **The STREAM send path** (Phase 4, fourteenth part): `wt_quic_connection_send_stream` encodes and sends
+  an RFC 9000 section 19.8 frame with the stream number checked against the peer's grant -- and a stream
+  number is four fields in one, so whether a limit applies depends on who opened the stream. It is
+  deliberately not the stream layer: nothing remembers the bytes, so nothing retransmits them, which is
+  what the stream layer adds.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

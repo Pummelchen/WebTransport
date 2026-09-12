@@ -267,6 +267,24 @@ const wt_quic_peer_limits_t *wt_quic_connection_peer_limits(const wt_quic_connec
 wt_status_t wt_quic_connection_send_datagram(wt_quic_connection_t *connection, const uint8_t *data,
                                              size_t length, uint64_t now);
 
+/* Send one STREAM frame (RFC 9000 section 19.8) carrying `length` bytes of `stream_id` at `offset`,
+ * with FIN when this is the end of the stream.
+ *
+ * WHAT THIS IS AND IS NOT. It is the wire half of sending on a stream: it checks that the stream is one
+ * this endpoint may open at all against the peer's `initial_max_streams_bidi`/`_uni`, encodes the frame
+ * and sends it. It is NOT the stream layer: nothing here remembers the bytes, so a STREAM frame is not
+ * retransmitted (the caller that keeps the data must send it again), and nothing counts the flow control
+ * credit spent -- `wt_quic_connection_peer_limits` is what a stream layer reads to do that. It exists
+ * because the send path and the wire format are worth having and testing on their own, and because the
+ * stream layer's first part is exactly this plus the state that remembers.
+ *
+ * WT_ERR_LIMIT when the stream number is beyond what the peer granted, WT_ERR_STATE before its parameters
+ * have been parsed, WT_ERR_INVALID_ARGUMENT for a null payload with a length, WT_ERR_AGAIN when the
+ * congestion window has no room. */
+wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uint64_t stream_id,
+                                           uint64_t offset, const uint8_t *data, size_t length,
+                                           int fin, uint64_t now);
+
 /* The largest DATAGRAM payload this connection may send right now: the smaller of the peer's frame
  * limit and what the path carries, with the frame's own length field accounted for. Zero when the peer
  * does not accept datagrams. */

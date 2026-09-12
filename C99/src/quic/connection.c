@@ -737,6 +737,53 @@ wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_
  * and the tag. Being generous here costs a few bytes of payload and never a packet that does not fit. */
 #define WT_QUIC_DATAGRAM_PACKET_OVERHEAD 64U
 
+/* Whether `stream_id` is one this endpoint is allowed to open, given what the peer granted. A stream
+ * number is four fields in one (RFC 9000 section 2.1): the least significant bit is the initiator and
+ * the next one is the directionality, so whether a limit applies at all depends on who opened the
+ * stream. Sending on a stream the PEER opened is always allowed -- it is theirs to send on -- and only
+ * a stream this endpoint opens is bounded by the count the peer granted. */
+static int stream_id_allowed(const wt_quic_connection_t *connection, uint64_t stream_id) {
+  int ours = (int)(stream_id & 0x01U) == (connection->config.role == WT_QUIC_ROLE_CLIENT ? 0 : 1);
+  int bidi = (stream_id & 0x02U) == 0U;
+  uint64_t index = stream_id >> 2;
+  uint64_t granted;
+
+  if (!ours) return 1;
+  granted = bidi ? connection->peer_limits.initial_max_streams_bidi
+                 : connection->peer_limits.initial_max_streams_uni;
+  return index < granted;
+}
+
+wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uint64_t stream_id,
+                                           uint64_t offset, const uint8_t *data, size_t length,
+                                           int fin, uint64_t now) {
+  wt_quic_frame_t frame;
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (!connection->peer_limits.set) return WT_ERR_STATE;
+  if (!stream_id_allowed(connection, stream_id)) return WT_ERR_LIMIT;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
+  frame.as.stream.id = stream_id;
+  frame.as.stream.offset = offset;
+  /* The offset is omitted when it is zero, which is what a sender does for the first bytes of a stream:
+   * one byte saved per frame, and the flag is what an encoder needs to reproduce the choice. */
+  frame.as.stream.has_offset = offset != 0U;
+  frame.as.stream.length = length;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.fin = fin;
+  frame.as.stream.data = data;
+
+  /* No descriptor: this function does not own the bytes, so it cannot send them again. The stream layer
+   * that does keeps them. */
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+  if (status != WT_OK) return status;
+  return sent ? WT_OK : WT_ERR_STATE;
+}
+
 uint64_t wt_quic_connection_max_datagram_payload(const wt_quic_connection_t *connection) {
   if (connection == NULL || !connection->peer_limits.set) return 0U;
   if (connection->peer_limits.max_datagram_frame_size == 0U) return 0U;

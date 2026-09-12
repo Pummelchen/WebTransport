@@ -888,6 +888,22 @@ a real handshake with the application keys kept, and `tests/unit/test_quic_conne
 discard itself -- idempotent, a send in a discarded space refused with WT_ERR_STATE, a space that never
 had keys not an error, and the arguments.
 
+**Fourteenth part done: the STREAM frame send path.** `wt_quic_connection_send_stream` encodes an
+RFC 9000 section 19.8 STREAM frame -- id, offset (omitted when it is zero, which is what a sender does for
+a stream's first bytes), length, FIN and data -- and sends it, with the stream number checked against what
+the peer granted. That check is the interesting half: a stream number is four fields in one (section 2.1),
+so whether a limit applies at all depends on WHO opened the stream -- sending on a stream the peer opened
+is always allowed, because it is theirs, and only a stream this endpoint opens is bounded by the count the
+peer's `initial_max_streams_bidi`/`_uni` grants.
+
+It is deliberately NOT the stream layer, and the header says so: nothing here remembers the bytes, so a
+STREAM frame is not retransmitted and nothing counts the flow control credit spent. It exists because the
+send path and the wire format are worth having and testing on their own, and because the stream layer's
+first part is exactly this plus the state that remembers. `tests/unit/test_quic_handshake.c` (194 checks)
+now carries a handshake, a datagram and a STREAM frame over loopback, checks the frame's fields and bytes
+as the peer's composed handler sees them, that a stream beyond the peer's grant is refused, and that a
+peer-initiated stream is sendable.
+
 Implement the production network state machine.
 
 Tasks:
