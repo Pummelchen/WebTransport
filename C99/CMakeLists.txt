@@ -82,8 +82,12 @@ set(WT_QUIC_SOURCES
   src/quic/connection_id.c
   src/quic/protection.c
 )
+set(WT_TLS_SOURCES
+  src/tls/keyschedule.c
+)
 list(APPEND WT_CORE_SOURCES ${WT_CRYPTO_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_QUIC_SOURCES})
+list(APPEND WT_CORE_SOURCES ${WT_TLS_SOURCES})
 
 set(WT_PUBLIC_HEADERS
   include/webtransport/status.h
@@ -105,6 +109,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/connection_id.h
   include/webtransport/quic/protection.h
   include/webtransport/crypto/crypto.h
+  include/webtransport/tls/keyschedule.h
 )
 
 # The sanitizer flags are added to every target when the option is on, including

@@ -91,19 +91,73 @@ static void test_sha256(void) {
     WT_EXPECT_BYTES("with the same digest", one_shot, out, WT_SHA256_LEN);
   }
 
+  /* The snapshot: the hash of the message so far, leaving the context usable.
+   * This is what a handshake transcript reads at each point where the key schedule
+   * needs a hash, so "the context survives it" is the property under test. */
+  {
+    wt_sha256_ctx_t ctx;
+    uint8_t so_far[WT_SHA256_LEN];
+    uint8_t rest[WT_SHA256_LEN];
+    uint8_t want_abc[WT_SHA256_LEN];
+    uint8_t want_abcdef[WT_SHA256_LEN];
+    unhex("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          want_abc, sizeof(want_abc));
+    unhex("bef57ec7f53a6d40beb640a780a639c83bc29ac8a9816f1fc6c5c6dcd93c4721",
+          want_abcdef, sizeof(want_abcdef));
+    WT_EXPECT_OK("a snapshot context starts", wt_sha256_init(&ctx));
+    WT_EXPECT_OK("and takes the first half",
+                 wt_sha256_update(&ctx, "abc", 3U));
+    WT_EXPECT_OK("the hash so far", wt_sha256_snapshot(&ctx, so_far));
+    WT_EXPECT_BYTES("is the hash of the first half", want_abc, so_far,
+                    WT_SHA256_LEN);
+    /* Reading it twice gives the same answer, and the context still absorbs. */
+    WT_EXPECT_OK("read again", wt_sha256_snapshot(&ctx, so_far));
+    WT_EXPECT_BYTES("to the same value", want_abc, so_far, WT_SHA256_LEN);
+    WT_EXPECT_OK("the context takes the second half",
+                 wt_sha256_update(&ctx, "def", 3U));
+    WT_EXPECT_OK("and finalises", wt_sha256_final(&ctx, rest));
+    WT_EXPECT_BYTES("to the whole message's hash", want_abcdef, rest,
+                    WT_SHA256_LEN);
+    WT_EXPECT_STATUS("snapshotting into NULL is refused", WT_ERR_INVALID_ARGUMENT,
+                     wt_sha256_snapshot(&ctx, NULL));
+    /* Finalising ended the context, so a snapshot of it is a state error rather
+     * than a hash of the last block. This is also the state a caller is left in
+     * after final, which is why the check belongs here rather than on a context
+     * that was never initialised: what the library can recognise is a context it
+     * owns and has finished with, not whatever a caller's stack happened to hold. */
+    WT_EXPECT_STATUS("a snapshot after final is a state error", WT_ERR_STATE,
+                     wt_sha256_snapshot(&ctx, so_far));
+  }
+
   /* The refusals. */
   WT_EXPECT_STATUS("a NULL context is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_sha256_init(NULL));
+  WT_EXPECT_STATUS("snapshotting a NULL context is refused",
+                   WT_ERR_INVALID_ARGUMENT, wt_sha256_snapshot(NULL, out));
   WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_sha256("abc", 3U, NULL));
   WT_EXPECT_STATUS("NULL data with a length is refused",
                    WT_ERR_INVALID_ARGUMENT, wt_sha256(NULL, 3U, out));
   {
+    /* A context the library has never touched. Both cases are written out rather
+     * than left to the stack: the guarantee being checked is that a context which
+     * was zeroed (a static or value-initialised one) or which holds something else
+     * entirely is refused with WT_ERR_STATE rather than dereferenced, and an
+     * uninitialised stack local would make the test depend on what the previous
+     * frame left there instead. */
     wt_sha256_ctx_t ctx;
-    WT_EXPECT_STATUS("updating an uninitialised context is refused",
+    memset(&ctx, 0, sizeof(ctx));
+    WT_EXPECT_STATUS("updating a zeroed context is refused", WT_ERR_STATE,
+                     wt_sha256_update(&ctx, "a", 1U));
+    WT_EXPECT_STATUS("finalising a zeroed context is refused", WT_ERR_STATE,
+                     wt_sha256_final(&ctx, out));
+    WT_EXPECT_STATUS("snapshotting a zeroed context is refused", WT_ERR_STATE,
+                     wt_sha256_snapshot(&ctx, out));
+    memset(&ctx, 0xAB, sizeof(ctx));
+    WT_EXPECT_STATUS("updating a context that holds something else is refused",
                      WT_ERR_STATE, wt_sha256_update(&ctx, "a", 1U));
-    WT_EXPECT_STATUS("finalising an uninitialised context is refused",
-                     WT_ERR_STATE, wt_sha256_final(&ctx, out));
+    WT_EXPECT_STATUS("finalising it is refused", WT_ERR_STATE,
+                     wt_sha256_final(&ctx, out));
   }
 }
 

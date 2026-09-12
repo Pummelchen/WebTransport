@@ -27,6 +27,7 @@ set(WT_UNIT_TESTS
   test_quic_malformed
   test_crypto
   test_quic_protection
+  test_tls13_keyschedule
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

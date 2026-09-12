@@ -201,6 +201,35 @@ wt_status_t wt_sha256(const void *data, size_t len,
   return (written == WT_SHA256_LEN) ? WT_OK : WT_ERR_UNSUPPORTED;
 }
 
+wt_status_t wt_sha256_snapshot(const wt_sha256_ctx_t *ctx,
+                               uint8_t out[WT_SHA256_LEN]) {
+  const wt_openssl_sha256_ctx_t *impl;
+  EVP_MD_CTX *copy;
+  unsigned int written = 0U;
+  int ok;
+
+  if (ctx == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  impl = (const wt_openssl_sha256_ctx_t *)(const void *)ctx->storage;
+  if (impl->live != WT_OPENSSL_SHA256_LIVE || impl->ctx == NULL) {
+    return WT_ERR_STATE;
+  }
+  /* EVP_MD_CTX_copy_ex is the backend's own way of saying "the same hash over the
+   * same bytes so far, without disturbing it", which is exactly the operation the
+   * transcript needs and the reason the context is a backend structure rather than
+   * a caller-visible one. */
+  copy = EVP_MD_CTX_new();
+  if (copy == NULL) return WT_ERR_OUT_OF_MEMORY;
+  ok = EVP_MD_CTX_copy_ex(copy, impl->ctx) == 1 &&
+       EVP_DigestFinal_ex(copy, out, &written) == 1 &&
+       written == WT_SHA256_LEN;
+  EVP_MD_CTX_free(copy);
+  if (!ok) {
+    memset(out, 0, WT_SHA256_LEN);
+    return WT_ERR_UNSUPPORTED;
+  }
+  return WT_OK;
+}
+
 /* ------------------------------------------------------------ HMAC, HKDF */
 
 /* HMAC-SHA256 over up to three pieces. The HKDF expansion needs it because its

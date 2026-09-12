@@ -327,6 +327,40 @@ Completion criteria:
 
 ## Phase 3: TLS 1.3 for QUIC
 
+**First part done: the key schedule and the transcript.**
+`include/webtransport/tls/keyschedule.h` and `src/tls/keyschedule.c` carry RFC 8446
+section 7.1's two chains -- the extracts that build Early, Handshake and Master
+secrets out of the PSK and the ECDHE, and the derivations that turn those into the
+two directions' handshake and application traffic secrets, the exporter and
+resumption secrets, the record traffic keys, the Finished keys and verify data, and
+the key update secret -- plus the handshake transcript they consume. The transcript
+absorbs whole handshake messages into a running SHA-256 and reads the hash at each
+point without consuming it, which is what `wt_sha256_snapshot` was added to the
+crypto interface for: a handshake hashes on the order of a hundred bytes of state
+rather than buffering a peer's certificate chain. A message whose framing disagrees
+with its length is refused, because a transcript that absorbed one would hash bytes
+the peer never hashed and every secret after it would be wrong with nothing to point
+at. An all-zero ECDHE shared secret is refused here rather than in a caller, per
+RFC 8446 section 7.4.2.
+
+The vectors are RFC 8448 section 3, extracted by
+`tests/vectors/extract_rfc8448_keyschedule.py`, which recomputes every value before
+writing it: each extract as HMAC(salt, IKM), each derivation as
+HKDF-Expand-Label(PRK, label, hash), each traffic and Finished key from the secret
+its own step names, the schedule as a chain (each extract's salt is the previous
+"derived" step's output), and the three transcript hashes against the handshake
+messages it extracts beside them. 33 values, and `tests/unit/test_tls13_keyschedule.c`
+(361 checks) drives the implementation through them: the extract chain, the
+transcript through each checkpoint, both directions' secrets, all four traffic key
+sets, both Finished keys and verify data, and the negative cases the trace cannot
+cover -- an all-zero shared secret, a Finished with one bit of one byte changed
+(tried for every bit of every byte), a message whose framing lies, a transcript used
+before it was initialised or after it was cleared.
+
+What remains in this phase: the handshake messages and extensions, the key share,
+certificate chain validation through OpenSSL, the trust policy, and the client and
+server state machines that sequence them.
+
 Port the Swift TLS behavior into portable C99 state machines.
 
 Tasks:

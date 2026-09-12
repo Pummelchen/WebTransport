@@ -39,3 +39,16 @@ fi
 
 python3 "$c99_root/tests/vectors/extract_rfc9001_keys.py" "$rfc" --check
 python3 "$c99_root/tests/vectors/extract_rfc9001_client_initial.py" "$rfc" --check
+
+# RFC 8448's key schedule trace, which is the vectors for the TLS layer.
+rfc8448="$rfc_dir/rfc8448.txt"
+if [ ! -f "$rfc8448" ]; then
+  url8448=https://www.rfc-editor.org/rfc/rfc8448.txt
+  echo "check-vectors: fetching $url8448"
+  if ! curl -fsSL "$url8448" -o "$rfc8448"; then
+    rm -f "$rfc8448"
+    echo "check-vectors: could not fetch $url8448" >&2
+    exit 2
+  fi
+fi
+python3 "$c99_root/tests/vectors/extract_rfc8448_keyschedule.py" "$rfc8448" --check

@@ -9,7 +9,8 @@ scaffolding.
 ## Current Status
 
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
-complete.** Phases 3 to 14 are not started.
+complete, and Phase 3 is under way: its key schedule and transcript are done.**
+The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
 
@@ -34,7 +35,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 20 unit test files and 73,012 checks, run by `ctest` and again under
+- 21 unit test files and 73,388 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -80,7 +81,21 @@ What is here:
     operations. The order is the documented part: a sample of the payload masks the
     header, and the unmasked header carries the packet number the payload's nonce
     needs, so the receive path cannot be reordered.
-- The vectors are RFC 9001 appendix A, extracted from the RFC text rather than
+- **The TLS 1.3 key schedule** (Phase 3, first part), which is what turns a
+  handshake into the secrets QUIC protects with:
+  - `tls/keyschedule.h` — RFC 8446 section 7.1's two chains: the extracts that build
+    the Early, Handshake and Master secrets from the PSK and the ECDHE shared
+    secret, and the derivations that turn them into both directions' handshake and
+    application traffic secrets, the exporter and resumption secrets, the record
+    traffic keys, the Finished keys and verify data, and the key update secret. An
+    all-zero shared secret is refused where it enters, per RFC 8446 section 7.4.2.
+  - The handshake transcript lives here too. It absorbs whole handshake messages
+    into a running SHA-256 and reads the hash at each point without consuming it, so
+    a transcript is a few hundred bytes whatever the peer's certificate chain
+    weighs; a message whose framing disagrees with its length is refused rather than
+    hashed.
+- The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
+  text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
   writes -- the Initial secret from the version-1 salt and the connection ID, each
   key from its traffic secret, each header protection sample as the packet's bytes
@@ -89,6 +104,12 @@ What is here:
   number -- and refuses to write one that does not check. The tests then take each
   protected packet apart and put it back together, so a mistake that was symmetric
   between the two directions fails the second one.
+- The TLS vectors are RFC 8448's own key schedule trace, including the handshake
+  messages it prints: `tests/vectors/extract_rfc8448_keyschedule.py` recomputes every
+  secret, key and Finished value from the RFC's inputs, checks the schedule as a
+  chain, and checks the trace's three transcript hashes against the messages it
+  extracted -- so a message read from the wrong place in a 3,800-line document fails
+  generation rather than becoming a vector a wrong implementation would pass.
 - A package consumer test: the library is installed and a separate CMake project
   links it, which is the only way to know the install tree works. It found that the
   installed config did not declare its OpenSSL dependency, which no build inside
@@ -121,6 +142,7 @@ include/webtransport/   public headers, installed
 src/core/               the Phase 0 utilities
 src/crypto/             the OpenSSL-backed crypto provider
 src/quic/               the QUIC wire core and packet protection
+src/tls/                the TLS 1.3 key schedule and transcript
 tests/vectors/          generated RFC vectors and the scripts that extract them
 apps/                   wt-client-c99, wt-server-c99, wt-conformance-c99
 tests/unit/             one file per module, registered with CTest

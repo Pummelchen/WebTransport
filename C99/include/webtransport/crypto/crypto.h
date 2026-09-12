@@ -74,6 +74,20 @@ wt_status_t wt_sha256_final(wt_sha256_ctx_t *ctx, uint8_t out[WT_SHA256_LEN]);
 /* One-shot, for a value that is hashed once and not transcribed. */
 wt_status_t wt_sha256(const void *data, size_t len, uint8_t out[WT_SHA256_LEN]);
 
+/* The hash of everything absorbed so far, leaving the context usable.
+ *
+ * A handshake takes the transcript hash at several points -- after the
+ * ServerHello, after the server's Finished, after the client's -- and each one is
+ * over everything absorbed up to that moment. Consuming the context to read it
+ * would end the transcript, and keeping the absorbed messages to re-hash them later
+ * would hold a peer-controlled amount of memory for the length of a handshake, so
+ * neither is what this does: the backend is asked for a copy of its own state.
+ *
+ * Returns WT_ERR_STATE for a context that was never initialised or has already
+ * been finalised. */
+wt_status_t wt_sha256_snapshot(const wt_sha256_ctx_t *ctx,
+                               uint8_t out[WT_SHA256_LEN]);
+
 /* HMAC-SHA256 (RFC 2104), which is what HKDF and the TLS Finished MAC are built
  * from. */
 wt_status_t wt_hmac_sha256(const uint8_t *key, size_t key_len,
