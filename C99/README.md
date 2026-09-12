@@ -11,8 +11,8 @@ scaffolding.
 **Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
 complete, and Phase 3 is under way: its key schedule, transcript, handshake message
 codecs (Hellos and certificates), X25519 key agreement, peer authentication and both halves of
-the handshake are done, and Phase 4 has its packet number space, loss detection, congestion control and the stream
-machines.**
+the handshake are done, and Phase 4 has its packet number space, loss detection, congestion control, the stream machines,
+DATAGRAM and the close paths.**
 The rest of Phase 3, and Phases 4 to 14, are not started.
 
 What is here:
@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 30 unit test files and 74,388 checks, run by `ctest` and again under
+- 32 unit test files and 74,544 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -161,6 +161,11 @@ What is here:
   peer appending to an ended stream, RESET_STREAM and STOP_SENDING, and flow control at the
   connection's level and the stream's. Flow control counts *offsets* rather than delivered bytes,
   which is the RFC's model: a gap cannot be used to escape the accounting.
+- **QUIC DATAGRAM and the close paths** (Phase 4, fifth part): `quic/datagram.h` is RFC 9221's
+  unreliable messages -- the size rule against both the peer's frame limit and the path's packet size,
+  and a bounded receive queue whose discard policy is the newest rather than the oldest.
+  `quic/close.h` is the two forms of CONNECTION_CLOSE, which are different messages, and the draining
+  period of three probe timeouts.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

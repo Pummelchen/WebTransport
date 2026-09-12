@@ -29,6 +29,8 @@ set(WT_UNIT_TESTS
   test_quic_loss
   test_quic_congestion
   test_quic_stream
+  test_quic_datagram
+  test_quic_close
   test_crypto
   test_quic_protection
   test_tls13_keyschedule

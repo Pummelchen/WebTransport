@@ -620,6 +620,25 @@ was a gap in the API rather than a bug: a reset receive half had no way to becom
 whose reset had arrived could never be forgotten; `wt_quic_stream_on_reset_read` is the transition
 RFC 9000 section 3.2 puts between them.
 
+**Fifth part done: QUIC DATAGRAM and the close paths.** `quic/datagram.h` carries RFC 9221's
+datagrams: the size rule in both directions (the peer's `max_datagram_frame_size` bounds the frame and
+the path's packet size bounds the packet, and the answer is the smaller of the two, including the
+frame's own length field whose width follows the value it describes), and a bounded receive queue
+whose policy is stated rather than implied -- when it is full the NEWEST datagram is discarded, because
+the application has already been told about everything in the queue and for the traffic this carries
+the freshest message is the one that matters least. `quic/close.h` carries RFC 9000 sections 10.2 and
+19.19: the two forms of CONNECTION_CLOSE, which are different messages and must not be confused (the
+transport form names the frame that caused the error and the application form cannot), and the
+draining period of three probe timeouts, with no deadline at all when there is no probe timeout to
+multiply -- which is not the same as a deadline that has already passed.
+
+`tests/unit/test_quic_datagram.c` (103 checks) and `tests/unit/test_quic_close.c` (53 checks) check
+those rules at their boundaries: a limit that cannot hold an empty datagram, a byte that changes the
+length field's width, a queue that wraps, and the narrow list of frames that may still be processed
+once the connection has closed. Two findings were in the tests: a ring test that pushed every
+iteration and popped every other one was checking the queue's depth rather than its order, and a block
+that reused a queue the previous block had left entries in.
+
 Implement the production network state machine.
 
 Tasks:
