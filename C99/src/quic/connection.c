@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "webtransport/quic/packet_io.h"
+#include "webtransport/quic/transport_parameters.h"
 #include "webtransport/writer.h"
 
 /* RFC 9002 section 6.2.1's kInitialRtt is 333ms, which makes the first probe timeout 1333ms: it is
@@ -46,6 +47,74 @@ const char *wt_quic_space_name(wt_quic_space_t space) {
       break;
   }
   return "unknown";
+}
+
+/* The idle timeout this connection enforces: the smaller of its own and the peer's, because RFC 9000
+ * section 10.1 makes the effective value the minimum of the two nonzero ones. Zero means neither end
+ * limited it. */
+static uint64_t idle_timeout_of(const wt_quic_connection_t *connection) {
+  uint64_t local = connection->config.idle_timeout;
+  uint64_t peer = connection->peer_limits.max_idle_timeout;
+
+  if (local == 0U) return peer;
+  if (peer == 0U) return local;
+  return local < peer ? local : peer;
+}
+
+/* One integer parameter, or `fallback` when the peer did not send it: absent and zero are different
+ * answers (RFC 9000 section 18.2 gives an absent flow control limit the value zero, which is the same
+ * number but a different fact), and this is where the RFC's default is applied. */
+static uint64_t parameter_or(const wt_quic_transport_parameters_t *params, uint64_t id,
+                             uint64_t fallback) {
+  uint64_t value = 0U;
+  if (wt_quic_transport_parameters_integer(params, id, &value) != WT_OK) return fallback;
+  return value;
+}
+
+wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connection,
+                                                   const uint8_t *data, size_t length) {
+  wt_quic_transport_parameters_t params;
+  wt_quic_error_t error = WT_QUIC_NO_ERROR;
+  uint64_t offender = 0U;
+  wt_quic_peer_limits_t limits;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+
+  wt_quic_transport_parameters_init(&params);
+  status = wt_quic_transport_parameters_decode(data, length, &params, &error);
+  if (status != WT_OK) return status;
+  /* RFC 9000 section 18.2's own rules -- a max_udp_payload_size below 1200, an ack delay exponent
+   * above 20, a stream limit above 2^60 -- are an error rather than something to clamp. */
+  status = wt_quic_transport_parameters_check(&params, &error, &offender);
+  if (status != WT_OK) return status;
+
+  memset(&limits, 0, sizeof(limits));
+  limits.max_idle_timeout = parameter_or(&params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 0U);
+  limits.max_udp_payload_size = parameter_or(&params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE,
+                                            WT_QUIC_DEFAULT_MAX_UDP_PAYLOAD_SIZE);
+  limits.initial_max_data = parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_DATA, 0U);
+  limits.initial_max_stream_data_bidi_local =
+      parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, 0U);
+  limits.initial_max_stream_data_bidi_remote =
+      parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, 0U);
+  limits.initial_max_stream_data_uni =
+      parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI, 0U);
+  limits.initial_max_streams_bidi = parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 0U);
+  limits.initial_max_streams_uni = parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 0U);
+  /* RFC 9000 section 18.2's default is 2, not zero: a peer that says nothing still allows the two
+   * connection IDs the handshake itself needs. */
+  limits.active_connection_id_limit =
+      parameter_or(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 2U);
+  limits.max_datagram_frame_size = parameter_or(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 0U);
+  limits.set = 1;
+  connection->peer_limits = limits;
+  return WT_OK;
+}
+
+const wt_quic_peer_limits_t *wt_quic_connection_peer_limits(const wt_quic_connection_t *connection) {
+  return connection == NULL ? NULL : &connection->peer_limits;
 }
 
 /* RFC 9002 section 5.3: an acknowledgement delay is only subtracted in the Application space, and only
@@ -911,8 +980,8 @@ wt_status_t wt_quic_connection_next_timeout(wt_quic_connection_t *connection, ui
   }
 
   /* The idle timeout is armed whether or not anything is in flight (RFC 9000 section 10.1). */
-  if (connection->config.idle_timeout != 0U) {
-    uint64_t idle_deadline = connection->last_activity + connection->config.idle_timeout;
+  if (idle_timeout_of(connection) != 0U) {
+    uint64_t idle_deadline = connection->last_activity + idle_timeout_of(connection);
     if (idle_deadline > now) {
       earliest = idle_deadline - now;
       armed = 1;
@@ -985,8 +1054,8 @@ wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint
 
   /* The idle timeout is a silent close (RFC 9000 section 10.1): the connection is gone and nothing is
    * sent, because the peer is presumed gone too. */
-  if (connection->config.idle_timeout != 0U &&
-      now >= connection->last_activity + connection->config.idle_timeout) {
+  if (idle_timeout_of(connection) != 0U &&
+      now >= connection->last_activity + idle_timeout_of(connection)) {
     (void)wt_quic_close_transport(&connection->close, WT_QUIC_NO_ERROR, 0U, NULL, 0U, now,
                                   pto_of(connection));
     connection->close_sent = 1;

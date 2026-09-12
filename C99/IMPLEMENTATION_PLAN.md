@@ -831,6 +831,29 @@ close-code hint a frame handler may set before refusing a frame, so that a faile
 RFC 9000 section 20.1's CRYPTO_ERROR with the TLS alert in its low byte rather than as a generic internal
 error.
 
+**Eleventh part done: the peer's transport parameters as the limits this endpoint obeys.** A connection
+now parses the parameters the handshake carried (`wt_quic_connection_set_peer_parameters`) and keeps what
+they say about what the peer will accept: the flow control limits at both levels, the stream counts, the
+connection ID limit, the datagram size, the payload size. THIS IS THE OTHER HALF OF EVERY LIMIT the
+resource limit task names, and the reason the stream and datagram work comes after it: a sender that does
+not know the peer's `initial_max_data` cannot know when to stop, and one that ignores
+`max_datagram_frame_size` sends a frame the peer must reject.
+
+The parser is where RFC 9000 section 18.2's defaults live, and getting them right is not the same as
+zeroing a struct: an absent parameter and a zero one are different facts, and the RFC gives three
+parameters defaults that are not zero (`max_udp_payload_size` is 65527, `active_connection_id_limit` is 2,
+and the flow control limits are zero, which means "nothing granted"). A list that breaks the section's
+rules -- a payload size below 1200, a stream limit above 2^60 -- is a connection error rather than
+something to clamp, and the codec's own check reports the offender.
+
+The effective idle timeout becomes the SMALLER of this endpoint's and the peer's, because RFC 9000
+section 10.1 makes it the minimum of the two nonzero values: a connection that enforced only its own
+would stay open after the peer had forgotten it, and one that enforced only the peer's would outlive its
+own configuration. `tests/unit/test_quic_peer_limits.c` (57 checks) checks every limit through a real
+codec round trip, the defaults for an empty list, both directions of the idle timeout minimum (through
+the connection's own timer rather than a field), and the refusals: a too-small payload size, a truncated
+list, and the arguments.
+
 Implement the production network state machine.
 
 Tasks:

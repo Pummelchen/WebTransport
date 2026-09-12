@@ -71,6 +71,26 @@ typedef enum wt_quic_space {
  * acknowledged by a later frame, which RFC 9000 section 13.2.4 allows. */
 #define WT_QUIC_CONNECTION_ACK_RANGES_MAX 256U
 
+/* What the peer's transport parameters say about what it will accept and what it allows. They are the
+ * other half of every limit this endpoint enforces: a sender may not open more streams than the peer's
+ * `initial_max_streams`, may not send more data than its `initial_max_data`, and may not send a
+ * datagram larger than its `max_datagram_frame_size`. A parameter the peer did not send has the
+ * default RFC 9000 section 18.2 gives it, which for the flow control limits is zero -- a peer that
+ * says nothing grants nothing -- and for max_udp_payload_size is 65527. */
+typedef struct wt_quic_peer_limits {
+  uint64_t max_idle_timeout;      /* microseconds; 0 when the peer did not limit it */
+  uint64_t max_udp_payload_size;  /* never below WT_QUIC_MIN_MAX_UDP_PAYLOAD_SIZE */
+  uint64_t initial_max_data;
+  uint64_t initial_max_stream_data_bidi_local;
+  uint64_t initial_max_stream_data_bidi_remote;
+  uint64_t initial_max_stream_data_uni;
+  uint64_t initial_max_streams_bidi;
+  uint64_t initial_max_streams_uni;
+  uint64_t active_connection_id_limit;
+  uint64_t max_datagram_frame_size; /* 0 when the peer does not support DATAGRAM at all */
+  int set;                          /* whether a parameter list has been parsed at all */
+} wt_quic_peer_limits_t;
+
 typedef struct wt_quic_connection_config {
   wt_quic_role_t role;
   uint32_t version;
@@ -146,6 +166,8 @@ typedef struct wt_quic_connection {
   wt_quic_loss_t loss;
   wt_quic_congestion_t congestion;
   wt_quic_close_state_t close;
+  /* The peer's limits, parsed from the transport parameters its handshake carried. */
+  wt_quic_peer_limits_t peer_limits;
 
   wt_quic_tx_frame_t frames[WT_QUIC_CONNECTION_FRAMES_MAX];
 
@@ -212,6 +234,22 @@ wt_status_t wt_quic_connection_attach(wt_quic_connection_t *connection,
  * `wt_quic_connection_clear`. */
 wt_status_t wt_quic_connection_set_keys(wt_quic_connection_t *connection, wt_quic_space_t space,
                                         int inbound, const wt_quic_packet_keys_t *keys);
+
+/* Parse the peer's transport parameters, which the TLS handshake carried, and keep the limits they
+ * state. The idle timeout this connection uses becomes the smaller of its own and the peer's, because
+ * RFC 9000 section 10.1 makes the effective idle timeout the minimum of the two -- a connection that
+ * enforced only its own would stay open after the peer had forgotten it, and one that enforced only the
+ * peer's would outlive its own configuration.
+ *
+ * WT_ERR_PROTOCOL when the list breaks RFC 9000 section 18.2's rules (with the offender available from
+ * the codec), WT_ERR_TRUNCATED when a parameter's length runs past the end of the extension. */
+wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connection,
+                                                   const uint8_t *data, size_t length);
+
+/* The peer's limits, and whether any have been parsed. A caller that sends streams or datagrams reads
+ * them: `set` is 0 before the handshake has produced them, and a limit the peer did not send is zero,
+ * which is the RFC's default and means "none granted". */
+const wt_quic_peer_limits_t *wt_quic_connection_peer_limits(const wt_quic_connection_t *connection);
 
 /* Install the frame and loss handlers. Both are optional; without the first, frames this layer does
  * not act on are ignored -- which is correct for a connection whose owner has nothing to do with them

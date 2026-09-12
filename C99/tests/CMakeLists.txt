@@ -35,6 +35,7 @@ set(WT_UNIT_TESTS
   test_quic_connection
   test_quic_crypto_stream
   test_quic_handshake
+  test_quic_peer_limits
   test_crypto
   test_quic_protection
   test_tls13_keyschedule
