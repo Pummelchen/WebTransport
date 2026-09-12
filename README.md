@@ -26,7 +26,14 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
-The Swift conformance matrix passes in full. The C99 directory contains planning material only; it is not a protocol implementation.
+The Swift conformance matrix passes in full. The C99 implementation is **Phase 0
+complete**: it builds with CMake as a static and shared library with three CLI
+tools, carries a tested core (checked arithmetic, byte cursors, a two-pass writer,
+a bounded buffer, an allocator interface, a monotonic clock), and installs as a
+CMake package with a consumer test. It implements no protocol yet -- the QUIC,
+TLS, HTTP/3, QPACK and WebTransport phases are not started -- and its draft-16
+score is therefore still 0%. See [C99/README.md](C99/README.md) and the
+[C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).
 
 1.3.0 added server TLS identity injection, graceful shutdown, connection admission
 limits, and certificate expiry reporting, and was the first release verified end to

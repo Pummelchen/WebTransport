@@ -1,0 +1,100 @@
+# The C99 implementation's own CI, separate from the Swift job because the two
+# share nothing but the repository: no toolchain overlap, no dependency overlap,
+# and a failure in one should not mask the other. The matrix is the plan's
+# Phase 12 list minus the platforms whose runners are not free -- FreeBSD and
+# Windows 11 are still to be added -- and the Windows entries wait on the WSA
+# runtime in Phase 4 rather than on the build system.
+
+name: C99 CI
+
+"on":
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: c99-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: C99 / ${{ matrix.os }} / ${{ matrix.cc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            cc: clang
+          - os: ubuntu-24.04
+            cc: gcc
+          - os: ubuntu-24.04
+            cc: clang
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Ninja
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y ninja-build
+          else
+            brew install ninja
+          fi
+
+      # The warnings are part of the contract, not advice: this build turns them
+      # into errors for this project's sources, so a narrowing conversion or an
+      # unchecked length arithmetic fails here rather than at run time on a
+      # peer's packet. -Wconversion is the flag that does most of that work.
+      - name: Configure and build
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          cmake -S C99 -B C99/out/ci/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DWEBTRANSPORT_C99_BUILD_APPS=ON
+          cmake --build C99/out/ci/build
+
+      - name: Unit tests
+        run: ctest --test-dir C99/out/ci/build --output-on-failure
+
+      - name: Release build
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          cmake -S C99 -B C99/out/ci/release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build C99/out/ci/release
+
+      # The same tests under AddressSanitizer and UndefinedBehaviorSanitizer.
+      # A separate configuration because CMake caches compiler flags: enabling
+      # sanitizers in a directory that was configured without them does nothing.
+      - name: Sanitizer build and tests
+        if: matrix.cc == 'clang'
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          cmake -S C99 -B C99/out/ci/sanitize -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DWEBTRANSPORT_C99_SANITIZE=ON
+          cmake --build C99/out/ci/sanitize
+          ctest --test-dir C99/out/ci/sanitize --output-on-failure
+
+      # The install tree is the interface a consumer sees, so it is checked by
+      # building a consumer against it rather than by looking at the files.
+      - name: Package consumer
+        run: C99/scripts/check-package.sh
+
+      - name: CLI smoke
+        run: |
+          C99/out/ci/build/apps/wt-client-c99 --version
+          C99/out/ci/build/apps/wt-server-c99 --help >/dev/null
+          # An unimplemented tool must not exit 0, or a script would read a stub
+          # as a successful run.
+          if C99/out/ci/build/apps/wt-client-c99 >/dev/null 2>&1; then
+            echo "wt-client-c99 exited 0 with no protocol implemented" >&2
+            exit 1
+          fi
