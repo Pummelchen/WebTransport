@@ -82,12 +82,14 @@ jobs:
         env:
           CC: ${{ matrix.cc }}
           # LeakSanitizer runs at exit on Linux and is where a leak in this
-          # project is caught: the first run of this job found a 4-byte leak in
-          # a test that had passed every assertion. Darwin's ASan has no
-          # LeakSanitizer and aborts if asked for one, which is why the local
-          # script asks for it only on Linux and why this job's Linux leg is the
-          # one that matters for leaks.
-          ASAN_OPTIONS: detect_leaks=1
+          # project is caught: this job's first run found a 4-byte leak in a test
+          # that had passed every assertion. Darwin's AddressSanitizer has no
+          # LeakSanitizer and aborts the process if asked for one -- "detect_leaks
+          # is not supported on this platform" -- so the option is set on Linux
+          # only, exactly as scripts/build-and-test.sh does it. Setting it for
+          # every leg failed all ten macOS tests on the first attempt at this
+          # fix, which is how the two places came to agree.
+          ASAN_OPTIONS: ${{ runner.os == 'Linux' && 'detect_leaks=1' || '' }}
         run: |
           cmake -S C99 -B C99/out/ci/sanitize -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
