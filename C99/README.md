@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 36 unit test files and 75,260 checks, run by `ctest` and again under
+- 37 unit test files and 75,368 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -202,6 +202,12 @@ What is here:
   was acknowledged and its bytes are the peer's only copy. Both are bounded and a frame that does not
   fit is refused whole, which is what lets the connection answer with the transport error code
   RFC 9000 gives this case.
+- **The TLS 1.3 handshake over CRYPTO** (Phase 4, tenth part): `quic/handshake.h` joins the TLS machine to
+  the packet layer -- reassembling each level's CRYPTO stream, walking it into whole handshake messages,
+  feeding them to TLS in order, installing the keys each step makes available, and sending a lost flight
+  again from the bytes it kept. `tests/unit/test_quic_handshake.c` runs a whole handshake between two
+  connections over real loopback sockets on IPv4 and IPv6, with a real certificate and trust check, then a
+  1-RTT frame -- the phase's completion criterion in one test.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

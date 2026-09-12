@@ -151,6 +151,15 @@ typedef struct wt_quic_connection {
 
   wt_quic_frame_handler_fn handler;
   void *handler_context;
+  /* Set by a frame handler that is about to refuse a frame, so that the CONNECTION_CLOSE the connection
+   * then sends names the handler's error code rather than a generic one. It matters most for the TLS
+   * handshake: RFC 9000 section 20.1 puts a failed handshake in CRYPTO_ERROR with the alert in its low
+   * byte, and a peer that reads INTERNAL_ERROR where a CRYPTO_ERROR belongs cannot tell a refused
+   * certificate from a broken implementation. The handler sets `close_code` (and, if it knows it, the
+   * frame type) before returning a failure; the connection clears the hint after using it. */
+  uint64_t close_code;
+  uint64_t close_frame_type;
+  int close_code_set;
   wt_quic_frame_lost_fn lost_handler;
   void *lost_context;
 
@@ -219,6 +228,18 @@ void wt_quic_connection_set_handlers(wt_quic_connection_t *connection,
 wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_quic_space_t space,
                                            uint64_t offset, const uint8_t *data, size_t length,
                                            uint64_t now);
+
+/* Send one frame by itself, in one packet, with the keys of that space.
+ *
+ * This is the general path for the frames this layer does not produce -- HANDSHAKE_DONE, the flow
+ * control limits, the stream frames -- and it takes a frame the frame codec has already validated.
+ * `ack_eliciting` is the caller's to state because it follows from the frame's type (RFC 9000 section
+ * 13.2.1): PADDING, ACK and CONNECTION_CLOSE do not ask for an acknowledgement and everything else
+ * does. It refuses, rather than silently succeeding, when the congestion window, the loss list or a
+ * retransmission slot has no room. */
+wt_status_t wt_quic_connection_send_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                          const wt_quic_frame_t *frame, int ack_eliciting,
+                                          uint64_t now);
 
 /* Send an acknowledgement if one is owed in this space, and a probe (an ack-eliciting PING) if one is
  * owed because a probe timeout fired. Returns WT_OK whether or not anything was sent; the count of

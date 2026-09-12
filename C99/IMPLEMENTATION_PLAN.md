@@ -794,6 +794,43 @@ consumer takes bytes, the peer may send more at the offset it reached, which is 
 fixed buffer needs -- and that a duplicate, an overlapping retransmission and a repeat of what was
 already delivered are all ordinary rather than errors.
 
+**Tenth part done: the TLS 1.3 handshake over CRYPTO, and a whole handshake over loopback.** `quic/handshake.h`
+and `src/quic/handshake.c` are the join between the message-at-a-time TLS machine and the packet layer:
+they reassemble each encryption level's CRYPTO stream, walk it into whole handshake messages, feed them to
+the TLS machine in order, take what it produces, install the keys each step makes available, and send a
+lost flight again from the bytes they kept. Three rules are worth naming. A message boundary is the
+transport's and not TLS's, so a partial message is held rather than parsed. The keys appear AS the
+handshake makes them -- the Initial keys are the caller's, the handshake keys arrive with the ServerHello
+(client) or the ClientHello (server), and the application keys only when the handshake is confirmed --
+and a driver that installed them early would protect a packet with a key the peer does not have. And a
+lost flight is retransmitted from here, because TLS is asked for a flight once: an RSA-PSS signature is
+randomised, so a second flight would not match the transcript the first one signed.
+
+`tests/unit/test_quic_handshake.c` (108 checks) runs a whole handshake between two connections over two
+real loopback sockets, on IPv4 and on IPv6: a real certificate, a real signature and a real trust check,
+with the ClientHello in an Initial packet, the ServerHello in another, the rest of the server's flight
+under the handshake keys the ServerHello derived, the client's Finished under the same, the server's
+HANDSHAKE_DONE under the application keys, and then a 1-RTT frame the server reads -- which is this
+phase's completion criterion, in one test.
+
+**Three defects came out of it, and they are the reason it was worth writing.** The loss list keyed a
+packet on its number alone, and packet numbers are per space (RFC 9000 section 12.3): the server's first
+Handshake packet number zero was refused as a duplicate of its Initial packet number zero. The fix is
+RFC 9002 appendix A's own shape -- the space is part of the key, and loss detection, the loss timer and
+the probe timeout are per space (WT-75). The connection's send path set the source connection ID and the
+token unconditionally, so every SHORT header packet was refused by the builder and the first 1-RTT frame a
+connection ever sent was `WT_ERR_INVALID_ARGUMENT` (WT-76). And the TLS machine's views of the ALPN and the
+peer's transport parameters point into the CRYPTO window, which slides as the handshake proceeds, so a
+driver that read them after the handshake read bytes that had been consumed: the driver now copies them
+the first time they are reported, which is also what the connection needs, since both outlive the
+handshake (WT-77).
+
+Two small additions came with it: `wt_quic_connection_send_frame`, the general path for a frame this
+layer does not produce (HANDSHAKE_DONE today, the stream frames next, which is why it exists), and a
+close-code hint a frame handler may set before refusing a frame, so that a failed handshake goes out as
+RFC 9000 section 20.1's CRYPTO_ERROR with the TLS alert in its low byte rather than as a generic internal
+error.
+
 Implement the production network state machine.
 
 Tasks:

@@ -34,6 +34,7 @@ set(WT_UNIT_TESTS
   test_quic_packet_io
   test_quic_connection
   test_quic_crypto_stream
+  test_quic_handshake
   test_crypto
   test_quic_protection
   test_tls13_keyschedule
@@ -69,4 +70,8 @@ target_compile_definitions(test_tls13_trust PRIVATE
 # The server test needs the same fixtures, because the certificate it sends is the one the
 # client validates.
 target_compile_definitions(test_tls13_server PRIVATE
+  WT_TRUST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vectors/trust")
+# And the handshake test runs a whole handshake over sockets, so it needs the same identity to
+# serve and the same CA to validate it.
+target_compile_definitions(test_quic_handshake PRIVATE
   WT_TRUST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vectors/trust")

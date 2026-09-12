@@ -1,0 +1,432 @@
+/* A whole TLS 1.3 handshake between two connections over loopback sockets.
+ *
+ * THIS IS THE PHASE'S COMPLETION CRITERION IN ONE TEST. Two QUIC connections, two real UDP sockets on one
+ * machine, a real certificate and a real signature: the ClientHello travels in an Initial packet, the
+ * ServerHello in another, the rest of the server's flight under the handshake keys the ServerHello
+ * derived, the client's Finished under the same, and the server's confirmation under the application
+ * keys -- each level installed by the handshake driver at the moment the handshake made it available,
+ * and each datagram protected, sent, received, unprotected and reassembled by the layers below. IPv4 and
+ * IPv6 are both run, because "loopback works" is a statement about the family and not about the code.
+ *
+ * THE CLOCK IS SYNTHETIC AND THE SOCKET IS REAL. Every call takes the test's own microsecond value, so
+ * the round trip arithmetic and the timers are deterministic, while the bytes really do go through the
+ * kernel. What the test must not do is sleep: `wt_udp_wait` is given a short timeout and a timeout is
+ * treated as "nothing has arrived yet", which is what a real event loop does with it.
+ *
+ * The certificates are the repository's trust fixtures -- a leaf for example.com, the CA that signs it,
+ * and the leaf's private key -- which is why the client validates with a STORE holding that CA and the
+ * host name the leaf was issued for. A test that pinned nothing and validated nothing would pass while
+ * the handshake did no authentication at all.
+ */
+
+#include <stdio.h>
+#include <string.h>
+
+#include "wt_test.h"
+
+#include "webtransport/quic/connection.h"
+#include "webtransport/quic/handshake.h"
+#include "webtransport/quic/packet_io.h"
+#include "webtransport/quic/protection.h"
+#include "webtransport/runtime/udp.h"
+
+#ifndef WT_TRUST_FIXTURE_DIR
+#error "WT_TRUST_FIXTURE_DIR must name the directory holding the trust fixtures"
+#endif
+
+static const uint8_t k_connection_id[8] = {0x83U, 0x94U, 0xc8U, 0xf0U, 0x3eU, 0x51U, 0x57U, 0x08U};
+static const uint8_t k_transport_parameters[] = {0x01U, 0x02U, 0x03U, 0x04U, 0x05U};
+/* The protocol name as bytes: a string literal is char, which this tree treats as the different type it
+ * is, and this one is compared byte for byte with what the handshake negotiated. */
+static const uint8_t k_alpn_h3[2] = {'h', '3'};
+
+static size_t read_fixture(const char *name, uint8_t *out, size_t capacity) {
+  char path[512];
+  FILE *file;
+  size_t used;
+
+  if (snprintf(path, sizeof(path), "%s/%s", WT_TRUST_FIXTURE_DIR, name) < 0) return 0U;
+  file = fopen(path, "rb");
+  if (file == NULL) return 0U;
+  used = fread(out, 1U, capacity, file);
+  fclose(file);
+  return used;
+}
+
+typedef struct fixtures {
+  uint8_t leaf[4096];
+  size_t leaf_len;
+  uint8_t ca_bundle[8192];
+  size_t ca_bundle_len;
+  uint8_t private_key[4096];
+  size_t private_key_len;
+} fixtures_t;
+
+static int load_fixtures(fixtures_t *fixtures) {
+  memset(fixtures, 0, sizeof(*fixtures));
+  fixtures->leaf_len = read_fixture("leaf.der", fixtures->leaf, sizeof(fixtures->leaf));
+  fixtures->ca_bundle_len = read_fixture("ca.pem", fixtures->ca_bundle, sizeof(fixtures->ca_bundle));
+  fixtures->private_key_len =
+      read_fixture("leaf-key.der", fixtures->private_key, sizeof(fixtures->private_key));
+  return fixtures->leaf_len != 0U && fixtures->ca_bundle_len != 0U &&
+         fixtures->private_key_len != 0U;
+}
+
+typedef struct endpoint {
+  wt_quic_connection_t connection;
+  wt_quic_handshake_t handshake;
+  wt_udp_socket_t socket;
+  wt_udp_address_t address;
+  wt_udp_address_t peer;
+} endpoint_t;
+
+/* A datagram if one is waiting, and nothing if not: a timeout from the wait is the ordinary case in an
+ * event loop and not a failure, so it is reported through `out_received` rather than as a status. */
+static wt_status_t pump(endpoint_t *receiver, uint64_t now, int *out_received) {
+  wt_status_t status = wt_udp_wait(&receiver->socket, 20000U);
+
+  if (out_received != NULL) *out_received = 0;
+  if (status == WT_ERR_TIMEOUT) return WT_OK;
+  if (status != WT_OK) return status;
+  status = wt_quic_connection_receive(&receiver->connection, now);
+  if (status != WT_OK) return status;
+  if (out_received != NULL) *out_received = 1;
+  return WT_OK;
+}
+
+static void connection_config(wt_quic_connection_config_t *config, wt_quic_role_t role,
+                              const endpoint_t *peer) {
+  memset(config, 0, sizeof(*config));
+  config->role = role;
+  config->version = WT_QUIC_VERSION_1;
+  config->local_connection_id = k_connection_id;
+  config->local_connection_id_length = sizeof(k_connection_id);
+  /* Both ends answer to the same connection ID here, which is what makes the Initial keys -- derived
+   * from the connection ID -- the same at both ends. A real handshake replaces the peer's ID with the
+   * one the server chooses; that is the connection ID management the runtime still needs. */
+  config->peer_connection_id = k_connection_id;
+  config->peer_connection_id_length = sizeof(k_connection_id);
+  config->aead = WT_AEAD_AES_128_GCM;
+  config->max_ack_delay = 25000U;
+  config->local_max_ack_delay = 25000U;
+  config->idle_timeout = 30000000U;
+  config->max_datagram_size = WT_QUIC_MAX_PACKET;
+  (void)peer;
+}
+
+static void client_tls_config(wt_tls_client_config_t *config, const fixtures_t *fixtures) {
+  static const char *const alpn_h3[] = {"h3"};
+
+  memset(config, 0, sizeof(*config));
+  config->host_name = "example.com";
+  config->alpn = alpn_h3;
+  config->alpn_count = 1U;
+  config->require_transport_parameters = 1;
+  config->transport_parameters = k_transport_parameters;
+  config->transport_parameters_len = sizeof(k_transport_parameters);
+  config->trust.mode = WT_TLS_TRUST_STORE;
+  config->trust.ca_bundle = fixtures->ca_bundle;
+  config->trust.ca_bundle_len = fixtures->ca_bundle_len;
+  config->trust.host_name = "example.com";
+}
+
+static void server_tls_config(wt_tls_server_config_t *config, const fixtures_t *fixtures,
+                              wt_tls_server_identity_t *identity) {
+  memset(identity, 0, sizeof(*identity));
+  identity->certificate[0] = fixtures->leaf;
+  identity->certificate_len[0] = fixtures->leaf_len;
+  identity->certificate_count = 1U;
+  identity->private_key = fixtures->private_key;
+  identity->private_key_len = fixtures->private_key_len;
+  identity->signature_scheme = WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256;
+
+  memset(config, 0, sizeof(*config));
+  config->identity = identity;
+  config->alpn = "h3";
+  config->require_transport_parameters = 1;
+  config->transport_parameters = k_transport_parameters;
+  config->transport_parameters_len = sizeof(k_transport_parameters);
+}
+
+/* Bring one endpoint up: a socket on loopback, a connection with the Initial keys both ends derive from
+ * the same connection ID, and the handshake driver installed as the connection's frame handler. */
+static void open_endpoint(wt_udp_family_t family, endpoint_t *endpoint, endpoint_t *peer,
+                          wt_quic_role_t role) {
+  wt_quic_connection_config_t config;
+  wt_quic_packet_keys_t keys;
+  uint8_t initial_secret[WT_SHA256_LEN];
+  uint16_t port = 0U;
+
+  WT_EXPECT_OK("a socket opens", wt_udp_socket_open(&endpoint->socket, family));
+  WT_EXPECT_OK("and binds loopback", wt_udp_bind_loopback(&endpoint->socket, 0U, &port));
+  wt_udp_address_loopback(family, &endpoint->address);
+  endpoint->address.port = port;
+  if (peer != NULL) endpoint->peer = peer->address;
+
+  connection_config(&config, role, endpoint);
+  WT_EXPECT_OK("the connection initialises", wt_quic_connection_init(&endpoint->connection, &config));
+  WT_EXPECT_OK("and borrows the socket",
+               wt_quic_connection_attach(&endpoint->connection, &endpoint->socket,
+                                         peer == NULL ? NULL : &peer->address));
+
+  /* The Initial keys: RFC 9001 section 5.2 derives them from the connection ID, and this direction's
+   * keys are the peer's opposite, which is what the `from_server` flag says. */
+  WT_EXPECT_OK("the Initial secret derives",
+               wt_quic_initial_secret(wt_quic_initial_salt_v1, sizeof(wt_quic_initial_salt_v1),
+                                      k_connection_id, sizeof(k_connection_id), initial_secret));
+  WT_EXPECT_OK("the send keys derive",
+               wt_quic_initial_packet_keys(initial_secret, role == WT_QUIC_ROLE_SERVER,
+                                           WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("and are installed",
+               wt_quic_connection_set_keys(&endpoint->connection, WT_QUIC_SPACE_INITIAL, 0, &keys));
+  WT_EXPECT_OK("the receive keys derive",
+               wt_quic_initial_packet_keys(initial_secret, role != WT_QUIC_ROLE_SERVER,
+                                           WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("and are installed",
+               wt_quic_connection_set_keys(&endpoint->connection, WT_QUIC_SPACE_INITIAL, 1, &keys));
+  wt_quic_packet_keys_clear(&keys);
+}
+
+static void close_endpoint(endpoint_t *endpoint) {
+  wt_quic_handshake_clear(&endpoint->handshake);
+  wt_quic_connection_clear(&endpoint->connection);
+  wt_udp_close(&endpoint->socket);
+}
+
+/* Alternate the two ends until both handshakes are complete, giving each flush and each direction of
+ * the socket a turn. The step bound is what keeps a handshake that never converges from looping: the
+ * test fails on the assertions below rather than hanging. */
+static void run_until_connected(endpoint_t *client, endpoint_t *server) {
+  uint64_t now = 1000000U;
+  int step;
+
+  for (step = 0; step < 60; step++) {
+    wt_status_t status;
+    int received = 0;
+
+    if (wt_quic_handshake_pending(&client->handshake)) {
+      status = wt_quic_handshake_flush(&client->handshake, now);
+      if (status != WT_OK) {
+        WT_EXPECT_OK("the client can flush", status);
+        return;
+      }
+    }
+    status = pump(server, now, &received);
+    if (status != WT_OK) {
+      WT_EXPECT_OK("the server can receive", status);
+      return;
+    }
+    if (wt_quic_handshake_pending(&server->handshake)) {
+      status = wt_quic_handshake_flush(&server->handshake, now);
+      if (status != WT_OK) {
+        WT_EXPECT_OK("the server can flush", status);
+        return;
+      }
+    }
+    status = pump(client, now, &received);
+    if (status != WT_OK) {
+      WT_EXPECT_OK("the client can receive", status);
+      return;
+    }
+    /* A step reads one datagram from each direction, and the handshake takes a few: the loop simply
+     * runs until both ends have nothing left to say. */
+    status = pump(server, now, &received);
+    if (status != WT_OK) {
+      WT_EXPECT_OK("the server can receive again", status);
+      return;
+    }
+    now += 1000U;
+    if (wt_quic_handshake_is_connected(&client->handshake) &&
+        wt_quic_handshake_is_connected(&server->handshake)) {
+      return;
+    }
+  }
+}
+
+static void test_handshake(wt_udp_family_t family) {
+  fixtures_t fixtures;
+  endpoint_t client;
+  endpoint_t server;
+  wt_tls_client_config_t client_tls;
+  wt_tls_server_config_t server_tls;
+  wt_tls_server_identity_t identity;
+  const uint8_t *alpn = NULL;
+  const uint8_t *parameters = NULL;
+  size_t alpn_len = 0U;
+  size_t parameters_len = 0U;
+  uint64_t now = 5000000U;
+
+  WT_EXPECT_INT("the trust fixtures load", 1, load_fixtures(&fixtures));
+  if (fixtures.leaf_len == 0U) return;
+
+  memset(&client, 0, sizeof(client));
+  memset(&server, 0, sizeof(server));
+  open_endpoint(family, &server, NULL, WT_QUIC_ROLE_SERVER);
+  open_endpoint(family, &client, &server, WT_QUIC_ROLE_CLIENT);
+  server.peer = client.address;
+  WT_EXPECT_OK("the server learns its peer's address",
+               wt_quic_connection_attach(&server.connection, &server.socket, &client.address));
+
+  client_tls_config(&client_tls, &fixtures);
+  server_tls_config(&server_tls, &fixtures, &identity);
+
+  /* The driver is the connection's frame handler and its lost handler, which is the seam the connection
+   * layer was built with: the packet layer knows nothing about TLS and the handshake knows nothing
+   * about packets. */
+  wt_quic_connection_set_handlers(&client.connection, wt_quic_handshake_on_frame, &client.handshake,
+                                  wt_quic_handshake_on_lost, &client.handshake);
+  wt_quic_connection_set_handlers(&server.connection, wt_quic_handshake_on_frame, &server.handshake,
+                                  wt_quic_handshake_on_lost, &server.handshake);
+
+  WT_EXPECT_OK("the server handshake starts",
+               wt_quic_handshake_start_server(&server.handshake, &server.connection, &server_tls));
+  WT_EXPECT_OK("the client handshake starts and builds its ClientHello",
+               wt_quic_handshake_start_client(&client.handshake, &client.connection, &client_tls));
+  WT_EXPECT_INT("with the ClientHello waiting to be sent", 1,
+                wt_quic_handshake_pending(&client.handshake));
+  WT_EXPECT_U64("and the client in the waiting state",
+                (uint64_t)WT_QUIC_HANDSHAKE_CLIENT_WAITING,
+                (uint64_t)wt_quic_handshake_state(&client.handshake));
+
+  run_until_connected(&client, &server);
+
+  WT_EXPECT_INT("the client's handshake completed", 1,
+                wt_quic_handshake_is_connected(&client.handshake));
+  WT_EXPECT_INT("the server's handshake completed", 1,
+                wt_quic_handshake_is_connected(&server.handshake));
+  if (wt_quic_handshake_is_connected(&client.handshake) &&
+      wt_quic_handshake_is_connected(&server.handshake)) {
+    /* The protocol both ends agreed on, read from the message that carried it. */
+    alpn = wt_quic_handshake_alpn(&client.handshake, &alpn_len);
+    WT_EXPECT_U64("the client negotiated a protocol", 2U, (uint64_t)alpn_len);
+    WT_EXPECT_BYTES("which is h3", k_alpn_h3, alpn, 2U);
+    alpn = wt_quic_handshake_alpn(&server.handshake, &alpn_len);
+    WT_EXPECT_U64("and so did the server", 2U, (uint64_t)alpn_len);
+    WT_EXPECT_BYTES("with the same answer", k_alpn_h3, alpn, 2U);
+
+    /* The peer's transport parameters survived the handshake unchanged, which is what the QUIC layer
+     * will read its limits out of. */
+    parameters = wt_quic_handshake_peer_transport_parameters(&client.handshake, &parameters_len);
+    WT_EXPECT_U64("the client has the server's parameters", (uint64_t)sizeof(k_transport_parameters),
+                  (uint64_t)parameters_len);
+    WT_EXPECT_BYTES("unchanged", k_transport_parameters, parameters, parameters_len);
+
+    /* The server confirmed the handshake, and the client learned it from HANDSHAKE_DONE. */
+    WT_EXPECT_INT("the server considers the handshake confirmed", 1, server.handshake.confirmed);
+    WT_EXPECT_INT("and the client does too", 1, client.handshake.confirmed);
+    WT_EXPECT_INT("which is what the connection records", 1, client.connection.handshake_confirmed);
+
+    /* Both directions' application keys work: a frame the client sends under them is read by the
+     * server, which is the whole point of the handshake having produced them. */
+    {
+      wt_quic_frame_t ping = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+      uint64_t received_before = server.connection.packets_received;
+      WT_EXPECT_OK("the client sends a 1-RTT frame",
+                   wt_quic_connection_send_frame(&client.connection, WT_QUIC_SPACE_APPLICATION, &ping,
+                                                 1, now));
+      now += 1000U;
+      {
+        int received = 0;
+        WT_EXPECT_OK("and the server reads a datagram", pump(&server, now, &received));
+        WT_EXPECT_INT("which arrived", 1, received);
+        WT_EXPECT_U64("as the frame's packet", received_before + 1U,
+                      server.connection.packets_received);
+      }
+      WT_EXPECT_U64("and it is not discarded", 0U, server.connection.packets_discarded);
+    }
+  }
+
+  close_endpoint(&client);
+  close_endpoint(&server);
+}
+
+/* The driver's own edges, without a peer: what it does with a frame that is not its business, with a
+ * handshake message that has only half arrived, and with a handshake that does not fit the window it
+ * holds. */
+static void test_driver_edges(void) {
+  fixtures_t fixtures;
+  endpoint_t client;
+  wt_tls_client_config_t client_tls;
+  wt_quic_frame_t frame;
+  uint8_t partial[8];
+  uint8_t big[WT_QUIC_CRYPTO_BUFFER_MAX + 64U];
+
+  /* A ServerHello header -- type 2, length 0x20 -- with only the header arrived: a message the driver
+   * must hold rather than parse. */
+  partial[0] = 0x02U;
+  partial[1] = 0x00U;
+  partial[2] = 0x00U;
+  partial[3] = 0x20U;
+  memset(partial + 4, 0x5a, sizeof(partial) - 4U);
+  memset(big, 0x41U, sizeof(big));
+
+  WT_EXPECT_INT("the fixtures load", 1, load_fixtures(&fixtures));
+  memset(&client, 0, sizeof(client));
+  open_endpoint(WT_UDP_IPV4, &client, &client, WT_QUIC_ROLE_CLIENT);
+  client_tls_config(&client_tls, &fixtures);
+
+  WT_EXPECT_OK("the handshake starts",
+               wt_quic_handshake_start_client(&client.handshake, &client.connection, &client_tls));
+  WT_EXPECT_INT("with the ClientHello pending", 1,
+                wt_quic_handshake_pending(&client.handshake));
+  WT_EXPECT_OK("which flushes", wt_quic_handshake_flush(&client.handshake, 1000U));
+  WT_EXPECT_INT("leaving nothing pending", 0, wt_quic_handshake_pending(&client.handshake));
+  WT_EXPECT_U64("and one packet on the wire", 1U, client.connection.packets_sent);
+
+  /* A frame this layer does not own is answered WT_OK, which is what lets a composition of handlers
+   * pass it on. */
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+  WT_EXPECT_OK("a PING is not this layer's business",
+               wt_quic_handshake_on_frame(&client.handshake, WT_QUIC_SPACE_INITIAL, &frame));
+  WT_EXPECT_STATUS("and a null frame is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_handshake_on_frame(&client.handshake, WT_QUIC_SPACE_INITIAL, NULL));
+  WT_EXPECT_STATUS("and a null handshake is too", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_handshake_on_frame(NULL, WT_QUIC_SPACE_INITIAL, &frame));
+
+  /* Half a message is held: the bytes are delivered by the reassembler but not consumed by the
+   * driver, because TLS has not been given a message it could parse. */
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_CRYPTO);
+  frame.as.crypto.offset = 0U;
+  frame.as.crypto.data = partial;
+  frame.as.crypto.length = sizeof(partial);
+  WT_EXPECT_OK("a partial message is accepted",
+               wt_quic_handshake_on_frame(&client.handshake, WT_QUIC_SPACE_INITIAL, &frame));
+  WT_EXPECT_INT("and changes no state", (int)WT_QUIC_HANDSHAKE_CLIENT_WAITING,
+                (int)wt_quic_handshake_state(&client.handshake));
+  WT_EXPECT_U64("with the bytes held", (uint64_t)sizeof(partial),
+                (uint64_t)client.handshake.recv[WT_QUIC_SPACE_INITIAL].length);
+  {
+    const uint8_t *data = NULL;
+    WT_EXPECT_U64("and delivered but not consumed", (uint64_t)sizeof(partial),
+                  (uint64_t)wt_quic_crypto_recv_available(
+                      &client.handshake.recv[WT_QUIC_SPACE_INITIAL], &data));
+    (void)data;
+  }
+
+  /* A handshake that does not fit the window: the driver fails and names RFC 9000 section 20.1's code
+   * for it, which is what the connection then puts in the CONNECTION_CLOSE it sends. */
+  frame.as.crypto.offset = 0U;
+  frame.as.crypto.data = big;
+  frame.as.crypto.length = sizeof(big);
+  WT_EXPECT_STATUS("a handshake that does not fit is refused", WT_ERR_LIMIT,
+                   wt_quic_handshake_on_frame(&client.handshake, WT_QUIC_SPACE_INITIAL, &frame));
+  WT_EXPECT_INT("and the handshake fails", (int)WT_QUIC_HANDSHAKE_FAILED,
+                (int)wt_quic_handshake_state(&client.handshake));
+  WT_EXPECT_U64("with the code the RFC gives this case", (uint64_t)WT_QUIC_CRYPTO_BUFFER_EXCEEDED,
+                client.handshake.error_code);
+  WT_EXPECT_INT("which the connection is told about", 1, client.connection.close_code_set);
+  WT_EXPECT_U64("as that code", (uint64_t)WT_QUIC_CRYPTO_BUFFER_EXCEEDED,
+                client.connection.close_code);
+  WT_EXPECT_INT("and a failed handshake has nothing pending", 0,
+                wt_quic_handshake_pending(&client.handshake));
+
+  close_endpoint(&client);
+}
+
+int main(void) {
+  test_handshake(WT_UDP_IPV4);
+  test_handshake(WT_UDP_IPV6);
+  test_driver_edges();
+
+  WT_TEST_MAIN_END("wt_quic_handshake");
+}

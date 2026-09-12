@@ -15,10 +15,14 @@ void wt_quic_loss_init(wt_quic_loss_t *loss) {
   memset(loss, 0, sizeof(*loss));
 }
 
-static size_t find_packet(const wt_quic_loss_t *loss, uint64_t packet_number) {
+static size_t find_packet(const wt_quic_loss_t *loss, uint8_t packet_number_space,
+                          uint64_t packet_number) {
   size_t i;
   for (i = 0U; i < loss->count; i++) {
-    if (loss->sent[i].packet_number == packet_number) return i;
+    if (loss->sent[i].packet_number_space == packet_number_space &&
+        loss->sent[i].packet_number == packet_number) {
+      return i;
+    }
   }
   return loss->count;
 }
@@ -28,7 +32,7 @@ wt_status_t wt_quic_loss_on_sent(wt_quic_loss_t *loss,
   if (loss == NULL || packet == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* A packet number is never reused (RFC 9000 section 12.3), so recording one twice is a caller
    * that has lost track of what it sent, and appending it again would double-count its bytes. */
-  if (find_packet(loss, packet->packet_number) != loss->count) {
+  if (find_packet(loss, packet->packet_number_space, packet->packet_number) != loss->count) {
     return WT_ERR_INVALID_ARGUMENT;
   }
   if (loss->count == WT_QUIC_SENT_PACKETS_MAX) {
@@ -60,14 +64,14 @@ static void remove_packet(wt_quic_loss_t *loss, size_t at) {
   loss->count--;
 }
 
-wt_status_t wt_quic_loss_on_ack(wt_quic_loss_t *loss, uint64_t packet_number,
-                                const wt_quic_rtt_t *rtt, uint64_t now,
+wt_status_t wt_quic_loss_on_ack(wt_quic_loss_t *loss, uint8_t packet_number_space,
+                                uint64_t packet_number, const wt_quic_rtt_t *rtt, uint64_t now,
                                 uint64_t max_ack_delay, int *out_newly_acked) {
   size_t at;
 
   if (loss == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (out_newly_acked != NULL) *out_newly_acked = 0;
-  at = find_packet(loss, packet_number);
+  at = find_packet(loss, packet_number_space, packet_number);
   if (at == loss->count) {
     /* An acknowledgement for a packet already declared lost is the ordinary race between loss
      * detection and a late acknowledgement, not an error. */
@@ -97,8 +101,8 @@ static uint64_t loss_delay(const wt_quic_rtt_t *rtt) {
   return (base * WT_QUIC_TIME_THRESHOLD_NUMERATOR) / WT_QUIC_TIME_THRESHOLD_DENOMINATOR;
 }
 
-uint64_t wt_quic_loss_time(const wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
-                           uint64_t largest_acked) {
+uint64_t wt_quic_loss_time(const wt_quic_loss_t *loss, uint8_t packet_number_space,
+                           const wt_quic_rtt_t *rtt, uint64_t largest_acked) {
   uint64_t delay;
   uint64_t earliest = 0U;
   size_t i;
@@ -109,6 +113,7 @@ uint64_t wt_quic_loss_time(const wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
   for (i = 0U; i < loss->count; i++) {
     const wt_quic_sent_packet_t *packet = &loss->sent[i];
     uint64_t when;
+    if (packet->packet_number_space != packet_number_space) continue;
     if (packet->packet_number > largest_acked) continue;
     /* A packet that has already met the packet threshold is lost on the next detection rather
      * than by a timer. */
@@ -119,8 +124,8 @@ uint64_t wt_quic_loss_time(const wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
   return earliest;
 }
 
-wt_status_t wt_quic_loss_detect(wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
-                                uint64_t now, uint64_t largest_acked,
+wt_status_t wt_quic_loss_detect(wt_quic_loss_t *loss, uint8_t packet_number_space,
+                                const wt_quic_rtt_t *rtt, uint64_t now, uint64_t largest_acked,
                                 wt_quic_lost_fn visit, void *context) {
   uint64_t delay;
   uint64_t lost_send_time;
@@ -136,7 +141,8 @@ wt_status_t wt_quic_loss_detect(wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
   while (i < loss->count) {
     const wt_quic_sent_packet_t *packet = &loss->sent[i];
     int lost = 0;
-    if (packet->packet_number <= largest_acked) {
+    if (packet->packet_number_space == packet_number_space &&
+        packet->packet_number <= largest_acked) {
       if (largest_acked >= packet->packet_number + WT_QUIC_PACKET_THRESHOLD) {
         lost = 1; /* The packet threshold: three numbers higher has arrived. */
       } else if (delay != 0U && packet->time_sent <= lost_send_time) {
@@ -150,12 +156,13 @@ wt_status_t wt_quic_loss_detect(wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
     if (visit != NULL) visit(context, packet);
     remove_packet(loss, i);
   }
-  loss->loss_time = wt_quic_loss_time(loss, rtt, largest_acked);
+  loss->loss_time = wt_quic_loss_time(loss, packet_number_space, rtt, largest_acked);
   return WT_OK;
 }
 
-wt_status_t wt_quic_loss_pto(const wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
-                             uint64_t max_ack_delay, uint64_t *out_time) {
+wt_status_t wt_quic_loss_pto(const wt_quic_loss_t *loss, uint8_t packet_number_space,
+                             const wt_quic_rtt_t *rtt, uint64_t max_ack_delay,
+                             uint64_t *out_time) {
   uint64_t base_pto = 0U;
   uint64_t earliest = 0U;
   size_t i;
@@ -174,6 +181,7 @@ wt_status_t wt_quic_loss_pto(const wt_quic_loss_t *loss, const wt_quic_rtt_t *rt
   }
   for (i = 0U; i < loss->count; i++) {
     const wt_quic_sent_packet_t *packet = &loss->sent[i];
+    if (packet->packet_number_space != packet_number_space) continue;
     uint64_t when;
     if (!packet->ack_eliciting) continue;
     when = packet->time_sent + base_pto;

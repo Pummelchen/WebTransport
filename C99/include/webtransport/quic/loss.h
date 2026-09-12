@@ -49,6 +49,13 @@ extern "C" {
 #define WT_QUIC_TIME_THRESHOLD_DENOMINATOR 8U
 
 typedef struct wt_quic_sent_packet {
+  /* The packet number space this packet belongs to, as the caller numbers them. RFC 9000 section 12.3
+   * makes packet numbers per space, so a number is only unique together with its space: a list that
+   * keyed on the number alone refused a Handshake packet number zero because an Initial packet number
+   * zero had been sent first. The module never interprets the value beyond comparing it, which is why
+   * it is a plain byte rather than this layer's enum -- the space type belongs to the connection and
+   * this header must not depend on it. */
+  uint8_t packet_number_space;
   uint64_t packet_number;
   uint64_t time_sent; /* microseconds, from the connection's monotonic clock */
   uint64_t size;      /* bytes on the wire, which is what congestion control accounts for */
@@ -89,8 +96,8 @@ wt_status_t wt_quic_loss_on_sent(wt_quic_loss_t *loss,
  * can arrive for a packet this endpoint has already declared lost, which is the ordinary race
  * between a loss detection and a late acknowledgement -- and reports 0 through `out_newly_acked`
  * so a caller can tell the two apart. */
-wt_status_t wt_quic_loss_on_ack(wt_quic_loss_t *loss, uint64_t packet_number,
-                                const wt_quic_rtt_t *rtt, uint64_t now,
+wt_status_t wt_quic_loss_on_ack(wt_quic_loss_t *loss, uint8_t packet_number_space,
+                                uint64_t packet_number, const wt_quic_rtt_t *rtt, uint64_t now,
                                 uint64_t max_ack_delay, int *out_newly_acked);
 
 /* A packet that has been declared lost. */
@@ -101,23 +108,28 @@ typedef void (*wt_quic_lost_fn)(void *context, const wt_quic_sent_packet_t *pack
  * A packet below the largest acknowledged is lost when a packet at least three numbers higher has
  * been acknowledged, or when it was sent more than 9/8 of the larger of the smoothed and latest
  * round trip times ago. The order is the order packets were sent, which is what makes a caller
- * that retransmits in that order retransmit in a useful order. */
-wt_status_t wt_quic_loss_detect(wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
-                                uint64_t now, uint64_t largest_acked,
+ * that retransmits in that order retransmit in a useful order.
+ *
+ * Detection is PER SPACE (RFC 9002 appendix A keeps one sent-packet list per space), so the space is
+ * an argument: an acknowledgement in one space must not declare a packet of another lost, and the
+ * packet and time thresholds of one space say nothing about the others. */
+wt_status_t wt_quic_loss_detect(wt_quic_loss_t *loss, uint8_t packet_number_space,
+                                const wt_quic_rtt_t *rtt, uint64_t now, uint64_t largest_acked,
                                 wt_quic_lost_fn visit, void *context);
 
 /* The time at which the next packet will be declared lost by the time threshold, or 0 when no
  * packet is below the largest acknowledged. With `now` this is the loss timer. */
-uint64_t wt_quic_loss_time(const wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
-                           uint64_t largest_acked);
+uint64_t wt_quic_loss_time(const wt_quic_loss_t *loss, uint8_t packet_number_space,
+                           const wt_quic_rtt_t *rtt, uint64_t largest_acked);
 
 /* The probe timeout: the earliest send time among ack-eliciting packets in flight, plus the probe
  * timeout from the estimator doubled `pto_count` times (RFC 9002 sections 6.2.1 and 6.2.2).
  * WT_ERR_STATE when nothing ack-eliciting is in flight, which is when there is nothing to probe
  * for; `max_ack_delay` is the peer's delay for this space, which is zero outside the Application
  * space. */
-wt_status_t wt_quic_loss_pto(const wt_quic_loss_t *loss, const wt_quic_rtt_t *rtt,
-                             uint64_t max_ack_delay, uint64_t *out_time);
+wt_status_t wt_quic_loss_pto(const wt_quic_loss_t *loss, uint8_t packet_number_space,
+                             const wt_quic_rtt_t *rtt, uint64_t max_ack_delay,
+                             uint64_t *out_time);
 
 /* Record that the probe timeout fired: the backoff doubles, and the caller is expected to send a
  * probe (RFC 9002 section 6.2.4). The doubling is bounded so that a long-lived connection whose

@@ -92,6 +92,7 @@ set(WT_QUIC_RUNTIME_SOURCES
   src/quic/packet_io.c
   src/quic/connection.c
   src/quic/crypto_stream.c
+  src/quic/handshake.c
 )
 # The runtime is the POSIX part of the tree (WT-13): sockets, poll, the monotonic clock. It is the
 # same library because a consumer links one thing and a test must not be able to build a different
@@ -142,6 +143,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/packet_io.h
   include/webtransport/quic/connection.h
   include/webtransport/quic/crypto_stream.h
+  include/webtransport/quic/handshake.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
   include/webtransport/tls/extension.h

@@ -136,8 +136,8 @@ static int probe_time(const wt_quic_connection_t *connection, wt_quic_space_t sp
   size_t i;
   int found = 0;
 
-  if (wt_quic_loss_pto(&connection->loss, &space_state->rtt, max_ack_delay_for(connection, space),
-                       out_time) == WT_OK) {
+  if (wt_quic_loss_pto(&connection->loss, (uint8_t)space, &space_state->rtt,
+                       max_ack_delay_for(connection, space), out_time) == WT_OK) {
     return 1;
   }
   /* Nothing to probe for unless something ack-eliciting is outstanding. */
@@ -200,7 +200,7 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
    * Declaring what is already lost by the time threshold is the way to make room, and if that is not
    * enough the packet is not sent: the caller tries again, and nothing has been put on the wire. */
   if (connection->loss.count >= WT_QUIC_SENT_PACKETS_MAX) {
-    status = wt_quic_loss_detect(&connection->loss, &space_state->rtt, now,
+    status = wt_quic_loss_detect(&connection->loss, (uint8_t)space, &space_state->rtt, now,
                                  space_state->has_largest_acked ? space_state->largest_acked : 0U,
                                  on_lost, connection);
     if (status != WT_OK) return status;
@@ -227,8 +227,13 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
   build.version = connection->config.version;
   build.destination_connection_id = connection->config.peer_connection_id;
   build.destination_connection_id_len = connection->config.peer_connection_id_length;
-  build.source_connection_id = connection->config.local_connection_id;
-  build.source_connection_id_len = connection->config.local_connection_id_length;
+  if (build.short_header == 0) {
+    /* The source connection ID and the token are long header fields. A short header has neither, and
+     * the builder refuses a packet that claims one -- which is what a caller that set them
+     * unconditionally would discover only when it first sent a 1-RTT packet. */
+    build.source_connection_id = connection->config.local_connection_id;
+    build.source_connection_id_len = connection->config.local_connection_id_length;
+  }
   build.packet_number = packet_number;
   build.packet_number_length = packet_number_length;
   build.key_phase = 0;
@@ -248,6 +253,9 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
   if (status != WT_OK) return status;
 
   memset(&sent, 0, sizeof(sent));
+  /* The space travels with the packet because a packet number is only unique within one (RFC 9000
+   * section 12.3), and the loss list is one list for the connection. */
+  sent.packet_number_space = (uint8_t)space;
   sent.packet_number = packet_number;
   sent.time_sent = now;
   sent.size = (uint64_t)packet_length;
@@ -397,8 +405,9 @@ static wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t 
   for (i = 0U; i < count; i++) {
     int newly_acked = 0;
     if (!ack_covers(frame, snapshot[i].packet_number)) continue;
-    status = wt_quic_loss_on_ack(&connection->loss, snapshot[i].packet_number, &space_state->rtt,
-                                 now, max_ack_delay_for(connection, space), &newly_acked);
+    status = wt_quic_loss_on_ack(&connection->loss, (uint8_t)space, snapshot[i].packet_number,
+                                 &space_state->rtt, now, max_ack_delay_for(connection, space),
+                                 &newly_acked);
     if (status != WT_OK) return status;
     if (newly_acked == 0) continue;
     if (snapshot[i].in_flight) {
@@ -428,7 +437,8 @@ static wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t 
 
   /* Anything the acknowledgement put beyond the thresholds is lost now rather than at the next timer,
    * which is what keeps a loss from waiting for a probe timeout. */
-  return wt_quic_loss_detect(&connection->loss, &space_state->rtt, now, largest, on_lost, connection);
+  return wt_quic_loss_detect(&connection->loss, (uint8_t)space, &space_state->rtt, now, largest,
+                             on_lost, connection);
 }
 
 static wt_status_t handle_connection_close(wt_quic_connection_t *connection,
@@ -508,8 +518,12 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
       status = connection->handler(connection->handler_context, visit->space, frame);
       if (status != WT_OK) {
         /* A handler that refuses a frame is refusing the connection: there is no way to accept a
-         * packet that its owner could not process. */
-        (void)close_with(connection, WT_QUIC_INTERNAL_ERROR, 0U, visit->now);
+         * packet that its owner could not process. The code it named, if it named one, is what the
+         * peer is told. */
+        uint64_t code = connection->close_code_set ? connection->close_code : WT_QUIC_INTERNAL_ERROR;
+        uint64_t type = connection->close_code_set ? connection->close_frame_type : 0U;
+        connection->close_code_set = 0;
+        (void)close_with(connection, code, type, visit->now);
         return status;
       }
       return WT_OK;
@@ -628,6 +642,24 @@ wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_
   frame.as.crypto.length = length;
 
   status = send_one_frame(connection, space, &frame, 1, 1, 1, offset, length, &sent, now);
+  if (status != WT_OK) return status;
+  return sent ? WT_OK : WT_ERR_STATE;
+}
+
+wt_status_t wt_quic_connection_send_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                          const wt_quic_frame_t *frame, int ack_eliciting,
+                                          uint64_t now) {
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL || frame == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (space >= WT_QUIC_SPACE_COUNT) return WT_ERR_INVALID_ARGUMENT;
+  if (wt_quic_connection_is_closed(connection)) return WT_ERR_STATE;
+
+  /* A frame with nothing to retransmit carries no descriptor, so a loss of its packet costs the
+   * congestion controller but asks nobody to send it again -- which is right for a HANDSHAKE_DONE and
+   * wrong for a STREAM frame, whose caller has its own retransmission to do. */
+  status = send_one_frame(connection, space, frame, ack_eliciting, 0, 0, 0U, 0U, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -755,6 +787,8 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
   connection->bytes_received += (uint64_t)datagram_length;
   connection->last_activity = now;
 
+  /* A datagram is a sequence of coalesced packets (RFC 9000 section 12.2), each with its own
+   * encryption level, so the loop advances by the packet's own length rather than by the datagram's. */
   while (offset < datagram_length) {
     wt_quic_received_packet_t packet;
     wt_quic_space_t space;
@@ -776,8 +810,8 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
       }
       if (status != WT_OK) return status;
       if (kind == WT_QUIC_PACKET_KIND_VERSION_NEGOTIATION) {
-        /* A list of versions rather than a packet, and the response to one is the connection's
-         * business rather than this loop's. */
+        /* A list of versions rather than a packet. The response to one is the connection's business
+         * rather than this loop's. */
         connection->packets_discarded++;
         return WT_OK;
       }
@@ -790,11 +824,11 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
         } else if (type_bits == (uint32_t)WT_QUIC_PACKET_HANDSHAKE) {
           space = WT_QUIC_SPACE_HANDSHAKE;
         } else {
-          /* 0-RTT shares the Application packet number space but not its keys, and this runtime has
-           * one key set per space: reading a 0-RTT packet with the 1-RTT keys would report an
+          /* 0-RTT shares the Application packet number space but not its keys, and this runtime has one
+           * key set per space: reading a 0-RTT packet with the 1-RTT keys would report an
            * authentication failure for a packet that is correctly protected. A Retry is not read here
-           * either. Both are refused by name rather than by a confusing failure (WT-71 records the
-           * 0-RTT keys). */
+           * either. Both are discarded by name rather than through a confusing failure (WT-71 records
+           * the 0-RTT keys). */
           connection->packets_discarded++;
           return WT_OK;
         }
@@ -817,8 +851,8 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
                                  connection->local_connection_id_length, &packet);
     if (status == WT_ERR_AUTHENTICATION) {
       /* RFC 9001 section 5.3: a packet that does not authenticate is discarded. So is the rest of the
-       * datagram, because the next coalesced packet's position is only known from a header this one
-       * did not authenticate. */
+       * datagram, because the next coalesced packet's position is only known from a header this one did
+       * not authenticate. */
       connection->packets_discarded++;
       return WT_OK;
     }
@@ -828,8 +862,8 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
     }
     if (status != WT_OK) return status;
 
-    /* RFC 9000 section 7.2: a packet whose destination connection ID is not this endpoint's is not
-     * for this connection, which is ordinary during a handshake and not an error. */
+    /* RFC 9000 section 7.2: a packet whose destination connection ID is not this endpoint's is not for
+     * this connection, which is ordinary during a handshake and not an error. */
     if (packet.destination_connection_id_len != connection->local_connection_id_length ||
         (packet.destination_connection_id_len != 0U &&
          memcmp(packet.destination_connection_id, connection->local_connection_id,
@@ -843,8 +877,8 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
     if (status != WT_OK) return status;
 
     /* The received set is updated after the frames are processed, because whether the acknowledgement
-     * is urgent depends on what they carried. A packet that turned out not to be ack-eliciting is
-     * still acknowledged eventually. */
+     * is urgent depends on what they carried. A packet that turned out not to be ack-eliciting is still
+     * recorded, so a later acknowledgement covers it. */
     status = wt_quic_ack_record(&connection->spaces[space].received, packet.packet_number,
                                 ack_eliciting);
     if (status != WT_OK) return status;
@@ -858,6 +892,7 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
   }
   return WT_OK;
 }
+
 
 wt_status_t wt_quic_connection_next_timeout(wt_quic_connection_t *connection, uint64_t now,
                                             uint64_t *out_micros) {
@@ -891,7 +926,8 @@ wt_status_t wt_quic_connection_next_timeout(wt_quic_connection_t *connection, ui
     wt_quic_space_t space = (wt_quic_space_t)i;
     const wt_quic_pn_space_t *space_state = &connection->spaces[space];
     uint64_t largest_acked = space_state->has_largest_acked ? space_state->largest_acked : 0U;
-    uint64_t loss_time = wt_quic_loss_time(&connection->loss, &space_state->rtt, largest_acked);
+    uint64_t loss_time = wt_quic_loss_time(&connection->loss, (uint8_t)space, &space_state->rtt,
+                                           largest_acked);
     uint64_t pto = 0U;
 
     /* An acknowledgement that is owed and delayed is a deadline like any other: the peer is waiting
@@ -963,11 +999,12 @@ wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint
     wt_quic_space_t space = (wt_quic_space_t)i;
     wt_quic_pn_space_t *space_state = &connection->spaces[space];
     uint64_t largest_acked = space_state->has_largest_acked ? space_state->largest_acked : 0U;
-    uint64_t loss_time = wt_quic_loss_time(&connection->loss, &space_state->rtt, largest_acked);
+    uint64_t loss_time = wt_quic_loss_time(&connection->loss, (uint8_t)space, &space_state->rtt,
+                                           largest_acked);
 
     if (loss_time != 0U && now >= loss_time) {
-      status = wt_quic_loss_detect(&connection->loss, &space_state->rtt, now, largest_acked, on_lost,
-                                   connection);
+      status = wt_quic_loss_detect(&connection->loss, (uint8_t)space, &space_state->rtt, now,
+                                   largest_acked, on_lost, connection);
       if (status != WT_OK) return status;
     }
   }

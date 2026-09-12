@@ -134,21 +134,21 @@ static void test_packet_threshold(void) {
    * An endpoint does not declare its own packets lost before a later one is acknowledged. */
   memset(&log, 0, sizeof(log));
   WT_EXPECT_OK("packet 0 is acknowledged",
-               wt_quic_loss_detect(&loss, &rtt, 1000U, 0U, log_lost, &log));
+               wt_quic_loss_detect(&loss, 0U, &rtt, 1000U, 0U, log_lost, &log));
   WT_EXPECT_U64("declaring nothing lost", 0U, (uint64_t)log.count);
 
   /* Acknowledging 2 still declares nothing: 2 >= 0 + 3 and 2 >= 1 + 3 are both false. Two numbers
    * higher than a packet is inside the threshold. */
   memset(&log, 0, sizeof(log));
   WT_EXPECT_OK("packet 2 is acknowledged",
-               wt_quic_loss_detect(&loss, &rtt, 1000U, 2U, log_lost, &log));
+               wt_quic_loss_detect(&loss, 0U, &rtt, 1000U, 2U, log_lost, &log));
   WT_EXPECT_U64("still declaring nothing lost", 0U, (uint64_t)log.count);
 
   /* Acknowledging 3 declares packet 0 and only packet 0: 3 >= 0 + 3 is true (three numbers higher
    * has arrived) and 3 >= 1 + 3 is false. This is the boundary the threshold is about. */
   memset(&log, 0, sizeof(log));
   WT_EXPECT_OK("packet 3 is acknowledged",
-               wt_quic_loss_detect(&loss, &rtt, 1000U, 3U, log_lost, &log));
+               wt_quic_loss_detect(&loss, 0U, &rtt, 1000U, 3U, log_lost, &log));
   WT_EXPECT_U64("one packet is declared lost", 1U, (uint64_t)log.count);
   WT_EXPECT_U64("which is packet 0", 0U, log.packet_numbers[0]);
   WT_EXPECT_U64("with the caller's tag", 0U, log.tags[0]);
@@ -156,7 +156,7 @@ static void test_packet_threshold(void) {
   /* Acknowledging 6 declares 1, 2 and 3: each is at least three below six. */
   memset(&log, 0, sizeof(log));
   WT_EXPECT_OK("packet 6 is acknowledged",
-               wt_quic_loss_detect(&loss, &rtt, 1000U, 6U, log_lost, &log));
+               wt_quic_loss_detect(&loss, 0U, &rtt, 1000U, 6U, log_lost, &log));
   WT_EXPECT_U64("three packets are declared lost", 3U, (uint64_t)log.count);
   WT_EXPECT_U64("the first is packet 1", 1U, log.packet_numbers[0]);
   WT_EXPECT_U64("the second is packet 2", 2U, log.packet_numbers[1]);
@@ -172,7 +172,7 @@ static void test_packet_threshold(void) {
   /* Detection is idempotent: a second call with the same watermark declares nothing, because the
    * packets it declared are no longer in the list. */
   memset(&log, 0, sizeof(log));
-  WT_EXPECT_OK("detecting again", wt_quic_loss_detect(&loss, &rtt, 1000U, 6U, log_lost, &log));
+  WT_EXPECT_OK("detecting again", wt_quic_loss_detect(&loss, 0U, &rtt, 1000U, 6U, log_lost, &log));
   WT_EXPECT_U64("declares nothing the second time", 0U, (uint64_t)log.count);
 }
 
@@ -195,7 +195,7 @@ static void test_time_threshold(void) {
   {
     int newly_acked = 0;
     WT_EXPECT_OK("the second is acknowledged",
-                 wt_quic_loss_on_ack(&loss, 1U, &rtt, 1000002U, 0U, &newly_acked));
+                 wt_quic_loss_on_ack(&loss, 0U, 1U, &rtt, 1000002U, 0U, &newly_acked));
     WT_EXPECT_INT("which is new", 1, newly_acked);
   }
 
@@ -203,25 +203,25 @@ static void test_time_threshold(void) {
    * microseconds ago and the delay is 112500. */
   memset(&log, 0, sizeof(log));
   WT_EXPECT_OK("detection one microsecond inside",
-               wt_quic_loss_detect(&loss, &rtt, 1000000U + 112499U, 1U, log_lost, &log));
+               wt_quic_loss_detect(&loss, 0U, &rtt, 1000000U + 112499U, 1U, log_lost, &log));
   WT_EXPECT_U64("declares nothing lost", 0U, (uint64_t)log.count);
   WT_EXPECT_U64("and packet 0 is still in flight", 1U,
                 (uint64_t)wt_quic_loss_count(&loss));
 
   /* The time at which it will be lost, which is what a connection arms its loss timer with. */
   WT_EXPECT_U64("the loss time is the send time plus the delay", 1000000U + 112500U,
-                wt_quic_loss_time(&loss, &rtt, 1U));
+                wt_quic_loss_time(&loss, 0U, &rtt, 1U));
 
   /* At the threshold it is lost: RFC 9002 section 6.1's comparison is "sent at or before
    * now minus the delay". */
   memset(&log, 0, sizeof(log));
   WT_EXPECT_OK("detection at the threshold",
-               wt_quic_loss_detect(&loss, &rtt, 1000000U + 112500U, 1U, log_lost, &log));
+               wt_quic_loss_detect(&loss, 0U, &rtt, 1000000U + 112500U, 1U, log_lost, &log));
   WT_EXPECT_U64("declares packet 0 lost", 1U, (uint64_t)log.count);
   WT_EXPECT_U64("which is the packet sent first", 0U, log.packet_numbers[0]);
   WT_EXPECT_U64("leaving nothing in flight", 0U, (uint64_t)wt_quic_loss_count(&loss));
   WT_EXPECT_U64("and no loss time, because nothing is below the watermark", 0U,
-                wt_quic_loss_time(&loss, &rtt, 1U));
+                wt_quic_loss_time(&loss, 0U, &rtt, 1U));
 
   /* A packet that has met the packet threshold is not given a loss time: it is lost on the next
    * detection rather than by a timer, so arming one for it would be a timer that fires for nothing. */
@@ -239,11 +239,11 @@ static void test_time_threshold(void) {
     /* With 3 acknowledged, packet 0 has met the packet threshold and is skipped, while packet 1
      * has not and is the one the timer is for. */
     WT_EXPECT_U64("the loss time comes from the packet that has not met the threshold",
-                  5000U + 112500U, wt_quic_loss_time(&space, &rtt, 3U));
+                  5000U + 112500U, wt_quic_loss_time(&space, 0U, &rtt, 3U));
     /* With everything below the watermark having met it, there is no loss time at all: those
      * packets are declared lost by number rather than by a timer. */
     WT_EXPECT_U64("and none when every packet has met it", 0U,
-                  wt_quic_loss_time(&space, &rtt, 7U));
+                  wt_quic_loss_time(&space, 0U, &rtt, 7U));
   }
 }
 
@@ -258,7 +258,7 @@ static void test_acknowledgement(void) {
   packet = packet_at(0U, 1000U, 1);
   WT_EXPECT_OK("an ack-eliciting packet is sent", wt_quic_loss_on_sent(&loss, &packet));
   WT_EXPECT_OK("it is acknowledged",
-               wt_quic_loss_on_ack(&loss, 0U, &rtt, 2000U, 0U, &newly_acked));
+               wt_quic_loss_on_ack(&loss, 0U, 0U, &rtt, 2000U, 0U, &newly_acked));
   WT_EXPECT_INT("which is a new acknowledgement", 1, newly_acked);
   WT_EXPECT_U64("and it is no longer in flight", 0U, (uint64_t)wt_quic_loss_count(&loss));
   WT_EXPECT_U64("with no bytes in flight", 0U, wt_quic_loss_bytes_in_flight(&loss));
@@ -266,7 +266,7 @@ static void test_acknowledgement(void) {
   /* Acknowledging it again is not an error: a peer may repeat an acknowledgement, and the packet
    * may already have been declared lost and retransmitted. */
   WT_EXPECT_OK("acknowledging it again",
-               wt_quic_loss_on_ack(&loss, 0U, &rtt, 3000U, 0U, &newly_acked));
+               wt_quic_loss_on_ack(&loss, 0U, 0U, &rtt, 3000U, 0U, &newly_acked));
   WT_EXPECT_INT("is not a new acknowledgement", 0, newly_acked);
 
   /* The probe timeout's backoff is reset by acknowledging an ack-eliciting packet. */
@@ -276,7 +276,7 @@ static void test_acknowledgement(void) {
   wt_quic_loss_on_pto(&loss);
   WT_EXPECT_U64("two expiries have backed it off", 2U, loss.pto_count);
   WT_EXPECT_OK("the packet is acknowledged",
-               wt_quic_loss_on_ack(&loss, 1U, &rtt, 6000U, 0U, &newly_acked));
+               wt_quic_loss_on_ack(&loss, 0U, 1U, &rtt, 6000U, 0U, &newly_acked));
   WT_EXPECT_U64("which resets the backoff", 0U, loss.pto_count);
 
   /* A packet that was not ack-eliciting does not reset it: acknowledging a packet the peer did not
@@ -287,7 +287,7 @@ static void test_acknowledgement(void) {
   wt_quic_loss_on_pto(&loss);
   WT_EXPECT_U64("the backoff is one", 1U, loss.pto_count);
   WT_EXPECT_OK("and it is acknowledged",
-               wt_quic_loss_on_ack(&loss, 2U, &rtt, 8000U, 0U, &newly_acked));
+               wt_quic_loss_on_ack(&loss, 0U, 2U, &rtt, 8000U, 0U, &newly_acked));
   WT_EXPECT_U64("which does not reset the backoff", 1U, loss.pto_count);
 }
 
@@ -302,29 +302,29 @@ static void test_probe_timeout(void) {
   wt_quic_loss_init(&loss);
   /* Nothing ack-eliciting in flight: there is nothing to probe for. */
   WT_EXPECT_STATUS("no probe timeout with nothing outstanding", WT_ERR_STATE,
-                   wt_quic_loss_pto(&loss, &rtt, 0U, &pto));
+                   wt_quic_loss_pto(&loss, 0U, &rtt, 0U, &pto));
 
   /* A packet that needs no answer does not arm it either. */
   packet = packet_at(0U, 1000U, 0);
   WT_EXPECT_OK("a packet that needs no answer is sent",
                wt_quic_loss_on_sent(&loss, &packet));
   WT_EXPECT_STATUS("which does not arm the probe timeout", WT_ERR_STATE,
-                   wt_quic_loss_pto(&loss, &rtt, 0U, &pto));
+                   wt_quic_loss_pto(&loss, 0U, &rtt, 0U, &pto));
 
   /* An ack-eliciting one does: sent at 2000, plus smoothed 100000 + 4 * 50000 (the variation) =
    * 300000, so 302000. */
   packet = packet_at(1U, 2000U, 1);
   WT_EXPECT_OK("an ack-eliciting packet is sent", wt_quic_loss_on_sent(&loss, &packet));
-  WT_EXPECT_OK("the probe timeout is armed", wt_quic_loss_pto(&loss, &rtt, 0U, &pto));
+  WT_EXPECT_OK("the probe timeout is armed", wt_quic_loss_pto(&loss, 0U, &rtt, 0U, &pto));
   WT_EXPECT_U64("at the send time plus the timeout", 2000U + 100000U + 4U * 50000U, pto);
   first = pto;
 
   /* Each expiry doubles it from the same send time. */
   wt_quic_loss_on_pto(&loss);
-  WT_EXPECT_OK("after one expiry", wt_quic_loss_pto(&loss, &rtt, 0U, &pto));
+  WT_EXPECT_OK("after one expiry", wt_quic_loss_pto(&loss, 0U, &rtt, 0U, &pto));
   WT_EXPECT_U64("the timeout is doubled", 2000U + 2U * (first - 2000U), pto);
   wt_quic_loss_on_pto(&loss);
-  WT_EXPECT_OK("after two", wt_quic_loss_pto(&loss, &rtt, 0U, &pto));
+  WT_EXPECT_OK("after two", wt_quic_loss_pto(&loss, 0U, &rtt, 0U, &pto));
   WT_EXPECT_U64("it is doubled again", 2000U + 4U * (first - 2000U), pto);
 
   /* The peer's maximum acknowledgement delay belongs to the Application space, and a caller that
@@ -336,7 +336,7 @@ static void test_probe_timeout(void) {
     WT_EXPECT_OK("a packet in the application space",
                  wt_quic_loss_on_sent(&space, &packet));
     WT_EXPECT_OK("the probe timeout with a delay",
-                 wt_quic_loss_pto(&space, &rtt, 25000U, &pto));
+                 wt_quic_loss_pto(&space, 0U, &rtt, 25000U, &pto));
     WT_EXPECT_U64("includes the delay", 300000U + 25000U, pto);
   }
 
@@ -346,14 +346,14 @@ static void test_probe_timeout(void) {
     size_t i;
     for (i = 0U; i < 64U; i++) wt_quic_loss_on_pto(&loss);
     WT_EXPECT_TRUE("the backoff is bounded", loss.pto_count <= 16U);
-    WT_EXPECT_OK("and the timeout still computes", wt_quic_loss_pto(&loss, &rtt, 0U, &pto));
+    WT_EXPECT_OK("and the timeout still computes", wt_quic_loss_pto(&loss, 0U, &rtt, 0U, &pto));
     WT_EXPECT_TRUE("in the future", pto > first);
   }
 
   WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
-                   wt_quic_loss_pto(&loss, &rtt, 0U, NULL));
+                   wt_quic_loss_pto(&loss, 0U, &rtt, 0U, NULL));
   WT_EXPECT_STATUS("a NULL estimator is refused", WT_ERR_INVALID_ARGUMENT,
-                   wt_quic_loss_pto(&loss, NULL, 0U, &pto));
+                   wt_quic_loss_pto(&loss, 0U, NULL, 0U, &pto));
 }
 
 int main(void) {
