@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 83 test programs and 91,312 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
+- 83 test programs and 91,326 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -674,14 +674,18 @@ What is here:
   WT-147 fix as an assertion).
 - **Static analysis, run over every source** (WT-176): the Definition of Done's "sanitizers and static checks are
   clean" criterion was carried by warnings-as-errors, and the plan's Phase 13 asks for static analysis by name.
-  `scripts/check-static-analysis.sh` runs the **Clang Static Analyzer** (`clang --analyze`) over all **92 sources**
+  `scripts/check-static-analysis.sh` runs the **Clang Static Analyzer** (`clang --analyze`) over all **93 sources**
   of the library and the tools, replaying each file's own command from `compile_commands.json` so the include
   paths, defines and C standard are the ones the code is really compiled with. It is symbolic execution, not a
   warning flag: it finds the use-after-free, the null dereference on a branch no test takes, the value read
   uninitialised on one path. It found a **dead store in `wt_sha256_init`** (the storage view was taken, then
   wiped by the `memset`, then taken again -- the analyzer called the first assignment what it was), and the tree
-  is clean at 92/92 after the fix. A machine without clang reports `unsupported` with its reason, like the
-  Windows checks do for a missing cross-compiler; where clang is present a finding fails the build.
+  is clean at 93/93 after the fix. The Linux leg then found what the macOS one could not, because only glibc
+  declares `memcpy`/`memcmp` nonnull: **seven `core.NonNullParamChecker` findings** where a NULL with a zero
+  length -- legal at these entry points -- was handed to those calls, on paths no test took. Each call is now
+  guarded (WT-184), the guards have tests, and both legs are clean. A machine without clang reports `unsupported`
+  with its reason, like the Windows checks do for a missing cross-compiler; where clang is present a finding fails
+  the build.
   `check-static-analysis.sh` is registered in CI beside the matrix and portability checks. A SECOND engine runs
   beside it -- `scripts/check-cppcheck.sh`, the tool the plan names by hand -- and it earns its place: over this
   tree it found a default mode chosen by comparing two literals in all three tools (`strcmp("connect", "none")`,

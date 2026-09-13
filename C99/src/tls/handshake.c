@@ -702,8 +702,12 @@ wt_status_t wt_tls_certificate_build(const wt_tls_certificate_params_t *params,
   certificate.request_context = params->request_context;
   certificate.request_context_len = params->request_context_len;
   certificate.count = params->count;
-  memcpy(certificate.entries, params->entries,
-         params->count * sizeof(certificate.entries[0]));
+  /* An empty certificate list is legal, so the copy is guarded: that is what keeps
+   * a NULL with a zero count away from `memcpy`'s nonnull parameters. */
+  if (params->count != 0U) {
+    memcpy(certificate.entries, params->entries,
+           params->count * sizeof(certificate.entries[0]));
+  }
 
   {
     wt_writer_t w = wt_writer_init(out, capacity);

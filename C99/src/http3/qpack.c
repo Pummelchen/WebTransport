@@ -34,8 +34,11 @@ wt_status_t wt_qpack_static_find(const char *name, size_t name_length, const cha
   for (i = 0U; i < (size_t)WT_QPACK_STATIC_TABLE_SIZE; i++) {
     wt_qpack_static_entry_t entry = view(i);
     if (entry.name_length != name_length || entry.value_length != value_length) continue;
-    if (memcmp(entry.name, name, name_length) != 0) continue;
-    if (memcmp(entry.value, value, value_length) != 0) continue;
+    /* The lengths already agree, so a zero length compares equal without the
+     * call: the guard is what keeps a NULL with a zero length away from
+     * `memcmp`'s nonnull parameters. */
+    if (name_length != 0U && memcmp(entry.name, name, name_length) != 0) continue;
+    if (value_length != 0U && memcmp(entry.value, value, value_length) != 0) continue;
     *out_index = (uint64_t)i;
     return WT_OK;
   }
@@ -53,7 +56,7 @@ wt_status_t wt_qpack_static_find_name(const char *name, size_t name_length, uint
   for (i = 0U; i < (size_t)WT_QPACK_STATIC_TABLE_SIZE; i++) {
     wt_qpack_static_entry_t entry = view(i);
     if (entry.name_length != name_length) continue;
-    if (memcmp(entry.name, name, name_length) != 0) continue;
+    if (name_length != 0U && memcmp(entry.name, name, name_length) != 0) continue;
     /* The first match, which is what RFC 9204 section 4.5.4's encoder does: the
      * table keeps the most common value of a name first, so "first" is also the
      * cheapest choice among equals. */

@@ -52,6 +52,13 @@ static void test_exact_lookups(void) {
                    wt_qpack_static_find("x-nonexistent", 13U, "", 0U, &index));
   WT_EXPECT_STATUS("nor a name that matches only in length", WT_ERR_CLOSED,
                    wt_qpack_static_find("x-frame-optionz", 15U, "deny", 4U, &index));
+
+  /* A NULL with a zero length is the same legal empty name or value, and it is the
+   * form that used to hand NULL to memcmp's nonnull parameter. */
+  WT_EXPECT_STATUS("a null zero-length name matches nothing", WT_ERR_CLOSED,
+                   wt_qpack_static_find(NULL, 0U, "deny", 4U, &index));
+  WT_EXPECT_STATUS("and neither does a null zero-length value", WT_ERR_CLOSED,
+                   wt_qpack_static_find("x-frame-options", 15U, NULL, 0U, &index));
 }
 
 static void test_name_lookups(void) {
@@ -81,6 +88,8 @@ static void test_name_lookups(void) {
    * the lookup must not match the first entry by accident. */
   WT_EXPECT_STATUS("an empty name matches nothing", WT_ERR_CLOSED,
                    wt_qpack_static_find_name("", 0U, &index));
+  WT_EXPECT_STATUS("as does a null zero-length name", WT_ERR_CLOSED,
+                   wt_qpack_static_find_name(NULL, 0U, &index));
 }
 
 int main(void) {

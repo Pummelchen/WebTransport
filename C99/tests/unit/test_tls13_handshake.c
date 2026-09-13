@@ -803,6 +803,28 @@ static void test_certificate_messages(void) {
                        wt_tls_certificate_build(&params, small, sizeof(small), NULL));
     }
 
+    /* An empty chain with no entries is the form RFC 8446 section 4.4.2 gives a client with no
+     * certificate to offer, and it is the call where a NULL entry array must not reach memcpy --
+     * the guard in the builder is what keeps it legal. */
+    {
+      wt_tls_certificate_t parsed;
+      wt_tls_certificate_params_t params;
+      uint8_t empty[16];
+      size_t empty_len = 0U;
+      params.request_context = NULL;
+      params.request_context_len = 0U;
+      params.entries = NULL;
+      params.count = 0U;
+      WT_EXPECT_OK("an empty chain with no entries is built",
+                   wt_tls_certificate_build(&params, empty, sizeof(empty), &empty_len));
+      /* The handshake header is four bytes (type and a three-byte length) and the body is
+       * four more: an empty request context and an empty certificate list. */
+      WT_EXPECT_U64("as an eight-byte message", 8U, (uint64_t)empty_len);
+      WT_EXPECT_OK("and it parses back", wt_tls_certificate_parse(empty, empty_len, &parsed));
+      WT_EXPECT_U64("with no entries", 0U, (uint64_t)parsed.count);
+      WT_EXPECT_U64("and no request context", 0U, (uint64_t)parsed.request_context_len);
+    }
+
     /* A certificate entry with no DER is not an empty chain. */
     {
       wt_tls_certificate_entry_t entry;

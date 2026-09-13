@@ -80,8 +80,10 @@ wt_status_t wt_qpack_dynamic_insert(wt_qpack_dynamic_table_t *table, const uint8
   }
 
   needed = name_length + value_length;
-  memcpy(table->bytes + table->used, name, name_length);
-  memcpy(table->bytes + table->used + name_length, value, value_length);
+  /* An empty name or value is legal and has no bytes to copy; the guards keep a
+   * NULL with a zero length away from `memcpy`'s nonnull parameters. */
+  if (name_length != 0U) memcpy(table->bytes + table->used, name, name_length);
+  if (value_length != 0U) memcpy(table->bytes + table->used + name_length, value, value_length);
   table->entries[table->count].absolute_index = table->insert_count;
   table->entries[table->count].offset = (uint32_t)table->used;
   table->entries[table->count].name_length = (uint16_t)name_length;

@@ -882,6 +882,13 @@ static void test_retry_integrity_tag(void) {
                    wt_quic_retry_integrity_verify(odcid, sizeof(odcid), packet, 8U));
   WT_EXPECT_STATUS("and a null packet is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_quic_retry_integrity_verify(odcid, sizeof(odcid), NULL, 32U));
+
+  /* A Retry with neither an original destination connection ID nor a payload is
+   * legal at this layer: the pseudo-packet is the zero-length byte alone. Both
+   * copies in the builder are guarded, which is what keeps a NULL away from
+   * memcpy's nonnull parameters for this call. */
+  WT_EXPECT_OK("a Retry with no ODCID and no payload still produces a tag",
+               wt_quic_retry_integrity_tag(NULL, 0U, NULL, 0U, tag));
 }
 
 /* RFC 9001 appendix A.4: the Retry packet the document prints, and the integrity tag it prints with

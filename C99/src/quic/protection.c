@@ -401,8 +401,15 @@ wt_status_t wt_quic_retry_integrity_tag(const uint8_t *original_destination_conn
 
   total = 1U + original_destination_connection_id_len + length;
   pseudo[0] = (uint8_t)original_destination_connection_id_len;
-  memcpy(pseudo + 1U, original_destination_connection_id, original_destination_connection_id_len);
-  memcpy(pseudo + 1U + original_destination_connection_id_len, retry_packet_without_tag, length);
+  /* A Retry with no ODCID or no payload is legal at this layer, so the copies are
+   * guarded: that is what keeps a NULL with a zero length away from `memcpy`'s
+   * nonnull parameters. */
+  if (original_destination_connection_id_len != 0U) {
+    memcpy(pseudo + 1U, original_destination_connection_id, original_destination_connection_id_len);
+  }
+  if (length != 0U) {
+    memcpy(pseudo + 1U + original_destination_connection_id_len, retry_packet_without_tag, length);
+  }
 
   status = wt_aead_seal(WT_AEAD_AES_128_GCM, WT_QUIC_RETRY_KEY, WT_QUIC_RETRY_NONCE, pseudo, total,
                         empty, 0U, empty, out);

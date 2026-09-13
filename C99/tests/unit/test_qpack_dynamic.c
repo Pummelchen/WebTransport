@@ -48,6 +48,17 @@ static void test_insert_and_lookup(void) {
 
   WT_EXPECT_STATUS("an index that was never inserted is not there", WT_ERR_CLOSED,
                    wt_qpack_dynamic_entry(&table, 2U, &name, &name_length, &value, &value_length));
+
+  /* An empty name and value with NULL pointers are legal: the entry has no bytes to
+   * copy, and the guards in the insert are what keep those NULLs away from
+   * memcpy's nonnull parameters. */
+  WT_EXPECT_OK("an entry with no name and no value inserts",
+               wt_qpack_dynamic_insert(&table, NULL, 0U, NULL, 0U, &index));
+  WT_EXPECT_U64("at the next absolute index", 2U, index);
+  WT_EXPECT_OK("and it reads back", wt_qpack_dynamic_entry(&table, 2U, &name, &name_length, &value,
+                                                           &value_length));
+  WT_EXPECT_U64("with no name bytes", 0U, (uint64_t)name_length);
+  WT_EXPECT_U64("and no value bytes", 0U, (uint64_t)value_length);
 }
 
 static void test_eviction_keeps_indices(void) {
