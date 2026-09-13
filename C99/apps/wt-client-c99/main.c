@@ -23,10 +23,11 @@ static int wt_usage(const char *program) {
   printf("WebTransport over HTTP/3, C99 implementation %s (%s).\n",
          wt_version_string(), wt_protocol_draft());
   printf("\n");
-  printf("This build carries the protocol layers and the public API, but the\n");
-  printf("tool does not yet drive a session over a socket: that wiring is the\n");
-  printf("rest of Phase 9. It exits 3 rather than 0 so a script cannot read\n");
-  printf("this as a successful run.\n");
+  printf("It connects to a peer, establishes a WebTransport session and exchanges\n");
+  printf("the message named by --exchange over the transport named by --transport.\n");
+  printf("The peer's identity is checked according to --trust, including the pinned\n");
+  printf("identities a local development peer uses. It exits non-zero when the\n");
+  printf("session does not complete.\n");
   return 3;
 }
 

@@ -68,6 +68,20 @@ grep -q '"role":"client"' "$work/out" || fail "and must report in JSON when aske
 grep -q '"established":false' "$work/out" || fail "with established false" "$work/out"
 grep -q '"status":"ok"' "$work/out" && fail "and must NOT claim ok" "$work/out"
 
+# --help must describe the tool that exists. It said "the tool does not yet drive a session over a socket" for
+# several phases after the tools started driving one -- a user reading --help was told the tool could not do what
+# the CTest suite proved it does twice a minute. The check is the phrase rather than the wording, so the text can
+# be improved without editing this.
+for tool in "$client" "$server" "$conformance"; do
+  set +e
+  "$tool" --help >"$work/help" 2>&1
+  help_status=$?
+  set -e
+  [ "$help_status" -eq 0 ] || fail "--help must exit 0 for every tool (got $help_status)" "$work/help"
+  grep -q "does not yet" "$work/help" \
+    && fail "--help must not claim the tool is unimplemented" "$work/help"
+done
+
 # The conformance tool's report is machine-readable and its summary is consistent with its scenarios.
 # Exit 3 means "nothing failed but something was not attempted", which is the report's own distinction and not a
 # failure of this script.

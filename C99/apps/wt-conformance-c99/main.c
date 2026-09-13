@@ -33,10 +33,11 @@ static int wt_usage(const char *program) {
   printf("WebTransport over HTTP/3, C99 implementation %s (%s).\n",
          wt_version_string(), wt_protocol_draft());
   printf("\n");
-  printf("This build carries the protocol layers and the public API, but the\n");
-  printf("tool does not yet drive a session over a socket: that wiring is the\n");
-  printf("rest of Phase 9. It exits 3 rather than 0 so a script cannot read\n");
-  printf("this as a successful run.\n");
+  printf("It runs the scenario suites and writes a machine-readable report: the\n");
+  printf("codec and framing cases, the refusals, the connection-control and\n");
+  printf("flow-control matrices, the sub-protocol negotiation, and two real\n");
+  printf("sessions over IPv4 and IPv6. It exits 0 when nothing failed, 3 when\n");
+  printf("something was unsupported, and non-zero when a scenario failed.\n");
   return 3;
 }
 
