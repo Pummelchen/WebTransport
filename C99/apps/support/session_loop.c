@@ -155,6 +155,30 @@ static void connection_config(wt_quic_connection_config_t *config, wt_quic_role_
   config->max_datagram_size = 1200U;
 }
 
+/* Everything a failed run can say about WHY, read while the session is still alive.
+ *
+ * This was inline at each failure return once, and it was WRONG twice over: the assignments sat after
+ * `wt_runtime_session_clear`, so the handshake state was read from a cleared struct (it said "idle" while the
+ * connection held Handshake and Application keys), and the insertion loop left the block in some paths twice. A
+ * helper called before the clear is one place, one order, and a comment that says why the order matters (WT-135).
+ */
+static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
+  out->first_receive_error = loop->session.first_receive_error;
+  out->receive_errors = loop->session.receive_errors;
+  out->packets_seen = loop->session.packets_seen;
+  out->last_receive = loop->session.last_receive;
+  out->close_code = loop->session.connection.close_code;
+  out->close_frame_type = loop->session.connection.close_frame_type;
+  out->close_code_set = loop->session.connection.close_code_set;
+  out->peer_error_code = loop->session.connection.peer_error_code;
+  out->peer_closed = loop->session.connection.peer_closed;
+  out->packets_discarded = loop->session.connection.packets_discarded;
+  out->has_initial_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
+  out->has_handshake_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
+  out->has_application_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
+  out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop->session.handshake));
+}
+
 static void pump_once(loop_t *loop) {
   (void)wt_udp_wait(&loop->socket, WT_LOOP_WAIT_MICROS);
   (void)wt_runtime_session_pump(&loop->session, loop->now);
@@ -269,116 +293,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     pump_once(&loop);
   }
   if (wt_runtime_session_established(&loop.session) == 0) {
-    wt_runtime_session_clear(&loop.session);
+    record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
-    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
-     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
-     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
-     * when the packets were arriving all along (WT-135). */
-    out->first_receive_error = loop.session.first_receive_error;
-    out->receive_errors = loop.session.receive_errors;
-    out->packets_seen = loop.session.packets_seen;
-    out->last_receive = loop.session.last_receive;
-    out->close_code = loop.session.connection.close_code;
-    out->close_frame_type = loop.session.connection.close_frame_type;
-    out->close_code_set = loop.session.connection.close_code_set;
-    out->peer_error_code = loop.session.connection.peer_error_code;
-    out->peer_closed = loop.session.connection.peer_closed;
-    out->packets_discarded = loop.session.connection.packets_discarded;
-    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
-    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
-    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
-    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
-    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
-     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
-     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
-     * when the packets were arriving all along (WT-135). */
-    out->first_receive_error = loop.session.first_receive_error;
-    out->receive_errors = loop.session.receive_errors;
-    out->packets_seen = loop.session.packets_seen;
-    out->last_receive = loop.session.last_receive;
-    out->close_code = loop.session.connection.close_code;
-    out->close_frame_type = loop.session.connection.close_frame_type;
-    out->close_code_set = loop.session.connection.close_code_set;
-    out->peer_error_code = loop.session.connection.peer_error_code;
-    out->peer_closed = loop.session.connection.peer_closed;
-    out->packets_discarded = loop.session.connection.packets_discarded;
-    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
-    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
-    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
-    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
-    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
-     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
-     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
-     * when the packets were arriving all along (WT-135). */
-    out->first_receive_error = loop.session.first_receive_error;
-    out->receive_errors = loop.session.receive_errors;
-    out->packets_seen = loop.session.packets_seen;
-    out->last_receive = loop.session.last_receive;
-    out->close_code = loop.session.connection.close_code;
-    out->close_frame_type = loop.session.connection.close_frame_type;
-    out->close_code_set = loop.session.connection.close_code_set;
-    out->peer_error_code = loop.session.connection.peer_error_code;
-    out->peer_closed = loop.session.connection.peer_closed;
-    out->packets_discarded = loop.session.connection.packets_discarded;
-    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
-    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
-    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
-    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
-    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
-     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
-     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
-     * when the packets were arriving all along (WT-135). */
-    out->first_receive_error = loop.session.first_receive_error;
-    out->receive_errors = loop.session.receive_errors;
-    out->packets_seen = loop.session.packets_seen;
-    out->last_receive = loop.session.last_receive;
-    out->close_code = loop.session.connection.close_code;
-    out->close_frame_type = loop.session.connection.close_frame_type;
-    out->close_code_set = loop.session.connection.close_code_set;
-    out->peer_error_code = loop.session.connection.peer_error_code;
-    out->peer_closed = loop.session.connection.peer_closed;
-    out->packets_discarded = loop.session.connection.packets_discarded;
-    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
-    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
-    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
-    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
-    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
-     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
-     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
-     * when the packets were arriving all along (WT-135). */
-    out->first_receive_error = loop.session.first_receive_error;
-    out->receive_errors = loop.session.receive_errors;
-    out->packets_seen = loop.session.packets_seen;
-    out->last_receive = loop.session.last_receive;
-    out->close_code = loop.session.connection.close_code;
-    out->close_frame_type = loop.session.connection.close_frame_type;
-    out->close_code_set = loop.session.connection.close_code_set;
-    out->peer_error_code = loop.session.connection.peer_error_code;
-    out->peer_closed = loop.session.connection.peer_closed;
-    out->packets_discarded = loop.session.connection.packets_discarded;
-    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
-    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
-    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
-    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
-    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
-     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
-     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
-     * when the packets were arriving all along (WT-135). */
-    out->first_receive_error = loop.session.first_receive_error;
-    out->receive_errors = loop.session.receive_errors;
-    out->packets_seen = loop.session.packets_seen;
-    out->last_receive = loop.session.last_receive;
-    out->close_code = loop.session.connection.close_code;
-    out->close_frame_type = loop.session.connection.close_frame_type;
-    out->close_code_set = loop.session.connection.close_code_set;
-    out->peer_error_code = loop.session.connection.peer_error_code;
-    out->peer_closed = loop.session.connection.peer_closed;
-    out->packets_discarded = loop.session.connection.packets_discarded;
-    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
-    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
-    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
-    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
     return WT_ERR_TIMEOUT;
   }
   out->established = 1;
@@ -390,7 +308,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
                                                        config->authority, config->path, 0U, loop.now,
                                                        &loop.side.request_stream_id, &h3_error);
     if (status != WT_OK) {
-      wt_runtime_session_clear(&loop.session);
+      record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -399,7 +319,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     pump_once(&loop);
   }
   if (loop.side.section_complete == 0) {
-    wt_runtime_session_clear(&loop.session);
+    record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
     return WT_ERR_TIMEOUT;
   }
@@ -408,7 +330,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
         &loop.side.endpoint, loop.side.request_stream_id, loop.side.section, loop.side.section_length,
         scratch, sizeof(scratch), &response, &h3_error);
     if (status != WT_OK) {
-      wt_runtime_session_clear(&loop.session);
+      record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -419,7 +343,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   {
     wt_status_t status = send_message(&loop, &transport, config);
     if (status != WT_OK) {
-      wt_runtime_session_clear(&loop.session);
+      record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -429,6 +355,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   out->received_bytes = loop.side.data_bytes;
   out->received_datagram = loop.side.data_was_datagram;
 
+  record_oracle(&loop, out);
   wt_runtime_session_clear(&loop.session);
   wt_udp_close(&loop.socket);
   return WT_OK;
@@ -538,7 +465,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     pump_once(&loop);
   }
   if (wt_runtime_session_established(&loop.session) == 0) {
-    wt_runtime_session_clear(&loop.session);
+    record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
     return WT_ERR_TIMEOUT;
   }
@@ -552,7 +481,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     pump_once(&loop);
   }
   if (loop.side.section_complete == 0) {
-    wt_runtime_session_clear(&loop.session);
+    record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
     return WT_ERR_TIMEOUT;
   }
@@ -561,7 +492,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
         &loop.side.endpoint, loop.side.request_stream_id, loop.side.section, loop.side.section_length,
         scratch, sizeof(scratch), &request, &h3_error);
     if (status != WT_OK) {
-      wt_runtime_session_clear(&loop.session);
+      record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -572,7 +505,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   policy.wt_enabled = 1;
   if (wt_webtransport_session_request_validate(&request, &policy, &decision, &h3_error) != WT_OK ||
       decision.outcome != WT_WEBTRANSPORT_REQUEST_ACCEPT) {
-    wt_runtime_session_clear(&loop.session);
+    record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
     return WT_ERR_PROTOCOL;
   }
@@ -584,7 +519,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
                                                        loop.side.request_stream_id, 200U, 0U, 0,
                                                        loop.now);
     if (status != WT_OK) {
-      wt_runtime_session_clear(&loop.session);
+      record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -599,13 +536,16 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   if (config->message != NULL) {
     wt_status_t status = send_message(&loop, &transport, config);
     if (status != WT_OK) {
-      wt_runtime_session_clear(&loop.session);
+      record_oracle(&loop, out);
+    record_oracle(&loop, out);
+  wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
     for (round = 0U; round < 100U; round++) pump_once(&loop);
   }
 
+  record_oracle(&loop, out);
   wt_runtime_session_clear(&loop.session);
   wt_udp_close(&loop.socket);
   return WT_OK;
