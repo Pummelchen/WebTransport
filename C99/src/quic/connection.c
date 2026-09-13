@@ -1720,18 +1720,26 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
       return handle_new_connection_id(connection, frame, visit->now);
     case WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID:
       return handle_retire_connection_id(connection, frame, visit);
+    case WT_QUIC_FRAME_KIND_PATH_CHALLENGE:
+      return handle_path_challenge(connection, frame, visit);
+    case WT_QUIC_FRAME_KIND_PATH_RESPONSE:
+      return handle_path_response(connection, frame, visit);
+    /* PING, CRYPTO, NEW_TOKEN, DATA_BLOCKED, STREAMS_BLOCKED and DATAGRAM carry no work for this layer, so they
+     * go to the handler like any other frame. They used to share the PATH_CHALLENGE label above, which was a
+     * REMOTE CRASH: `handle_path_challenge` reads `frame->as.path_challenge.data`, and for a frame of any other
+     * kind that member is whatever the previous frame left in the decoder's reused union -- for a PING, an
+     * uninitialised scalar. A non-NULL garbage pointer passed the null check and was then memcpy'd from, so a
+     * peer that merely sent a PING took this endpoint down with SIGSEGV. Found on the VPS matrix against quinn,
+     * quiche and h3, which send one; pywebtransport, which did not in the window, was unaffected.
+     *
+     * Everything that is not PADDING, an acknowledgement or a close makes the packet ack-eliciting, whether or
+     * not this layer acts on it itself (RFC 9000 section 13.2.1). */
     case WT_QUIC_FRAME_KIND_PING:
     case WT_QUIC_FRAME_KIND_CRYPTO:
     case WT_QUIC_FRAME_KIND_NEW_TOKEN:
     case WT_QUIC_FRAME_KIND_DATA_BLOCKED:
     case WT_QUIC_FRAME_KIND_STREAMS_BLOCKED:
-    case WT_QUIC_FRAME_KIND_PATH_CHALLENGE:
-      return handle_path_challenge(connection, frame, visit);
-    case WT_QUIC_FRAME_KIND_PATH_RESPONSE:
-      return handle_path_response(connection, frame, visit);
     case WT_QUIC_FRAME_KIND_DATAGRAM:
-      /* Everything that is not PADDING, an acknowledgement or a close makes the packet
-       * ack-eliciting, whether or not this layer acts on it itself (RFC 9000 section 13.2.1). */
       return deliver_to_handler(connection, visit, frame);
   }
   /* A kind this layer does not know cannot come from the decoder, which refuses unknown types, so

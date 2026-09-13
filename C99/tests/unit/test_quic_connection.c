@@ -3775,6 +3775,77 @@ static const recorded_frame_t *witness_frame(const fs_witness_t *witness, wt_qui
   return NULL;
 }
 
+/* Send two frames in ONE packet. That is the only way to reach the decoder's reused union: it decodes every
+ * frame of a packet into a single `wt_quic_frame_t`, so a frame that does not set a union member inherits
+ * whatever the previous frame in the same packet left there. */
+static void send_two_frames_from_side(connection_pair_t *pair, const wt_quic_frame_t *first,
+                                      const wt_quic_frame_t *second, const wt_quic_packet_keys_t *keys,
+                                      uint64_t packet_number, const uint8_t *dcid, size_t dcid_len) {
+  uint8_t payload[128];
+  uint8_t datagram[256];
+  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+  size_t datagram_len = 0U;
+  wt_quic_packet_build_t build;
+
+  WT_EXPECT_OK("the first frame encodes", wt_quic_frame_encode(&w, first));
+  WT_EXPECT_OK("the second frame encodes", wt_quic_frame_encode(&w, second));
+  memset(&build, 0, sizeof(build));
+  build.short_header = 1;
+  build.version = WT_QUIC_VERSION_1;
+  build.destination_connection_id = dcid;
+  build.destination_connection_id_len = dcid_len;
+  build.packet_number = packet_number;
+  build.packet_number_length = 2U;
+  build.payload = payload;
+  build.payload_len = wt_writer_offset(&w);
+  build.keys = keys;
+  WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("and is sent",
+               wt_udp_send(&pair->server_socket, &pair->client_address, datagram, datagram_len));
+}
+
+/* A frame that is NOT a PATH_CHALLENGE must not be handled as one (WT-194).
+ *
+ * The dispatch sent PING, CRYPTO, NEW_TOKEN, DATA_BLOCKED and STREAMS_BLOCKED to `handle_path_challenge`,
+ * which reads `frame->as.path_challenge.data`. For those kinds that member holds the previous frame's bytes,
+ * and for DATA_BLOCKED it is a varint limit -- not a pointer at all. The NULL check passed, and eight bytes
+ * were copied from that address: a peer that sent one of those frames took this endpoint down with SIGSEGV.
+ * Measured against real peers rather than reasoned about: quinn, quiche and h3 each send a PING, and all three
+ * crashed this client until the labels were separated.
+ *
+ * DATA_BLOCKED then PING in ONE packet is that state deterministically, which is why this sends two frames
+ * rather than a PING on its own -- a PING alone leaves the union zeroed by `wt_quic_frame_make` and would pass
+ * even with the defect in place. */
+static void test_a_frame_that_is_not_a_challenge_is_not_handled_as_one(void) {
+  connection_pair_t pair;
+  wt_quic_frame_t blocked = wt_quic_frame_make(WT_QUIC_FRAME_KIND_DATA_BLOCKED);
+  wt_quic_frame_t ping = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+  wt_quic_packet_keys_t keys;
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 114000000U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  arm_path_pair(&pair, 0x31U);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x31U + i);
+  WT_EXPECT_OK("the sender's keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+
+  /* The limit is what the union holds where a pointer would be read. 0x2e is the address the real crash read
+   * from, so this uses it rather than a round number. */
+  blocked.as.data_blocked.maximum = 0x2eU;
+  send_two_frames_from_side(&pair, &blocked, &ping, &keys, 0U, k_dcid, sizeof(k_dcid));
+
+  /* Before the fix this call did not return. */
+  receive_on(&pair.client, &pair.client_socket, now);
+
+  WT_EXPECT_U64("the PING reaches the handler", 1U,
+                (uint64_t)witness_frames_of(&pair.client_witness, WT_QUIC_FRAME_KIND_PING));
+  WT_EXPECT_U64("and is not answered with a PATH_RESPONSE", 0U,
+                wt_quic_connection_path_responses_sent(&pair.client));
+
+  close_pair(&pair);
+}
+
 static void test_a_path_challenge_is_echoed_immediately(void) {
   connection_pair_t pair;
   wt_quic_frame_t challenge = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PATH_CHALLENGE);
@@ -3930,6 +4001,7 @@ static void test_a_path_that_does_not_answer_is_given_up_on(void) {
 
 int main(void) {
   test_frame_permission();
+  test_a_frame_that_is_not_a_challenge_is_not_handled_as_one();
   test_a_path_challenge_is_echoed_immediately();
   test_a_path_is_validated_by_its_own_response();
   test_a_path_that_does_not_answer_is_given_up_on();
