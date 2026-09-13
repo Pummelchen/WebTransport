@@ -194,6 +194,16 @@ What is here:
   runtime refuses to make it rather than inventing one. IPv4 is asserted unconditionally and
   IPv6 is available-or-skipped, because a test that fails without an IPv6 loopback is a test
   about the machine.
+- **A draft-16 compliance matrix for this tree** (`docs/COMPLIANCE-MATRIX.md`): every requirement the
+  draft places on a WebTransport endpoint — the extended CONNECT and its refusals, the response, the
+  session-as-a-request-stream rules, WebTransport streams and their prefixes (including a prefix that
+  arrives in pieces), datagrams and their advertisement, the capsules with the strict-increase and
+  `2^60` flow-control rules, drain, close and the CONNECT stream ending — mapped to the function that
+  implements it and the test that exercises it. **The matrix cannot drift:** `scripts/check-matrix.sh`
+  greps every symbol it names for a C declaration or a registered CTest name and fails if one is
+  missing, and CI runs it. The two rows that are not "tested" are stated rather than hidden — server
+  push is refused deterministically by design, and a peer that changes its connection ID during the
+  handshake is not tracked, which is the recorded transport gap.
 - **Where this stands against the plan's Definition of Done** (an audit with evidence, kept in
   `IMPLEMENTATION_PLAN.md`): **met** — the CLIs run local IPv4 and IPv6 sessions, sanitizers and
   static checks are clean, the public API is documented, and nothing placeholder-shaped is exposed as

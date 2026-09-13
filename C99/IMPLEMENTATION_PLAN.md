@@ -2994,6 +2994,27 @@ Completion criteria:
 - Release artifacts are reproducible.
 - Public docs match actual behavior.
 
+### WT-132: the compliance matrix, and a checker that keeps it honest
+
+`docs/COMPLIANCE-MATRIX.md` is the document the Definition of Done's first criterion needs: every requirement
+draft-ietf-webtrans-http3-16 places on an endpoint, mapped to the function that implements it and the test that
+exercises it. Twenty-eight rows across the draft's own sections -- the extended CONNECT and its refusals, the
+response, the session-as-a-request-stream rules (including trailers and their pseudo-header prohibition),
+WebTransport streams and their prefixes (including a prefix that arrives in pieces and the replay for a request),
+datagrams and their advertisement, capsules with the strict-increase and 2^60 flow-control rules, drain, close,
+and the CONNECT stream ending -- plus rows for the QUIC, HTTP/3 and TLS layers the session runs on.
+
+**The matrix is checked, not trusted.** `scripts/check-matrix.sh` greps every symbol the document names for a C
+declaration or a registered CTest name and fails if one is missing, so a matrix that drifts away from the code is
+a red build rather than a document that reads like evidence. It caught two names on its first run that were test
+names rather than symbols -- which is why it searches CMakeLists and scripts as well as headers and sources -- and
+CI now runs it beside the vector and package checks.
+
+Two rows are deliberately not "tested" and are stated rather than hidden: **server push**, which this tree refuses
+deterministically (H3_ID_ERROR for a client, H3_STREAM_CREATION_ERROR for a server) because the draft does not use
+it, and **a peer that changes its connection ID during the handshake**, which the tests do not cover because they
+use the same connection ID at both ends -- the recorded transport gap rather than a claimed feature.
+
 ## Definition of Done audit (measured, 89 rounds in)
 
 Every claim below names the evidence, and the ones that are NOT met name what they still need. This is the

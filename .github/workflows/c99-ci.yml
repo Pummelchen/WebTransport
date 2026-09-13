@@ -108,6 +108,10 @@ jobs:
       # building a consumer against it rather than by looking at the files.
       - name: Package consumer
         run: C99/scripts/check-package.sh
+      - name: Check the compliance matrix against the tree
+        # A matrix that names functions nobody wrote is worse than no matrix, because it reads like
+        # evidence: this greps every symbol it names and fails if one is missing.
+        run: C99/scripts/check-matrix.sh
 
       - name: CLI smoke
         run: |
