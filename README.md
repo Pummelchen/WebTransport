@@ -7,6 +7,10 @@
 [![Swift CI](https://github.com/Pummelchen/WebTransport/actions/workflows/swift-ci.yml/badge.svg?branch=main)](https://github.com/Pummelchen/WebTransport/actions/workflows/swift-ci.yml)
 [![Release](https://img.shields.io/github/v/release/Pummelchen/WebTransport?display_name=tag)](https://github.com/Pummelchen/WebTransport/releases/latest)
 [![License](https://img.shields.io/github/license/Pummelchen/WebTransport)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Pummelchen/WebTransport?style=flat-square&logo=github&label=Stars&color=e3b341)](https://github.com/Pummelchen/WebTransport/stargazers)
+[![Profile Visitors](https://komarev.com/ghpvc/?username=Pummelchen&label=Profile%20Visitors&color=blueviolet&style=flat-square)](https://github.com/Pummelchen)
+[![Last Commit](https://img.shields.io/github/last-commit/Pummelchen/WebTransport?style=flat-square&logo=git&label=Last%20Commit&color=2ea44f)](https://github.com/Pummelchen/WebTransport/commits/main)
+[![Contact](https://img.shields.io/badge/Contact-0xa0b1%40gmail.com-blue?style=flat-square&logo=gmail&logoColor=white)](mailto:0xa0b1@gmail.com)
 
 A native Swift reference implementation of WebTransport over HTTP/3.
 
