@@ -18,8 +18,19 @@ import WebTransportNetworkRuntime
 /// accepted.
 @Test
 func listenerServesMoreSequentialSessionsThanItsConcurrencyLimit() async throws {
-    let concurrencyLimit = 2
-    let rounds = 5
+    try await serveSequentialSessions(concurrencyLimit: 2, rounds: 5)
+}
+
+/// The shape the defect was reported in: the default ceiling of 16, with more sessions
+/// than that attempted in sequence. The issue's measurements were 16 accepted, then 0
+/// and 0 for the next twenty attempts, in the same process — a listener that had stopped
+/// accepting for the rest of its life while the process stayed healthy.
+@Test
+func listenerServesMoreSequentialSessionsThanTheDefaultCeiling() async throws {
+    try await serveSequentialSessions(concurrencyLimit: 16, rounds: 20)
+}
+
+private func serveSequentialSessions(concurrencyLimit: Int, rounds: Int) async throws {
     let server = WebTransportServer(
         configuration: WebTransportServerConfiguration(
             authority: "localhost",
