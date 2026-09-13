@@ -58,7 +58,11 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   add_test(NAME wt_conformance_scenarios COMMAND wt-conformance-c99 --scenario all --json)
   # The two TOOLS against each other, in two processes: the client tool and the server tool run real sessions
   # over a real socket, which is what the plan's CLI criteria ask for and what one process cannot prove.
-  add_test(NAME wt_cli_session
+  # Both exchange modes, because they are different code paths in both tools.
+  add_test(NAME wt_cli_session_stream
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
-            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99>)
+            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45417 stream)
+  add_test(NAME wt_cli_session_datagram
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
+            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45419 datagram)
 endif()

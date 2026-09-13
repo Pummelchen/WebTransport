@@ -14,16 +14,18 @@ set -eu
 server="$1"
 client="$2"
 port="${3:-45417}"
+mode="${4:-stream}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-"$server" --listen "127.0.0.1:$port" --message pong --timeout-ms 10000 --json >"$work/server.json" 2>&1 &
+"$server" --listen "127.0.0.1:$port" --message pong --exchange "$mode" --timeout-ms 10000 --json \
+  >"$work/server.json" 2>&1 &
 server_pid=$!
 
 # The server must be listening before the client writes; a short pause is enough for a bound socket, and the
 # client retransmits its Initial anyway, which is what a real peer does.
 sleep 1
-"$client" --connect "127.0.0.1:$port" --origin localhost --exchange stream --message ping \
+"$client" --connect "127.0.0.1:$port" --origin localhost --exchange "$mode" --message ping \
   --timeout-ms 10000 --json >"$work/client.json" 2>&1
 
 wait "$server_pid"
@@ -44,4 +46,10 @@ grep -q '"responseStatus":200' "$work/client.json" || fail "the response was not
 # Each side received the other's four-byte message, which is the exchange the tools exist to make.
 grep -q '"receivedBytes":4' "$work/client.json" || fail "the client did not receive the message"
 grep -q '"receivedBytes":4' "$work/server.json" || fail "the server did not receive the message"
-echo "cli session: client and server exchanged a WebTransport session over 127.0.0.1:$port"
+# The MODE is asserted too: `--exchange stream` and `--exchange datagram` are different code paths, and a report
+# that claimed the same thing for both would be worth nothing.
+grep -q "\"receivedDatagram\":$([ "$mode" = datagram ] && echo true || echo false)" "$work/client.json" \
+  || fail "the client's report does not match the $mode mode"
+grep -q "\"receivedDatagram\":$([ "$mode" = datagram ] && echo true || echo false)" "$work/server.json" \
+  || fail "the server's report does not match the $mode mode"
+echo "cli session ($mode): client and server exchanged a WebTransport session over 127.0.0.1:$port"

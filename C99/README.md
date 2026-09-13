@@ -170,7 +170,10 @@ What is here:
   `wt-client-c99 --connect` run a real WebTransport session over a real socket, in two processes,
   each with its own command line and its own machine-readable JSON — handshake, CONNECT accepted
   (response `200`), and a four-byte message each way. A CTest script runs them against each other,
-  so the plan's CLI criterion is checked rather than demonstrated. The piece that made it work is
+  so the plan's CLI criterion is checked rather than demonstrated. **Both** exchange modes are
+  registered (`wt_cli_session_stream` and `wt_cli_session_datagram`), and each asserts the mode in
+  both tools' reports — they are different code paths, and a report that claimed the same thing for
+  both would be worth nothing. The piece that made it work is
   `wt_udp_peek`: a listener learns its peer's address by PEEKING at the first datagram and leaving
   it in the queue, because a connection must be armed with the peer's address before it can process
   the packet that names the peer — a listener that consumed that packet would wait for a

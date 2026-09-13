@@ -2749,6 +2749,18 @@ The count assertions are the ones that matter, and the reason is worth keeping: 
 entry past its bound would show a short, clean run, and "the peer opened one more stream than we allow" is
 exactly the case where a silent drop and a refusal look identical from the outside.
 
+### Phase 10's seventh part: the tools' test covers both exchange modes
+
+The CLI session test ran `--exchange stream` only, which left the plan's `--exchange stream|datagram` half
+covered at the TOOL level (the library's own pair test covers both, and the conformance tool's scenarios cover
+both, but the tools are the phase's deliverable). There are now two CTest entries -- `wt_cli_session_stream` and
+`wt_cli_session_datagram` -- on different ports, and the script asserts the MODE in both tools' reports:
+`"receivedDatagram":true` for one and `false` for the other. They are different code paths in both tools, and a
+report that claimed the same thing for both would be worth nothing.
+
+That closes the last gap in what the tools' own test proves: a two-process session, a CONNECT accepted, a 200
+response, and a message exchanged in each mode, on every build.
+
 ### Phase 10's sixth part: WT-120 lands -- the routing, on its own
 
 The second step is the one the first attempt crashed on, and it is now in: in the driver's bidirectional branch,
