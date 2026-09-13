@@ -1647,6 +1647,25 @@ what this endpoint has sent and what the peer has acknowledged, not on the bytes
 the prefix as an argument and writes what it is given, and the tracking belongs with the encoder that owns
 those sections.
 
+**Thirteenth part done: the encoder's eviction bookkeeping.** `src/http3/qpack_encoder_state.c` is what
+turns a QPACK reader into a QPACK user: an encoder may not evict an entry that an unacknowledged section might
+reference (section 2.1.1), so it has to remember what it sent and what the decoder confirmed.
+`wt_qpack_encoder_state_begin_section` returns the prefix to write (the current insert count as both the
+Required Insert Count and the Base, so the newest entry is dynamic index zero) and records the section;
+`evictable_below` is the SMALLEST required insert count among the outstanding sections, or the whole table
+when nothing is outstanding.
+
+Three decisions. A section that references nothing is not recorded at all: its prefix is zero and it cannot
+hold anything back, so recording it would only spend one of the sixteen slots. A second section on the same
+stream REPLACES the first, because a stream carries one field section at a time and the older record is
+superseded. And an acknowledgement for a stream with no outstanding section is refused (WT_ERR_CLOSED) --
+that is this endpoint's own records disagreeing -- while a cancellation for one is accepted, because a peer
+may cancel anything it likes.
+
+The test that matters takes the SMALLEST of two outstanding counts after more insertions have happened: an
+implementation that took the largest, or the first, or the last would pass a test with one section and fail
+this one, and the failure it prevents is evicting an entry a section in flight still points at.
+
 Enforce table capacity and malformed reference handling.
 
 Completion criteria:

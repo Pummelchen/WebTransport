@@ -435,6 +435,68 @@ wt_status_t wt_qpack_field_section_encode(wt_writer_t *w, const wt_qpack_header_
                                          const wt_qpack_field_line_t *lines, size_t line_count,
                                          uint8_t *scratch, size_t scratch_capacity);
 
+/* ------------------------------------- RFC 9204 section 2.1.1's encoder bookkeeping */
+
+/* An encoder may not evict an entry an unacknowledged section might reference, which
+ * means it has to remember what it has sent and what the decoder has confirmed. That
+ * is the state here: one record per outstanding section, the decoder's insert count
+ * increments, and the arithmetic that says how far down the table is safe to evict.
+ *
+ * The bound is this endpoint's, like every other table: an encoder that has this many
+ * sections in flight without an acknowledgement is not going to be helped by room for
+ * one more.
+ */
+#define WT_QPACK_MAX_OUTSTANDING_SECTIONS 16U
+
+typedef struct wt_qpack_outstanding_section {
+  int in_use;
+  uint64_t stream_id;
+  /* The count that section was written with: anything below it may be referenced by
+   * it, so nothing below it may be evicted until the section is acknowledged. */
+  uint64_t required_insert_count;
+} wt_qpack_outstanding_section_t;
+
+typedef struct wt_qpack_encoder_state {
+  wt_qpack_dynamic_table_t *table;
+  /* Insertions the decoder has confirmed processing (section 4.4.3). */
+  uint64_t known_received_count;
+  wt_qpack_outstanding_section_t outstanding[WT_QPACK_MAX_OUTSTANDING_SECTIONS];
+  size_t outstanding_count;
+} wt_qpack_encoder_state_t;
+
+void wt_qpack_encoder_state_init(wt_qpack_encoder_state_t *state, wt_qpack_dynamic_table_t *table);
+
+/* The prefix to write for a section on this stream. `references_dynamic` says whether
+ * the section will use dynamic indices: when it will not, the prefix is zero and
+ * nothing is recorded, because a section that references nothing holds nothing back.
+ * When it will, the required insert count is the table's current insert count and the
+ * Base is the same, so the most recent entry is dynamic index 0 (section 3.2.5). A
+ * second outstanding section on the same stream replaces the first: a stream carries
+ * one field section at a time. */
+wt_status_t wt_qpack_encoder_state_begin_section(wt_qpack_encoder_state_t *state, uint64_t stream_id,
+                                                 int references_dynamic,
+                                                 wt_qpack_header_prefix_t *out_prefix);
+
+/* A Section Acknowledgement: that stream's section is decoded and may be forgotten. */
+wt_status_t wt_qpack_encoder_state_section_acknowledged(wt_qpack_encoder_state_t *state,
+                                                        uint64_t stream_id);
+
+/* A Stream Cancellation: nothing more will be decoded there, so its section is
+ * forgotten too (section 4.4.2). */
+wt_status_t wt_qpack_encoder_state_stream_cancelled(wt_qpack_encoder_state_t *state,
+                                                    uint64_t stream_id);
+
+/* An Insert Count Increment. An increment that would pass the table's insert count is
+ * QPACK_DECODER_STREAM_ERROR, the same rule the instruction parser enforces. */
+wt_status_t wt_qpack_encoder_state_on_insert_count_increment(wt_qpack_encoder_state_t *state,
+                                                             uint64_t increment,
+                                                             wt_qpack_error_t *out_error);
+
+/* The highest absolute index plus one that may be evicted: the smallest required
+ * insert count among outstanding sections, or the table's insert count when nothing is
+ * outstanding. Entries at or above it must survive until an acknowledgement. */
+uint64_t wt_qpack_encoder_state_evictable_below(const wt_qpack_encoder_state_t *state);
+
 #ifdef __cplusplus
 }
 #endif
