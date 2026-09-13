@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 79,936 checks, run by `ctest` and again under
+- 75 unit test files and 79,996 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -76,6 +76,16 @@ What is here:
   rather than trusting it). Both sides end confirmed with application keys installed. That
   is the plan's "run local IPv4 and IPv6 packet sessions" at the library level; the tools'
   own session loop is what remains before the CLI can claim it.
+- **The bounded tables, at their bounds** (Phase 10): every table in HTTP/3 and the session
+  layer is fixed, because a table that grows with a peer is a heap exhaustion path with the peer's
+  name on it. The suite drives each one — the endpoint's peer-stream and request tables, the
+  driver's pending-prefix and frame-boundary tables — to its bound and asserts three things about
+  what happens then: the refusal is `WT_ERR_LIMIT`, it carries **no error code** (the bound is this
+  endpoint's, so blaming the peer for it would tell the peer's story about a local limit), and the
+  table does not move — a refused stream consumes no slot, and a stream that ends gives its slot
+  back, because these are bounds on *concurrency* and not lifetime totals. A table that quietly
+  dropped the entry past its bound would show a short, clean run, which is exactly why the count
+  assertions are the ones that matter.
 - **A malformed-input corpus for HTTP/3, QPACK and the session layer** (Phase 10): the same
   treatment the QUIC parsers already had — a deterministic pseudo-random byte stream fed to the
   frame decoder, the SETTINGS parser, the capsule decoder and its value parsers, the datagram

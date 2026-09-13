@@ -2731,6 +2731,24 @@ reason (section 6.2.1). The first version of the test asserted "refused > accept
 which is the same lesson this tracker carries from several earlier rounds: assert what the code does, not what a
 paragraph about it suggests it should.
 
+### Phase 10's fourth part: the bounded tables, at their bounds
+
+The plan's test port asks for resource exhaustion, and this is what it means in these layers: every table is
+FIXED, because a table that grows with a peer is a heap exhaustion path with the peer's name on it.
+`test_http3_limits` drives each one to its bound -- the endpoint's peer-stream table, the endpoint's request
+table, the driver's pending-prefix table and its frame-boundary table -- and asserts three things about what
+happens then:
+
+- the refusal is `WT_ERR_LIMIT`;
+- it carries NO error code, because the bound is this endpoint's and blaming the peer for it would tell the
+  peer's story about a local limit (the rule WT-99 and WT-102 established, now asserted in one place);
+- the table does not move: a refused stream consumes no slot, and a stream that ends GIVES ITS SLOT BACK, since
+  these are bounds on CONCURRENCY rather than lifetime totals.
+
+The count assertions are the ones that matter, and the reason is worth keeping: a table that quietly dropped the
+entry past its bound would show a short, clean run, and "the peer opened one more stream than we allow" is
+exactly the case where a silent drop and a refusal look identical from the outside.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.
