@@ -17,6 +17,7 @@
 #include "webtransport/quic/connection.h"
 #include "webtransport/quic/packet_io.h"
 #include "webtransport/quic/varint.h"
+#include "webtransport/webtransport/capsule.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
 
@@ -427,10 +428,214 @@ static void test_a_frame_that_ends_at_fin_names_the_http3_error(void) {
                 (uint64_t)wt_http3_driver_last_error(&driver));
 }
 
+/* The CONNECT stream's capsules are not HTTP/3 frames (WT-164).
+ *
+ * Draft-16 section 5 puts the session's control messages on the CONNECT stream as CAPSULES after its one HEADERS
+ * frame, and this driver used to parse them as HTTP/3 frames to FIN. The failure is silent for the capsule that
+ * matters most: a flow-control grant's type is an UNKNOWN frame type, so the parser read the capsule's LENGTH as a
+ * frame length and skipped the capsule -- the peer's credit dropped without a word. What makes this more than a
+ * check is WHERE the mark settles: the response HEADERS and the capsule can arrive in one STREAM frame, so the
+ * stream has to become a capsule stream DURING the buffer that framed its HEADERS. */
+typedef struct capsule_sink {
+  wt_http3_driver_t *driver;
+  int mark_on_headers;
+  int mark_headers_pending;
+  unsigned frame_calls;
+  uint64_t frame_type;
+  uint8_t frame_bytes[64];
+  size_t frame_length;
+  int frame_last;
+  unsigned data_calls;
+  uint8_t data_bytes[64];
+  size_t data_length;
+  int data_fin;
+} capsule_sink_t;
+
+static wt_status_t capsule_on_frame(void *context, uint64_t stream_id, uint64_t type,
+                                    const uint8_t *payload, size_t length, int last) {
+  capsule_sink_t *log = context;
+
+  log->frame_calls++;
+  log->frame_type = type;
+  if (length > sizeof(log->frame_bytes)) return WT_ERR_LIMIT;
+  if (length > 0U) memcpy(log->frame_bytes, payload, length);
+  log->frame_length = length;
+  log->frame_last = last;
+  /* The server's side of the mark, made from INSIDE the HEADERS delivery: that is where a caller learns that the
+   * request is a WebTransport CONNECT, and the capsule behind it in the same STREAM frame must not be framed. */
+  if (log->mark_on_headers != 0 && type == (uint64_t)WT_HTTP3_FRAME_HEADERS && last != 0) {
+    (void)wt_http3_driver_mark_capsule_stream(log->driver, stream_id, log->mark_headers_pending);
+  }
+  return WT_OK;
+}
+
+static wt_status_t capsule_on_data(void *context, uint64_t stream_id, const uint8_t *data, size_t length,
+                                   int fin) {
+  capsule_sink_t *log = context;
+
+  (void)stream_id;
+  log->data_calls++;
+  if (length > sizeof(log->data_bytes)) return WT_ERR_LIMIT;
+  if (length > 0U) memcpy(log->data_bytes, data, length);
+  log->data_length = length;
+  log->data_fin = fin;
+  return WT_OK;
+}
+
+static void test_the_connect_streams_capsules_are_not_framed(void) {
+  static const uint8_t k_headers[] = {0x01U, 0x04U, 's', 'e', 'c', 't'}; /* HEADERS, four bytes of section */
+  uint8_t buffer[64];
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_settings_t settings;
+  wt_http3_driver_transport_t transport;
+  recording_t recording;
+  capsule_sink_t log;
+  wt_http3_driver_sink_t sink;
+  wt_writer_t w;
+  uint64_t request_stream_id = 0U;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  size_t capsule_length;
+  size_t total;
+
+  memset(&recording, 0, sizeof(recording));
+  memset(&log, 0, sizeof(log));
+  memset(&sink, 0, sizeof(sink));
+  memset(&transport, 0, sizeof(transport));
+  transport.open_stream = record_open;
+  transport.send_stream = record_send;
+  transport.send_datagram = record_datagram;
+  transport.context = &recording;
+  sink.context = &log;
+  sink.on_frame_payload = capsule_on_frame;
+  sink.on_stream_data = capsule_on_data;
+  log.driver = &driver;
+
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_CLIENT);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("the endpoint advertises WebTransport",
+               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_OK("a session starts",
+               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat", 0U, 1000U,
+                                             &request_stream_id, &error));
+  /* `start_session` marks the CONNECT stream itself, because the response is the one HTTP/3 frame still to come
+   * on it and a caller that had to remember would be a caller that forgets. */
+  WT_EXPECT_INT("its CONNECT stream is marked with the response still to come", 0,
+                wt_http3_driver_is_capsule_stream(&driver, request_stream_id));
+
+  memcpy(buffer, k_headers, sizeof(k_headers));
+  w = wt_writer_init(buffer + sizeof(k_headers), sizeof(buffer) - sizeof(k_headers));
+  WT_EXPECT_OK("the peer's MAX_DATA capsule encodes", wt_webtransport_max_data_write(&w, 1024U));
+  capsule_length = wt_writer_offset(&w);
+  total = sizeof(k_headers) + capsule_length;
+
+  WT_EXPECT_OK("the response and the capsule in ONE buffer are routed",
+               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, buffer, total, 0, 16384U, &sink,
+                                               &error));
+  WT_EXPECT_U64("the HEADERS frame is framed exactly as before", 1U, (uint64_t)log.frame_calls);
+  WT_EXPECT_U64("as a HEADERS frame", 0x01U, log.frame_type);
+  WT_EXPECT_BYTES("with the section it carried", k_headers + 2, log.frame_bytes, 4U);
+  WT_EXPECT_INT("in one piece", 1, log.frame_last);
+  WT_EXPECT_U64("and the capsule is NOT framed: the session sink gets it", 1U, (uint64_t)log.data_calls);
+  WT_EXPECT_U64("whole", (uint64_t)capsule_length, (uint64_t)log.data_length);
+  WT_EXPECT_BYTES("byte for byte", buffer + sizeof(k_headers), log.data_bytes, capsule_length);
+  WT_EXPECT_INT("with no end of stream", 0, log.data_fin);
+  WT_EXPECT_INT("and the stream carries capsules from here", 1,
+                wt_http3_driver_is_capsule_stream(&driver, request_stream_id));
+
+  /* What the sink was handed is a real capsule, not a coincidence of framing: it decodes, and its value is the
+   * limit the peer granted. */
+  {
+    wt_cursor_t cursor = wt_cursor_init(log.data_bytes, log.data_length);
+    wt_webtransport_capsule_t capsule;
+    uint64_t maximum = 0U;
+
+    memset(&capsule, 0, sizeof(capsule));
+    WT_EXPECT_OK("the delivered bytes decode as a capsule",
+                 wt_webtransport_capsule_decode(&cursor, log.data_length, &capsule, &error));
+    WT_EXPECT_U64("of type MAX_DATA", WT_CAPSULE_MAX_DATA, capsule.type);
+    WT_EXPECT_OK("whose value parses", wt_webtransport_max_data_parse(&capsule, &maximum, &error));
+    WT_EXPECT_U64("as the limit the peer granted", 1024U, maximum);
+  }
+
+  /* And the stream's end is the session's event too, with no frame left in progress to call it truncated. */
+  WT_EXPECT_OK("the CONNECT stream ends",
+               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, NULL, 0U, 1, 16384U, &sink, &error));
+  WT_EXPECT_U64("reported as the session's own end", 2U, (uint64_t)log.data_calls);
+  WT_EXPECT_U64("with nothing in it", 0U, (uint64_t)log.data_length);
+  WT_EXPECT_INT("and the peer's end of stream", 1, log.data_fin);
+}
+
+/* The SERVER's half: the mark is made while the request's HEADERS is being delivered, and a capsule behind it in
+ * the same STREAM frame still has to reach the session (WT-164). */
+static void test_a_server_marks_the_connect_stream_as_it_accepts_it(void) {
+  static const uint8_t k_headers[] = {0x01U, 0x04U, 's', 'e', 'c', 't'};
+  uint8_t buffer[64];
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  capsule_sink_t log;
+  wt_http3_driver_sink_t sink;
+  wt_quic_frame_t frame;
+  wt_writer_t w;
+  size_t capsule_length;
+  size_t total;
+
+  memset(&log, 0, sizeof(log));
+  memset(&sink, 0, sizeof(sink));
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_driver_set_session_id(&driver, 0U);
+  sink.context = &log;
+  sink.on_frame_payload = capsule_on_frame;
+  sink.on_stream_data = capsule_on_data;
+  log.driver = &driver;
+  log.mark_on_headers = 1;
+  log.mark_headers_pending = 0;
+
+  memcpy(buffer, k_headers, sizeof(k_headers));
+  w = wt_writer_init(buffer + sizeof(k_headers), sizeof(buffer) - sizeof(k_headers));
+  WT_EXPECT_OK("the peer's MAX_DATA capsule encodes", wt_webtransport_max_data_write(&w, 4096U));
+  capsule_length = wt_writer_offset(&w);
+  total = sizeof(k_headers) + capsule_length;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
+  frame.as.stream.id = 0U; /* the peer's CONNECT stream */
+  frame.as.stream.offset = 0U;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = buffer;
+  frame.as.stream.length = total;
+  frame.as.stream.fin = 0;
+  WT_EXPECT_OK("the request and the capsule in one STREAM frame are routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_U64("the request's HEADERS is framed", 1U, (uint64_t)log.frame_calls);
+  WT_EXPECT_U64("and the capsule reaches the session", 1U, (uint64_t)log.data_calls);
+  WT_EXPECT_U64("whole", (uint64_t)capsule_length, (uint64_t)log.data_length);
+  WT_EXPECT_INT("with the stream marked from inside that delivery", 1,
+                wt_http3_driver_is_capsule_stream(&driver, 0U));
+
+  /* The NEXT STREAM frame on the stream is capsules from its first byte. */
+  log.frame_calls = 0U;
+  log.data_calls = 0U;
+  w = wt_writer_init(buffer, sizeof(buffer));
+  WT_EXPECT_OK("a second capsule encodes", wt_webtransport_max_data_write(&w, 8192U));
+  frame.as.stream.offset = total;
+  frame.as.stream.data = buffer;
+  frame.as.stream.length = wt_writer_offset(&w);
+  frame.as.stream.fin = 1;
+  WT_EXPECT_OK("the second frame is routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_U64("with nothing framed at all", 0U, (uint64_t)log.frame_calls);
+  WT_EXPECT_U64("and the capsule delivered", 1U, (uint64_t)log.data_calls);
+  WT_EXPECT_INT("with the peer's end of stream", 1, log.data_fin);
+}
+
 int main(void) {
   test_the_streams_a_session_start_opens();
   test_a_data_stream_this_endpoint_opened();
   test_a_data_stream_the_peer_splits_across_frames();
   test_a_frame_that_ends_at_fin_names_the_http3_error();
+  test_the_connect_streams_capsules_are_not_framed();
+  test_a_server_marks_the_connect_stream_as_it_accepts_it();
   WT_TEST_MAIN_END("wt_http3_driver_streams");
 }

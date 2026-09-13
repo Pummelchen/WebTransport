@@ -52,11 +52,26 @@ extern "C" {
  * follows. */
 #define WT_HTTP3_DRIVER_DATA_STREAMS_MAX 32U
 
+/* How many WebTransport CONNECT streams this driver may remember at once. A CONNECT stream is marked when its
+ * session is known -- by the client when it sends the CONNECT, by the server when it accepts one -- so that the
+ * bytes after its single HEADERS frame are the SESSION's capsules rather than HTTP/3 frames (draft-16 section 5).
+ * The bound is smaller than the data-stream table's because one session has many streams but a driver serves a
+ * handful of sessions, and a caller past it is refused with WT_ERR_LIMIT rather than given more. */
+#define WT_HTTP3_DRIVER_CAPSULE_STREAMS_MAX 8U
+
 typedef struct wt_http3_driver_pending {
   uint64_t stream_id;
   uint8_t bytes[WT_HTTP3_DRIVER_PREFIX_MAX];
   size_t length;
 } wt_http3_driver_pending_t;
+
+/* One marked CONNECT stream. `headers_pending` is the ONE frame that is still HTTP/3 on the stream -- the
+ * response on a stream this endpoint opened, the request on a peer-initiated one -- and the mark settles when
+ * that frame has been delivered. */
+typedef struct wt_http3_driver_capsule_stream {
+  uint64_t stream_id;
+  int headers_pending;
+} wt_http3_driver_capsule_stream_t;
 
 /* The longest frame header: two varints, at most eight bytes each. */
 #define WT_HTTP3_DRIVER_FRAME_HEADER_MAX 16U
@@ -139,6 +154,14 @@ typedef struct wt_http3_driver {
    * frame and its message in the next could show that -- this tree's own client sends both together (WT-156). */
   uint64_t data_stream_ids[WT_HTTP3_DRIVER_DATA_STREAMS_MAX];
   size_t data_stream_count;
+  /* The WebTransport CONNECT streams whose capsules have begun, by ID, and the ones whose single HEADERS frame is
+   * still to come. Draft-16 section 5 puts the session's control messages -- drain, close and the flow-control
+   * grants -- on the CONNECT stream as CAPSULES after that one HEADERS frame, and a capsule's type is a varint
+   * that this layer would otherwise read as a frame type: a flow-control capsule is an UNKNOWN frame type, so its
+   * length field is read as a frame length and the capsule is SKIPPED -- the peer's credit dropped without a
+   * word. Marking the stream is what stops the framing (WT-164). */
+  wt_http3_driver_capsule_stream_t capsule_streams[WT_HTTP3_DRIVER_CAPSULE_STREAMS_MAX];
+  size_t capsule_stream_count;
   /* The HTTP/3 error code of the last refusal this driver made, and the connection it belongs to when one has
    * been bound. RFC 9114 section 8 carries an HTTP/3 error in a CONNECTION_CLOSE of type 0x1d with the HTTP/3
    * code, and a handler that only returns a status closes the TRANSPORT with INTERNAL_ERROR instead -- a
@@ -351,6 +374,23 @@ void wt_http3_driver_bind_connection(wt_http3_driver_t *driver, wt_quic_connecti
  * path asks FIRST, because the answer decides whether the bytes are the session's payload or something to
  * classify. */
 int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id);
+
+/* Say that a stream is a WebTransport CONNECT stream, so that once its single HEADERS frame has passed, the rest
+ * of what arrives on it is the SESSION's capsules rather than HTTP/3 frames (draft-16 section 5).
+ *
+ * `headers_pending` says whether that one frame is still to come. A CLIENT marks its request stream when it sends
+ * the CONNECT, because the RESPONSE -- the stream's one inbound HEADERS frame -- has not arrived yet; a SERVER
+ * marks the peer's stream when it accepts the request, whose HEADERS it has just read. Either way the HEADERS
+ * frame is delivered to the frame sink exactly as before, and the bytes after it go to the stream-data sink,
+ * because only the session can say what a capsule means. Marking a stream twice is not an error and does not
+ * change the mark. WT_ERR_LIMIT when the table is full, which is a caller with more sessions than this driver
+ * was built for rather than a peer's doing. */
+wt_status_t wt_http3_driver_mark_capsule_stream(wt_http3_driver_t *driver, uint64_t stream_id,
+                                                int headers_pending);
+
+/* Whether a stream's CAPSULES have begun: it was marked, and its one HEADERS frame has been delivered. False for
+ * a marked stream whose HEADERS frame is still to come, because that frame is still this layer's to frame. */
+int wt_http3_driver_is_capsule_stream(const wt_http3_driver_t *driver, uint64_t stream_id);
 
 /* Answer a request with a status: the response's HEADERS on the stream that carried the request. One per
  * stream, because a second response is not a status an HTTP/3 peer can be given. */

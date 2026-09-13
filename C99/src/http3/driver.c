@@ -13,6 +13,10 @@
 #include "webtransport/webtransport/session_request.h"
 #include "webtransport/quic/varint.h"
 
+/* Defined with the capsule-stream table, used by the frame loop above it: a completed HEADERS frame on a marked
+ * CONNECT stream is what turns the rest of that stream into the session's capsules (WT-164). */
+static void settle_capsule_stream(wt_http3_driver_t *driver, uint64_t stream_id);
+
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint) {
   if (driver == NULL) return;
   /* Zeroed WHOLE rather than field by field. Naming every field was here so that adding one would force this
@@ -294,6 +298,21 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
   if (driver == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
 
+  /* A WebTransport CONNECT stream whose one HEADERS frame has passed carries the SESSION's capsules, not HTTP/3
+   * frames (draft-16 section 5): a capsule's type is a varint this parser would read as a frame type and its
+   * length as a frame length, and for a flow-control capsule -- an UNKNOWN frame type -- that means the grant is
+   * skipped in silence (WT-164). The stream-data sink is where the session's own bytes go, and capsules are
+   * exactly that; which stream they belong to is the caller's to know, and it does.
+   *
+   * The check is here AND at the top of the loop below, and the loop's copy is not redundant: the mark can settle
+   * DURING this call, because the sink marks the stream from inside the HEADERS frame's own delivery -- a server
+   * marks when it accepts the request, and a client's mark settles as its response is delivered. A single check
+   * before the loop would frame the capsules that arrived in the same STREAM frame as that HEADERS. */
+  if (wt_http3_driver_is_capsule_stream(driver, stream_id)) {
+    if (sink == NULL || sink->on_stream_data == NULL || (length == 0U && fin == 0)) return WT_OK;
+    return sink->on_stream_data(sink->context, stream_id, length == 0U ? NULL : data, length, fin);
+  }
+
   state = find_frame_state(driver, stream_id);
   if (state == NULL) {
     if (driver->frame_count >= WT_HTTP3_DRIVER_FRAMES_MAX) return WT_ERR_LIMIT;
@@ -305,6 +324,10 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
   }
 
   while (position < length) {
+    if (wt_http3_driver_is_capsule_stream(driver, stream_id)) {
+      if (sink == NULL || sink->on_stream_data == NULL) return WT_OK;
+      return sink->on_stream_data(sink->context, stream_id, data + position, length - position, fin);
+    }
     if (!state->in_frame) {
       /* Fill the header before the payload: the length is what says how much payload to
        * expect, so the header has to be complete first. */
@@ -370,6 +393,7 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
         state->payload_received += (uint64_t)from_header;
         state->header_length = 0U;
         if (state->payload_received == state->payload_length) {
+          if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS) settle_capsule_stream(driver, stream_id);
           state->in_frame = 0;
           continue;
         }
@@ -395,9 +419,18 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
                                                       0U, 1);
           if (status != WT_OK) return status;
         }
+        if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS) settle_capsule_stream(driver, stream_id);
         state->in_frame = 0;
       }
     }
+  }
+
+  /* The stream's own end, on a CONNECT stream whose capsules have begun: there is no frame state to report, but
+   * the session has to be told the stream is over. This is also where a mark that settled on the last byte of this
+   * buffer is honoured -- the loop above has no bytes left to test it with. */
+  if (fin != 0 && wt_http3_driver_is_capsule_stream(driver, stream_id)) {
+    if (sink == NULL || sink->on_stream_data == NULL) return WT_OK;
+    return sink->on_stream_data(sink->context, stream_id, NULL, 0U, fin);
   }
 
   if (fin != 0 && (state->in_frame || state->header_length > 0U)) {
@@ -838,6 +871,60 @@ int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t str
   return 0;
 }
 
+/* The marked CONNECT stream `stream_id`, or NULL. One function looks a stream up, so the mark and the question
+ * cannot disagree about what "settled" means. */
+static wt_http3_driver_capsule_stream_t *find_capsule_stream(wt_http3_driver_t *driver, uint64_t stream_id) {
+  size_t index;
+
+  if (driver == NULL) return NULL;
+  for (index = 0U; index < driver->capsule_stream_count; index++) {
+    if (driver->capsule_streams[index].stream_id == stream_id) return &driver->capsule_streams[index];
+  }
+  return NULL;
+}
+
+wt_status_t wt_http3_driver_mark_capsule_stream(wt_http3_driver_t *driver, uint64_t stream_id,
+                                                int headers_pending) {
+  wt_http3_driver_capsule_stream_t *marked;
+
+  if (driver == NULL) return WT_ERR_INVALID_ARGUMENT;
+  marked = find_capsule_stream(driver, stream_id);
+  if (marked != NULL) {
+    /* Already marked: the FIRST mark's state stands. A caller that marked a stream whose HEADERS frame has not
+     * arrived and then marks it again has not made that frame arrive sooner, and letting the second call settle it
+     * early would route the HEADERS frame itself as capsules. */
+    return WT_OK;
+  }
+  if (driver->capsule_stream_count >= WT_HTTP3_DRIVER_CAPSULE_STREAMS_MAX) return WT_ERR_LIMIT;
+  driver->capsule_streams[driver->capsule_stream_count].stream_id = stream_id;
+  driver->capsule_streams[driver->capsule_stream_count].headers_pending = headers_pending != 0 ? 1 : 0;
+  driver->capsule_stream_count++;
+  return WT_OK;
+}
+
+int wt_http3_driver_is_capsule_stream(const wt_http3_driver_t *driver, uint64_t stream_id) {
+  size_t index;
+
+  if (driver == NULL) return 0;
+  for (index = 0U; index < driver->capsule_stream_count; index++) {
+    if (driver->capsule_streams[index].stream_id == stream_id) {
+      return driver->capsule_streams[index].headers_pending == 0 ? 1 : 0;
+    }
+  }
+  return 0;
+}
+
+/* The HEADERS frame of a marked CONNECT stream has been delivered: the stream's capsules begin here. Any frame
+ * state is dropped with the mark, because a stream that is no longer framed must not keep a half-read frame header
+ * that a later capsule byte would be appended to. */
+static void settle_capsule_stream(wt_http3_driver_t *driver, uint64_t stream_id) {
+  wt_http3_driver_capsule_stream_t *marked = find_capsule_stream(driver, stream_id);
+
+  if (marked == NULL || marked->headers_pending == 0) return;
+  marked->headers_pending = 0;
+  (void)wt_http3_driver_forget_frame(driver, stream_id);
+}
+
 wt_status_t wt_http3_driver_resend_request(wt_http3_driver_t *driver,
                                            const wt_http3_driver_transport_t *transport, uint64_t now) {
   if (driver == NULL || transport == NULL || transport->send_stream == NULL) {
@@ -907,6 +994,12 @@ wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
    * CONNECT stream"), so this is where the driver learns which session it serves -- and a prefix it writes or
    * reads names this stream's ID. Nothing else sets it, which is why a data stream had no session to name. */
   wt_http3_driver_set_session_id(driver, stream_id);
+  /* And it is a WebTransport CONNECT stream from here on: the RESPONSE is the one HTTP/3 frame still to come on
+   * it, and everything the server sends after that is a capsule on this session (WT-164). Marked BEFORE the
+   * request goes out, because the answer can arrive in the very next packet and a mark made after sending would
+   * race it. */
+  status = wt_http3_driver_mark_capsule_stream(driver, stream_id, 1);
+  if (status != WT_OK) return status;
 
   /* The extended CONNECT of draft-16 section 3.1, as the fields the request line needs: CONNECT with a
    * :protocol, over https, for the authority and path the caller named. */
