@@ -386,3 +386,47 @@ wt_status_t wt_quic_transport_parameters_add_bytes(
     size_t length) {
   return wt_quic_tp_insert(params, id, value, length);
 }
+
+wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *params, int is_server,
+                                               const uint8_t *source_connection_id, size_t source_length,
+                                               const uint8_t *original_destination_connection_id,
+                                               size_t original_length) {
+  wt_status_t status;
+
+  if (params == NULL || source_connection_id == NULL || source_length == 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (is_server && (original_destination_connection_id == NULL || original_length == 0U)) {
+    /* A server that does not say which connection ID the client addressed it by is missing a parameter the RFC
+     * requires of it, and the peer cannot tell that from a mis-routed packet. */
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+
+  wt_quic_transport_parameters_init(params);
+
+  /* RFC 9000 section 7.3: both endpoints send this, and it must be the Source Connection ID they used in their
+   * Initial packets -- a peer compares it, and a mismatch (including its absence) is TRANSPORT_PARAMETER_ERROR.
+   * This is the parameter whose omission a third-party peer named on the first handshake that reached one. */
+  status = wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                                  source_connection_id, source_length);
+  if (status != WT_OK) return status;
+
+  if (is_server) {
+    status = wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID,
+                                                    original_destination_connection_id, original_length);
+    if (status != WT_OK) return status;
+  }
+
+  /* The limits this library advertises, in one place: a caller that added its own would be the second owner of
+   * a number that has to agree with what the runtime enforces. */
+  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_DATA, 100000U);
+  if (status != WT_OK) return status;
+  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+                                                    4096U);
+  if (status != WT_OK) return status;
+  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI, 4096U);
+  if (status != WT_OK) return status;
+  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 8U);
+  if (status != WT_OK) return status;
+  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 8U);
+  if (status != WT_OK) return status;
+  return wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U);
+}

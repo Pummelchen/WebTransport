@@ -176,6 +176,24 @@ wt_status_t wt_quic_transport_parameters_add_bytes(
     wt_quic_transport_parameters_t *params, uint64_t id, const uint8_t *value,
     size_t length);
 
+/* The parameter list an endpoint MUST send (RFC 9000 section 7.3), built in ONE place so a caller cannot leave
+ * a mandatory parameter out.
+ *
+ * A client sends `initial_source_connection_id`, set to the Source Connection ID it uses in its Initial packets.
+ * A server sends that too, AND `original_destination_connection_id`, set to the Destination Connection ID the
+ * client's first Initial carried. A peer that receives neither is entitled to close with
+ * TRANSPORT_PARAMETER_ERROR -- which is exactly what aioquic did to this client, and the reason this function
+ * exists: two callers built the block by hand, both omitted the parameter, and only a peer this project shares
+ * no code with could name the omission (WT-141).
+ *
+ * `is_server` is explicit rather than inferred from a NULL: a server that forgets its original destination ID
+ * must be refused here, not treated as a client. The limits this library advertises are added too, so two
+ * callers cannot drift apart about them either. */
+wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *params, int is_server,
+                                               const uint8_t *source_connection_id, size_t source_length,
+                                               const uint8_t *original_destination_connection_id,
+                                               size_t original_length);
+
 /* A short stable name for the identifiers above, or "unknown". Never NULL. */
 const char *wt_quic_transport_parameter_name(uint64_t id);
 

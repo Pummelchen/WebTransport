@@ -115,18 +115,17 @@ static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_
   return wt_http3_driver_on_quic_frame(&side->driver, space, frame, &side->sink, 16384U);
 }
 
-static uint64_t build_parameters(uint8_t *out, size_t capacity) {
+/* The endpoint's transport parameters, built by the LIBRARY: the mandatory connection-ID parameters live in
+ * `wt_quic_transport_parameters_build` so that this file cannot forget one. It did forget one -- the parameter
+ * that says which Source Connection ID these packets carry -- and only a third-party peer ever said so (WT-141). */
+static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *connection_id,
+                                 size_t connection_id_length) {
   wt_quic_transport_parameters_t params;
   wt_writer_t w = wt_writer_init(out, capacity);
-
-  wt_quic_transport_parameters_init(&params);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_DATA, 100000U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-                                                 4096U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI, 4096U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 8U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 8U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U);
+  if (wt_quic_transport_parameters_build(&params, is_server, connection_id, connection_id_length,
+                                         connection_id, connection_id_length) != WT_OK) {
+    return 0U;
+  }
   if (wt_quic_transport_parameters_encode(&w, &params) != WT_OK) return 0U;
   return (uint64_t)wt_writer_offset(&w);
 }
@@ -162,7 +161,9 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
                                              0x65U, 0x76U, 0x87U, 0x98U};
   scenario_pair_t pair;
   uint8_t parameters[256];
+  uint8_t server_parameters[256];
   uint64_t parameters_len;
+  uint64_t server_parameters_len;
   wt_quic_connection_config_t client_config;
   wt_quic_connection_config_t server_config;
   wt_tls_client_config_t client_tls;
@@ -184,7 +185,13 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
 
   memset(&pair, 0, sizeof(pair));
   pair.now = 1000U;
-  parameters_len = build_parameters(parameters, sizeof(parameters));
+  /* Two lists, because the two sides do not send the same parameters: a client sends its own Source Connection
+   * ID, a server sends that PLUS the Destination Connection ID the client's first Initial carried (RFC 9000
+   * section 7.3). One buffer for both was the shape that made the omission invisible. */
+  parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_connection_id,
+                                    sizeof(k_connection_id));
+  server_parameters_len = build_parameters(server_parameters, sizeof(server_parameters), 1, k_connection_id,
+                                           sizeof(k_connection_id));
   if (parameters_len == 0U) {
     detail_set(detail, detail_size, "the transport parameters did not encode");
     return WT_CLI_RESULT_FAILED;
@@ -260,8 +267,8 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
   server_tls.identity = &identity;
   server_tls.alpn = "h3";
   server_tls.require_transport_parameters = 1;
-  server_tls.transport_parameters = parameters;
-  server_tls.transport_parameters_len = (size_t)parameters_len;
+  server_tls.transport_parameters = server_parameters;
+  server_tls.transport_parameters_len = (size_t)server_parameters_len;
 
   if (wt_runtime_session_start_server(&pair.server, &pair.server_socket, &pair.client_address,
                                       k_connection_id, sizeof(k_connection_id), &server_config,

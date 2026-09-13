@@ -13,6 +13,78 @@
 
 #include "webtransport/quic/transport_parameters.h"
 
+/* The parameters an endpoint MUST send (RFC 9000 section 7.3), and the omission a third-party peer named.
+ *
+ * aioquic closed this client's first interop handshake with `0x8 TRANSPORT_PARAMETER_ERROR:
+ * initial_source_connection_id does not match`, because the parameter was absent: two callers built the block by
+ * hand and both left it out, and the C99 peer accepted it because it shares the omission (WT-141). These cases
+ * are what a peer compares. */
+static void test_build_sends_the_mandatory_connection_ids(void) {
+  static const uint8_t client_source[] = {0x11U, 0x22U, 0x33U, 0x44U};
+  static const uint8_t server_source[] = {0xaaU, 0xbbU};
+  wt_quic_transport_parameters_t params;
+  uint8_t encoded[256];
+  wt_writer_t w = wt_writer_init(encoded, sizeof(encoded));
+  wt_status_t status;
+
+  /* A client: its own Source Connection ID, and nothing about a destination it did not choose. */
+  WT_EXPECT_OK("a client's parameters build",
+               wt_quic_transport_parameters_build(&params, 0, client_source, sizeof(client_source), NULL, 0U));
+  WT_EXPECT_OK("and encode", wt_quic_transport_parameters_encode(&w, &params));
+  {
+    wt_quic_transport_parameters_t read_back;
+    const uint8_t *value = NULL;
+    size_t value_length = 0U;
+    wt_quic_error_t error = WT_QUIC_NO_ERROR;
+    WT_EXPECT_OK("and decode again",
+                 wt_quic_transport_parameters_decode(encoded, wt_writer_offset(&w), &read_back, &error));
+    WT_EXPECT_OK("with initial_source_connection_id present",
+                 wt_quic_transport_parameters_get(&read_back, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID, &value,
+                                                  &value_length));
+    WT_EXPECT_U64("of the source connection ID's length", (uint64_t)sizeof(client_source),
+                  (uint64_t)value_length);
+    WT_EXPECT_BYTES("and its bytes", client_source, value, sizeof(client_source));
+    WT_EXPECT_STATUS("and no original_destination_connection_id, which a client must not send",
+                     WT_ERR_INVALID_ARGUMENT,
+                     wt_quic_transport_parameters_get(&read_back,
+                                                      WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, &value,
+                                                      &value_length));
+  }
+
+  /* A server: both parameters, and the second is the ID the CLIENT addressed it by, not its own. */
+  {
+    uint8_t encoded_server[256];
+    wt_writer_t server_writer = wt_writer_init(encoded_server, sizeof(encoded_server));
+    wt_quic_transport_parameters_t read_back;
+    const uint8_t *value = NULL;
+    size_t value_length = 0U;
+    wt_quic_error_t error = WT_QUIC_NO_ERROR;
+    WT_EXPECT_OK("a server's parameters build",
+                 wt_quic_transport_parameters_build(&params, 1, server_source, sizeof(server_source),
+                                                    client_source, sizeof(client_source)));
+    WT_EXPECT_OK("and encode", wt_quic_transport_parameters_encode(&server_writer, &params));
+    WT_EXPECT_OK("and decode again",
+                 wt_quic_transport_parameters_decode(encoded_server, wt_writer_offset(&server_writer),
+                                                     &read_back, &error));
+    WT_EXPECT_OK("with initial_source_connection_id",
+                 wt_quic_transport_parameters_get(&read_back, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID, &value,
+                                                  &value_length));
+    WT_EXPECT_BYTES("set to the server's own", server_source, value, sizeof(server_source));
+    WT_EXPECT_OK("and original_destination_connection_id",
+                 wt_quic_transport_parameters_get(&read_back,
+                                                  WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, &value,
+                                                  &value_length));
+    WT_EXPECT_BYTES("set to the client's", client_source, value, sizeof(client_source));
+  }
+
+  /* A server that cannot say which connection ID it was addressed by has a caller bug, refused here rather than
+   * sent as a parameter list a peer would close over. */
+  status = wt_quic_transport_parameters_build(&params, 1, server_source, sizeof(server_source), NULL, 0U);
+  WT_EXPECT_STATUS("a server without an original destination is refused", WT_ERR_INVALID_ARGUMENT, status);
+  status = wt_quic_transport_parameters_build(&params, 0, NULL, 0U, NULL, 0U);
+  WT_EXPECT_STATUS("and a list with no source connection ID is refused", WT_ERR_INVALID_ARGUMENT, status);
+}
+
 int main(void) {
   wt_quic_transport_parameters_t params;
   wt_quic_error_t error = 0U;
@@ -494,5 +566,6 @@ int main(void) {
   WT_EXPECT_STR("an unassigned identifier", "unknown",
                 wt_quic_transport_parameter_name(0x4321U));
 
+  test_build_sends_the_mandatory_connection_ids();
   WT_TEST_MAIN_END("wt_quic_transport_parameters");
 }

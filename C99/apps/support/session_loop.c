@@ -122,16 +122,19 @@ static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_
   return wt_http3_driver_on_quic_frame(&side->driver, space, frame, &side->sink, 16384U);
 }
 
-static uint64_t build_parameters(uint8_t *out, size_t capacity) {
+/* The endpoint's transport parameters, built by the LIBRARY: the mandatory connection-ID parameters live in
+ * `wt_quic_transport_parameters_build` so that this file cannot forget one. It did forget one -- the parameter
+ * that says which Source Connection ID these packets carry -- and only a third-party peer ever said so (WT-141). */
+static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *connection_id,
+                                 size_t connection_id_length) {
   wt_quic_transport_parameters_t params;
   wt_writer_t w = wt_writer_init(out, capacity);
-  wt_quic_transport_parameters_init(&params);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_DATA, 100000U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, 4096U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI, 4096U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 8U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 8U);
-  (void)wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U);
+  /* The same connection ID on both sides of this local exchange, so it is both the Source Connection ID these
+   * packets carry and, for the server, the Destination Connection ID the client's first Initial used. */
+  if (wt_quic_transport_parameters_build(&params, is_server, connection_id, connection_id_length,
+                                         connection_id, connection_id_length) != WT_OK) {
+    return 0U;
+  }
   if (wt_quic_transport_parameters_encode(&w, &params) != WT_OK) return 0U;
   return (uint64_t)wt_writer_offset(&w);
 }
@@ -209,7 +212,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   memset(out, 0, sizeof(*out));
   memset(&loop, 0, sizeof(loop));
   loop.now = 1000U;
-  parameters_len = build_parameters(parameters, sizeof(parameters));
+  parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_connection_id, sizeof(k_connection_id));
   if (parameters_len == 0U) return WT_ERR_LIMIT;
 
   {
@@ -349,7 +352,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   memset(out, 0, sizeof(*out));
   memset(&loop, 0, sizeof(loop));
   loop.now = 1000U;
-  parameters_len = build_parameters(parameters, sizeof(parameters));
+  parameters_len = build_parameters(parameters, sizeof(parameters), 1, k_connection_id, sizeof(k_connection_id));
   if (parameters_len == 0U) return WT_ERR_LIMIT;
 
   {
