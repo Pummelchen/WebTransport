@@ -217,6 +217,12 @@ What is here:
   missing, and CI runs it. The two rows that are not "tested" are stated rather than hidden — server
   push is refused deterministically by design, and a peer that changes its connection ID during the
   handshake is not tracked, which is the recorded transport gap.
+- **Five diagnostics, and what each one answers** (`docs/DIAGNOSTICS.md`): the environment-gated dumps
+  that record what was on the wire — every packet sent, the TLS traffic secrets at derivation, the
+  ClientHello this client hashed, the request's field section and the frames on the request stream, and
+  every STREAM frame the HTTP/3 driver was asked to route. They are off unless a variable names a file,
+  they write secrets when they are on, and one page states what each records and which interop defect
+  it closed — because a diagnostic nobody can find is a diagnostic that gets rewritten (WT-157).
 - **The platform surface, inventoried and checked** (`docs/PORTABILITY.md`): what a Windows or
   FreeBSD build would need, item by item — and the socket is now ONE header:
   `src/runtime/udp_platform.h` names all five differences that used to be spelled out as POSIX in a

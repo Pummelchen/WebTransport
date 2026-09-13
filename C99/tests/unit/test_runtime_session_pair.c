@@ -631,6 +631,13 @@ static void test_a_lost_packet_is_retransmitted(void) {
     size_t length = 0U;
     wt_udp_address_t from;
 
+    /* WAIT for the relay before spending a round. Every datagram in this test passes through it -- both ends
+     * address it -- so it is the one place a wait paces the loop, and without one this loop spins faster than
+     * loopback delivers: it spent all 600 rounds before the handshake's first packet arrived and failed about one
+     * run in five. That is the same rule `pump_pair` states for the direct pair ("a loop that spun faster than the
+     * loopback interface would finish before the first Initial packet did"), and this loop was the exception
+     * (WT-163). */
+    (void)wt_udp_wait(&relay, 2000U);
     (void)wt_runtime_session_pump(&pair.client, pair.now);
     (void)wt_runtime_session_pump(&pair.server, pair.now);
     pair.now += 1000U;
