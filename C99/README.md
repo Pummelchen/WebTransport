@@ -76,6 +76,17 @@ What is here:
   rather than trusting it). Both sides end confirmed with application keys installed. That
   is the plan's "run local IPv4 and IPv6 packet sessions" at the library level; the tools'
   own session loop is what remains before the CLI can claim it.
+- **An extended CONNECT across a real connection** (Phase 9): `test_runtime_session_pair` now
+  drives the WHOLE WebTransport handshake-over-HTTP/3 path — two sessions complete a TLS 1.3
+  handshake inside QUIC, the client opens HTTP/3's control and QPACK streams and sends an
+  extended CONNECT as a QPACK field section, and the server assembles that section from the
+  pieces the driver reports, decodes it off the wire, and accepts it with the draft-16
+  validator. The bug that had blocked it for several rounds was a missing RECEIVE credit: the
+  connection's flow account started at zero because nothing paired the `initial_max_data` each
+  endpoint ADVERTISES with the local grant that enforces it, so the first stream frame was
+  refused as `FLOW_CONTROL_ERROR` (code 3, frame type 8) and the connection closed — which
+  presents as a peer that says nothing, not as a missing grant. `runtime/session.h` now states
+  the rule, and pairing it automatically is recorded as a task.
 - **A packet session driver** (Phase 9): `runtime/session.h` is the only place where the
   socket, the QUIC connection and the TLS handshake meet — the connection needs somewhere to
   send, the handshake needs a connection with Initial keys, and the socket needs a caller to

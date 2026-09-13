@@ -73,7 +73,15 @@ typedef struct wt_runtime_session {
   void *next_context;
 } wt_runtime_session_t;
 
-/* A further frame handler installed behind the handshake's, with its own context. */
+/* A RULE THE CALLER MUST KEEP, and the one that cost this phase several rounds: the connection-level
+ * receive credit is the ENFORCEMENT of the `initial_max_data` the endpoint ADVERTISES in its transport
+ * parameters, and nothing pairs the two. A connection whose flow account was never granted starts at zero,
+ * so the FIRST stream frame it receives is refused as FLOW_CONTROL_ERROR (transport code 3, frame type 8)
+ * and the connection closes -- which presents as a peer that says nothing, not as a missing grant. Call
+ * `wt_quic_connection_set_max_data(connection, <the value you advertised>)` before any peer stream can
+ * arrive; the same is true per stream through the connection's `local_max_stream_data`, and for stream
+ * COUNTS through `wt_quic_connection_set_max_streams`. Pairing them automatically is a task on the tracker
+ * (it needs the advertised parameters, which this driver does not see). */
 typedef wt_status_t (*wt_runtime_frame_handler_fn)(void *context, wt_quic_space_t space,
                                                    const wt_quic_frame_t *frame);
 

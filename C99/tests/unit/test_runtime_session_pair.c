@@ -418,6 +418,12 @@ static void test_a_connect_crosses_a_real_connection(void) {
     ends[1] = &pair.server.connection;
     for (side = 0U; side < 2U; side++) {
       ends[side]->config.local_max_stream_data = 4096U;
+      /* The connection-level receive credit, which must MATCH the `initial_max_data` this endpoint
+       * advertises in its parameters: the advertised number is a promise and the local grant is the
+       * enforcement, and nothing pairs them yet. Without it the flow account starts at zero and the FIRST
+       * stream frame is refused as FLOW_CONTROL_ERROR -- which the server raised here, frame type 8. */
+      WT_EXPECT_OK("the endpoint grants session-level receive credit",
+                   wt_quic_connection_set_max_data(ends[side], 100000U));
       WT_EXPECT_OK("the endpoint grants bidirectional streams",
                    wt_quic_connection_set_max_streams(ends[side], WT_QUIC_STREAM_BIDIRECTIONAL, 8U));
       WT_EXPECT_OK("and unidirectional ones",
@@ -516,66 +522,51 @@ static void test_a_connect_crosses_a_real_connection(void) {
    * granted. That is the next thing to reproduce in isolation (set 8, open peer streams, read the grant), and
    * WT-110 carries it. The assertions below are the ones that are TRUE today and that would have saved three
    * rounds: frames DO arrive, and the walk DOES see them. */
-  /* MEASURED, and it ELIMINATED the previous round's suspect. The admission check
-   * (`ensure_peer_stream`) runs exactly ONCE on the server -- for stream 2, `bidir=0`, `index=0`,
-   * `granted=8` -- and admits it; it never refuses anything, so `STREAM_LIMIT_ERROR` does not come from
-   * there. What the measurements now say:
-   *
-   *   - the server saw FOUR STREAM frames, all for stream 2 (the control stream): the client's data for
-   *     streams 6, 10 and 0 never appears in the server's walk at all, although the driver's own sends
-   *     returned OK;
-   *   - the server ORIGINATED a close with transport error code 3, and the client closed in response;
-   *   - the grants the admission check reads are 8 in both classes on both sides, asserted above.
-   *
-   * So the next question is the CLIENT's send path for its SECOND, THIRD and FOURTH stream -- accepted,
-   * recorded, and walked by nobody -- which is a different place from every hypothesis so far. WT-110
-   * carries it.
-   */
-  WT_EXPECT_TRUE("the server's walk saw STREAM frames", pair.server.connection.stream_frames_seen > 0U);
-  WT_EXPECT_TRUE("and walked frames at all", pair.server.connection.frames_walked > 0U);
+  /* THE CONNECT ARRIVED. The server's HTTP/3 layer was asked about four frames (the control stream's
+   * SETTINGS among them), the request stream's field section was assembled from the pieces the driver
+   * reported, and the section below is decoded off the wire. */
+  WT_EXPECT_TRUE("the server's HTTP/3 layer was asked about frames", server.frames_seen > 0U);
+  WT_EXPECT_U64("the control stream's SETTINGS arrived", 1U, (uint64_t)server.control_frames);
+  WT_EXPECT_U64("as SETTINGS", WT_HTTP3_FRAME_SETTINGS, server.last_control_type);
+  WT_EXPECT_TRUE("and the CONNECT's section assembled", server.section_complete != 0);
+  WT_EXPECT_OK("the server tracks the request stream",
+               wt_http3_endpoint_request_state(&server.endpoint, request_stream_id, &state));
+  WT_EXPECT_INT("expecting the request line", (int)WT_HTTP3_REQUEST_EXPECT_HEADERS, (int)state);
+
+  /* The section decodes, and the DRAFT-16 layer decides -- the separation every part of this phase kept:
+   * HTTP/3 does not know what a WebTransport request is. This is the milestone: an extended CONNECT that
+   * crossed a real QUIC connection, was assembled from the frames a driver reported, and was accepted. */
+  WT_EXPECT_OK("the section decodes off the wire",
+               wt_http3_endpoint_on_request_headers(&server.endpoint, request_stream_id,
+                                                    server.section, server.section_length, scratch,
+                                                    sizeof(scratch), &decoded, &h3_error));
+  WT_EXPECT_BYTES("as the method that was sent", (const uint8_t *)"CONNECT", decoded.method,
+                  decoded.method_length);
+  WT_EXPECT_BYTES("the scheme", (const uint8_t *)"https", decoded.scheme, decoded.scheme_length);
+  WT_EXPECT_BYTES("the authority", (const uint8_t *)"example.com", decoded.authority,
+                  decoded.authority_length);
+  WT_EXPECT_BYTES("the path", (const uint8_t *)"/chat", decoded.path, decoded.path_length);
+  WT_EXPECT_BYTES("and the protocol", (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN,
+                  decoded.protocol, decoded.protocol_length);
+
+  policy.authority = "example.com";
+  policy.path = "/chat";
+  policy.wt_enabled = 1;
+  WT_EXPECT_OK("the draft-16 layer accepts it",
+               wt_webtransport_session_request_validate(&decoded, &policy, &decision, &h3_error));
+  WT_EXPECT_INT("as a WebTransport request", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT,
+                (int)decision.outcome);
+  WT_EXPECT_OK("and the server's request state advances",
+               wt_http3_endpoint_request_state(&server.endpoint, request_stream_id, &state));
+  WT_EXPECT_INT("past the request line", (int)WT_HTTP3_REQUEST_BODY, (int)state);
+
   /* The pump's own instrumentation, asserted rather than printed: both sides read packets, neither side
-   * refused one (a receive that is neither success nor "nothing there" is counted), and the flush reported
-   * OK -- so "the packet was refused somewhere on the way in" is now ruled out by measurement rather than
-   * by reading. What is left is the server's frame WALK, which is where the next counter belongs. */
-  {
-    int id;
-    printf("DIAG server closed=%d peer_streams=", (int)wt_quic_connection_is_closed(&pair.server.connection));
-    for (id = 0; id < 16; id++) {
-      if (wt_quic_connection_stream(&pair.server.connection, (uint64_t)id) != NULL) printf("%d ", id);
-    }
-    printf("| client closed=%d client_code=%llu server_code=%llu\n",
-           (int)wt_quic_connection_is_closed(&pair.client.connection),
-           (unsigned long long)pair.client.connection.close.error_code,
-           (unsigned long long)pair.server.connection.close.error_code);
-  }
-  printf("DIAG server walked=%llu streams=%llu delivered=%llu | client walked=%llu streams=%llu\n",
-         (unsigned long long)pair.server.connection.frames_walked,
-         (unsigned long long)pair.server.connection.stream_frames_seen,
-         (unsigned long long)pair.server.connection.frames_delivered,
-         (unsigned long long)pair.client.connection.frames_walked,
-         (unsigned long long)pair.client.connection.stream_frames_seen);
+   * refused one, and both flushes reported OK. */
   WT_EXPECT_U64("the server refused no packet", 0U, (uint64_t)pair.server.receive_errors);
   WT_EXPECT_U64("and neither did the client", 0U, (uint64_t)pair.client.receive_errors);
   WT_EXPECT_STATUS("the client's flush succeeded", WT_OK, pair.client.last_flush);
   WT_EXPECT_STATUS("the server's flush succeeded", WT_OK, pair.server.last_flush);
-  /* The stream RECORDS what it sent: the connection writes the frame and leaves the offset to whoever
-   * asked for the send, so a transport adapter that did not record it would send every later frame at the
-   * same offset -- and this assertion is what caught exactly that. */
-  {
-    wt_quic_stream_t *sent_stream = wt_quic_connection_stream(&pair.client.connection, request_stream_id);
-    WT_EXPECT_TRUE("the client has its request stream", sent_stream != NULL);
-    if (sent_stream != NULL) {
-      WT_EXPECT_TRUE("and recorded the bytes it sent", sent_stream->send_offset > 0U);
-    }
-  }
-  WT_EXPECT_TRUE("the client flushed packets", pair.client.flushes > 0U);
-  WT_EXPECT_TRUE("and the server read packets", pair.server.packets_seen > 0U);
-  /* Where the inbound path stops, MEASURED rather than guessed, and left as a comment because the
-   * measurement is a failure today: `wt_quic_connection_stream(&server.connection, request_stream_id)` is
-   * NULL, so the server never created the stream at all -- the STREAM frame did not reach its frame walk,
-   * which is a different place from where the last round looked. The next measurement is the client's side
-   * of the same question: whether `wt_quic_connection_send_stream` queued a frame that the flush then sent.
-   * WT-110 carries both the measurement and that next step. */
+
   WT_EXPECT_INT("with the request stream tracked by the client", 1,
                 wt_http3_endpoint_request_state(&client.endpoint, request_stream_id, &state) == WT_OK);
   (void)decoded;

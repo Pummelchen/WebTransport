@@ -2361,6 +2361,31 @@ granted. Reproducing that in isolation (set 8, open peer streams, read the grant
 carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
 saw STREAM frames, and it walked frames at all.
 
+### Phase 9's eighteenth part: the CONNECT crosses a real connection
+
+**The milestone this phase was built for is reached**: `test_runtime_session_pair` drives the whole path --
+two sessions complete a TLS 1.3 handshake inside QUIC Initial and Handshake packets, the client opens HTTP/3's
+control stream and both QPACK streams, sends an extended CONNECT as a QPACK field section, and the SERVER
+assembles that section from the pieces the driver reports, decodes it off the wire, and accepts it with the
+draft-16 validator, with its request state advanced past the request line.
+
+The bug that blocked it is worth recording in full, because three rounds of the diagnosis were spent on it and
+the first reading of its evidence was wrong. The server closed the connection with transport error code **3**,
+and this session read that as `STREAM_LIMIT_ERROR` and went looking at the stream-count accounting -- where two
+further measurements found nothing wrong. Code 3 is `FLOW_CONTROL_ERROR` (0x04 is the stream limit), and the
+close came from the STREAM branch's own mapping after `wt_quic_stream_on_data` refused the frame. The reason it
+refused: **the connection-level receive account started at zero**, because nothing pairs the `initial_max_data`
+an endpoint ADVERTISES in its transport parameters with the local grant that enforces it
+(`wt_quic_connection_set_max_data`). The advertised number is a promise; the grant is the enforcement; the two
+must agree, and until they do the first peer stream frame is refused and the connection closes -- which presents
+as a peer that says nothing rather than as a missing grant.
+
+`runtime/session.h` now states the rule beside the driver's other invariants, and pairing it automatically is a
+task on the tracker: it needs the advertised parameters, which the session driver does not currently see. Two
+lessons join the ones this phase has already recorded: **read the error space before reasoning about the error
+code** (0x03 is flow control, not stream limit), and **an endpoint that grants nothing receives nothing** --
+which is the receive-side twin of the "one number, one owner" rule from WT-108 and WT-112.
+
 ### Phase 9's seventeenth part: the stream-limit suspect is eliminated, and the question moves to the client's sends
 
 The isolated check did its job by REMOVING a suspect rather than confirming one. Two facts, both measurements:
