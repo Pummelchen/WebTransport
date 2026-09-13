@@ -35,6 +35,11 @@ extern "C" {
 /* The session's state, as a consumer sees it. The names match the draft's phases rather
  * than this implementation's internals, so a caller reads them without a header of ours
  * in hand. */
+/* The longest authority or path a session handle copies, so a caller can bound its own
+ * strings without reading a private header. A longer one is refused, never truncated: a
+ * truncated authority names a different session. */
+#define WT_SESSION_AUTHORITY_MAX 128U
+
 /* A QUIC DATAGRAM frame cannot carry more than this, and the quarter stream ID travels
  * inside it, so it is the ceiling a datagram bound may ask for. */
 #define WT_SESSION_DATAGRAM_MAX 65535U

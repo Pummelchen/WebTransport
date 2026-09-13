@@ -76,7 +76,9 @@ static void on_close(void *context, uint32_t error_code) {
 }
 
 int main(void) {
-  wt_session_config_t config = wt_session_config_default();
+  wt_endpoint_config_t endpoint = wt_endpoint_config_default();
+  wt_session_config_t config;
+  wt_status_t endpoint_status;
   wt_session_callbacks_t callbacks;
   peer_log_t log;
   wt_session_t *session = NULL;
@@ -93,15 +95,25 @@ int main(void) {
 
   printf("webtransport-c99 %s (%s)\n\n", wt_version_string(), wt_protocol_draft());
 
-  /* An ENDPOINT: the authority and path this session is for, and the CONNECT stream ID it
-   * lives on. The strings are copied into the handle, so these could be freed now. */
-  config.authority = "example.com";
-  config.path = "/chat";
-  config.session_id = 4U;
+  /* An ENDPOINT: which side this program is, the name it is reached at, how the peer's
+   * certificate is judged, and the authority and path the CONNECT request will carry. The
+   * development bypass is used here because a sample connects to nothing; it is tied to a
+   * loopback name, so the same configuration against a real host is refused below. */
+  endpoint.role = WT_ENDPOINT_ROLE_CLIENT;
+  endpoint.host = "localhost";
+  endpoint.port = 4433U;
+  endpoint.path = "/chat";
+  endpoint.trust.mode = WT_TLS_TRUST_LOCAL_DEVELOPMENT;
+  endpoint_status = wt_endpoint_config_check(&endpoint);
+  if (endpoint_status != WT_OK) return fail("wt_endpoint_config_check", endpoint_status, 0U);
+  printf("endpoint: %s on %s:%u, trust %s\n", wt_endpoint_role_name(endpoint.role), endpoint.host,
+         (unsigned)endpoint.port, "local development (loopback only)");
 
-  /* TRUST lives in the TLS layer and is not part of this API yet; what a caller does here
-   * is decide which endpoint it is talking to, which is what the authority above is for.
-   * The sample says so out loud rather than pretending to configure trust. */
+  /* The endpoint produces the session configuration, so the authority and path a request
+   * carries come from one place rather than from whichever string was nearest. */
+  if (wt_endpoint_session_config(&endpoint, 4U, &config) != WT_OK) {
+    return fail("wt_endpoint_session_config", WT_ERR_STATE, 0U);
+  }
   printf("session: %s%s on CONNECT stream %llu\n", config.authority, config.path,
          (unsigned long long)config.session_id);
 

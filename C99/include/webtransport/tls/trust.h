@@ -81,6 +81,13 @@ typedef struct wt_tls_trust_policy {
   size_t fingerprint_count;
 } wt_tls_trust_policy_t;
 
+/* Whether a host name is one the LOCAL_DEVELOPMENT bypass is allowed for. Exported
+ * because two layers need the same answer -- this policy at the handshake, and the public
+ * API when it checks a configuration before a connection is even attempted -- and a rule
+ * with two implementations is a rule that will disagree with itself. Exact comparison: a
+ * name that merely contains a loopback name is not one. */
+int wt_tls_trust_host_is_loopback(const char *host_name);
+
 /* Validate a peer's certificate chain and hand back the leaf's public key.
  *
  * `spki_out` receives the leaf's SubjectPublicKeyInfo in DER, which is what

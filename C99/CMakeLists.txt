@@ -120,6 +120,7 @@ list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 # test must not be able to link a different build of HTTP/3 than the one that
 # ships.
 set(WT_API_SOURCES
+  src/api/endpoint.c
   src/api/events.c
   src/api/flow.c
   src/api/session.c
@@ -159,6 +160,7 @@ list(APPEND WT_CORE_SOURCES ${WT_HTTP3_SOURCES})
 
 set(WT_PUBLIC_HEADERS
   include/webtransport/status.h
+  include/webtransport/api/endpoint.h
   include/webtransport/api/events.h
   include/webtransport/api/flow.h
   include/webtransport/api/session.h

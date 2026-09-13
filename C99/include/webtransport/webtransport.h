@@ -104,6 +104,7 @@
 /* The public consumer API. It comes last because it is the layer a program is written
  * against rather than a layer this library is written in: everything above it is the
  * machinery it turns into `create`, feed and callback. */
+#include "webtransport/api/endpoint.h"
 #include "webtransport/api/events.h"
 #include "webtransport/api/flow.h"
 #include "webtransport/api/session.h"

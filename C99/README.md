@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 67 unit test files and 79,222 checks, run by `ctest` and again under
+- 68 unit test files and 79,263 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -91,6 +91,14 @@ What is here:
     `wt_session_config_default()` returns every bound at its default, because a C
     caller that forgot a field would otherwise pass whatever its stack held into a
     bound.
+  - `api/endpoint.h` — which side this program is, the name the peer's certificate
+    must be valid for, and how it is judged, so a trust misconfiguration is a return
+    value before any packet rather than a handshake failure afterwards. The
+    development bypass is tied to a loopback name through the trust layer's own
+    `wt_tls_trust_host_is_loopback`, which is exported precisely so the configuration
+    check and the handshake cannot disagree about the rule; a server must carry no
+    trust policy, because this draft has no client authentication and a policy there
+    would be a promise the library cannot keep.
   - `api/flow.h` — the session's send-side flow control, which is what backpressure
     means when there is no socket to block on. The draft's rules are the
     implementation: flow control is off until both endpoints' SETTINGS say otherwise

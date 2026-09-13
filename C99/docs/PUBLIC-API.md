@@ -20,6 +20,7 @@ text, a place for events to go, and answers to "may I send this".
 | `api/session.h` | The session handle: create, destroy, state, error, the CONNECT-stream capsules. |
 | `api/events.h` | The event-loop seam: the callback table, peer streams, peer datagrams. |
 | `api/flow.h` | Backpressure: the peer's flow-control grants and what is left of them. |
+| `api/endpoint.h` | Which side this program is, where it is reached, and how the peer's certificate is judged. |
 | `webtransport.h` | The umbrella, which includes all of the above plus every layer beneath. |
 
 ## Endpoints
@@ -46,11 +47,51 @@ politeness: a C caller that sets three fields of a six-field struct passes whate
 stack held into a bound, and the bounds are what stop a peer from spending this process's
 memory.
 
-**Trust is a connection-level policy and is not yet part of this API.** Chain validation,
-the CertificateVerify gate and the prompt-free trust modes live in the TLS layer
-(`webtransport/tls/...`), and a caller driving a connection uses them there. Surfacing them
-here is the next part of this phase; until it lands, this document does not claim a
-`trust` field.
+## Endpoints and trust
+
+An endpoint says which side this program is, where it is reached, and how the peer's
+certificate is judged. A session is then built from it, so the authority a request carries
+comes from one place:
+
+```c
+wt_endpoint_config_t endpoint = wt_endpoint_config_default();
+endpoint.role = WT_ENDPOINT_ROLE_CLIENT;      /* there is no default role */
+endpoint.host = "example.com";               /* also the name the certificate must match */
+endpoint.port = 443;
+endpoint.path = "/chat";                     /* defaults to "/" */
+endpoint.trust.mode = WT_TLS_TRUST_SYSTEM;   /* or STORE, PINNED_CERTIFICATE, LOCAL_DEVELOPMENT */
+if (wt_endpoint_config_check(&endpoint) != WT_OK) { /* a misconfiguration, before any packet */ }
+
+wt_session_config_t session_config;
+wt_endpoint_session_config(&endpoint, 4U, &session_config);   /* CONNECT stream 4 */
+```
+
+`host` is the name the peer's certificate is validated against (RFC 6125, through the TLS
+layer) unless the policy names its own `host_name`. `authority` defaults to `host`.
+
+| Trust mode | What it does |
+| --- | --- |
+| `WT_TLS_TRUST_SYSTEM` | The platform's trust store. `WT_ERR_UNSUPPORTED` where there is none. |
+| `WT_TLS_TRUST_STORE` | A PEM bundle the caller supplies. |
+| `WT_TLS_TRUST_PINNED_CERTIFICATE` | SHA-256 pins of acceptable leaves; at least one, at most `WT_TLS_PINNED_MAX`. |
+| `WT_TLS_TRUST_LOCAL_DEVELOPMENT` | The self-signed bypass, **tied to a loopback name**. |
+
+The last one is the one worth reading twice. The bypass is refused for any host name that is
+not `localhost`, `127.0.0.1` or `::1`, and the check is the trust layer's own function
+(`wt_tls_trust_host_is_loopback`) called from both the configuration check here and the
+handshake, so the two cannot drift apart. A caller that reaches for the development policy
+against a real endpoint gets `WT_ERR_TRUST` from `wt_endpoint_config_check` -- before a
+packet is sent, rather than after a connection that was authenticated by nothing.
+
+A **server** must leave the trust policy unset: this draft has no client authentication, so a
+server has no peer certificate to judge, and accepting a policy would be a promise the
+library cannot keep. A client must name a port and a trust mode; a server may leave the port
+to the system (0) and often will, since binding an ephemeral port is what a test does.
+
+`wt_endpoint_config_check` reports `WT_ERR_INVALID_ARGUMENT` for a missing or impossible
+field, `WT_ERR_TRUST` for a mode used outside what it allows, and `WT_ERR_LIMIT` for a path
+or authority longer than the session handle copies. It never resolves a name or touches the
+network.
 
 ## Sessions
 
@@ -207,8 +248,6 @@ never blames the peer for it.
 
 ## What is not here yet
 
-- **A trust surface.** Chain validation and the trust modes exist in the TLS layer; the
-  public wrapper for them is the next part of this phase.
 - **Blocking helpers.** The plan allows optional blocking wrappers for the CLI tools and
   simple programs; they arrive with the CLI applications, which are what need them.
 - **Streams and datagrams to SEND.** The send side needs the connection that moves the

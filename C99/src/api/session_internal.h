@@ -11,8 +11,6 @@
 #include "webtransport/api/flow.h"
 #include "webtransport/webtransport/session.h"
 
-#define WT_SESSION_AUTHORITY_MAX 128U
-
 /* A peer stream this handle is tracking. */
 typedef struct wt_session_stream_slot {
   uint64_t stream_id;

@@ -64,8 +64,9 @@ static int scheme_is_rsa_pss(uint16_t scheme) {
 
 /* The loopback names the development bypass is restricted to, which is the same set the
  * Swift client's `localDevelopmentSelfSigned` policy allows. Compared exactly: a name that
- * merely contains one of these is not one of them. */
-static int is_loopback_name(const char *host_name) {
+ * merely contains one of these is not one of them. Public because the API checks the same
+ * rule before a connection is attempted. */
+int wt_tls_trust_host_is_loopback(const char *host_name) {
   if (host_name == NULL) return 0;
   return strcmp(host_name, "localhost") == 0 || strcmp(host_name, "127.0.0.1") == 0 ||
          strcmp(host_name, "::1") == 0 || strcmp(host_name, "[::1]") == 0;
@@ -181,7 +182,7 @@ wt_status_t wt_tls_trust_verify(const wt_tls_trust_policy_t *policy,
     /* The bypass is restricted to loopback names, and the restriction is part of the
      * mode: a caller that reached for the development policy against a real endpoint
      * gets a trust failure rather than a connection that is authenticated by nothing. */
-    if (!is_loopback_name(policy->host_name)) return WT_ERR_TRUST;
+    if (!wt_tls_trust_host_is_loopback(policy->host_name)) return WT_ERR_TRUST;
     rest = sk_X509_new_null();
     if (rest == NULL) return WT_ERR_OUT_OF_MEMORY;
     leaf = parse_first(certificate, rest);

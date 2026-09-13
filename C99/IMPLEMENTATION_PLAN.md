@@ -1897,6 +1897,26 @@ now enables testing before its subdirectories, and guards the registration on th
 than CTest's `BUILD_TESTING`, which this project never defines. Both mistakes report success, which is what
 makes them worth a paragraph.
 
+**Sixth part done: endpoints and trust.** `api/endpoint.h` is the per-program half of the API: which side
+this process is, the name it is reached at, the port, the authority and path a CONNECT request carries, and how
+the peer's certificate is judged. It exists so that a misconfiguration is a return value from
+`wt_endpoint_config_check` before a packet is sent rather than a handshake failure twenty seconds later, and
+`wt_endpoint_session_config` then produces the session configuration from it, so the authority a request
+carries comes from one place.
+
+Two decisions in it are worth recording. The development bypass
+(`WT_TLS_TRUST_LOCAL_DEVELOPMENT`) is tied to a loopback name, and the check is the TRUST LAYER's function --
+exported for this purpose -- rather than a copy of its rule: a security rule with two implementations is a
+rule that will disagree with itself, and the disagreement will be found by an attacker rather than by a test.
+And a SERVER must leave the trust policy unset, because this draft has no client authentication: a server has
+no peer certificate to judge, so accepting a policy would be a promise the library cannot keep. Refusing it is
+the only honest answer, and the alternative -- ignoring it -- is how a caller comes to believe their clients
+are authenticated.
+
+The mode-0 enumeration produced a small lesson of its own: a `case` label for a value outside an enum does not
+compile under `-Wswitch`, which is the compiler saying what the code meant -- an unknown mode falls through to
+"not a policy" rather than being named.
+
 Design the public API after the protocol core is stable.
 
 API requirements:

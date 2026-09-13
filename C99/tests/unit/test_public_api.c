@@ -70,9 +70,15 @@ static void test_the_layers_are_reachable(void) {
     wt_session_t *session = NULL;
     wt_session_callbacks_t callbacks;
     memset(&callbacks, 0, sizeof(callbacks));
-    config.authority = "localhost";
-    config.path = "/wt";
-    config.session_id = 4U;
+    wt_endpoint_config_t endpoint = wt_endpoint_config_default();
+    endpoint.role = WT_ENDPOINT_ROLE_CLIENT;
+    endpoint.host = "localhost";
+    endpoint.port = 443U;
+    endpoint.trust.mode = WT_TLS_TRUST_LOCAL_DEVELOPMENT;
+    WT_EXPECT_OK("an endpoint checks out", wt_endpoint_config_check(&endpoint));
+    WT_EXPECT_OK("and builds a session configuration",
+                 wt_endpoint_session_config(&endpoint, 4U, &config));
+    config.max_capsule_bytes = 4096U;
     WT_EXPECT_OK("a session is created from the umbrella alone",
                  wt_session_create(&config, NULL, &session));
     WT_EXPECT_OK("its callbacks install", wt_session_set_callbacks(session, &callbacks));
