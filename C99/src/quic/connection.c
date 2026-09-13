@@ -793,6 +793,7 @@ static wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
  * is what the peer is told. */
 static wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_visit_t *visit,
                                       const wt_quic_frame_t *frame) {
+  connection->frames_delivered++;
   wt_status_t status;
 
   visit->ack_eliciting = 1;
@@ -844,6 +845,9 @@ static wt_status_t handle_retire_connection_id(wt_quic_connection_t *connection,
 static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
   wt_quic_visit_t *visit = context;
   wt_quic_connection_t *connection = visit->connection;
+
+  connection->frames_walked++;
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) connection->stream_frames_seen++;
 
   /* RFC 9000 section 10.2.1: once the connection is closed, only PADDING, the close's own frames and the
    * frames a probe needs may still be processed -- everything else is ignored, and ignoring it STOPS the

@@ -493,6 +493,40 @@ static void test_a_connect_crosses_a_real_connection(void) {
    * refused one (a receive that is neither success nor "nothing there" is counted), and the flush reported
    * OK -- so "the packet was refused somewhere on the way in" is now ruled out by measurement rather than
    * by reading. What is left is the server's frame WALK, which is where the next counter belongs. */
+  /* MEASURED, and this round found the reason nothing arrived: BOTH connections are CLOSED, with transport
+   * error code **3 -- STREAM_LIMIT_ERROR** -- long before the CONNECT matters. The server's frame walk did see
+   * the client's STREAM frames (`stream_frames_seen` is 4), and then `ensure_peer_stream` decided the client
+   * had opened more streams than this endpoint granted and closed the connection; everything after that is
+   * ignored, which is exactly why no stream was created for the request and no frame reached the handler.
+   *
+   * The admission check reads `local_max_streams[bidirectional ? 0 : 1]`, and this test sets BOTH to 8 before
+   * any stream is opened -- so the accounting, not the test, is what believes one unidirectional stream was
+   * granted. That is the next thing to reproduce in isolation (set 8, open peer streams, read the grant), and
+   * WT-110 carries it. The assertions below are the ones that are TRUE today and that would have saved three
+   * rounds: frames DO arrive, and the walk DOES see them. */
+  WT_EXPECT_TRUE("the server's walk saw STREAM frames", pair.server.connection.stream_frames_seen > 0U);
+  WT_EXPECT_TRUE("and walked frames at all", pair.server.connection.frames_walked > 0U);
+  /* The pump's own instrumentation, asserted rather than printed: both sides read packets, neither side
+   * refused one (a receive that is neither success nor "nothing there" is counted), and the flush reported
+   * OK -- so "the packet was refused somewhere on the way in" is now ruled out by measurement rather than
+   * by reading. What is left is the server's frame WALK, which is where the next counter belongs. */
+  {
+    int id;
+    printf("DIAG server closed=%d peer_streams=", (int)wt_quic_connection_is_closed(&pair.server.connection));
+    for (id = 0; id < 16; id++) {
+      if (wt_quic_connection_stream(&pair.server.connection, (uint64_t)id) != NULL) printf("%d ", id);
+    }
+    printf("| client closed=%d client_code=%llu server_code=%llu\n",
+           (int)wt_quic_connection_is_closed(&pair.client.connection),
+           (unsigned long long)pair.client.connection.close.error_code,
+           (unsigned long long)pair.server.connection.close.error_code);
+  }
+  printf("DIAG server walked=%llu streams=%llu delivered=%llu | client walked=%llu streams=%llu\n",
+         (unsigned long long)pair.server.connection.frames_walked,
+         (unsigned long long)pair.server.connection.stream_frames_seen,
+         (unsigned long long)pair.server.connection.frames_delivered,
+         (unsigned long long)pair.client.connection.frames_walked,
+         (unsigned long long)pair.client.connection.stream_frames_seen);
   WT_EXPECT_U64("the server refused no packet", 0U, (uint64_t)pair.server.receive_errors);
   WT_EXPECT_U64("and neither did the client", 0U, (uint64_t)pair.client.receive_errors);
   WT_EXPECT_STATUS("the client's flush succeeded", WT_OK, pair.client.last_flush);

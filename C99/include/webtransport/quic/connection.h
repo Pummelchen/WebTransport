@@ -261,6 +261,13 @@ typedef struct wt_quic_connection {
   uint64_t packets_received;
   uint64_t bytes_sent;
   uint64_t bytes_received;
+  /* Every frame the walk visited, how many of them were STREAM frames, and how many reached the caller's
+   * handler. They are diagnostics rather than protocol state, and they exist because a session whose
+   * packets arrive and whose handler is never called has exactly one question to ask -- did the walk see
+   * the frame? -- and no way to ask it from outside. */
+  uint64_t frames_walked;
+  uint64_t stream_frames_seen;
+  uint64_t frames_delivered;
   /* Whether the handshake is confirmed, which RFC 9002 section 5.3 requires before an acknowledgement
    * delay is subtracted from a round trip sample. */
   int handshake_confirmed;
