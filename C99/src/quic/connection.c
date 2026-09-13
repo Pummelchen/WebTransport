@@ -114,6 +114,35 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   limits.set = 1;
   connection->peer_limits = limits;
   connection->flow.peer_max_data = limits.initial_max_data;
+
+  /* RFC 9000 section 7.2: after the ServerHello, a client addresses every packet to the SOURCE CONNECTION ID the
+   * server chose, and a server addresses a client the same way.
+   *
+   * NOTHING DID THAT HERE, and it cost this tree a third-party interop: the destination connection ID was written
+   * once from the configuration, so a peer that chose its own ID dropped every packet this endpoint sent after the
+   * handshake as belonging to another connection -- before consulting any key. The peer said "Decryption key is not
+   * available", retransmitted its handshake CRYPTO forever and never left SERVER_EXPECT_FINISHED, while everything
+   * about those packets was correct: typed, numbered, protected, and carrying a Finished that opens with the
+   * peer's OWN key. It was invisible to the C99 pair because this tree's server does not enforce CID routing, so
+   * both ends accepted the configured ID (WT-135).
+   *
+   * A Retry's retry_source_connection_id is the same idea one message later. */
+  {
+    const uint8_t *peer_source = NULL;
+    size_t peer_source_length = 0U;
+    if (wt_quic_transport_parameters_get(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID, &peer_source,
+                                         &peer_source_length) == WT_OK &&
+        peer_source != NULL && peer_source_length > 0U &&
+        peer_source_length <= (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
+      if (peer_source_length != connection->peer_connection_id_length ||
+          memcmp(connection->peer_connection_id, peer_source, peer_source_length) != 0) {
+        memcpy(connection->peer_connection_id, peer_source, peer_source_length);
+        connection->peer_connection_id_length = peer_source_length;
+        connection->config.peer_connection_id = connection->peer_connection_id;
+        connection->config.peer_connection_id_length = peer_source_length;
+      }
+    }
+  }
   return WT_OK;
 }
 
