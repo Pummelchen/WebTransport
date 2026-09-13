@@ -16,6 +16,7 @@
 
 #include "scenario_session.h"
 #include "scenario_refusals.h"
+#include "scenario_control.h"
 #include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/capsule.h"
@@ -189,6 +190,11 @@ int main(int argc, char **argv) {
     /* The refusal scenarios: what this endpoint refuses, and with which code. They need no sockets, because a
      * refusal is a decision rather than a session, and the code is the value the report can carry. */
     wt_scenario_refusals_run(&report);
+
+    /* The connection-control scenarios: GOAWAY identifiers, the peer's control stream and the QPACK bounds.
+     * They mirror the Swift suite's control and shutdown groups, and they too need no sockets: what is being
+     * asserted is the code the peer would be sent. */
+    wt_scenario_control_run(&report);
 
     /* The two session scenarios: two endpoints in ONE process over loopback, with a generated and pinned
      * identity, running the whole exchange -- handshake, CONNECT, response, a stream message and a datagram.

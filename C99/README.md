@@ -224,8 +224,8 @@ What is here:
   not the same as being done: the criteria that are not met are outside the matrix and outside this
   repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
   Windows CI legs need portability work before a job for them would be anything but red. The two
-  partial criteria are conformance scenario breadth (five end-to-end scenarios against the Swift
-  tools' two 40-scenario suites) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
+  partial criteria are conformance scenario breadth (thirty scenarios, two of them end-to-end
+  sessions over real sockets, against the Swift tools' 40-scenario suite) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
   sessions, sanitizers and static checks are clean, the public API is documented, nothing
   placeholder-shaped is exposed as production, and the matrix itself exists and is checked.
 
@@ -242,7 +242,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **seventeen scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **thirty scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -251,9 +251,13 @@ What is here:
   new streams, a capsule over the bound is excessive load, a peer stream past the bound is
   `WT_ERR_LIMIT` with **no** error code because the bound is ours, and an empty datagram is malformed
   rather than short), the positive edge this project earned the hard way (half a prefix decides nothing
-  until it is whole), and the two **real sessions** over IPv4 and IPv6. The reserved-SETTINGS scenario
-  is what **found** a real spec violation in this tree's own parser, and the fix is in — see
-  `IMPLEMENTATION_PLAN.md`. Registered with CTest.
+  until it is whole), **thirteen connection-control scenarios** (GOAWAY identifiers that must not
+  increase and must name a client stream, the reject-at-or-above boundary, one control stream per
+  connection, a request frame refused on it, SETTINGS that must come first, a closed critical stream,
+  the QPACK static table's exact bound and a dynamic capacity of zero, the session-stream predicate,
+  and the datagram's quarter-id round trip), and the two **real sessions** over IPv4 and IPv6. The
+  reserved-SETTINGS scenario is what **found** a real spec violation in this tree's own parser, and
+  the fix is in — see `IMPLEMENTATION_PLAN.md`. Registered with CTest.
 - **The conformance tool's scenarios, positive and negative** (Phase 9-10): seventeen scenarios in
   one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path is `404`
   compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a server

@@ -77,8 +77,27 @@ conformance_status=$?
 set -e
 [ "$conformance_status" -eq 0 ] || [ "$conformance_status" -eq 3 ] \
   || fail "the conformance tool must exit 0 or 3 (got $conformance_status)" "$work/err"
-grep -q '"summary":{"total":17' "$work/out" || fail "the conformance summary must count seventeen scenarios" "$work/out"
-grep -q '"failed":0' "$work/out" || fail "and no scenario may fail" "$work/out"
+# The summary is a claim ABOUT the scenario list, so it is checked as an invariant rather than as a number:
+# the two parts must agree, nothing may fail, and the count may GROW as breadth is added. A hard-coded
+# `"total":17` here failed the moment the control scenarios landed, which is the same rot the conditional
+# `unsupported` check below was rewritten to avoid -- a check that breaks when the work advances teaches
+# people to edit the check.
+summary=$(sed -n 's/.*"summary":{\([^}]*\)}.*/\1/p' "$work/out" | tail -1)
+[ -n "$summary" ] || fail "the report must carry a summary" "$work/out"
+summary_field() { printf '%s' "$summary" | sed -n "s/.*\"$1\":\([0-9]*\).*/\1/p"; }
+total=$(summary_field total)
+passed=$(summary_field passed)
+failed=$(summary_field failed)
+unsupported=$(summary_field unsupported)
+[ -n "$total" ] && [ -n "$passed" ] && [ -n "$failed" ] && [ -n "$unsupported" ] \
+  || fail "the summary must carry all four counts" "$work/out"
+[ "$failed" -eq 0 ] || fail "and no scenario may fail" "$work/out"
+[ "$((passed + failed + unsupported))" -eq "$total" ] \
+  || fail "the summary's counts must agree with each other" "$work/out"
+listed=$(grep -o '"name":"' "$work/out" | wc -l | tr -d ' ')
+[ "$listed" -eq "$total" ] \
+  || fail "the summary must count what it lists (listed $listed, total $total)" "$work/out"
+[ "$total" -ge 30 ] || fail "the scenario list must not shrink below thirty (got $total)" "$work/out"
 # `unsupported` is allowed -- IPv6 reports itself where the machine has no IPv6 loopback -- and IF a scenario is
 # unsupported it must carry a NON-EMPTY reason. The check is conditional because a run with no unsupported
 # scenarios is the healthy case: an unconditional grep here failed the moment WT-137 was fixed and the last
