@@ -28,6 +28,11 @@ void wt_http3_endpoint_init(wt_http3_endpoint_t *endpoint, wt_http3_role_t role)
     endpoint->streams[i].kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
     endpoint->streams[i].type = 0U;
   }
+  /* Zero capacity: no dynamic table has been advertised, so a section that needs one is
+   * QPACK_DECOMPRESSION_FAILED rather than a guess. */
+  wt_qpack_dynamic_init(&endpoint->decoder_table, 0U);
+  endpoint->decoder_insert_count = 0U;
+  endpoint->decoder_capacity_set = 0;
   endpoint->request_count = 0U;
   for (i = 0U; i < WT_HTTP3_ENDPOINT_REQUESTS_MAX; i++) {
     endpoint->requests[i].stream_id = 0U;
@@ -102,6 +107,71 @@ wt_status_t wt_http3_endpoint_on_request_stream(wt_http3_endpoint_t *endpoint, u
     return refuse(WT_ERR_PROTOCOL, WT_HTTP3_STREAM_CREATION_ERROR, out_error);
   }
   return track_request(endpoint, stream_id, 0);
+}
+
+wt_status_t wt_http3_endpoint_set_decoder_capacity(wt_http3_endpoint_t *endpoint, size_t capacity) {
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (endpoint->decoder_capacity_set != 0 && endpoint->decoder_table.capacity == capacity) {
+    /* The same capacity twice is not a reconfiguration, and treating it as one would let a
+     * caller silently discard the peer's insertions. */
+    return WT_OK;
+  }
+  wt_qpack_dynamic_init(&endpoint->decoder_table, capacity);
+  endpoint->decoder_insert_count = 0U;
+  endpoint->decoder_capacity_set = 1;
+  return WT_OK;
+}
+
+wt_status_t wt_http3_endpoint_on_request_headers(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                                 const uint8_t *payload, size_t length,
+                                                 uint8_t *scratch, size_t scratch_capacity,
+                                                 wt_http3_message_t *out_message,
+                                                 wt_http3_error_t *out_error) {
+  wt_status_t status;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (endpoint == NULL || out_message == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (payload == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+
+  {
+    wt_http3_endpoint_request_t *request = NULL;
+    wt_http3_request_state_t before = WT_HTTP3_REQUEST_EXPECT_HEADERS;
+    size_t i;
+
+    for (i = 0U; i < endpoint->request_count; i++) {
+      if (endpoint->requests[i].stream_id == stream_id) request = &endpoint->requests[i];
+    }
+    /* Whether this is the request's own section or its trailer is a question about the state
+     * BEFORE the frame is applied, so it is read first. */
+    if (request != NULL) before = request->request.state;
+
+    /* The ordering rule is the request machine's, applied exactly as any other frame's: a
+     * HEADERS frame after the trailer is as invalid here as anywhere. */
+    status = wt_http3_endpoint_on_request_frame(endpoint, stream_id, WT_HTTP3_FRAME_HEADERS,
+                                                out_error);
+    if (status != WT_OK) return status;
+
+    status = wt_http3_message_decode(out_message, WT_HTTP3_HEADER_REQUEST, payload, length,
+                                     &endpoint->decoder_table,
+                                     wt_qpack_max_entries(endpoint->decoder_table.capacity),
+                                     endpoint->decoder_insert_count, scratch, scratch_capacity,
+                                     out_error);
+    if (status != WT_OK) return status;
+
+    if (before != WT_HTTP3_REQUEST_EXPECT_HEADERS) {
+      /* Section 4.1: "Trailers MUST NOT contain pseudo-header fields." The decoder has one
+       * request shape and one response shape, so a trailer is decoded with the request
+       * rules and the pseudo-headers it must NOT carry are refused here -- which is the
+       * rule the message layer cannot state for a section it cannot tell from a request. */
+      if (out_message->method_length != 0U || out_message->scheme_length != 0U ||
+          out_message->path_length != 0U || out_message->authority_length != 0U ||
+          out_message->protocol_length != 0U) {
+        if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
+        return WT_ERR_PROTOCOL;
+      }
+    }
+    return WT_OK;
+  }
 }
 
 wt_status_t wt_http3_endpoint_on_request_frame(wt_http3_endpoint_t *endpoint, uint64_t stream_id,

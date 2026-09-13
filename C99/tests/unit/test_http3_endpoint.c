@@ -11,8 +11,11 @@
 
 #include "wt_test.h"
 
+#include <string.h>
+
 #include "webtransport/http3/endpoint.h"
 #include "webtransport/quic/varint.h"
+#include "webtransport/webtransport/session_request.h"
 #include "webtransport/webtransport/framing.h"
 
 /* The prefix a peer would send for a stream of this type: its varint, shortest form. */
@@ -323,11 +326,175 @@ static void test_request_streams_follow_the_roles(void) {
   (void)length;
 }
 
+/* A field section built the way a peer builds one: the prefix, then one literal line per
+ * field, all against the static table so no dynamic state is needed. */
+static size_t build_section(uint8_t *out, size_t capacity, const char *name, const char *value) {
+  wt_writer_t w = wt_writer_init(out, capacity);
+  wt_qpack_header_prefix_t prefix;
+  wt_qpack_field_line_t line;
+  uint8_t scratch[64];
+
+  prefix.required_insert_count = 0U;
+  prefix.base = 0U;
+  line.kind = WT_QPACK_FIELD_LITERAL_LITERAL_NAME;
+  line.never_indexed = 0;
+  line.index = 0U;
+  line.name_huffman = 0;
+  line.name = (const uint8_t *)name;
+  line.name_length = strlen(name);
+  line.value = (const uint8_t *)value;
+  line.value_length = strlen(value);
+  line.value_huffman = 0;
+  line.bytes_consumed = 0U;
+
+  if (wt_qpack_field_section_encode(&w, &prefix, 0U, &line, 1U, scratch, sizeof(scratch)) != WT_OK) {
+    return 0U;
+  }
+  return wt_writer_offset(&w);
+}
+
+static void test_request_headers_are_decoded(void) {
+  wt_http3_endpoint_t server;
+  wt_http3_endpoint_stream_kind_t unused = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+  wt_http3_message_t message;
+  wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  uint8_t payload[128];
+  uint8_t scratch[256];
+  size_t length;
+  size_t i;
+  wt_webtransport_request_policy_t policy;
+  wt_webtransport_session_request_t decision;
+
+  wt_http3_endpoint_init(&server, WT_HTTP3_ROLE_SERVER);
+
+  /* A capacity below 32 makes MaxEntries zero, and then no section may reference the
+   * dynamic table: the state to configure before reading anything. */
+  WT_EXPECT_OK("a decoder capacity is set", wt_http3_endpoint_set_decoder_capacity(&server, 0U));
+  WT_EXPECT_OK("and setting it again is not a reconfiguration",
+               wt_http3_endpoint_set_decoder_capacity(&server, 0U));
+
+  WT_EXPECT_OK("the server receives a request stream",
+               wt_http3_endpoint_on_request_stream(&server, 0U, &error));
+
+  /* A field section reaching the message decoder: the endpoint owns the decoder state and
+   * the ordering rule, and hands back a decoded request. */
+  length = build_section(payload, sizeof(payload), "x-test", "one");
+  WT_EXPECT_TRUE("a field section was built", length != 0U);
+  /* A request's FIRST section IS the request line, so a section carrying only regular
+   * fields is not a request: the message layer refuses it and names the code. The endpoint
+   * does not second-guess that judgement -- it owns the ordering rule and the decoder state,
+   * not the shape of a request. */
+  WT_EXPECT_STATUS("a first section without the request line is refused", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_request_headers(&server, 0U, payload, length, scratch,
+                                                        sizeof(scratch), &message, &error));
+  WT_EXPECT_U64("with the message error code", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  WT_EXPECT_OK("while the stream's frame state still moved",
+               wt_http3_endpoint_request_state(&server, 0U, &state));
+  WT_EXPECT_INT("to the body", (int)WT_HTTP3_REQUEST_BODY, (int)state);
+
+  /* An extended CONNECT: the pseudo-headers are the request line, and the draft-16 layer
+   * decides what they mean. The endpoint does not, which is the separation under test. */
+  {
+    static uint8_t section[256];
+    wt_writer_t w = wt_writer_init(section, sizeof(section));
+    wt_qpack_header_prefix_t prefix;
+    wt_qpack_field_line_t lines[5];
+    uint8_t local_scratch[256];
+    const char *names[5];
+    const char *values[5];
+
+    names[0] = ":method";    values[0] = "CONNECT";
+    names[1] = ":scheme";    values[1] = "https";
+    names[2] = ":authority"; values[2] = "example.com";
+    names[3] = ":path";      values[3] = "/chat";
+    names[4] = ":protocol";  values[4] = WT_WEBTRANSPORT_PROTOCOL_TOKEN;
+
+    prefix.required_insert_count = 0U;
+    prefix.base = 0U;
+    for (i = 0U; i < 5U; i++) {
+      lines[i].kind = WT_QPACK_FIELD_LITERAL_LITERAL_NAME;
+      lines[i].never_indexed = 0;
+      lines[i].index = 0U;
+      lines[i].name_huffman = 0;
+      lines[i].name = (const uint8_t *)names[i];
+      lines[i].name_length = strlen(names[i]);
+      lines[i].value = (const uint8_t *)values[i];
+      lines[i].value_length = strlen(values[i]);
+      lines[i].value_huffman = 0;
+      lines[i].bytes_consumed = 0U;
+    }
+    WT_EXPECT_OK("a CONNECT section encodes",
+                 wt_qpack_field_section_encode(&w, &prefix, 0U, lines, 5U, local_scratch,
+                                               sizeof(local_scratch)));
+
+    WT_EXPECT_OK("and a second request stream opens",
+                 wt_http3_endpoint_on_request_stream(&server, 4U, &error));
+    WT_EXPECT_OK("whose CONNECT decodes",
+                 wt_http3_endpoint_on_request_headers(&server, 4U, section, wt_writer_offset(&w),
+                                                      scratch, sizeof(scratch), &message, &error));
+    WT_EXPECT_U64("with the method's length", 7U, (uint64_t)message.method_length);
+    WT_EXPECT_BYTES("the method", (const uint8_t *)"CONNECT", message.method,
+                    message.method_length);
+    WT_EXPECT_BYTES("the protocol", (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN,
+                    message.protocol, message.protocol_length);
+
+    /* The decision is the draft-16 layer's, and it is taken from the decoded message
+     * without this layer knowing what a WebTransport request is. */
+    policy.authority = "example.com";
+    policy.path = "/chat";
+    policy.wt_enabled = 1;
+    WT_EXPECT_OK("the session layer accepts it",
+                 wt_webtransport_session_request_validate(&message, &policy, &decision, &error));
+    WT_EXPECT_INT("as an accepted WebTransport request",
+                  (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)decision.outcome);
+
+    /* A trailer may not carry pseudo-headers (section 4.1), and this layer is where that is
+     * enforced, because the message decoder has one request shape and one response shape. */
+    wt_http3_endpoint_on_request_frame(&server, 4U, WT_HTTP3_FRAME_DATA, &error);
+    {
+      static uint8_t trailer[256];
+      wt_writer_t tw = wt_writer_init(trailer, sizeof(trailer));
+      wt_qpack_field_line_t line;
+      wt_qpack_header_prefix_t tprefix;
+      uint8_t trailer_scratch[128];
+      tprefix.required_insert_count = 0U;
+      tprefix.base = 0U;
+      line.kind = WT_QPACK_FIELD_LITERAL_LITERAL_NAME;
+      line.never_indexed = 0;
+      line.index = 0U;
+      line.name_huffman = 0;
+      line.name = (const uint8_t *)":path";
+      line.name_length = 5U;
+      line.value = (const uint8_t *)"/again";
+      line.value_length = 6U;
+      line.value_huffman = 0;
+      line.bytes_consumed = 0U;
+      WT_EXPECT_OK("a pseudo-header trailer encodes",
+                   wt_qpack_field_section_encode(&tw, &tprefix, 0U, &line, 1U, trailer_scratch,
+                                                 sizeof(trailer_scratch)));
+      WT_EXPECT_STATUS("and is refused", WT_ERR_PROTOCOL,
+                       wt_http3_endpoint_on_request_headers(&server, 4U, trailer,
+                                                            wt_writer_offset(&tw), scratch,
+                                                            sizeof(scratch), &message, &error));
+      WT_EXPECT_U64("with the message error code", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+    }
+  }
+
+  /* A HEADERS frame on a stream this endpoint is not tracking is the caller's ordering. */
+  length = build_section(payload, sizeof(payload), "x-test", "two");
+  WT_EXPECT_STATUS("an untracked stream is a state error", WT_ERR_STATE,
+                   wt_http3_endpoint_on_request_headers(&server, 8U, payload, length, scratch,
+                                                        sizeof(scratch), &message, &error));
+  (void)unused;
+}
+
 int main(void) {
   test_our_own_streams_exist_once();
   test_peer_streams_are_classified();
   test_control_frames_are_forwarded();
   test_the_peer_table_is_bounded();
   test_request_streams_follow_the_roles();
+  test_request_headers_are_decoded();
   WT_TEST_MAIN_END("wt_http3_endpoint");
 }

@@ -2006,6 +2006,27 @@ sessions one connection may carry, and running into it is WT_ERR_LIMIT with no e
 the peer-stream table, for the same reason. A duplicate stream is detected BEFORE the bound, so a caller's own
 mistake is never reported as a limit, and the test asserts that ordering explicitly.
 
+### Phase 9's third part: the QPACK decode path at the endpoint
+
+`wt_http3_endpoint_on_request_headers` closes the chain from a HEADERS frame to a decoded request: the
+endpoint applies the request-ordering rule, decodes the field section against decoder state IT owns (the
+dynamic table the peer's encoder stream fills, plus the insertion count), and hands back a
+`wt_http3_message_t`. What it deliberately does NOT do is decide whether the request is a WebTransport
+request: that is `wt_webtransport_session_request_validate`, and keeping the judgement in the draft-16 layer is
+why the endpoint needs to know nothing about `:protocol`.
+
+Two details are the RFC's rather than conveniences. The decoder capacity is set explicitly, because a field
+section's `MaxEntries` prefix is ENCODED AGAINST what this endpoint advertised -- reading it without saying
+what was advertised would be guessing -- and a capacity below 32 makes `MaxEntries` zero, so a section that
+references a dynamic table this endpoint never advertised is QPACK_DECOMPRESSION_FAILED rather than a
+misread index. And a TRAILER may not carry pseudo-header fields (section 4.1): the message decoder has one
+request shape and one response shape and cannot tell a trailer from a request, so the endpoint -- which is the
+layer that knows the first HEADERS from the second -- refuses the pseudo-headers itself.
+
+The test also pins down a boundary that is easy to get wrong in the other direction: a first section carrying
+only regular fields has no request line, and the message layer refuses it. The endpoint does not second-guess
+that, and the test asserts the refusal rather than a hand-built section passing.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

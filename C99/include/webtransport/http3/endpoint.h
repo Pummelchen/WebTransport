@@ -34,6 +34,7 @@
 
 #include "webtransport/http3/control.h"
 #include "webtransport/http3/frame.h"
+#include "webtransport/http3/message.h"
 #include "webtransport/http3/request.h"
 #include "webtransport/http3/role.h"
 #include "webtransport/status.h"
@@ -99,6 +100,12 @@ typedef struct wt_http3_endpoint {
   /* The request streams while they live, in either direction. */
   wt_http3_endpoint_request_t requests[WT_HTTP3_ENDPOINT_REQUESTS_MAX];
   size_t request_count;
+  /* The QPACK DECODER state: the dynamic table the peer's encoder stream fills, and how
+   * many insertions have been applied to it. It lives here because a field section cannot
+   * be read without it and a connection has exactly one of each. */
+  wt_qpack_dynamic_table_t decoder_table;
+  uint64_t decoder_insert_count;
+  int decoder_capacity_set;
 } wt_http3_endpoint_t;
 
 void wt_http3_endpoint_init(wt_http3_endpoint_t *endpoint, wt_http3_role_t role);
@@ -188,6 +195,29 @@ wt_status_t wt_http3_endpoint_request_state(const wt_http3_endpoint_t *endpoint,
                                             wt_http3_request_state_t *out_state);
 
 size_t wt_http3_endpoint_request_count(const wt_http3_endpoint_t *endpoint);
+
+/* Set the dynamic table's capacity to what this endpoint advertised, which is what makes
+ * a field section's MaxEntries prefix readable: the prefix is encoded against that number,
+ * so reading it without saying what was advertised would mean guessing. A capacity below
+ * 32 makes MaxEntries zero, and then no field section may reference the dynamic table at
+ * all -- which is the correct state for an endpoint that advertised no dynamic table. */
+wt_status_t wt_http3_endpoint_set_decoder_capacity(wt_http3_endpoint_t *endpoint, size_t capacity);
+
+/* A HEADERS frame's payload on a tracked request stream: the ordering rule first, then the
+ * field section decoded against this endpoint's decoder state. The decoded message is what
+ * HEADERS means -- its pseudo-headers are the request line -- and deciding whether it is a
+ * WebTransport request is the session layer's judgement, not this one's, so it is left to
+ * `wt_webtransport_session_request_validate`.
+ *
+ * `scratch` is where Huffman-coded strings are decoded, exactly as in the QPACK layer: it
+ * belongs to the caller because its size is a policy decision and this struct should not
+ * carry a buffer for it. The message's views point into the tables and into `scratch`, so
+ * both must outlive the message. */
+wt_status_t wt_http3_endpoint_on_request_headers(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                                 const uint8_t *payload, size_t length,
+                                                 uint8_t *scratch, size_t scratch_capacity,
+                                                 wt_http3_message_t *out_message,
+                                                 wt_http3_error_t *out_error);
 
 #ifdef __cplusplus
 }

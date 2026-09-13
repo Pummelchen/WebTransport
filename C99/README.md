@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 69 unit test files and 79,391 checks, run by `ctest` and again under
+- 69 unit test files and 79,411 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -109,6 +109,15 @@ What is here:
     re-implemented. The request table is bounded too, at
     `WT_HTTP3_ENDPOINT_REQUESTS_MAX` sessions per connection, and a duplicate is found
     before the bound so a caller's mistake is never reported as a limit.
+  - the same header's QPACK decode path, which is what turns a HEADERS frame into a
+    request: the endpoint owns the decoder state (the dynamic table its peer's encoder
+    stream fills, and the insertion count), a capacity below 32 makes `MaxEntries` zero
+    so no section may reference a dynamic table this endpoint never advertised, and the
+    draft-16 layer then decides whether the decoded pseudo-headers are a WebTransport
+    request — the endpoint deliberately does not know what one is. The RFC's "trailers
+    MUST NOT contain pseudo-header fields" is enforced here, because the message
+    decoder has one request shape and one response shape and cannot tell a trailer from
+    a request on its own.
   - `api/endpoint.h` — which side this program is, the name the peer's certificate
     must be valid for, and how it is judged, so a trust misconfiguration is a return
     value before any packet rather than a handshake failure afterwards. The
