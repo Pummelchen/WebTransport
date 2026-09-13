@@ -132,6 +132,7 @@ set(WT_HTTP3_SOURCES
   src/http3/qpack_field.c
   src/http3/qpack_dynamic.c
   src/http3/qpack_encoder_stream.c
+  src/http3/qpack_decoder_stream.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_HTTP3_SOURCES})
 

@@ -1561,6 +1561,21 @@ One C detail worth recording: the error enum's members cannot be named after the
 are macros -- an enumerator sharing a macro's name is replaced before the compiler sees it, and the header
 fails to parse for every translation unit that includes it.
 
+**Eighth part done: the decoder stream instructions.** `src/http3/qpack_decoder_stream.c` applies RFC 9204
+section 4.4's section acknowledgement, stream cancellation and insert count increment, and writes them. Two
+of the section's rules are errors rather than no-ops: an increment of zero says nothing and is
+QPACK_DECODER_STREAM_ERROR, and an increment that would take the acknowledged count past the number of
+insertions cannot describe a decoder that has processed them.
+
+Landing it produced a correction that applies to the encoder stream part as well, and it is the more
+interesting half of the work. A truncated instruction was being reported as QPACK_*_STREAM_ERROR, but an
+instruction whose bytes have not all arrived is INCOMPLETE, not malformed: RFC 9204 section 2.2 delivers
+instructions on a stream, in pieces, so waiting for the rest is the correct response and only a malformed
+instruction is the peer's fault. The caller that sees the stream END with an instruction half-read is what
+reports the error. Both modules now return WT_ERR_TRUNCATED with no error code for that case, and both tests
+assert the distinction -- because a parser that reports "malformed" for "not yet" turns an ordinary network
+split into a connection error.
+
 Implement encoder and decoder streams.
 - Implement Base and post-Base dynamic references.
 - Enforce table capacity and malformed reference handling.

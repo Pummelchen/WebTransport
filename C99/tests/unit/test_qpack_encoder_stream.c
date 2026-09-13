@@ -172,7 +172,9 @@ static void test_duplicate_and_errors(void) {
     c = wt_cursor_init(short_insert, sizeof(short_insert));
     WT_EXPECT_STATUS("a truncated insertion is refused", WT_ERR_TRUNCATED,
                      wt_qpack_encoder_stream_apply(&stream, &c, &error));
-    WT_EXPECT_U64("as an encoder stream error", WT_QPACK_ERROR_ENCODER_STREAM, (uint64_t)error);
+    /* Incomplete rather than malformed: the rest may still arrive on the stream, so
+     * there is no error to send the peer yet. */
+    WT_EXPECT_U64("with no error to send yet", (uint64_t)WT_QPACK_ERROR_NONE, (uint64_t)error);
   }
 
   /* And an empty stream is not an instruction. */

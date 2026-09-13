@@ -282,6 +282,44 @@ wt_status_t wt_qpack_encoder_stream_write_insert_literal(wt_writer_t *w, const u
                                                         size_t value_length);
 wt_status_t wt_qpack_encoder_stream_write_duplicate(wt_writer_t *w, uint64_t relative_index);
 
+/* --------------------------------------- RFC 9204 section 4.4's decoder stream */
+
+/* The three instructions a decoder sends back to an encoder, which are what let
+ * the encoder know it may evict: a section acknowledgement (this header block is
+ * decoded), a stream cancellation (nothing more will be decoded on that stream),
+ * and an insert count increment (these insertions have been processed).
+ *
+ * This is the bookkeeping half. The per-section REFERENCE tracking that decides
+ * HOW MUCH of the table is safe to evict -- the smallest absolute index among the
+ * outstanding sections -- belongs with the encoder that created those sections, so
+ * the two counters here are what that part will read. */
+typedef struct wt_qpack_decoder_stream {
+  /* Insertions the decoder has confirmed processing, as a total. */
+  uint64_t acknowledged_insert_count;
+  /* Instructions seen, for diagnostics: a section acknowledgement or a
+   * cancellation for a stream still outstanding is the encoder's bookkeeping to
+   * check, not this parser's. */
+  uint64_t sections_acknowledged;
+  uint64_t streams_cancelled;
+} wt_qpack_decoder_stream_t;
+
+void wt_qpack_decoder_stream_init(wt_qpack_decoder_stream_t *stream);
+
+/* Apply one instruction, advancing the cursor past it. `table` may be NULL; when
+ * it is given, an increment that would take the acknowledged count past the number
+ * of insertions is the error section 4.4.3 names. */
+wt_status_t wt_qpack_decoder_stream_apply(wt_qpack_decoder_stream_t *stream,
+                                          const wt_qpack_dynamic_table_t *table, wt_cursor_t *c,
+                                          wt_qpack_error_t *out_error);
+
+wt_status_t wt_qpack_decoder_stream_write_section_acknowledgement(wt_writer_t *w,
+                                                                 uint64_t section_id);
+wt_status_t wt_qpack_decoder_stream_write_stream_cancellation(wt_writer_t *w, uint64_t stream_id);
+/* Refuses a zero increment, which section 4.4.3 makes an error rather than a
+ * no-op. */
+wt_status_t wt_qpack_decoder_stream_write_insert_count_increment(wt_writer_t *w,
+                                                                uint64_t increment);
+
 #ifdef __cplusplus
 }
 #endif

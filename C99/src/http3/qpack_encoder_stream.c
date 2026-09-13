@@ -48,13 +48,24 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
     wt_qpack_static_entry_t entry;
 
     (void)unused;
-    if (wt_qpack_integer_decode(c, 6U, &index) != WT_OK) {
-      if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
-      return WT_ERR_PROTOCOL;
+    {
+      wt_status_t status = wt_qpack_integer_decode(c, 6U, &index);
+      if (status == WT_ERR_TRUNCATED) return WT_ERR_TRUNCATED;
+      if (status != WT_OK) {
+        if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
+        return WT_ERR_PROTOCOL;
+      }
     }
-    if (wt_qpack_string_decode(c, &value, &value_length, &value_huffman) != WT_OK) {
-      if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
-      return WT_ERR_PROTOCOL;
+    {
+      /* A string whose bytes have not all arrived is INCOMPLETE, not malformed: a
+       * QPACK stream delivers instructions in pieces (RFC 9204 section 2.2), so the
+       * caller waits for more and only a malformed instruction is the peer's error. */
+      wt_status_t status = wt_qpack_string_decode(c, &value, &value_length, &value_huffman);
+      if (status == WT_ERR_TRUNCATED) return WT_ERR_TRUNCATED;
+      if (status != WT_OK) {
+        if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
+        return WT_ERR_PROTOCOL;
+      }
     }
     if (value_huffman) {
       /* The name may be Huffman-coded and so may the value; the encoder stream
@@ -104,22 +115,27 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
     size_t value_length = 0U;
     int value_huffman = 0;
 
-    if (wt_qpack_integer_decode(c, 5U, &name_length) != WT_OK) {
-      if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
-      return WT_ERR_PROTOCOL;
+    {
+      wt_status_t status = wt_qpack_integer_decode(c, 5U, &name_length);
+      if (status == WT_ERR_TRUNCATED) return WT_ERR_TRUNCATED;
+      if (status != WT_OK) {
+        if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
+        return WT_ERR_PROTOCOL;
+      }
     }
     if (name_length > (uint64_t)SIZE_MAX) {
       if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
       return WT_ERR_LIMIT;
     }
     name = wt_cursor_bytes(c, (size_t)name_length);
-    if (name == NULL && name_length != 0U) {
-      if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
-      return WT_ERR_TRUNCATED;
-    }
-    if (wt_qpack_string_decode(c, &value, &value_length, &value_huffman) != WT_OK) {
-      if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
-      return WT_ERR_TRUNCATED;
+    if (name == NULL && name_length != 0U) return WT_ERR_TRUNCATED;
+    {
+      wt_status_t status = wt_qpack_string_decode(c, &value, &value_length, &value_huffman);
+      if (status == WT_ERR_TRUNCATED) return WT_ERR_TRUNCATED;
+      if (status != WT_OK) {
+        if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
+        return WT_ERR_PROTOCOL;
+      }
     }
     if (name_huffman || value_huffman) {
       if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
@@ -132,9 +148,13 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
   if ((first & 0x20U) != 0U) {
     /* 001xxxxx: the table's capacity. */
     uint64_t capacity;
-    if (wt_qpack_integer_decode(c, 5U, &capacity) != WT_OK) {
-      if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
-      return WT_ERR_PROTOCOL;
+    {
+      wt_status_t status = wt_qpack_integer_decode(c, 5U, &capacity);
+      if (status == WT_ERR_TRUNCATED) return WT_ERR_TRUNCATED;
+      if (status != WT_OK) {
+        if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
+        return WT_ERR_PROTOCOL;
+      }
     }
     if (capacity > (uint64_t)stream->max_capacity) {
       /* Section 4.3.1: a capacity above what this endpoint advertised is an error,
@@ -155,9 +175,13 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
     size_t name_length = 0U;
     size_t value_length = 0U;
 
-    if (wt_qpack_integer_decode(c, 5U, &relative) != WT_OK) {
-      if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
-      return WT_ERR_PROTOCOL;
+    {
+      wt_status_t status = wt_qpack_integer_decode(c, 5U, &relative);
+      if (status == WT_ERR_TRUNCATED) return WT_ERR_TRUNCATED;
+      if (status != WT_OK) {
+        if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
+        return WT_ERR_PROTOCOL;
+      }
     }
     if (resolve_relative(stream->table, relative, &absolute) != WT_OK) {
       if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
