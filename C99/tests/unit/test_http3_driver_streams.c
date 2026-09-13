@@ -14,6 +14,8 @@
 #include "webtransport/cursor.h"
 #include "webtransport/http3/message.h"
 #include "webtransport/http3/settings.h"
+#include "webtransport/quic/connection.h"
+#include "webtransport/quic/packet_io.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
@@ -361,6 +363,7 @@ static void test_a_frame_that_ends_at_fin_names_the_http3_error(void) {
   wt_http3_driver_t driver;
   data_stream_sink_t sink_log;
   wt_http3_driver_sink_t sink;
+  wt_quic_connection_t connection;
   wt_quic_frame_t frame;
 
   memset(&sink_log, 0, sizeof(sink_log));
@@ -374,6 +377,27 @@ static void test_a_frame_that_ends_at_fin_names_the_http3_error(void) {
   WT_EXPECT_U64("a fresh driver has no error to report", (uint64_t)WT_HTTP3_NO_ERROR,
                 (uint64_t)wt_http3_driver_last_error(&driver));
 
+  /* A connection for the driver to state its refusals to: the driver knows the HTTP/3 code, so the driver is what
+   * closes with it, rather than each caller translating the status (WT-159). */
+  {
+    static const uint8_t k_id[4] = {0x0aU, 0x0bU, 0x0cU, 0x0dU};
+    wt_quic_connection_config_t config;
+    memset(&config, 0, sizeof(config));
+    config.role = WT_QUIC_ROLE_SERVER;
+    config.version = WT_QUIC_VERSION_1;
+    config.local_connection_id = k_id;
+    config.local_connection_id_length = sizeof(k_id);
+    config.peer_connection_id = k_id;
+    config.peer_connection_id_length = sizeof(k_id);
+    config.aead = WT_AEAD_AES_128_GCM;
+    config.max_ack_delay = 25000U;
+    config.local_max_ack_delay = 25000U;
+    config.idle_timeout = 30000000U;
+    config.max_datagram_size = WT_QUIC_MAX_PACKET;
+    WT_EXPECT_OK("a connection initialises", wt_quic_connection_init(&connection, &config));
+    wt_http3_driver_bind_connection(&driver, &connection);
+  }
+
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
   frame.as.stream.id = 0U;
   frame.as.stream.offset = 0U;
@@ -385,6 +409,14 @@ static void test_a_frame_that_ends_at_fin_names_the_http3_error(void) {
                    wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
   WT_EXPECT_U64("and the refusal names H3_FRAME_ERROR", (uint64_t)WT_HTTP3_FRAME_ERROR,
                 (uint64_t)wt_http3_driver_last_error(&driver));
+  /* And the connection the driver is BOUND to is TOLD, as an application refusal with the HTTP/3 code: RFC 9114
+   * section 8 puts an HTTP/3 error in a CONNECTION_CLOSE of type 0x1d, so the driver leaves the APPLICATION hint
+   * rather than a transport code. The QUIC layer turns that hint into the close when the refusal comes back
+   * through it -- covered by `test_an_http3_refusal_is_an_application_close` in `test_quic_connection`, which is
+   * the other half of this chain and the half that needs a delivered frame. */
+  WT_EXPECT_INT("so the connection is told the code", 1, connection.close_code_set);
+  WT_EXPECT_U64("which is the HTTP/3 one", (uint64_t)WT_HTTP3_FRAME_ERROR, connection.close_code);
+  WT_EXPECT_INT("in the APPLICATION form", 1, connection.close_code_application);
 
   /* A frame that is merely INCOMPLETE is not an error at all: more bytes are coming, and the driver waits. Its
    * last error stays clear, so a connection is never closed over a frame that has not ended. */

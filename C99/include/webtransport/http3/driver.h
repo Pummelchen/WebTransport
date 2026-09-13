@@ -139,11 +139,14 @@ typedef struct wt_http3_driver {
    * frame and its message in the next could show that -- this tree's own client sends both together (WT-156). */
   uint64_t data_stream_ids[WT_HTTP3_DRIVER_DATA_STREAMS_MAX];
   size_t data_stream_count;
-  /* The HTTP/3 error code of the last refusal this driver made, so that the layer that owns the connection can
-   * report it as an APPLICATION close: RFC 9114 section 8 carries an HTTP/3 error in a CONNECTION_CLOSE of type
-   * 0x1d with the HTTP/3 code, and a handler that only returns a status closes the TRANSPORT with
-   * INTERNAL_ERROR instead -- a different error, in a different frame, that names the wrong rule (WT-158). */
+  /* The HTTP/3 error code of the last refusal this driver made, and the connection it belongs to when one has
+   * been bound. RFC 9114 section 8 carries an HTTP/3 error in a CONNECTION_CLOSE of type 0x1d with the HTTP/3
+   * code, and a handler that only returns a status closes the TRANSPORT with INTERNAL_ERROR instead -- a
+   * different error, in a different frame, that names the wrong rule. The driver knows the code, so the driver
+   * states it: a translation done by each caller instead is a translation one of them will forget (WT-158,
+   * WT-159). */
   wt_http3_error_t last_error;
+  wt_quic_connection_t *connection;
 } wt_http3_driver_t;
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint);
@@ -338,6 +341,11 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
 /* The HTTP/3 error code of the last refusal this driver made, or WT_HTTP3_NO_ERROR when the last frame was
  * accepted (or refused for a reason that is not an HTTP/3 error, such as a caller's bound). */
 wt_http3_error_t wt_http3_driver_last_error(const wt_http3_driver_t *driver);
+
+/* Say which connection this driver's refusals belong to, so that a refusal WITH an HTTP/3 error closes it as an
+ * APPLICATION close carrying that code (RFC 9114 section 8) without every caller having to translate. Unbound is
+ * the default and is not an error: a driver used without a connection simply reports the status, as before. */
+void wt_http3_driver_bind_connection(wt_http3_driver_t *driver, wt_quic_connection_t *connection);
 
 /* Whether `stream_id` is a WebTransport data stream whose prefix is settled, in either direction. The receive
  * path asks FIRST, because the answer decides whether the bytes are the session's payload or something to

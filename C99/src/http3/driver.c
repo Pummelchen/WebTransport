@@ -431,12 +431,25 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
                                           const wt_http3_driver_sink_t *sink,
                                           uint64_t max_frame_bytes) {
   wt_http3_driver_t *driver = context;
+  wt_status_t status;
 
   if (driver == NULL || driver->endpoint == NULL || frame == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* Cleared first, so that the code below is this frame's refusal rather than an older one's: the caller reads it
    * only when the status is a failure, and a stale code would name a rule the peer did not break. */
   driver->last_error = WT_HTTP3_NO_ERROR;
-  return route_quic_frame(driver, space, frame, sink, max_frame_bytes, &driver->last_error);
+  status = route_quic_frame(driver, space, frame, sink, max_frame_bytes, &driver->last_error);
+  if (status != WT_OK && driver->connection != NULL && driver->last_error != WT_HTTP3_NO_ERROR) {
+    /* The refusal IS an HTTP/3 error, so the peer is told the HTTP/3 code -- in the application form, which is the
+     * only form that carries one (RFC 9114 section 8). A refusal WITHOUT an HTTP/3 error is a caller's own bound
+     * and leaves the connection's default in force. */
+    wt_quic_connection_refuse_application(driver->connection, (uint64_t)driver->last_error, 0U);
+  }
+  return status;
+}
+
+void wt_http3_driver_bind_connection(wt_http3_driver_t *driver, wt_quic_connection_t *connection) {
+  if (driver == NULL) return;
+  driver->connection = connection;
 }
 
 /* The routing itself, with the HTTP/3 error code OUT so that the caller can record it: a refusal is reported to
