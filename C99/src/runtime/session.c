@@ -175,6 +175,31 @@ wt_status_t wt_runtime_session_set_frame_handler(wt_runtime_session_t *session,
   return WT_OK;
 }
 
+/* The peer's transport parameters, applied once, the moment the handshake has them: they ARE this connection's
+ * limits, and a connection without them refuses the unidirectional streams HTTP/3 opens before it sends anything.
+ *
+ * It is a function rather than a block because it has to run TWICE per pump, and the second time is the one that
+ * was missing: a packet can be the same one that carries the parameters AND completes this endpoint's handshake,
+ * so the Finished is flushed later in the SAME call -- and `wt_quic_connection_set_peer_parameters` is also where
+ * RFC 9000 section 7.2's rule is applied, that everything after the server's Initial goes to the server's Source
+ * Connection ID. Adopting it only at the top of the next pump sent the Finished to the connection ID this client
+ * chose, a third-party peer ignored it as a packet for an unknown connection ("ignoring non-initial packet for
+ * unknown connection 1122334455667788"), dropped every 1-RTT packet that followed because its own handshake was
+ * still incomplete ("dropping short packet during handshake"), and established the connection two probe timeouts
+ * later -- by which time a session had no time left to start (WT-145). */
+static wt_status_t apply_peer_parameters(wt_runtime_session_t *session) {
+  if (session->peer_parameters_applied != 0) return WT_OK;
+  if (session->handshake.peer_parameters_len == 0U) return WT_OK;
+  {
+    wt_status_t status = wt_quic_connection_set_peer_parameters(&session->connection,
+                                                                session->handshake.peer_parameters,
+                                                                session->handshake.peer_parameters_len);
+    if (status != WT_OK) return status;
+  }
+  session->peer_parameters_applied = 1;
+  return WT_OK;
+}
+
 wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now) {
   wt_status_t received;
   wt_status_t status;
@@ -183,16 +208,8 @@ wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now)
 
   /* One packet per call, and the caller loops: a pump that drained the socket would starve the other
    * endpoint in a two-session test, which is exactly the shape a test has. */
-  /* The peer's transport parameters, applied once, the moment the handshake has them: they ARE this
-   * connection's limits, and a connection without them refuses the unidirectional streams HTTP/3 opens
-   * before it sends anything. */
-  if (session->peer_parameters_applied == 0 && session->handshake.peer_parameters_len > 0U) {
-    status = wt_quic_connection_set_peer_parameters(&session->connection,
-                                                    session->handshake.peer_parameters,
-                                                    session->handshake.peer_parameters_len);
-    if (status != WT_OK) return status;
-    session->peer_parameters_applied = 1;
-  }
+  status = apply_peer_parameters(session);
+  if (status != WT_OK) return status;
 
   received = wt_quic_connection_receive(&session->connection, now);
   session->last_receive = received;
@@ -202,6 +219,10 @@ wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now)
     if (session->receive_errors == 0U) session->first_receive_error = received;
     session->receive_errors++;
   }
+
+  /* BEFORE the flushes, because the packet just read may have carried them (see above). */
+  status = apply_peer_parameters(session);
+  if (status != WT_OK) return status;
 
   status = wt_quic_handshake_flush(&session->handshake, now);
   if (status != WT_OK && status != WT_ERR_AGAIN) return status;

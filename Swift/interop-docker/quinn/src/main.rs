@@ -16,6 +16,16 @@ async fn main() -> Result<()> {
         .install_default()
         .expect("install rustls ring provider");
 
+    // A peer that says nothing is a peer whose view cannot be read, and one interop investigation in the C99
+    // tree needed exactly that view: the client's counters could say only that quinn acknowledged every packet
+    // and never answered. `RUST_LOG` turns on quinn's and h3's own tracing; unset, this does nothing at all.
+    if std::env::var_os("RUST_LOG").is_some() {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .init();
+    }
+
     let port: u16 = std::env::var("PORT").unwrap_or_else(|_| "54002".into()).parse()?;
     let addr: std::net::SocketAddr = format!("0.0.0.0:{port}").parse()?;
 

@@ -624,6 +624,11 @@ static wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t 
                                          snapshot[i].time_sent);
       if (status != WT_OK) return status;
     }
+    /* Counted HERE, at the one place a packet is found to be covered by an acknowledgement, because the peer's
+     * ACK is the only evidence that it READ what this endpoint sent. `wt_quic_loss_on_ack` above has already
+     * refused a packet that was acknowledged before, so each packet is counted once and a repeated acknowledgement
+     * of the same range changes nothing (WT-145). */
+    connection->packets_acked[space]++;
     if (!has_largest || snapshot[i].packet_number > largest_newly_acked) {
       has_largest = 1;
       largest_newly_acked = snapshot[i].packet_number;

@@ -158,6 +158,7 @@ int main(int argc, char **argv) {
              "\"probesWithData\":%u,\"requestStreamId\":%llu,"
              "\"streamsOpened\":{\"bidi\":%u,\"uni\":%u},"
              "\"sent\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},"
+             "\"acked\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},\"inFlight\":%u,"
              "\"transcriptTypes\":\"%s\","
              "\"acks\":{\"initial\":[%u,%llu],\"handshake\":[%u,%llu],\"application\":[%u,%llu]}}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
@@ -177,7 +178,9 @@ int main(int argc, char **argv) {
              result.probes, result.probes_with_data,
              (unsigned long long)result.request_stream_id, result.streams_opened_bidi,
              result.streams_opened_uni, result.sent_initial, result.sent_handshake,
-             result.sent_application, wt_client_transcript_types(&result), result.acks_initial,
+             result.sent_application, result.acked_initial, result.acked_handshake,
+             result.acked_application, result.in_flight, wt_client_transcript_types(&result),
+             result.acks_initial,
              result.ack_largest_initial, result.acks_handshake, result.ack_largest_handshake,
              result.acks_application, result.ack_largest_application);
     } else {

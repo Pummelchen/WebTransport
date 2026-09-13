@@ -299,6 +299,12 @@ typedef struct wt_quic_connection {
    * is asking from its side (WT-135). */
   uint64_t acks_sent[WT_QUIC_SPACE_COUNT];
   uint64_t ack_largest[WT_QUIC_SPACE_COUNT];
+  /* Packets the PEER acknowledged, by space, counted where the sent list is walked and a packet is found to be
+   * covered by an acknowledgement. "Did the peer read what we send, or is everything we send still owed?" is the
+   * one question the sent/lost/probe counters cannot answer between them: a space with packets sent, nothing
+   * declared lost, and nothing acknowledged is a peer that is not reading this endpoint at all, and that is a
+   * different defect from a peer that reads and does not answer (WT-145). */
+  uint64_t packets_acked[WT_QUIC_SPACE_COUNT];
 
   /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is

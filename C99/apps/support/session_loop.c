@@ -249,6 +249,10 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->sent_initial = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_INITIAL];
   out->sent_handshake = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_HANDSHAKE];
   out->sent_application = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_APPLICATION];
+  out->acked_initial = (unsigned)loop->session.connection.packets_acked[WT_QUIC_SPACE_INITIAL];
+  out->acked_handshake = (unsigned)loop->session.connection.packets_acked[WT_QUIC_SPACE_HANDSHAKE];
+  out->acked_application = (unsigned)loop->session.connection.packets_acked[WT_QUIC_SPACE_APPLICATION];
+  out->in_flight = (unsigned)wt_quic_loss_count(&loop->session.connection.loss);
   {
     const wt_tls13_transcript_t *transcript = NULL;
     size_t index;

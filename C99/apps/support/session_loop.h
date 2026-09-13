@@ -97,6 +97,14 @@ typedef struct wt_loop_result {
   unsigned sent_initial;
   unsigned sent_handshake;
   unsigned sent_application;
+  /* How many of this endpoint's packets the PEER acknowledged, by space, and how many are still in flight. The
+   * pair distinguishes "the peer is not reading us" from "the peer reads us and does not answer", which no other
+   * counter can: a space with packets sent, none lost and none acknowledged is a peer that never processed them
+   * (WT-145). */
+  unsigned acked_initial;
+  unsigned acked_handshake;
+  unsigned acked_application;
+  unsigned in_flight;
   /* The TYPE BYTES of the messages this endpoint absorbed into its TLS transcript, in order. The list must be
    * RFC 8446's (ClientHello, ServerHello, EncryptedExtensions, Certificate, CertificateVerify, Finished) and
    * nothing else -- a transcript that hashed something extra is invisible to a pair of the same code and fatal
