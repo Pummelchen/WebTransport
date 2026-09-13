@@ -219,6 +219,9 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
                            loop->session.connection.probes_sent[WT_QUIC_SPACE_HANDSHAKE] +
                            loop->session.connection.probes_sent[WT_QUIC_SPACE_APPLICATION]);
   out->probes_with_data = (unsigned)loop->session.connection.probes_with_data;
+  out->request_stream_id = loop->side.request_stream_id;
+  out->streams_opened_bidi = (unsigned)loop->session.connection.streams.opened_by_us_bidi;
+  out->streams_opened_uni = (unsigned)loop->session.connection.streams.opened_by_us_uni;
 }
 
 static void pump_once(loop_t *loop) {

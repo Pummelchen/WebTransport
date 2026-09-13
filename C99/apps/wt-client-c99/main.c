@@ -142,7 +142,8 @@ int main(int argc, char **argv) {
              "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
              "\"packetsDiscarded\":%llu,\"keys\":{\"initial\":%s,\"handshake\":%s,"
              "\"application\":%s},\"handshakeState\":\"%s\",\"resends\":%u,\"probes\":%u,"
-             "\"probesWithData\":%u}\n",
+             "\"probesWithData\":%u,\"requestStreamId\":%llu,"
+             "\"streamsOpened\":{\"bidi\":%u,\"uni\":%u}}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
              (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
@@ -154,7 +155,9 @@ int main(int argc, char **argv) {
              result.has_handshake_keys != 0 ? "true" : "false",
              result.has_application_keys != 0 ? "true" : "false",
              result.handshake_state != NULL ? result.handshake_state : "unknown", result.resends,
-             result.probes, result.probes_with_data);
+             result.probes, result.probes_with_data,
+             (unsigned long long)result.request_stream_id, result.streams_opened_bidi,
+             result.streams_opened_uni);
     } else {
       printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.status, (unsigned long long)result.received_bytes,

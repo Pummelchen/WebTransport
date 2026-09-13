@@ -81,6 +81,12 @@ typedef struct wt_loop_result {
   /* Probe timeouts that fired, summed over the spaces, and how many carried an outstanding frame. */
   unsigned probes;
   unsigned probes_with_data;
+  /* The stream id the driver opened for the request, and how many streams this endpoint opened in each class:
+   * a request on a stream the peer reads as unidirectional is an interop-only defect, and the id is the only
+   * thing that says which it is (WT-135). */
+  uint64_t request_stream_id;
+  unsigned streams_opened_bidi;
+  unsigned streams_opened_uni;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */
