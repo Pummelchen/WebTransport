@@ -134,6 +134,19 @@ jobs:
         # it compiles -- and it found FIONBIO not fitting a signed long on its first run. A machine without a
         # cross-compiler reports "unsupported" with that reason instead of failing.
         run: C99/scripts/check-windows-platform.sh
+      - name: Link the whole tree for Windows
+        # The stronger claim: every test and app becomes a PE32+ executable, which is what a Windows runner
+        # needs before it is worth adding. It needs a WINDOWS OpenSSL, and the MSYS2 package provides one as a
+        # plain tarball -- no MSYS2 installation, no Windows runner, and the compiler that checks it is the same
+        # one the compile step uses. Pinned so the job does not move under the project's feet; a fetch failure
+        # falls through to the script's own "unsupported" line rather than failing the job.
+        continue-on-error: true
+        run: |
+          curl -sL -o /tmp/mingw-openssl.pkg.tar.zst \
+            https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-openssl-3.6.4-1-any.pkg.tar.zst
+          zstd -d -f /tmp/mingw-openssl.pkg.tar.zst -o /tmp/mingw-openssl.tar
+          mkdir -p /tmp/windows-openssl && tar -xf /tmp/mingw-openssl.tar -C /tmp/windows-openssl
+          WT_WINDOWS_OPENSSL=/tmp/windows-openssl/mingw64 C99/scripts/check-windows-build.sh
 
       - name: CLI smoke
         run: |

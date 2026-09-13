@@ -521,10 +521,14 @@ wt_status_t wt_tls_client_hello_parse(const uint8_t *message, size_t len,
    * this implementation does not implement, so it is refused rather than negotiated
    * with. */
   if (compression_len != 1U) return WT_ERR_PROTOCOL;
-  out->compression_method_count = (size_t)compression_len;
-  for (i = 0U; i < out->compression_method_count; i++) {
-    out->compression_methods[i] = wt_cursor_u8(&body);
-  }
+  /* ONE byte, written by index rather than by a loop over the peer's count. The loop was describing generality
+   * this message does not have -- a TLS 1.3 ClientHello's vector is one byte set to zero -- and GCC's Release
+   * build is what insisted on the difference: it could not prove `i` stayed inside `compression_methods[4]`
+   * and said so with -Wstringop-overflow, which clang's optimiser had not. An explicit bound check did not
+   * satisfy it either, because the index came from a struct member; writing the one byte does, and it is what
+   * the RFC says. */
+  out->compression_method_count = 1U;
+  out->compression_methods[0] = wt_cursor_u8(&body);
   if (wt_cursor_failed(&body)) return WT_ERR_PROTOCOL;
   if (out->compression_methods[0] != 0U) return WT_ERR_PROTOCOL;
 
