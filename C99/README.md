@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 76,209 checks, run by `ctest` and again under
+- 38 unit test files and 76,278 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -339,6 +339,15 @@ What is here:
   rule names, or FRAME_ENCODING_ERROR for a truncated frame. Found by the test WT-83 asked for: a
   hand-written NEW_CONNECTION_ID whose `retire_prior_to` is above its sequence, which the encoder cannot
   produce because this library refuses to encode what it would refuse to decode.
+- **Packets addressed to an issued connection ID are accepted** (Phase 4, thirty-ninth part): the receive
+  path compared every packet's Destination Connection ID with the handshake's alone, so the IDs this
+  endpoint issued with NEW_CONNECTION_ID were write-only -- a peer that used one, which is exactly what
+  they are for, had its packets discarded as somebody else's. The handshake's ID and every issued ID that
+  has not been retired are now recognised, and which sequence a packet used travels with its frames so
+  RFC 9000 section 19.16's "cannot retire the ID the packet was addressed to" is applied to the ID that was
+  actually addressed rather than to sequence 0. A packet addressed to a retired ID is discarded, and
+  `wt_quic_connection_issue_connection_id` now refuses an ID whose length is not this endpoint's own,
+  because a short header carries no length and such an ID could never be received.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

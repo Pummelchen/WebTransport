@@ -393,7 +393,9 @@ wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uin
  * unguessable and it is the caller's to derive from a secret this layer does not hold (RFC 9000 section
  * 10.3), so it is taken rather than invented.
  *
- * Refuses a connection ID longer than twenty bytes or shorter than one (section 17.2), a sequence number
+ * Refuses a connection ID of a length other than this endpoint's own, because a short header does not
+ * carry that length and an ID of another length could never be received here; a connection ID longer than
+ * twenty bytes or shorter than one (section 17.2); a sequence number
  * already used -- RFC 9000 section 19.15 makes a repeat a PROTOCOL_VIOLATION, and this layer reports it as
  * a caller error before anything is sent -- a null reset token, and one more ID than the peer's
  * `active_connection_id_limit` allows, because a peer that cannot store it is a peer that will close the

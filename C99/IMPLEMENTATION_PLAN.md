@@ -1235,6 +1235,29 @@ visitor is left alone, because those paths have already closed the connection wi
 The test asserts what the RFC requires rather than what the code did: the connection closes with
 FRAME_ENCODING_ERROR for the hand-written frame.
 
+**Thirty-ninth part done: the connection IDs this endpoint issues are receivable.** NEW_CONNECTION_ID could
+be sent and the peer's own IDs were stored, but the receive path compared each packet's Destination
+Connection ID with the handshake's ID alone (RFC 9000 section 7.2). Everything this endpoint issued was
+therefore write-only: a peer that used one of them -- which is the entire point of issuing them, and what a
+peer does when it moves to a new path -- had its packets discarded as belonging to another connection. The
+handshake's ID and every issued ID that has not been retired are now recognised, and packets addressed to a
+retired one are discarded, which is this side's half of section 10.2's rule.
+
+Which sequence a packet used now travels with the frames, so section 19.16's second PROTOCOL_VIOLATION --
+the peer cannot retire the ID the packet was addressed to -- is applied to the ID that was actually
+addressed rather than to sequence 0, which was only ever right while the handshake's ID was the only one
+this endpoint would receive on.
+
+Writing the test found one more thing worth keeping: `wt_quic_connection_issue_connection_id` accepted an ID
+of any length in 1..20, including lengths this endpoint could never receive. A short header carries no
+Destination Connection ID length (section 17.2), so the receive path parses with the one length the
+connection uses; an ID of another length is one whose packets would be thrown away. It is now refused at the
+call rather than at the peer.
+
+Three tests, one per behaviour: a packet addressed to an issued ID is processed, one addressed to a retired
+ID is discarded without advancing the received set, and a RETIRE_CONNECTION_ID addressed to the very ID it
+retires closes the connection with PROTOCOL_VIOLATION.
+
 Implement the production network state machine.
 
 Tasks:

@@ -600,6 +600,11 @@ typedef struct wt_quic_visit {
   wt_quic_connection_t *connection;
   wt_quic_space_t space;
   uint64_t now;
+  /* The sequence of this endpoint's connection ID that the packet was addressed to: 0 for the ID the
+   * handshake used, or the sequence of an issued one. RFC 9000 section 19.16 needs it -- the peer cannot
+   * retire the ID it addressed the packet to -- and it is not always 0, because a peer that has moved
+   * onto one of the IDs this endpoint issued sends its frames there. */
+  uint64_t destination_sequence;
   /* Set by any frame that is not ACK, PADDING or CONNECTION_CLOSE, which is what makes the packet
    * ack-eliciting (RFC 9000 section 13.2.1). */
   int ack_eliciting;
@@ -807,9 +812,8 @@ static wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_
  *
  * Section 19.16 makes two sequences a PROTOCOL_VIOLATION: one that was never issued, and the one the peer
  * used as the Destination Connection ID of the packet that carried the frame -- the peer cannot ask for
- * the ID it is addressing. This endpoint accepts packets only on the ID the handshake used
- * (`wt_quic_connection_receive_datagram` matches that one ID), which section 5.1.1 numbers 0, so sequence
- * 0 is always the ID of the carrying packet here.
+ * the ID it is addressing. Which sequence that is comes from the receive path, because a peer may be
+ * addressing any ID this endpoint issued rather than the handshake's.
  *
  * A repeat of a sequence that was already retired is not an error: RETIRE_CONNECTION_ID is retransmitted
  * when it is lost, so the second copy describes a state the endpoint is already in. The frame still
@@ -822,7 +826,7 @@ static wt_status_t handle_retire_connection_id(wt_quic_connection_t *connection,
   uint64_t sequence = frame->as.retire_connection_id.sequence;
   size_t i;
 
-  if (sequence == 0U || sequence >= connection->next_issued_sequence) {
+  if (sequence == visit->destination_sequence || sequence >= connection->next_issued_sequence) {
     return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, WT_QUIC_FRAME_RETIRE_CONNECTION_ID,
                       visit->now);
   }
@@ -1017,10 +1021,38 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
   return WT_ERR_STATE;
 }
 
+/* Which of this endpoint's connection IDs a packet was addressed to (RFC 9000 section 5.1).
+ *
+ * The handshake's connection ID is sequence 0 (section 5.1.1), and every ID this endpoint has issued and
+ * not retired is one of ours too -- which is the whole reason to issue them: they are what a peer can use
+ * when it moves to a new path. A retired ID is not in the table any more, so a packet addressed to one is
+ * discarded like any other packet that belongs to a connection this endpoint does not have, which is this
+ * side's half of section 10.2's rule that a retired connection ID is not used again.
+ *
+ * Returns 1 and writes the sequence when the ID is ours. */
+static int local_connection_id_sequence(const wt_quic_connection_t *connection, const uint8_t *id,
+                                        size_t length, uint64_t *out_sequence) {
+  size_t i;
+
+  if (length == connection->local_connection_id_length &&
+      (length == 0U || memcmp(id, connection->local_connection_id, length) == 0)) {
+    *out_sequence = 0U;
+    return 1;
+  }
+  for (i = 0U; i < WT_QUIC_CONNECTION_IDS_MAX; i++) {
+    if (connection->issued_ids[i].in_use && connection->issued_ids[i].length == length &&
+        (length == 0U || memcmp(id, connection->issued_ids[i].id, length) == 0)) {
+      *out_sequence = connection->issued_ids[i].sequence;
+      return 1;
+    }
+  }
+  return 0;
+}
+
 /* One packet, already read. */
 static wt_status_t process_packet(wt_quic_connection_t *connection, wt_quic_space_t space,
                                   const uint8_t *payload, size_t payload_length, int *out_ack_eliciting,
-                                  uint64_t now) {
+                                  uint64_t now, uint64_t destination_sequence) {
   wt_quic_visit_t visit;
   wt_quic_error_t error = WT_QUIC_NO_ERROR;
   wt_status_t status;
@@ -1030,6 +1062,7 @@ static wt_status_t process_packet(wt_quic_connection_t *connection, wt_quic_spac
   visit.now = now;
   visit.ack_eliciting = 0;
   visit.saw_close = 0;
+  visit.destination_sequence = destination_sequence;
 
   status = wt_quic_frames_decode(payload, payload_length, visit_frame, &visit, &error);
   if (status != WT_OK) {
@@ -1174,6 +1207,12 @@ wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connect
 
   if (connection == NULL || id == NULL || reset_token == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (length == 0U || length > WT_QUIC_MAX_CONNECTION_ID_LENGTH) return WT_ERR_INVALID_ARGUMENT;
+  /* A short header does not carry the length of its Destination Connection ID (RFC 9000 section 17.2),
+   * so this endpoint can only recognise the IDs it issued if they are the length it already uses: the
+   * receive path parses with one length for the whole connection. Issuing one of another length would
+   * hand the peer an ID whose packets would be discarded as somebody else's, which is worse than
+   * refusing it here. */
+  if (length != connection->local_connection_id_length) return WT_ERR_INVALID_ARGUMENT;
   if (!connection->peer_limits.set) return WT_ERR_STATE;
 
   /* A caller that hands the same ID twice has made a mistake whether or not there is room, so the
@@ -1767,17 +1806,19 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
     if (status != WT_OK) return status;
 
     /* RFC 9000 section 7.2: a packet whose destination connection ID is not this endpoint's is not for
-     * this connection, which is ordinary during a handshake and not an error. */
-    if (packet.destination_connection_id_len != connection->local_connection_id_length ||
-        (packet.destination_connection_id_len != 0U &&
-         memcmp(packet.destination_connection_id, connection->local_connection_id,
-                packet.destination_connection_id_len) != 0)) {
-      connection->packets_discarded++;
-      return WT_OK;
+     * this connection, which is ordinary during a handshake and not an error. Every ID this endpoint
+     * issued and has not retired counts as its own. */
+    {
+      uint64_t destination_sequence = 0U;
+      if (!local_connection_id_sequence(connection, packet.destination_connection_id,
+                                        packet.destination_connection_id_len,
+                                        &destination_sequence)) {
+        connection->packets_discarded++;
+        return WT_OK;
+      }
+      status = process_packet(connection, space, packet.payload, packet.payload_len, &ack_eliciting,
+                              now, destination_sequence);
     }
-
-    status = process_packet(connection, space, packet.payload, packet.payload_len, &ack_eliciting,
-                            now);
     if (status != WT_OK) return status;
 
     /* RFC 9001 section 4.9.1: the Initial keys are discarded when the first Handshake packet is

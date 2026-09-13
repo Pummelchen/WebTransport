@@ -919,9 +919,9 @@ static void test_open_stream(void) {
  * raises one stream's send allowance. */
 /* Send a short-header application packet carrying exactly these bytes. A frame the ENCODER refuses to
  * produce -- because it would refuse to decode it -- can only be tested this way. */
-static void send_raw_payload_to(const connection_pair_t *pair, const uint8_t *payload,
-                                size_t payload_length, const wt_quic_packet_keys_t *keys,
-                                uint64_t packet_number) {
+static void send_raw_payload_with_dcid(const connection_pair_t *pair, const uint8_t *payload,
+                                       size_t payload_length, const uint8_t *dcid, size_t dcid_length,
+                                       const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
   uint8_t datagram[256];
   size_t datagram_len = 0U;
   wt_quic_packet_build_t build;
@@ -929,8 +929,8 @@ static void send_raw_payload_to(const connection_pair_t *pair, const uint8_t *pa
   memset(&build, 0, sizeof(build));
   build.short_header = 1;
   build.version = WT_QUIC_VERSION_1;
-  build.destination_connection_id = k_dcid;
-  build.destination_connection_id_len = sizeof(k_dcid);
+  build.destination_connection_id = dcid;
+  build.destination_connection_id_len = dcid_length;
   build.packet_number = packet_number;
   build.packet_number_length = 1U;
   build.payload = payload;
@@ -940,6 +940,12 @@ static void send_raw_payload_to(const connection_pair_t *pair, const uint8_t *pa
                wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
   WT_EXPECT_OK("and is sent",
                wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
+}
+
+static void send_raw_payload_to(const connection_pair_t *pair, const uint8_t *payload,
+                                size_t payload_length, const wt_quic_packet_keys_t *keys,
+                                uint64_t packet_number) {
+  send_raw_payload_with_dcid(pair, payload, payload_length, k_dcid, sizeof(k_dcid), keys, packet_number);
 }
 
 static void send_frame_to(const connection_pair_t *pair, const wt_quic_frame_t *frame,
@@ -1377,8 +1383,10 @@ static void test_issue_connection_id(void) {
   connection_pair_t pair;
   uint8_t payload[64];
   wt_quic_transport_parameters_t params;
-  static const uint8_t first_id[4] = {0x11U, 0x22U, 0x33U, 0x44U};
-  static const uint8_t second_id[4] = {0x55U, 0x66U, 0x77U, 0x88U};
+  /* Eight bytes, like the connection ID the handshake used: an issued ID of another length could not be
+   * received, because a short header carries no length, so the connection refuses one. */
+  static const uint8_t first_id[8] = {0x11U, 0x22U, 0x33U, 0x44U, 0x11U, 0x22U, 0x33U, 0x44U};
+  static const uint8_t second_id[8] = {0x55U, 0x66U, 0x77U, 0x88U, 0x55U, 0x66U, 0x77U, 0x88U};
   uint8_t token[16];
   uint64_t now = 103000000U;
 
@@ -1404,6 +1412,10 @@ static void test_issue_connection_id(void) {
 
   WT_EXPECT_STATUS("an empty connection ID is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_quic_connection_issue_connection_id(&pair.client, first_id, 0U, token, now));
+  /* A short header carries no connection ID length, so an ID of another length could never be received:
+   * this endpoint parses every packet with the one length it uses. */
+  WT_EXPECT_STATUS("and so is one of a length this endpoint does not use", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_connection_issue_connection_id(&pair.client, first_id, 4U, token, now));
   WT_EXPECT_STATUS("and a null token is", WT_ERR_INVALID_ARGUMENT,
                    wt_quic_connection_issue_connection_id(&pair.client, first_id, sizeof(first_id),
                                                           NULL, now));
@@ -1565,8 +1577,8 @@ static void test_retire_connection_id(void) {
   wt_quic_transport_parameters_t params;
   uint8_t secret[WT_SHA256_LEN];
   uint8_t payload[64];
-  static const uint8_t first_id[5] = {0x21U, 0x22U, 0x23U, 0x24U, 0x25U};
-  static const uint8_t replacement_id[5] = {0x31U, 0x32U, 0x33U, 0x34U, 0x35U};
+  static const uint8_t first_id[8] = {0x21U, 0x22U, 0x23U, 0x24U, 0x25U, 0x26U, 0x27U, 0x28U};
+  static const uint8_t replacement_id[8] = {0x31U, 0x32U, 0x33U, 0x34U, 0x35U, 0x36U, 0x37U, 0x38U};
   uint8_t token[16];
   uint64_t now = 105000000U;
   size_t i;
@@ -1636,8 +1648,8 @@ static void test_retire_connection_id(void) {
 }
 
 /* RFC 9000 section 19.16: an endpoint cannot retire the connection ID that the packet carrying the frame
- * was addressed to. This endpoint accepts packets only on the ID the handshake used, which section 5.1.1
- * numbers 0. */
+ * was addressed to. Here that is the handshake's ID, which section 5.1.1 numbers 0; the same rule with an
+ * issued ID as the destination is covered by `test_packets_to_issued_connection_ids`. */
 static void test_retire_handshake_connection_id(void) {
   connection_pair_t pair;
   wt_quic_packet_keys_t keys;
@@ -1745,6 +1757,107 @@ static void test_new_connection_id_retire_prior_to_is_refused(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 sections 5.1 and 7.2: an endpoint accepts packets addressed to any connection ID it issued and
+ * has not retired -- that is what issuing them is for, and it is how a peer that moves to a new path keeps
+ * its packets addressed to this connection -- and discards packets addressed to an ID it has retired.
+ *
+ * The third phase is RFC 9000 section 19.16's other PROTOCOL_VIOLATION, and it only exists once the first
+ * two do: a peer cannot retire the connection ID it addressed the packet to, which is not always the
+ * handshake's ID any more. */
+static void test_packets_to_issued_connection_ids(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_transport_parameters_t params;
+  wt_quic_frame_t frame;
+  uint8_t secret[WT_SHA256_LEN];
+  uint8_t payload[64];
+  static const uint8_t issued[8] = {0x51U, 0x52U, 0x53U, 0x54U, 0x55U, 0x56U, 0x57U, 0x58U};
+  static const uint8_t ping_and_padding[4] = {0x01U, 0x00U, 0x00U, 0x00U};
+  uint8_t token[16];
+  uint64_t now = 112000000U;
+  size_t i;
+
+  memset(token, 0x33, sizeof(token));
+
+  /* Phase one: a packet addressed to an issued ID is processed. */
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x70U + i);
+  WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the server writes",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("and reads",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("a limit of three connection IDs",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 3U));
+  {
+    wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+    WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&pw, &params));
+    WT_EXPECT_OK("and are parsed",
+                 wt_quic_connection_set_peer_parameters(&pair.server, payload, wt_writer_offset(&pw)));
+  }
+  WT_EXPECT_OK("the server issues one",
+               wt_quic_connection_issue_connection_id(&pair.server, issued, sizeof(issued), token, now));
+
+  send_raw_payload_with_dcid(&pair, ping_and_padding, sizeof(ping_and_padding), issued, sizeof(issued),
+                             &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("a packet addressed to an issued ID is processed", 1U,
+                (uint64_t)pair.server.spaces[WT_QUIC_SPACE_APPLICATION].received.has_largest);
+  WT_EXPECT_U64("and is not discarded", 0U, pair.server.packets_discarded);
+  WT_EXPECT_U64("for sequence zero, the handshake's", 0U,
+                pair.server.spaces[WT_QUIC_SPACE_APPLICATION].received.largest_received);
+
+  /* Phase two: retiring that ID and then addressing a packet to it. */
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID);
+  frame.as.retire_connection_id.sequence = 1U;
+  send_frame_to(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 1U, now);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("the retirement is applied", 0U, (uint64_t)pair.server.issued_count);
+  send_raw_payload_with_dcid(&pair, ping_and_padding, sizeof(ping_and_padding), issued, sizeof(issued),
+                             &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 2U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("a packet addressed to a retired ID is discarded", 1U, pair.server.packets_discarded);
+  /* The packets that were accepted were 0 and 1; the discarded one was 2, so the received set must not
+   * have advanced to it. */
+  WT_EXPECT_U64("with the discarded packet not recorded", 1U,
+                pair.server.spaces[WT_QUIC_SPACE_APPLICATION].received.largest_received);
+  close_pair(&pair);
+
+  /* Phase three: retiring the connection ID the packet itself was addressed to. */
+  open_pair(WT_UDP_IPV4, &pair);
+  WT_EXPECT_OK("the server writes",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("and reads",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  {
+    wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+    WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&pw, &params));
+    WT_EXPECT_OK("and are parsed",
+                 wt_quic_connection_set_peer_parameters(&pair.server, payload, wt_writer_offset(&pw)));
+  }
+  WT_EXPECT_OK("the server issues one again",
+               wt_quic_connection_issue_connection_id(&pair.server, issued, sizeof(issued), token, now));
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID);
+  frame.as.retire_connection_id.sequence = 1U;
+  {
+    wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+    WT_EXPECT_OK("the retire frame encodes", wt_quic_frame_encode(&pw, &frame));
+    send_raw_payload_with_dcid(&pair, payload, wt_writer_offset(&pw), issued, sizeof(issued),
+                               &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U);
+  }
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("retiring the ID the packet was addressed to closes it", 1,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a protocol violation", (uint64_t)WT_QUIC_PROTOCOL_VIOLATION,
+                pair.server.close.error_code);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1773,5 +1886,6 @@ int main(void) {
   test_retire_connection_id();
   test_retire_handshake_connection_id();
   test_new_connection_id_retire_prior_to_is_refused();
+  test_packets_to_issued_connection_ids();
   WT_TEST_MAIN_END("wt_quic_connection");
 }
