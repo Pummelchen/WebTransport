@@ -40,6 +40,12 @@ extern "C" {
  * more room; nothing here builds more than this without being told to. */
 #define WT_QUIC_MAX_PACKET 1200U
 
+/* The smallest datagram that may carry an Initial packet (RFC 9000 section 14.1). A client MUST
+ * expand every UDP datagram carrying an Initial packet to at least this size, and a server MUST
+ * discard an Initial packet whose datagram is smaller -- so an unpadded client Initial cannot start
+ * a connection against a conformant server at all. */
+#define WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE 1200U
+
 /* What building a packet needs. */
 typedef struct wt_quic_packet_build {
   /* The encryption level: Initial or Handshake for a long header, and 0-RTT or 1-RTT for a short one.

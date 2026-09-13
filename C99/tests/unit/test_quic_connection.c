@@ -797,8 +797,8 @@ static void test_handshake_done_role(void) {
 static void test_frame_permission(void) {
   connection_pair_t pair;
   uint64_t now = 70000000U;
-  uint8_t payload[32];
-  uint8_t datagram[128];
+  uint8_t payload[WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE];
+  uint8_t datagram[WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE + 64U];
   wt_writer_t w = wt_writer_init(payload, sizeof(payload));
   size_t payload_len;
   size_t datagram_len = 0U;
@@ -832,6 +832,18 @@ static void test_frame_permission(void) {
   build.keys = &pair.server.keys_in[WT_QUIC_SPACE_INITIAL];
   WT_EXPECT_OK("the packet builds",
                wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  /* RFC 9000 section 14.1: a server discards an Initial datagram below 1200 bytes. This test is about
+   * the frame permission rule, so the datagram is expanded to the minimum with PADDING frames -- the
+   * discard itself is covered by its own test. */
+  while (datagram_len < WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE) {
+    size_t shortfall = WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE - datagram_len;
+    WT_EXPECT_TRUE("there is room for the padding", payload_len + shortfall <= sizeof(payload));
+    memset(payload + payload_len, 0, shortfall);
+    payload_len += shortfall;
+    build.payload_len = payload_len;
+    WT_EXPECT_OK("the packet rebuilds",
+                 wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  }
   WT_EXPECT_OK("the client sends it",
                wt_udp_send(&pair.client_socket, &pair.server_address, datagram, datagram_len));
   now += 1000U;
@@ -1444,6 +1456,39 @@ static void send_application_frame(const connection_pair_t *pair, const wt_quic_
   WT_EXPECT_OK("and is sent", wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
 }
 
+/* The same injection as `send_application_frame`, but a long-header Initial packet built short: it is
+ * what RFC 9000 section 14.1 says a server must discard, and it has to be hand-built because this
+ * library's own send path now pads every client Initial. */
+static void send_short_initial_frame(const connection_pair_t *pair, const wt_quic_frame_t *frame,
+                                     const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
+  uint8_t payload[128];
+  uint8_t datagram[256];
+  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+  size_t len;
+  size_t datagram_len = 0U;
+  wt_quic_packet_build_t build;
+
+  WT_EXPECT_OK("the frame encodes", wt_quic_frame_encode(&w, frame));
+  len = wt_writer_offset(&w);
+  memset(&build, 0, sizeof(build));
+  build.short_header = 0;
+  build.type = WT_QUIC_PACKET_INITIAL;
+  build.version = WT_QUIC_VERSION_1;
+  build.destination_connection_id = k_dcid;
+  build.destination_connection_id_len = sizeof(k_dcid);
+  build.source_connection_id = k_dcid;
+  build.source_connection_id_len = sizeof(k_dcid);
+  build.packet_number = packet_number;
+  build.packet_number_length = 1U;
+  build.payload = payload;
+  build.payload_len = len;
+  build.keys = keys;
+  WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_TRUE("and is below the Initial minimum", datagram_len < WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE);
+  WT_EXPECT_OK("and is sent",
+               wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
+}
+
 static void test_peer_connection_ids(void) {
   connection_pair_t pair;
   wt_quic_packet_keys_t keys;
@@ -1614,6 +1659,47 @@ static void test_retire_handshake_connection_id(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 section 14.1: a client expands every UDP datagram carrying an Initial packet to at least
+ * 1200 bytes. The four-byte CRYPTO payload below is the case that matters, because a conformant
+ * server discards the datagram that is not expanded -- so without this the handshake cannot start. */
+static void test_client_initial_datagram_is_padded(void) {
+  connection_pair_t pair;
+  uint64_t now = 109000000U;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  WT_EXPECT_OK("a four-byte CRYPTO payload is sent",
+               wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 0U,
+                                              (const uint8_t *)"\x01\x02\x03\x04", 4U, now));
+  WT_EXPECT_U64("as one datagram, expanded to the minimum", 1200U, pair.client.bytes_sent);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("and the server reads it", 1U, pair.server.packets_received);
+  WT_EXPECT_U64("processing it rather than discarding it", 0U, pair.server.packets_discarded);
+  WT_EXPECT_TRUE("with its packet number recorded", pair.server.spaces[WT_QUIC_SPACE_INITIAL].received.has_largest != 0);
+  close_pair(&pair);
+}
+
+/* The other half of section 14.1, which is what makes the send rule observable: a server discards an
+ * Initial packet carried in a datagram smaller than 1200 bytes. The packet is hand-built because this
+ * library's own client would have padded it. */
+static void test_short_initial_datagram_is_discarded(void) {
+  connection_pair_t pair;
+  wt_quic_frame_t frame;
+  uint64_t now = 110000000U;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+  send_short_initial_frame(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_INITIAL], 0U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("the datagram arrives", 1U, pair.server.packets_received);
+  WT_EXPECT_U64("and is discarded", 1U, pair.server.packets_discarded);
+  WT_EXPECT_TRUE("without a packet number being recorded",
+                 pair.server.spaces[WT_QUIC_SPACE_INITIAL].received.has_largest == 0);
+  WT_EXPECT_INT("and without closing the connection", 0, wt_quic_connection_is_closed(&pair.server));
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1621,6 +1707,8 @@ int main(void) {
   test_round_trip(WT_UDP_IPV4);
   test_round_trip(WT_UDP_IPV6);
   test_short_packet_is_padded(WT_UDP_IPV4);
+  test_client_initial_datagram_is_padded();
+  test_short_initial_datagram_is_discarded();
   test_packet_threshold_loss();
   test_ack_for_unsent_packet();
   test_close_paths();

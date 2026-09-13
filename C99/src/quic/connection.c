@@ -315,6 +315,47 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
 
   status = wt_quic_packet_build(&build, packet, sizeof(packet), &packet_length);
   if (status != WT_OK) return status;
+  if (space == WT_QUIC_SPACE_INITIAL && connection->config.role == WT_QUIC_ROLE_CLIENT &&
+      packet_length < WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE) {
+    /* RFC 9000 section 14.1: a client MUST expand every UDP datagram carrying an Initial packet to at
+     * least 1200 bytes, because a server discards an Initial datagram smaller than that -- so an
+     * unpadded client Initial cannot start a connection against a conformant server. This runtime puts
+     * one packet in a datagram, so the packet is what is expanded, with PADDING frames ahead of the
+     * tag (RFC 9000 section 19.1).
+     *
+     * The padding is added by rebuilding rather than computed ahead of the build because the packet's
+     * own header length depends on the padded length: the long header's Length field is a varint whose
+     * width grows with the value it carries, so a size computed from the unpadded payload can land one
+     * byte short. Each pass adds the shortfall the previous pass measured, which converges immediately
+     * in practice and is bounded here rather than assumed. */
+    uint8_t padded[WT_QUIC_CONNECTION_PAYLOAD_MAX];
+    size_t padding = 0U;
+    size_t pass;
+
+    if (payload_length > sizeof(padded)) return WT_ERR_LIMIT;
+    if (payload_length != 0U) memcpy(padded, payload, payload_length);
+    for (pass = 0U; pass < 4U; pass++) {
+      if (packet_length == WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE) break;
+      if (packet_length < WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE) {
+        padding += (size_t)WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE - packet_length;
+      } else {
+        /* Adding the shortfall can also widen the header, because the long header's Length field is a
+         * varint whose width grows with the value it carries: a pass that lands one byte over is
+         * corrected by trimming a byte of padding rather than by sending a datagram above the path's
+         * limit, which is what the caller's `max_datagram_size` would then refuse. */
+        size_t excess = packet_length - WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE;
+        if (excess > padding) break;
+        padding -= excess;
+      }
+      if (payload_length + padding > sizeof(padded)) return WT_ERR_LIMIT;
+      memset(padded + payload_length, 0, padding);
+      build.payload = padded;
+      build.payload_len = payload_length + padding;
+      status = wt_quic_packet_build(&build, packet, sizeof(packet), &packet_length);
+      if (status != WT_OK) return status;
+    }
+    if (packet_length < WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE) return WT_ERR_STATE;
+  }
   if (packet_length > connection->config.max_datagram_size) {
     /* The path's limit is the caller's, and a packet above it is refused here rather than fragmented
      * or dropped somewhere the caller cannot see. */
@@ -1667,6 +1708,15 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
           connection->packets_discarded++;
           return WT_OK;
         }
+      }
+      /* RFC 9000 section 14.1: a server MUST discard an Initial packet carried in a UDP datagram whose
+       * payload is smaller than 1200 bytes. The rule is about the datagram, so the rest of it goes too:
+       * a coalesced packet after a short Initial would be located only from a datagram the peer built
+       * against a different rule. */
+      if (space == WT_QUIC_SPACE_INITIAL && connection->config.role == WT_QUIC_ROLE_SERVER &&
+          datagram_length < WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE) {
+        connection->packets_discarded++;
+        return WT_OK;
       }
     }
     if (!connection->has_keys_in[space]) {

@@ -1188,6 +1188,27 @@ endpoint announced was numbered 0, colliding with the handshake's own connection
 either would have been ambiguous. Sequences now start at 1 and are never reused, which is what makes a
 RETIRE_CONNECTION_ID naming a sequence mean one thing.
 
+**Thirty-sixth part done: a client's Initial datagram is expanded to the minimum.** RFC 9000 section
+14.1's rule was the last unimplemented piece of the Initial packet path, and it is not cosmetic: a server
+must discard an Initial packet carried in a datagram smaller than 1200 bytes, so an unpadded client
+Initial cannot start a connection against a conformant peer at all. The client now expands the packet with
+PADDING frames (section 19.1) until the datagram reaches the minimum, and the server discards a short
+Initial datagram before reading it.
+
+Three details are what the earlier attempts at this missed. First, the expansion is applied by rebuilding
+the packet rather than computed ahead of it, because the long header's Length field is a varint whose width
+grows with the value it carries: a size computed from the unpadded payload lands a byte short, and adding
+the shortfall then lands a byte over. The loop adds the shortfall the previous pass measured and trims
+instead when it overshoots, so the datagram lands on the minimum rather than above the caller's
+`max_datagram_size`. Second, only the client expands: the rule is a client requirement, and a server's
+Initials are already large enough to carry the handshake. Third, the discard is of the whole datagram and
+happens before the frame walk, which is why the frame-permission test now pads its hand-built Initial -- the
+test is about section 12.4's table, and the datagram-size rule would otherwise have swallowed the packet
+before the rule under test could refuse it.
+
+Two tests: the client's four-byte CRYPTO payload leaves as a 1200-byte datagram the server processes, and a
+hand-built short Initial is discarded with nothing recorded for it and no connection error.
+
 Implement the production network state machine.
 
 Tasks:

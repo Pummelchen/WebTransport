@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 76,132 checks, run by `ctest` and again under
+- 38 unit test files and 76,181 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -316,6 +316,13 @@ What is here:
   (section 19.16) -- which this endpoint numbers 0, because it receives only on the ID the handshake used
   (section 5.1.1). A repeat of a retirement already made is tolerated, since the frame is retransmitted
   when it is lost, and issued sequences now start at 1 instead of colliding with the handshake's own.
+- **A client's Initial datagram is expanded to the minimum** (Phase 4, thirty-sixth part): RFC 9000
+  section 14.1 requires every UDP datagram carrying an Initial packet to be at least 1200 bytes, because a
+  server discards one that is smaller -- an unpadded Initial cannot start a connection against a
+  conformant server at all. The client now expands the packet with PADDING frames and the server discards
+  a short Initial datagram before reading it. The expansion is applied by rebuilding rather than
+  computed ahead of the build, because the long header's Length varint widens with the value it carries;
+  a pass that lands a byte over trims padding instead of putting a datagram above the path's limit.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
