@@ -391,6 +391,7 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
   }
 
   connection->packets_sent++;
+  if (space < WT_QUIC_SPACE_COUNT) connection->packets_sent_by_space[space]++;
   connection->bytes_sent += (uint64_t)packet_length;
   connection->last_activity = now;
   return WT_OK;

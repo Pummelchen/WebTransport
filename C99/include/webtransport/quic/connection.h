@@ -281,6 +281,10 @@ typedef struct wt_quic_connection {
    * nothing to report" are different defects (WT-135). */
   uint64_t probes_sent[WT_QUIC_SPACE_COUNT];
   uint64_t probes_with_data;
+  /* Packets SENT, by space. "Did we send a Handshake-level packet at all" is the difference between a client that
+   * never finished its handshake and one whose Finished the peer cannot read, and the peer's log looks identical
+   * either way (WT-135). */
+  uint64_t packets_sent_by_space[WT_QUIC_SPACE_COUNT];
 
   /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is

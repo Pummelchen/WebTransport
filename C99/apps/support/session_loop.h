@@ -81,6 +81,10 @@ typedef struct wt_loop_result {
   /* Probe timeouts that fired, summed over the spaces, and how many carried an outstanding frame. */
   unsigned probes;
   unsigned probes_with_data;
+  /* Packets sent per space: initial, handshake, application. */
+  unsigned sent_initial;
+  unsigned sent_handshake;
+  unsigned sent_application;
   /* The stream id the driver opened for the request, and how many streams this endpoint opened in each class:
    * a request on a stream the peer reads as unidirectional is an interop-only defect, and the id is the only
    * thing that says which it is (WT-135). */
