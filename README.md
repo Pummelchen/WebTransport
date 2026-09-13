@@ -27,24 +27,21 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
 The Swift conformance matrix passes in full. The C99 implementation is **Phases 0
-to 4 complete, with Phase 5 next**: it builds with CMake as a static and shared
-library with three CLI tools, carries a tested core (checked arithmetic, byte cursors,
-a two-pass writer, a bounded buffer, an allocator interface, a monotonic clock), a tested
-QUIC wire core and crypto layer (varints, frames, packets, transport parameters,
-connection IDs, HKDF, AES-GCM and ChaCha20-Poly1305 packet protection with header
-protection, and key update), a TLS 1.3 handshake that runs end to end (the key schedule,
-the handshake and extension codecs, X25519, certificate chain validation, and both halves
-of the handshake), and the parts of the QUIC connection runtime that are not I/O: packet
-number spaces with ACK generation, loss detection and probe timeouts, NewReno congestion
-control, stream state machines and flow control, QUIC DATAGRAM, the close paths, and the
-packet build/read seam. It installs as a CMake package with a consumer test. The
-cryptographic and packet-protection tests are driven by RFC 9001 appendix A's and RFC
-8448's own vectors, extracted from the RFC text rather than transcribed. Phase 4 is complete: the UDP
-socket layer and the connection runtime carry a whole TLS 1.3 handshake and protected,
-acknowledged packets over both IPv4 and IPv6 loopback, its loss, probe-timeout and close-path
-suites pass, and every suite runs again under AddressSanitizer and UndefinedBehaviorSanitizer,
-on macOS and Linux in CI. No WebTransport protocol is implemented yet -- HTTP/3, QPACK and the
-draft-16 session layer come next -- so its draft-16 score is still 0%. See
+to 9 complete, with Phase 10 (the test port) under way**: it builds with CMake as a static and shared
+library with three CLI tools and carries the whole stack -- the core utilities, a QUIC wire core and
+crypto layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake
+that runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
+dynamic table, the draft-16 WebTransport session layer, and the public consumer API. It **runs
+sessions**: the conformance tool stands up both endpoints in one process over IPv4 and IPv6,
+`wt-client-c99` and `wt-server-c99` exchange a session in two processes, and
+`C99/scripts/run-container-interop.sh` completes a whole session **and the message exchange** against
+an independent implementation (`pywebtransport`/`aioquic`) in a container -- the peer logs
+`stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. 80 test programs
+and 80,256 checks pass, and every suite runs again under AddressSanitizer and
+UndefinedBehaviorSanitizer, on macOS and Linux in CI. Of the plan's nine completion criteria 7 are met
+and 2 partial (the FreeBSD/Windows CI legs, and the interop matrix, which is end to end against one
+implementation with `quinn` and `quiche` measured to a named point). All 25 of the draft-16
+compliance-matrix rows are exercised by a test. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).
 
