@@ -98,6 +98,20 @@ static void test_the_streams_a_session_start_opens(void) {
                  recording.streams[0].length >= 2U && recording.streams[0].bytes[0] == 0x00U);
   WT_EXPECT_U64("whose first frame is SETTINGS", 0x04U, (uint64_t)recording.streams[0].bytes[1]);
 
+  /* The SETTINGS payload itself, which was the one part of our own output still unread. Asserted as BYTES
+   * rather than through a parse: the payload is the identifier 0x2c7cf000 in QUIC's four-byte varint form
+   * (0xac 0x7c 0xf0 0x00, the top two bits saying "four bytes") followed by the value 1 -- and my first attempt
+   * at this read the stream with a cursor loop that found nothing, which is the third time in this interop work
+   * that a hand-written parse was the thing at fault. The bytes are what the peer sees. */
+  WT_EXPECT_U64("the control stream is type + SETTINGS + length + payload", 8U,
+                (uint64_t)recording.streams[0].length);
+  WT_EXPECT_U64("the SETTINGS payload is five bytes long", 0x05U,
+                (uint64_t)recording.streams[0].bytes[2]);
+  WT_EXPECT_TRUE("and it advertises WT_ENABLED (0x2c7cf000) with the value 1",
+                 recording.streams[0].bytes[3] == 0xacU && recording.streams[0].bytes[4] == 0x7cU &&
+                     recording.streams[0].bytes[5] == 0xf0U && recording.streams[0].bytes[6] == 0x00U &&
+                     recording.streams[0].bytes[7] == 0x01U);
+
   /* The QPACK streams: 0x02 is the encoder's, 0x03 the decoder's, and their prefixes are all they carry. */
   WT_EXPECT_TRUE("the QPACK encoder stream is one byte of type",
                  recording.streams[1].length == 1U && recording.streams[1].bytes[0] == 0x02U);
