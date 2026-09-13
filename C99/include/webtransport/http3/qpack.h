@@ -103,6 +103,17 @@ wt_status_t wt_qpack_string_encode(wt_writer_t *w, const uint8_t *bytes, size_t 
 wt_status_t wt_qpack_huffman_decode(const uint8_t *coded, size_t coded_length, uint8_t *out,
                                     size_t capacity, size_t *out_length);
 
+/* The bytes a Huffman encoding of these bytes occupies, so a caller can size the
+ * buffer it hands to the encoder without guessing (the code is not a fixed width,
+ * and the final byte is padded with one-bits to the boundary). */
+wt_status_t wt_qpack_huffman_encoded_size(const uint8_t *bytes, size_t length, size_t *out_size);
+
+/* Encode a string with the same table. Refuses an output buffer that cannot hold
+ * the result (WT_ERR_LIMIT) rather than writing part of it: a half-written string
+ * is a representation the peer would decode into something else. */
+wt_status_t wt_qpack_huffman_encode(const uint8_t *bytes, size_t length, uint8_t *out,
+                                    size_t capacity, size_t *out_length);
+
 #ifdef __cplusplus
 }
 #endif

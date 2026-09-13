@@ -1492,6 +1492,18 @@ appendix contains two hex blocks -- the encoded block and a per-representation d
 extractor has to take the first and stop at the blank line, or it splices the block together with its own
 explanation.
 
+**Fourth part done: Huffman encoding.** `wt_qpack_huffman_encode` writes the same generated table the
+decoder reads, MSB first, and pads the final byte with one-bits -- the EOS prefix, which is what section
+5.2 requires and what the decoder's padding check accepts. `wt_qpack_huffman_encoded_size` exists because the
+code is not a fixed width and a caller that guessed would either overflow its buffer or refuse a string that
+fits.
+
+The test that matters is not a round trip: an encoder and a decoder that read the same wrong table round-trip
+perfectly. Appendix C.4.1's plaintext must encode to exactly the twelve bytes the RFC prints, which neither
+side of this implementation can satisfy by being self-consistent with the other. The exhaustive pass over all
+256 symbols then covers what the example cannot: both the five-bit codes and the thirty-bit ones, and the
+bit packing that carries a code across a byte boundary.
+
 Implement Huffman encoding and decoding.
 - Implement static indexed fields.
 - Implement literal field lines.
