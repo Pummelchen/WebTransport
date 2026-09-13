@@ -98,12 +98,44 @@ destination, which clang accepts and mingw's GCC refuses (`apps/wt-conformance-c
 `scenario_refusal_wire.c` now bound the interpolation with a precision). A check that has never caught anything
 is a check nobody has tested; this one is on its second real find.
 
-What remains is the Windows RUNNER and FreeBSD, and both are now ONE thing: a way to RUN what already builds. The
-tree compiles for Windows (75 + 104 sources, warnings-as-errors), links for Windows (89 PE32+ executables and a
-shared library, enforced in CI), and the FreeBSD surface is the Debian one by the inventory. A job that cannot
-pass is worse than an absent one, because it teaches people to ignore CI -- so the runner is named rather than
-guessed at: Windows 11 needs OpenSSL there and something to execute the test binaries, FreeBSD needs a runner
-GitHub does not provide natively, and neither is a code change this tree can make and verify from here.
+**The tree RUNS for Windows, under Wine.** `scripts/check-windows-wine.sh` executes every linked test binary
+through Wine and reports the aggregate. On the VPS, in an `ubuntu:24.04` container with the mingw cross-build:
+**84 test executables ran, 82 passed, 2 failed, 0 hung, and the reported checks sum to 89,099.** That is the
+claim the section above could not make — "linked, not run" — and it is the first time this tree has executed on
+a Windows target at all.
+
+**And running it found two defects that linking could not.** They are the whole reason a runner is worth having:
+
+- **`test_runtime_udp`, 6 of 177 checks.** The datagram-truncation contract of `WT-36` does not hold on the
+  `_WIN32` socket branch: `receiving it into a small buffer is a truncation` wants `truncated` and gets `limit`,
+  the sender is not named where it should be, and a later read wants `ok` and 8 bytes and gets `truncated` and
+  0. This is the surface the table above describes — a peek on Windows cannot see past the caller's buffer — and
+  the branch has now been measured rather than reasoned about.
+- **`test_quic_connection`, 6 of 2276 checks.** The Retry path (`WT-168`) fails two assertions on Windows:
+  `the destination is the Retry's Source Connection ID, byte for byte` and `and the TOKEN is on the wire as the
+  peer sent it` are both `expected true`. Four further checks follow from them. Nothing here is endian- or
+  alignment-dependent by construction, so this is a finding to diagnose rather than a known class.
+
+Both are recorded as `WT-199` and `WT-200` in the [[Project Tracker|Project-Tracker]] rather than fixed here,
+because a fix without a Windows target to re-run it on would be a guess. Wine is a faithful Win32
+implementation, not Windows: both failures are **under Wine** until a Windows runner says otherwise.
+
+**Two setup facts cost a session, so they are written down.** `wine64` is not on `PATH` on Ubuntu or Debian —
+the package ships no wrapper and the binary is `/usr/lib/wine/wine64`, so `wine64 --version` is "command not
+found" while the runtime is installed. And a test executable imports **two** DLL sets: the target's OpenSSL
+*and* the tree's own `libwebtransport.dll`. Wine resolves a PE's imports from the executable's own directory
+first, so a missing DLL there is a load failure — status `c0000135`, whose low byte is the silent `rc=53` every
+test reported on the first run, with the reason only visible on stderr under a debug channel. Both are handled
+by the script, and the `WINEPREFIX` is initialized with a bounded `wineboot -u` before any test runs, so a hang
+is attributable to a test rather than to first-use setup.
+
+What remains is the **FreeBSD** leg and a **real Windows runner**. The tree compiles for Windows (75 + 104
+sources, warnings-as-errors), links for Windows (PE32+ executables and a shared library, enforced in CI), and now
+executes for Windows under Wine; the FreeBSD surface is the Debian one by the inventory. A job that cannot pass
+is worse than an absent one, because it teaches people to ignore CI — so what is left is named rather than
+guessed at: Windows 11 needs OpenSSL there and a machine to execute the binaries on (Wine is the half a Linux
+host can do, and the two failures above still need a real runner to confirm), and FreeBSD needs a runner GitHub
+does not provide natively. Neither is a code change this tree can make and verify from here.
 
 ## The two symbols this document is checked for
 
