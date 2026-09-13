@@ -47,6 +47,7 @@ set(WT_UNIT_TESTS
   test_runtime_udp
   test_http3_frame
   test_http3_settings
+  test_http3_control
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

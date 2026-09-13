@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 40 unit test files and 76,448 checks, run by `ctest` and again under
+- 41 unit test files and 76,525 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -369,6 +369,12 @@ What is here:
   identifiers of the `0x1f * N + 0x21` range are ignored rather than refused -- refusing them would break
   the one rule they exist to exercise. The encoder writes ascending identifier order, so the same set is
   always the same bytes.
+- **The control stream's lifecycle** (Phase 5, third part): `http3/control.h` is RFC 9114 section 6.2.1's
+  state machine for the peer's control stream, where all four rules are connection errors -- a first frame
+  that is not SETTINGS (H3_MISSING_SETTINGS), a second control stream (H3_STREAM_CREATION_ERROR), the
+  stream closing at any point (H3_CLOSED_CRITICAL_STREAM), and a frame the section does not allow there,
+  including a second SETTINGS and the types section 7.2.8 reserved for HTTP/2 (H3_FRAME_UNEXPECTED). It
+  decides permission only: what a SETTINGS, GOAWAY or MAX_PUSH_ID frame says is parsed by whoever owns it.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

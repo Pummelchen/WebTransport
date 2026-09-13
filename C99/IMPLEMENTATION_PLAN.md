@@ -1340,7 +1340,26 @@ round trip alone would not have noticed because parsing still failed -- with PRO
 the encoder had produced.
 
 Implement SETTINGS.
-- Implement control stream lifecycle.
+- **Third part done: the control stream's lifecycle.** `include/webtransport/http3/control.h` is RFC 9114
+section 6.2.1's state machine for the peer's control stream, and all four of the section's rules are
+connection errors: a first frame that is not SETTINGS is H3_MISSING_SETTINGS, a second control stream from
+the same peer is H3_STREAM_CREATION_ERROR, the stream closing at any point is H3_CLOSED_CRITICAL_STREAM
+(whether or not SETTINGS had arrived -- the closure itself is the error), and a frame the section does not
+allow there is H3_FRAME_UNEXPECTED. That last set is where the judgement is: DATA, HEADERS and PUSH_PROMISE
+describe requests and have nothing to describe on a control stream, a second SETTINGS is forbidden by section
+7.2.4's "MUST NOT be sent subsequently", and the frame types section 7.2.8 reserved for HTTP/2 are checked
+before those so a reserved type is reported as reserved. CANCEL_PUSH, GOAWAY, MAX_PUSH_ID and unknown
+extension frames are allowed, which is the half an over-eager implementation gets wrong.
+
+The state machine decides permission and nothing else: this takes a frame TYPE rather than a frame, because
+what a SETTINGS, GOAWAY or MAX_PUSH_ID frame says belongs to the part that owns that frame. A frame that
+arrives before the stream was opened, or after it closed, is the caller's own ordering and returns
+WT_ERR_STATE without naming a connection error, since there is nothing to tell the peer.
+
+Four tests: SETTINGS first and only once, every frame type that may not open the stream, the allowed and
+refused sets after SETTINGS, and the one-stream and closure rules.
+
+Implement control stream lifecycle.
 - Implement request stream lifecycle.
 - Implement GOAWAY.
 - Implement H3 error mapping.
