@@ -376,16 +376,17 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
 
   {
     wt_udp_address_t from;
-    uint8_t probe[1];
     unsigned waited;
     int arrived = 0;
-    size_t received = 0U;
 
+    /* The peer is learned by PEEKING, not by receiving: the datagram that names the peer must still be in the
+     * queue when the connection is armed, or this side waits for a retransmission it may never get -- which is
+     * exactly what the first version did (it received the Initial and dropped it). */
     for (waited = 0U; waited < 5000U; waited++) {
-      wt_status_t wait_status = wt_udp_receive(&loop.socket, probe, sizeof(probe), &received, &from);
-      if (wait_status == WT_OK) {
-        /* The first packet names the peer: the session is armed for it, and the packet itself is dropped -- it
-         * is an Initial that cannot be processed before the connection exists, and a real peer retransmits. */
+      size_t datagram_length = 0U;
+      size_t available = 0U;
+      wt_status_t peek_status = wt_udp_peek(&loop.socket, NULL, 0U, &datagram_length, &available, &from);
+      if (peek_status == WT_OK) {
         loop.peer = from;
         arrived = 1;
         break;

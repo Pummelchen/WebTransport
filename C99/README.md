@@ -125,6 +125,15 @@ What is here:
   local development setup, and `--listen --trust local-development` needs no certificate file. The
   test is a closed loop rather than a self-comparison: generate, pin what the generator returned,
   let the trust layer accept it, and let it refuse a different pin.
+- **The two CLI tools talk to each other** (Phase 9): `wt-server-c99 --listen` and
+  `wt-client-c99 --connect` run a real WebTransport session over a real socket, in two processes,
+  each with its own command line and its own machine-readable JSON — handshake, CONNECT accepted
+  (response `200`), and a four-byte message each way. A CTest script runs them against each other,
+  so the plan's CLI criterion is checked rather than demonstrated. The piece that made it work is
+  `wt_udp_peek`: a listener learns its peer's address by PEEKING at the first datagram and leaving
+  it in the queue, because a connection must be armed with the peer's address before it can process
+  the packet that names the peer — a listener that consumed that packet would wait for a
+  retransmission that may never come, which is exactly what the first version did.
 - **The tools' local socket** (Phase 9): `cli/endpoint.h` turns a `host:port` into a bound or
   targeted UDP endpoint, and both tools open theirs and report it in the `--json` output. The
   FAMILY comes from the address rather than a flag — an IPv4 address on an IPv6 socket is not

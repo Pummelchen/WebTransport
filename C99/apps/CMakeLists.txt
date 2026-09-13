@@ -56,4 +56,9 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   # machine-readable report is the contract, so the test asserts the tool's exit status -- 0 only when every
   # scenario passed.
   add_test(NAME wt_conformance_scenarios COMMAND wt-conformance-c99 --scenario all --json)
+  # The two TOOLS against each other, in two processes: the client tool and the server tool run real sessions
+  # over a real socket, which is what the plan's CLI criteria ask for and what one process cannot prove.
+  add_test(NAME wt_cli_session
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
+            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99>)
 endif()

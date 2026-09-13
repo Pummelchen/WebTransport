@@ -115,6 +115,19 @@ wt_status_t wt_udp_receive(const wt_udp_socket_t *socket, uint8_t *buffer, size_
  * state has a pending error and the way to learn it is to attempt the receive. */
 wt_status_t wt_udp_wait(const wt_udp_socket_t *socket, uint64_t timeout_micros);
 
+/* Look at the next datagram WITHOUT taking it: the bytes and the sender are reported and the packet stays in
+ * the socket's queue for a later `wt_udp_receive`. A listener needs exactly this, and nothing narrower will do:
+ * a connection has to be armed with the peer's address before it can process the packet that names the peer, so
+ * a caller that CONSUMED that packet would have to wait for a retransmission -- and a peer that had already
+ * given up would never send one.
+ *
+ * `out_length` is the datagram's length and `out_available` is how much of it fits in `buffer`; a caller that
+ * only wants the sender can pass a zero-capacity buffer, and one that wants the bytes must check the two against
+ * each other. A datagram is still a datagram: a peek that cannot see the whole thing does not guess at the part
+ * it can. */
+wt_status_t wt_udp_peek(const wt_udp_socket_t *socket, uint8_t *buffer, size_t capacity,
+                        size_t *out_length, size_t *out_available, wt_udp_address_t *out_from);
+
 /* Parse a numeric address: "127.0.0.1", "::1", "fe80::1%4". No name resolution -- that is a policy
  * decision with a resolver, a timeout and a platform API behind it, and QUIC's own address handling is
  * numeric. Returns WT_ERR_INVALID_ARGUMENT for anything else. */

@@ -2599,6 +2599,30 @@ TRUST LAYER accept it, checks that a different pin is refused, that no pin at al
 generations differ -- because a generator tested against its own output proves nothing about whether anything can
 trust it.
 
+### Phase 9's thirty-first part: the tools complete a session with each other
+
+**`wt-client-c99` and `wt-server-c99` exchange a WebTransport session over a real socket, in two processes**, and
+CTest runs them against each other:
+
+    client: {"role":"client","status":"ok","established":true,"connectAccepted":true,
+             "responseStatus":200,"receivedBytes":4}
+    server: {"role":"server","status":"ok","boundPort":4461,"established":true,
+             "connectAccepted":true,"receivedBytes":4,"pin":"1b2a79..."}
+
+The piece that made it work is `wt_udp_peek`: a listener learns its peer's address by looking at the first
+datagram and LEAVING IT IN THE QUEUE. The previous version received that datagram and dropped it, on the
+reasoning that an Initial cannot be processed before the connection exists -- and that reasoning is right and the
+implementation was wrong, because the packet that NAMES the peer is the packet the connection then needs. A
+listener that consumes it waits for a retransmission, and a peer that has already given up never sends one: the
+client's own report was `{"status":"timeout","established":false}` for exactly that reason. The peek returns the
+datagram's true length even when the caller's buffer is too small (a datagram is still a unit), and the caller
+that only wants the sender passes a zero-capacity buffer.
+
+`scripts/check-cli-session.sh` runs the two tools against each other and asserts the contract in their JSON:
+both `ok`, both `established`, the CONNECT accepted, the response `200`, and four bytes received on each side.
+It is registered with CTest as `wt_cli_session`, so the tools' path is checked on every build -- and it is the
+second CTest entry (after WT-123) whose result is a real session rather than a codec.
+
 ### Phase 9's thirtieth part: the client and server tools run a loop, and the accept path is the missing piece
 
 Both tools now drive a REAL one-sided session loop through a shared `apps/support/session_loop.c`: the client

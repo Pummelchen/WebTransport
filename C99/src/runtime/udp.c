@@ -362,6 +362,48 @@ wt_status_t wt_udp_receive(const wt_udp_socket_t *socket, uint8_t *buffer, size_
   return WT_OK;
 }
 
+wt_status_t wt_udp_peek(const wt_udp_socket_t *socket, uint8_t *buffer, size_t capacity,
+                        size_t *out_length, size_t *out_available, wt_udp_address_t *out_from) {
+  struct sockaddr_storage storage;
+  struct iovec iov;
+  struct msghdr message;
+  ssize_t received;
+  wt_status_t status;
+
+  if (socket == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (socket->fd < 0) return WT_ERR_STATE;
+  if (buffer == NULL && capacity != 0U) return WT_ERR_INVALID_ARGUMENT;
+  *out_length = 0U;
+  if (out_available != NULL) *out_available = 0U;
+
+  memset(&storage, 0, sizeof(storage));
+  memset(&iov, 0, sizeof(iov));
+  memset(&message, 0, sizeof(message));
+  iov.iov_base = buffer;
+  iov.iov_len = capacity;
+  message.msg_name = &storage;
+  message.msg_namelen = (socklen_t)sizeof(storage);
+  message.msg_iov = &iov;
+  message.msg_iovlen = 1;
+
+  /* MSG_PEEK is the whole point: the datagram is read and left in the queue, so the connection's own receive
+   * finds it exactly where it was. MSG_TRUNC is not an error here as it is in `wt_udp_receive`: this call is
+   * reporting what is there, and the length it reports is the datagram's own. */
+  received = recvmsg(socket->fd, &message, MSG_PEEK | MSG_TRUNC);
+  if (received < 0) return map_errno(errno);
+
+  if (out_from != NULL) {
+    status = from_sockaddr((const struct sockaddr *)(const void *)&storage, message.msg_namelen, out_from);
+    if (status != WT_OK) return status;
+  }
+  *out_length = (size_t)received;
+  if (out_available != NULL) {
+    size_t copied = (size_t)received < capacity ? (size_t)received : capacity;
+    *out_available = copied;
+  }
+  return WT_OK;
+}
+
 wt_status_t wt_udp_wait(const wt_udp_socket_t *socket, uint64_t timeout_micros) {
   struct pollfd entry;
   int timeout_ms;
