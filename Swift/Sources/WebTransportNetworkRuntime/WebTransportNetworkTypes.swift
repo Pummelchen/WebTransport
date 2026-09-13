@@ -18,6 +18,17 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
     /// connection — the stream is not resent — so a caller seeing this should
     /// establish a new one rather than wait longer.
     case peerControlStreamNotDelivered(role: String, timeoutMilliseconds: Int32)
+    /// The peer ended a stream before sending the bytes that stream has to begin with.
+    ///
+    /// Measured against the real framework: `receive(atMost:)` waits for at least one
+    /// byte, and a stream the peer opens without writing to it is not even delivered to
+    /// the inbound-stream handler until its first byte arrives — so an empty read is
+    /// never "nothing yet" (WebTransport issue #24). It means the peer ended the stream
+    /// with nothing on it. Without this case the codec's own report,
+    /// `QUICCodecError.truncated(needed: 1, available: 0)`, is what a caller sees, which
+    /// reads like an internal truncation rather than a peer that closed a stream it had
+    /// not written to.
+    case peerClosedStreamWithoutData(streamID: UInt64)
 
     public var description: String {
         switch self {
@@ -38,6 +49,9 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
         case .peerControlStreamNotDelivered(let role, let timeoutMilliseconds):
             return "\(role) never received the peer's HTTP/3 control stream within \(timeoutMilliseconds)ms; "
                 + "the connection cannot proceed and should be retried"
+        case .peerClosedStreamWithoutData(let streamID):
+            return "the peer ended stream \(streamID) before sending any bytes; "
+                + "the stream cannot be used and the peer is not following the protocol"
         }
     }
 }

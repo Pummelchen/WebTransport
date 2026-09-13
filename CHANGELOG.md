@@ -4,6 +4,12 @@ All notable changes to this project will be documented here.
 
 The project uses semantic versioning.
 
+## Unreleased
+
+Fixed:
+
+- A peer that ends a stream before sending the bytes that stream has to begin with is now reported as such, instead of as `QUICCodecError.truncated(needed: 1, available: 0)`. The runtime read the first chunk of a stream and dropped the `endOfStream` flag, so the codec's empty-buffer refusal was what a caller saw for a peer that FINed an inbound stream without writing to it — a message that reads like an internal truncation rather than a peer that is not following the protocol. The new `WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID:)` names the stream and the cause, and it is raised on the request stream, an inbound WebTransport stream, the peer's HTTP/3 control stream and a CONNECT response. A read that returns no bytes while the stream is still open is now waited out rather than returned, so "nothing yet" and "the peer is done" cannot be confused. Reported in issue #24.
+
 ## [1.3.7] - 2026-09-13
 
 A defect-fix release. There are no wire-format changes and nothing is added to or

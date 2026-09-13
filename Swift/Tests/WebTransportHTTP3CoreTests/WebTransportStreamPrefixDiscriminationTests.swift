@@ -32,6 +32,22 @@ func streamPrefixDetectionRejectsUnprefixedAndTruncatedPayloads() throws {
     #expect(!WebTransportStreamSignaling.hasStreamPrefix(Data([0x00])))  // varint 0, not a marker
 }
 
+/// The message quoted by WebTransport issue #24, pinned as the codec contract.
+///
+/// An empty payload can only mean a peer that ended the stream before writing it — the
+/// runtime's receive waits for a byte, and the framework does not even deliver a stream
+/// until its first byte arrives — but the codec's report is a truncation, which is why
+/// the runtime names that case itself rather than letting this surface.
+@Test
+func anEmptyPayloadIsATruncationAtThePrefix() {
+    #expect(throws: QUICCodecError.truncated(needed: 1, available: 0)) {
+        _ = try WebTransportStreamSignaling.parsePrefix(Data())
+    }
+    // And the detection API, which never throws, reports "not prefixed" — the two
+    // outcomes a caller has to keep apart.
+    #expect(!WebTransportStreamSignaling.hasStreamPrefix(Data()))
+}
+
 @Test
 func assertedPrefixWithInvalidSessionIDIsRejectedRatherThanDowngraded() throws {
     let constants = WebTransportHTTP3DraftConstants.current

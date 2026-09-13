@@ -272,7 +272,9 @@ public struct WebTransportQUICClient: Sendable {
         }
         InteroperableQUICDebug.log("client sent connect payload")
 
-        let responseData = try await InteroperableQUICHelpers.readStream(
+        // The server's response is the first thing on this stream: a peer that ends it
+        // without writing anything has not answered the request.
+        let responseData = try await InteroperableQUICHelpers.readFirstChunk(
             requestStream,
             timeoutMilliseconds: remainingTimeout()
         )
@@ -601,7 +603,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             direction: InteroperableQUICHelpers.bidirectionalStreamDirection,
             timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds
         )
-        let firstChunk = try await InteroperableQUICHelpers.readStream(
+        // A WebTransport stream begins with its prefix, so a stream that ends without
+        // one is a peer that closed it before writing: `readFirstChunk` names that case
+        // rather than letting the codec report an empty buffer as a truncation.
+        let firstChunk = try await InteroperableQUICHelpers.readFirstChunk(
             stream,
             timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
             maxBytes: maximumInitialBytes
@@ -1446,7 +1451,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         }
         InteroperableQUICDebug.log("server got request stream \(requestStream.streamID)")
         let requestPayload = try await runWithTimeout {
-            try await InteroperableQUICHelpers.readStream(
+            try await InteroperableQUICHelpers.readFirstChunk(
                 requestStream,
                 timeoutMilliseconds: remainingTimeout()
             )
@@ -1623,7 +1628,10 @@ private enum InteroperableQUICRuntime {
     }
 }
 
-private enum InteroperableQUICHelpers {
+/// Internal rather than private so the stream-read policy below can be tested directly: a
+/// `QUIC.Stream` cannot be constructed in a test, so the decision that turns a chunk into
+/// bytes, a wait, or a named error is what the tests can pin.
+enum InteroperableQUICHelpers {
     static let bidirectionalStreamDirection = 0
     static let unidirectionalStreamDirection = 1
 
@@ -1769,18 +1777,76 @@ private enum InteroperableQUICHelpers {
         return true
     }
 
+    /// What one chunk of a stream means to a reader waiting for its first bytes.
+    enum FirstChunkDecision: Equatable {
+        case bytes(Data)
+        case keepWaiting
+        case peerClosed
+    }
+
+    /// Classify a chunk from a stream the caller is waiting to read.
+    ///
+    /// `receive(atMost:)` defaults to `atLeast: 1`, so an empty chunk with the stream
+    /// still open is the one case the framework does not promise; waiting rather than
+    /// returning it is what keeps "no bytes yet" from reaching a caller that cannot tell
+    /// it apart from "the stream is over". An empty chunk at end of stream is the peer
+    /// having ended the stream without writing to it. Measured against the real
+    /// framework (WebTransport issue #24): a stream opened without data is not delivered
+    /// at all until its first byte arrives, and a stream finished with no bytes reads as
+    /// empty with `endOfStream` set.
+    static func decideFirstChunk(_ content: Data, endOfStream: Bool) -> FirstChunkDecision {
+        if !content.isEmpty {
+            return .bytes(content)
+        }
+        return endOfStream ? .peerClosed : .keepWaiting
+    }
+
     static func readStream(
         _ stream: QUIC.Stream<QUICStream>,
         timeoutMilliseconds: Int32,
         maxBytes: Int = 8_192
     ) async throws -> Data {
         try await withTimeout(timeoutMilliseconds) {
-            let chunk = try await stream.receive(atMost: maxBytes)
-            return chunk.content
+            while true {
+                let chunk = try await stream.receive(atMost: maxBytes)
+                switch decideFirstChunk(chunk.content, endOfStream: chunk.metadata.endOfStream) {
+                case .bytes(let bytes):
+                    return bytes
+                case .keepWaiting:
+                    continue
+                case .peerClosed:
+                    // A payload read is allowed to see the end of the stream: an empty
+                    // result with nothing behind it is how a reader learns the peer is
+                    // done. The callers that need bytes use `readFirstChunk`.
+                    return Data()
+                }
+            }
         }
     }
 
-    static func readPeerControlStream(
+    /// The first bytes of a stream whose protocol requires data, refusing a peer that
+    /// ended the stream before writing any.
+    ///
+    /// The codecs report that emptiness as `QUICCodecError.truncated(needed: 1,
+    /// available: 0)`, which is a true statement about the bytes and a misleading one
+    /// about the cause, so the runtime names it here instead (issue #24).
+    static func readFirstChunk(
+        _ stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        maxBytes: Int = 8_192
+    ) async throws -> Data {
+        let bytes = try await readStream(
+            stream,
+            timeoutMilliseconds: timeoutMilliseconds,
+            maxBytes: maxBytes
+        )
+        guard !bytes.isEmpty else {
+            throw WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID: stream.streamID)
+        }
+        return bytes
+    }
+
+    fileprivate static func readPeerControlStream(
         from inboundStreams: InteroperableQUICInboundStreamCollector,
         role: String,
         timeoutMilliseconds: Int32
@@ -1807,7 +1873,7 @@ private enum InteroperableQUICHelpers {
                 )
             }
             InteroperableQUICDebug.log("\(role) got peer unidirectional stream \(stream.streamID)")
-            let bytes = try await readStream(stream, timeoutMilliseconds: timeoutMilliseconds)
+            let bytes = try await readFirstChunk(stream, timeoutMilliseconds: timeoutMilliseconds)
             let prefix = try HTTP3StreamTypeParser.parsePrefix(bytes)
             switch prefix.type {
             case HTTP3StreamType.control:
