@@ -39,6 +39,7 @@ fi
 
 python3 "$c99_root/tests/vectors/extract_rfc9001_keys.py" "$rfc" --check
 python3 "$c99_root/tests/vectors/extract_rfc9001_client_initial.py" "$rfc" --check
+python3 "$c99_root/tests/vectors/extract_rfc9001_retry.py" "$rfc" --check
 
 # RFC 8448's key schedule trace, which is the vectors for the TLS layer.
 rfc8448="$rfc_dir/rfc8448.txt"

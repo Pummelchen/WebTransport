@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 76,181 checks, run by `ctest` and again under
+- 38 unit test files and 76,186 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -323,6 +323,14 @@ What is here:
   a short Initial datagram before reading it. The expansion is applied by rebuilding rather than
   computed ahead of the build, because the long header's Length varint widens with the value it carries;
   a pass that lands a byte over trims padding instead of putting a datagram above the path's limit.
+- **The Retry integrity tag is checked against the RFC** (Phase 4, thirty-seventh part): RFC 9001
+  appendix A.4's Retry packet and the tag it prints are extracted by
+  `tests/vectors/extract_rfc9001_retry.py`, which refuses to write a block that does not parse as a
+  version-1 Retry whose original destination connection ID agrees with A.2's client Initial packet. The
+  tag was computed but never asserted against the document before this -- the test that existed proved it
+  was computed consistently, which a wrong constant would also satisfy. Now the RFC's own tag is the
+  expectation, and the same packet with one changed byte, or with another original connection ID, is
+  refused.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

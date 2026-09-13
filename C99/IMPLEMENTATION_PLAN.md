@@ -1209,6 +1209,18 @@ before the rule under test could refuse it.
 Two tests: the client's four-byte CRYPTO payload leaves as a 1200-byte datagram the server processes, and a
 hand-built short Initial is discarded with nothing recorded for it and no connection error.
 
+**Thirty-seventh part done: the Retry integrity tag is checked against the RFC.** RFC 9001 section 5.8's
+tag is the only thing that lets a client tell a Retry the server sent from one an attacker injected, and
+until now nothing asserted the value this implementation produces against the document: the test that
+existed proved the tag was computed consistently, which a wrong key or nonce would satisfy just as well.
+`tests/vectors/extract_rfc9001_retry.py` now extracts appendix A.4's Retry packet and the tag printed with
+it, and refuses to write a block that does not parse as a version-1 Retry with a zero-length Destination
+Connection ID, a Source Connection ID of 1..20 bytes, a non-empty token and exactly sixteen bytes of tag --
+and whose named original destination connection ID is not the one A.2's client Initial packet carries, read
+from that packet's hex rather than from the sentence beside it. The test then requires the implementation's
+tag to equal the RFC's, the RFC's packet to verify, and a changed byte or a different original connection
+ID to be refused. `check-vectors.sh` runs the extractor's `--check` alongside the others.
+
 Implement the production network state machine.
 
 Tasks:

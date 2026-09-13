@@ -36,6 +36,7 @@
 #include "webtransport/quic/protection.h"
 
 #include "rfc9001_client_initial.h"
+#include "rfc9001_retry.h"
 #include "rfc9001_vectors.h"
 
 /* The header lengths the appendixes print, and the offsets they imply. Both
@@ -883,6 +884,41 @@ static void test_retry_integrity_tag(void) {
                    wt_quic_retry_integrity_verify(odcid, sizeof(odcid), NULL, 32U));
 }
 
+/* RFC 9001 appendix A.4: the Retry packet the document prints, and the integrity tag it prints with
+ * it. The test above proves the tag is computed consistently; this one proves it is computed
+ * correctly, which is the difference that matters for a value whose only job is to let a client tell a
+ * Retry the server sent from one an attacker injected. Both the packet and the tag come from the
+ * RFC's own hex, extracted by tests/vectors/extract_rfc9001_retry.py and checked there against A.2's
+ * client Initial, rather than transcribed into this file. */
+static void test_retry_integrity_vector(void) {
+  uint8_t tag[WT_AEAD_TAG_LEN];
+  uint8_t tampered[WT_RFC9001_RETRY_PACKET_LEN];
+  uint8_t other_odcid[WT_RFC9001_RETRY_ODCID_LEN];
+  size_t without_tag = sizeof(WT_RFC9001_RETRY_PACKET) - WT_RFC9001_RETRY_TAG_LEN;
+
+  WT_EXPECT_OK("the RFC's Retry packet produces a tag",
+               wt_quic_retry_integrity_tag(WT_RFC9001_RETRY_ODCID, WT_RFC9001_RETRY_ODCID_LEN,
+                                           WT_RFC9001_RETRY_PACKET, without_tag, tag));
+  WT_EXPECT_BYTES("which is the tag the RFC prints", WT_RFC9001_RETRY_TAG, tag,
+                  WT_RFC9001_RETRY_TAG_LEN);
+  WT_EXPECT_OK("and the RFC's packet verifies",
+               wt_quic_retry_integrity_verify(WT_RFC9001_RETRY_ODCID, WT_RFC9001_RETRY_ODCID_LEN,
+                                              WT_RFC9001_RETRY_PACKET,
+                                              WT_RFC9001_RETRY_PACKET_LEN));
+
+  memcpy(tampered, WT_RFC9001_RETRY_PACKET, sizeof(tampered));
+  tampered[12] ^= 0x01U; /* inside the Source Connection ID the tag covers */
+  WT_EXPECT_STATUS("a changed byte is refused", WT_ERR_AUTHENTICATION,
+                   wt_quic_retry_integrity_verify(WT_RFC9001_RETRY_ODCID, WT_RFC9001_RETRY_ODCID_LEN,
+                                                  tampered, sizeof(tampered)));
+  memcpy(other_odcid, WT_RFC9001_RETRY_ODCID, sizeof(other_odcid));
+  other_odcid[0] ^= 0x01U;
+  WT_EXPECT_STATUS("and so is another original destination connection ID", WT_ERR_AUTHENTICATION,
+                   wt_quic_retry_integrity_verify(other_odcid, sizeof(other_odcid),
+                                                  WT_RFC9001_RETRY_PACKET,
+                                                  WT_RFC9001_RETRY_PACKET_LEN));
+}
+
 int main(void) {
   WT_EXPECT_OK("the crypto backend initialises", wt_crypto_init());
 
@@ -894,5 +930,6 @@ int main(void) {
   test_header_protection_mask_width();
 
   test_retry_integrity_tag();
+  test_retry_integrity_vector();
   WT_TEST_MAIN_END("wt_quic_protection");
 }
