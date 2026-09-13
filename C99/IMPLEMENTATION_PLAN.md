@@ -2361,6 +2361,25 @@ granted. Reproducing that in isolation (set 8, open peer streams, read the grant
 carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
 saw STREAM frames, and it walked frames at all.
 
+### Phase 9's seventeenth part: the stream-limit suspect is eliminated, and the question moves to the client's sends
+
+The isolated check did its job by REMOVING a suspect rather than confirming one. Two facts, both measurements:
+
+- The grants the admission check reads are **8 in both classes on both sides**, asserted on the very
+  connections that closed -- so the setter, the getter and the admission field agree, and the previous round's
+  "the accounting believed one stream was granted" reading was wrong.
+- Instrumenting `ensure_peer_stream` itself showed it runs **exactly once** on the server (stream 2,
+  `bidir=0`, `index=0`, `granted=8`) and admits it. It never refuses anything, so `STREAM_LIMIT_ERROR` does not
+  come from the admission check at all.
+
+What the measurements leave is a sharper and different question: the server's walk saw **four STREAM frames,
+all for stream 2** -- the client's data for streams 6, 10 and 0 never appears in it, although
+`wt_http3_driver_start_own_streams` and `send_message` both returned OK and the frames were recorded against
+their streams. The server originated a close with transport error code 3 and the client closed in response.
+So the next place to look is the CLIENT's send path for its SECOND, THIRD and FOURTH stream: accepted,
+recorded, and walked by nobody. That is WT-110's next step, and it is the fourth distinct hypothesis the
+measurements have produced -- each previous one eliminated rather than argued away.
+
 The test asserts only what is true today (the CONNECT goes out, the client records and tracks its request
 stream), and WT-110 carries the measurement and the next step.
 

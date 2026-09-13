@@ -425,6 +425,18 @@ static void test_a_connect_crosses_a_real_connection(void) {
     }
   }
 
+  /* The grant the admission check will read, asserted on the very connections that closed with
+   * STREAM_LIMIT_ERROR: if the setter and the check disagree about which slot a direction uses, or the
+   * handshake overwrites the slot, this is where that shows. */
+  WT_EXPECT_U64("the server's unidirectional grant is what it asked for", 8U,
+                wt_quic_connection_max_streams(&pair.server.connection, WT_QUIC_STREAM_UNIDIRECTIONAL));
+  WT_EXPECT_U64("and its bidirectional grant too", 8U,
+                wt_quic_connection_max_streams(&pair.server.connection, WT_QUIC_STREAM_BIDIRECTIONAL));
+  WT_EXPECT_U64("the client's unidirectional grant as well", 8U,
+                wt_quic_connection_max_streams(&pair.client.connection, WT_QUIC_STREAM_UNIDIRECTIONAL));
+  WT_EXPECT_U64("and the client's bidirectional one", 8U,
+                wt_quic_connection_max_streams(&pair.client.connection, WT_QUIC_STREAM_BIDIRECTIONAL));
+
   /* Each side of the HTTP/3 conversation: an endpoint, a driver, and the sink the driver reports to. */
   wt_http3_endpoint_init(&client.endpoint, WT_HTTP3_ROLE_CLIENT);
   wt_http3_endpoint_init(&server.endpoint, WT_HTTP3_ROLE_SERVER);
@@ -504,6 +516,21 @@ static void test_a_connect_crosses_a_real_connection(void) {
    * granted. That is the next thing to reproduce in isolation (set 8, open peer streams, read the grant), and
    * WT-110 carries it. The assertions below are the ones that are TRUE today and that would have saved three
    * rounds: frames DO arrive, and the walk DOES see them. */
+  /* MEASURED, and it ELIMINATED the previous round's suspect. The admission check
+   * (`ensure_peer_stream`) runs exactly ONCE on the server -- for stream 2, `bidir=0`, `index=0`,
+   * `granted=8` -- and admits it; it never refuses anything, so `STREAM_LIMIT_ERROR` does not come from
+   * there. What the measurements now say:
+   *
+   *   - the server saw FOUR STREAM frames, all for stream 2 (the control stream): the client's data for
+   *     streams 6, 10 and 0 never appears in the server's walk at all, although the driver's own sends
+   *     returned OK;
+   *   - the server ORIGINATED a close with transport error code 3, and the client closed in response;
+   *   - the grants the admission check reads are 8 in both classes on both sides, asserted above.
+   *
+   * So the next question is the CLIENT's send path for its SECOND, THIRD and FOURTH stream -- accepted,
+   * recorded, and walked by nobody -- which is a different place from every hypothesis so far. WT-110
+   * carries it.
+   */
   WT_EXPECT_TRUE("the server's walk saw STREAM frames", pair.server.connection.stream_frames_seen > 0U);
   WT_EXPECT_TRUE("and walked frames at all", pair.server.connection.frames_walked > 0U);
   /* The pump's own instrumentation, asserted rather than printed: both sides read packets, neither side
