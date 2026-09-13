@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 70 unit test files and 79,589 checks, run by `ctest` and again under
+- 71 unit test files and 79,653 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -58,6 +58,17 @@ What is here:
   deadline arithmetic does not wrap near the counter's top. Note that Darwin has
   no LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by
   a local run on this machine; that is how the first one was found.
+- **The command-line tools' options** (Phase 9): `cli/options.h` is the one parser the
+  three tools share, because a flag that means one thing in one tool and another in the
+  next is worse than a flag that is missing. Two rules shape it: an UNSUPPORTED mode is
+  not an unknown one — `--transport packet` is what this build has, and
+  `--transport quic` is refused by name with exit code 2, because a tool that silently
+  ignores a mode it cannot honour produces reports nobody can trust — and a flag that
+  takes a value never swallows the NEXT FLAG, so a script's typo cannot become a
+  connection attempt. `--json` writes the parsed options as one machine-readable object
+  with stable field names, and the parser is a library function rather than argv walking
+  inside each `main`, which is what lets all of this be a failing check rather than a
+  manual attempt.
 - **The public API** (Phase 8), which is what a consumer outside this repository
   builds against; `docs/PUBLIC-API.md` is its contract, and
   `apps/wt-api-sample/main.c` is a consumer that includes only the umbrella header

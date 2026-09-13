@@ -2174,6 +2174,27 @@ keys and no room, so it refuses, and the assertion is that the adapter returns e
 returns rather than inventing a status of its own. That is the only part of a thin layer that can be wrong
 without a handshake, and the only part worth a unit test.
 
+### Phase 9's eleventh part: one options parser for the three tools
+
+`cli/options.h` parses exactly the flags the plan names, and the three tools share it. The reason is the plan's
+own requirement rather than tidiness: a flag that means one thing in one tool and another in the next is worse
+than a flag that is missing, and the only way to keep one meaning is one implementation. The parser is a
+library function rather than argv walking inside each `main`, which is what makes every rule here a failing
+check: the missing value, the unsupported mode, the timeout that is digits only, the positional address.
+
+Two rules are the interesting ones. **An unsupported mode is not an unknown one**: `--transport packet` is what
+this build has, and `--transport quic` is refused by NAME with exit code 2, because a tool that silently
+ignores a mode it cannot honour writes reports nobody can trust. And **a flag that takes a value never takes
+the next flag as that value**: `--timeout-ms --connect` is a missing value rather than a timeout of
+"`--connect`", so a script's typo cannot become a connection attempt. A single dash, by contrast, is a value
+and not a flag, because refusing `-host:1` as an address would be this parser inventing a rule about host names
+it has no business having.
+
+`wt_cli_options_check` is the one place that says "a connect needs an address" and "the development bypass is
+refused outside loopback", so the three tools cannot disagree about what a usable command line is. `--json`
+writes the parsed options as one object with stable field names, and the test asserts the text of that object,
+because a field that moves changes a machine's input.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

@@ -1,0 +1,243 @@
+/* The command-line tools' options (Phase 9). */
+
+#include "webtransport/cli/options.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#define WT_CLI_TIMEOUT_DEFAULT 5000U
+
+wt_cli_options_t wt_cli_options_default(void) {
+  wt_cli_options_t options;
+  memset(&options, 0, sizeof(options));
+  options.mode = WT_CLI_MODE_NONE;
+  options.transport = WT_CLI_TRANSPORT_PACKET;
+  options.trust = WT_CLI_TRUST_SYSTEM;
+  options.exchange = WT_CLI_EXCHANGE_STREAM;
+  options.timeout_ms = WT_CLI_TIMEOUT_DEFAULT;
+  return options;
+}
+
+const char *wt_cli_mode_name(wt_cli_mode_t mode) {
+  switch (mode) {
+    case WT_CLI_MODE_LISTEN: return "listen";
+    case WT_CLI_MODE_CONNECT: return "connect";
+    case WT_CLI_MODE_NONE: break;
+  }
+  return "none";
+}
+
+const char *wt_cli_transport_name(wt_cli_transport_t transport) {
+  switch (transport) {
+    case WT_CLI_TRANSPORT_PACKET: return "packet";
+  }
+  return "unknown";
+}
+
+const char *wt_cli_trust_name(wt_cli_trust_t trust) {
+  switch (trust) {
+    case WT_CLI_TRUST_SYSTEM: return "system";
+    case WT_CLI_TRUST_LOCAL_DEVELOPMENT: return "local-development";
+  }
+  return "unknown";
+}
+
+const char *wt_cli_exchange_name(wt_cli_exchange_t exchange) {
+  switch (exchange) {
+    case WT_CLI_EXCHANGE_STREAM: return "stream";
+    case WT_CLI_EXCHANGE_DATAGRAM: return "datagram";
+  }
+  return "unknown";
+}
+
+static int is_flag(const char *argument, const char *name) {
+  return strcmp(argument, name) == 0;
+}
+
+/* A timeout is milliseconds, and only digits: a value with a sign, a suffix or a space is not
+ * a number this tool will guess at. */
+static int parse_timeout(const char *value, uint64_t *out) {
+  uint64_t total = 0U;
+  size_t i;
+
+  if (value == NULL || value[0] == '\0') return 0;
+  for (i = 0U; value[i] != '\0'; i++) {
+    uint64_t digit;
+    if (value[i] < '0' || value[i] > '9') return 0;
+    digit = (uint64_t)(value[i] - '0');
+    if (total > (UINT64_MAX - digit) / 10U) return 0;
+    total = total * 10U + digit;
+  }
+  *out = total;
+  return 1;
+}
+
+static wt_status_t fail(const char *message, const char *argument, const char **out_error,
+                        const char **out_error_argument) {
+  if (out_error != NULL) *out_error = message;
+  if (out_error_argument != NULL) *out_error_argument = argument;
+  return WT_ERR_INVALID_ARGUMENT;
+}
+
+wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char *const *argv,
+                                 const char **out_error, const char **out_error_argument) {
+  int i;
+
+  if (options == NULL || argv == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (out_error != NULL) *out_error = NULL;
+  if (out_error_argument != NULL) *out_error_argument = NULL;
+
+  /* The options start from the defaults every time, so a caller cannot inherit a mode from a
+   * previous parse. */
+  *options = wt_cli_options_default();
+
+  for (i = 1; i < argc; i++) {
+    const char *argument = argv[i];
+
+    if (is_flag(argument, "--listen")) {
+      options->mode = WT_CLI_MODE_LISTEN;
+    } else if (is_flag(argument, "--connect")) {
+      options->mode = WT_CLI_MODE_CONNECT;
+    } else if (is_flag(argument, "--json")) {
+      options->json = 1;
+    } else if (is_flag(argument, "--settings-validation")) {
+      options->settings_validation = 1;
+    } else if (is_flag(argument, "--transport") || is_flag(argument, "--trust") ||
+               is_flag(argument, "--origin") || is_flag(argument, "--protocol") ||
+               is_flag(argument, "--exchange") || is_flag(argument, "--message") ||
+               is_flag(argument, "--timeout-ms") || is_flag(argument, "--scenario") ||
+               is_flag(argument, "--address")) {
+      const char *value;
+      /* A flag that takes a value does not take the NEXT FLAG as its value. */
+      if (i + 1 >= argc) return fail("missing value", argument, out_error, out_error_argument);
+      value = argv[i + 1];
+      if (value[0] == '-' && value[1] == '-') {
+        return fail("missing value", argument, out_error, out_error_argument);
+      }
+      i++;
+
+      if (is_flag(argument, "--transport")) {
+        if (strcmp(value, "packet") == 0) {
+          options->transport = WT_CLI_TRANSPORT_PACKET;
+        } else {
+          /* Supported modes are named, and everything else is refused with the same message:
+           * a tool that half-supports a transport writes reports nobody can trust. */
+          return fail("unsupported transport", value, out_error, out_error_argument);
+        }
+      } else if (is_flag(argument, "--trust")) {
+        if (strcmp(value, "system") == 0) {
+          options->trust = WT_CLI_TRUST_SYSTEM;
+        } else if (strcmp(value, "local-development") == 0) {
+          options->trust = WT_CLI_TRUST_LOCAL_DEVELOPMENT;
+        } else {
+          return fail("unsupported trust mode", value, out_error, out_error_argument);
+        }
+        options->trust_set = 1;
+      } else if (is_flag(argument, "--origin")) {
+        options->origin = value;
+      } else if (is_flag(argument, "--protocol")) {
+        options->protocol = value;
+      } else if (is_flag(argument, "--message")) {
+        options->message = value;
+      } else if (is_flag(argument, "--address")) {
+        options->address = value;
+      } else if (is_flag(argument, "--exchange")) {
+        if (strcmp(value, "stream") == 0) {
+          options->exchange = WT_CLI_EXCHANGE_STREAM;
+        } else if (strcmp(value, "datagram") == 0) {
+          options->exchange = WT_CLI_EXCHANGE_DATAGRAM;
+        } else {
+          return fail("unsupported exchange", value, out_error, out_error_argument);
+        }
+      } else if (is_flag(argument, "--scenario")) {
+        if (strcmp(value, "all") != 0) {
+          return fail("unsupported scenario", value, out_error, out_error_argument);
+        }
+        options->scenario_all = 1;
+      } else if (is_flag(argument, "--timeout-ms")) {
+        if (!parse_timeout(value, &options->timeout_ms)) {
+          return fail("invalid timeout", value, out_error, out_error_argument);
+        }
+        options->timeout_set = 1;
+      }
+    } else {
+      /* The address may also be positional, which is how a tool is usually driven by hand. A
+       * double dash is a flag and an unknown one is refused; a SINGLE dash is a value, because
+       * refusing to accept `-host:1` as an address would be this parser inventing a rule about
+       * host names it has no business having. */
+      if (argument[0] == '-' && argument[1] == '-') {
+        return fail("unknown flag", argument, out_error, out_error_argument);
+      }
+      if (options->address != NULL) {
+        return fail("more than one address", argument, out_error, out_error_argument);
+      }
+      options->address = argument;
+    }
+    options->parsed = i;
+  }
+  return WT_OK;
+}
+
+wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **out_error) {
+  if (options == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (out_error != NULL) *out_error = NULL;
+
+  if (options->mode == WT_CLI_MODE_NONE) {
+    if (out_error != NULL) *out_error = "no mode: pass --listen or --connect";
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  if (options->address == NULL || options->address[0] == '\0') {
+    if (out_error != NULL) *out_error = "no address: pass host:port";
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  if (options->timeout_ms == 0U) {
+    if (out_error != NULL) *out_error = "a zero timeout would wait forever";
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  /* The development bypass is tied to a loopback name in the API as well, but a tool that
+   * accepts it for any address would be offering something the library will refuse later;
+   * saying so here is the cheap place to say it. */
+  if (options->trust == WT_CLI_TRUST_LOCAL_DEVELOPMENT) {
+    if (out_error != NULL) {
+      *out_error = "the development bypass is refused for a non-loopback address";
+    }
+    if (strncmp(options->address, "localhost", 9U) != 0 &&
+        strncmp(options->address, "127.0.0.1", 9U) != 0 &&
+        strncmp(options->address, "[::1]", 5U) != 0) {
+      return WT_ERR_INVALID_ARGUMENT;
+    }
+  }
+  return WT_OK;
+}
+
+void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
+  if (options == NULL || stream == NULL) return;
+  fprintf(stream, "{\"mode\":\"%s\",\"address\":", wt_cli_mode_name(options->mode));
+  if (options->address == NULL) {
+    fprintf(stream, "null");
+  } else {
+    /* No escaping is needed for the addresses this tool accepts, and inventing an escaper here
+     * would be a second, weaker implementation of one the library already owns. */
+    fprintf(stream, "\"%s\"", options->address);
+  }
+  fprintf(stream, ",\"transport\":\"%s\",\"trust\":\"%s\",\"trustSet\":%s",
+          wt_cli_transport_name(options->transport), wt_cli_trust_name(options->trust),
+          options->trust_set != 0 ? "true" : "false");
+  fprintf(stream, ",\"origin\":");
+  if (options->origin == NULL) {
+    fprintf(stream, "null");
+  } else {
+    fprintf(stream, "\"%s\"", options->origin);
+  }
+  fprintf(stream, ",\"protocol\":");
+  if (options->protocol == NULL) {
+    fprintf(stream, "null");
+  } else {
+    fprintf(stream, "\"%s\"", options->protocol);
+  }
+  fprintf(stream, ",\"settingsValidation\":%s,\"exchange\":\"%s\",\"timeoutMs\":%llu",
+          options->settings_validation != 0 ? "true" : "false",
+          wt_cli_exchange_name(options->exchange), (unsigned long long)options->timeout_ms);
+  fprintf(stream, ",\"scenario\":%s,\"json\":%s}\n", options->scenario_all != 0 ? "\"all\"" : "null",
+          options->json != 0 ? "true" : "false");
+}
