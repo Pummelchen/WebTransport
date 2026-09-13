@@ -251,3 +251,7 @@ Report vulnerabilities privately through [GitHub Security Advisories](https://gi
 ## License
 
 WebTransport is available under the [MIT License](LICENSE).
+
+## Contact
+
+Questions, bug reports and suggestions are always welcome. You can contact André Borchert by email at [0xa0b1@gmail.com](mailto:0xa0b1@gmail.com).
