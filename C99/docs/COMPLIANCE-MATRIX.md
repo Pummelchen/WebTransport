@@ -32,6 +32,7 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | 5.2 | WT_DRAIN_SESSION stops new streams and lets existing ones finish | `wt_webtransport_session_on_drain`, `wt_webtransport_drain_session_write` | `test_webtransport_session`, `test_api_session` | tested |
 | 5.4 | WT_CLOSE_WEBTRANSPORT_SESSION carries the first close's code | `wt_webtransport_session_on_close`, `wt_webtransport_close_session_parse` | `test_webtransport_session` | tested |
 | 5.4 | A close reason above the draft's ceiling is refused | `WT_CAPSULE_CLOSE_MAX_REASON` | `test_webtransport_capsule` | tested |
+| 3.2 | A sub-protocol is negotiated through `wt-protocol`, a Structured Fields list in the request and a string item in the response | `wt_webtransport_protocol_decode_list`, `wt_webtransport_session_request_negotiate`, `wt_webtransport_session_response_selected_protocol`, `wt_webtransport_protocol_write_field` | `test_webtransport_protocol`, `protocol-negotiation`, `protocol-negotiation-required-refusal`, `protocol-negotiation-unoffered-selection` | tested |
 | 6 | The CONNECT stream ending ends the session | `wt_webtransport_session_on_stream_end` | `test_webtransport_session` | tested |
 | -- | QUIC transport the session runs on | `quic/` (frames, packets, loss, congestion, streams, DATAGRAM) | `test_quic_*`, `test_runtime_session_pair` | tested |
 | -- | HTTP/3 the session runs on | `http3/` (frames, SETTINGS, control, request, QPACK, GOAWAY, driver) | `test_http3_*` | tested |

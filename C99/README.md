@@ -218,7 +218,7 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **24 of 24 draft-16 requirements in
+  `scripts/score-matrix.sh` rather than from memory: **25 of 25 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 6 of the plan's 9 completion
   criteria are met, 2 partial and 1 not met.** The matrix coverage is 100% *of the matrix*, which is
   not the same as being done: the criteria that are not met are outside the matrix and outside this

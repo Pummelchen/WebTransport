@@ -20,6 +20,7 @@
 #include "scenario_headers.h"
 #include "scenario_isolation.h"
 #include "scenario_matrix.h"
+#include "scenario_protocol.h"
 #include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/capsule.h"
@@ -214,6 +215,9 @@ int main(int argc, char **argv) {
     wt_scenario_connect_matrix(&report);
     wt_scenario_malformed_flow_matrix(&report);
     wt_scenario_flow_control_matrix(&report);
+
+    /* The sub-protocol negotiation in both directions, through the field section. */
+    wt_scenario_protocol_run(&report);
 
     /* The two session scenarios: two endpoints in ONE process over loopback, with a generated and pinned
      * identity, running the whole exchange -- handshake, CONNECT, response, a stream message and a datagram.
