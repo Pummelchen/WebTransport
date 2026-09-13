@@ -266,7 +266,7 @@ static void test_a_data_stream_this_endpoint_opened(void) {
   WT_EXPECT_BYTES("and whose rest is the message", k_message, fake.sent + prefix_length, sizeof(k_message));
   WT_EXPECT_INT("and the message finishes the stream", 1, fake.sent_fin);
   WT_EXPECT_INT("and the stream is remembered as this endpoint's", 1,
-                wt_http3_driver_owns_data_stream(&driver, stream_id));
+                wt_http3_driver_is_data_stream(&driver, stream_id));
 
   /* The ANSWER on the same stream: payload with NO prefix, which is what a responder sends. */
   memset(&frame, 0, sizeof(frame));
@@ -298,8 +298,61 @@ static void test_a_data_stream_this_endpoint_opened(void) {
                 (uint64_t)sink_log.calls);
 }
 
+/* A peer that sends the prefix and the message in SEPARATE STREAM frames (WT-156).
+ *
+ * This is what aioquic's client does, and what turned `wt-server-c99`'s first session with a third-party client into
+ * `"closeCause":"truncated"`: the prefix was classified correctly and then FORGOTTEN, so the next frame on the same
+ * stream took the request-stream path and its bytes were parsed as HTTP/3 frames -- a frame type read out of the
+ * message itself, waiting for a length that never came, and a connection closed at FIN. The tree's own client puts
+ * the prefix and the message in one frame, which is exactly why every test in it passed. */
+static void test_a_data_stream_the_peer_splits_across_frames(void) {
+  static const uint8_t k_prefix[] = {0x40U, 0x41U, 0x00U}; /* the bidirectional signal value and session 0 */
+  static const uint8_t k_message[] = {'h', 'e', 'l', 'l', 'o'};
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  data_stream_sink_t sink_log;
+  wt_http3_driver_sink_t sink;
+  wt_quic_frame_t frame;
+
+  memset(&sink_log, 0, sizeof(sink_log));
+  memset(&sink, 0, sizeof(sink));
+  sink.context = &sink_log;
+  sink.on_stream_data = data_stream_on_data;
+
+  /* A SERVER: the peer initiates the stream, and this endpoint is the one that must classify it. */
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_driver_set_session_id(&driver, 0U);
+
+  memset(&frame, 0, sizeof(frame));
+  frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+  frame.as.stream.id = 4U; /* the peer's first data stream, after its request on stream 0 */
+  frame.as.stream.offset = 0U;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = k_prefix;
+  frame.as.stream.length = sizeof(k_prefix);
+  frame.as.stream.fin = 0;
+  WT_EXPECT_OK("the prefix frame is routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_U64("delivering nothing yet, because the prefix carries no payload", 0U, (uint64_t)sink_log.calls);
+  WT_EXPECT_INT("but the stream is remembered as a data stream", 1,
+                wt_http3_driver_is_data_stream(&driver, 4U));
+
+  /* The message, in the NEXT frame, at a non-zero offset: this is the frame that used to be mis-routed. */
+  frame.as.stream.offset = sizeof(k_prefix);
+  frame.as.stream.data = k_message;
+  frame.as.stream.length = sizeof(k_message);
+  frame.as.stream.fin = 1;
+  WT_EXPECT_OK("the message frame is routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_U64("straight to the session sink", 1U, (uint64_t)sink_log.calls);
+  WT_EXPECT_BYTES("as the payload, unchanged", k_message, sink_log.bytes, sizeof(k_message));
+  WT_EXPECT_INT("with the peer's end of stream", 1, sink_log.fin);
+}
+
 int main(void) {
   test_the_streams_a_session_start_opens();
   test_a_data_stream_this_endpoint_opened();
+  test_a_data_stream_the_peer_splits_across_frames();
   WT_TEST_MAIN_END("wt_http3_driver_streams");
 }

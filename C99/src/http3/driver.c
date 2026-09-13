@@ -1,6 +1,7 @@
 /* Driving an HTTP/3 endpoint from a connection (Phase 9). */
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "webtransport/http3/driver.h"
 
@@ -20,6 +21,15 @@ void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoi
    * Zeroing the struct makes a forgotten field impossible, and the one field that is not zero is named here. */
   memset(driver, 0, sizeof(*driver));
   driver->endpoint = endpoint;
+}
+
+/* Remember a stream whose prefix is settled: this endpoint opened it, or the peer did and the prefix said
+ * WebTransport. One table, one rule -- the bytes after the prefix are the session's. */
+static wt_status_t remember_data_stream(wt_http3_driver_t *driver, uint64_t stream_id) {
+  if (driver->data_stream_count >= WT_HTTP3_DRIVER_DATA_STREAMS_MAX) return WT_ERR_LIMIT;
+  driver->data_stream_ids[driver->data_stream_count] = stream_id;
+  driver->data_stream_count++;
+  return WT_OK;
 }
 
 void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_id) {
@@ -425,10 +435,32 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
    * for. */
   if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) {
       uint64_t stream_id = frame->as.stream.id;
+      /* A DIAGNOSTIC, gated by WT_HTTP3_STREAM_LOG: the STREAM frames this layer is asked to route, as the
+       * connection reported them. Which of the two -- a WebTransport data stream or an HTTP/3 request stream -- is
+       * decided below, and "the prefix arrived in two frames" and "the prefix was never recognized" look the same
+       * from the caller's side without this (WT-156). */
+      {
+        const char *stream_log_path = getenv("WT_HTTP3_STREAM_LOG");
+        if (stream_log_path != NULL) {
+          FILE *stream_log = fopen(stream_log_path, "a");
+          if (stream_log != NULL) {
+            size_t index;
+            fprintf(stream_log, "stream=%llu offset=%llu has_length=%d length=%llu fin=%d bytes=",
+                    (unsigned long long)stream_id, (unsigned long long)frame->as.stream.offset,
+                    frame->as.stream.has_length, (unsigned long long)frame->as.stream.length,
+                    frame->as.stream.fin);
+            for (index = 0U; index < frame->as.stream.length && index < 48U; index++) {
+              fprintf(stream_log, "%02x", frame->as.stream.data[index]);
+            }
+            fprintf(stream_log, "\n");
+            (void)fclose(stream_log);
+          }
+        }
+      }
       /* A WebTransport data stream THIS endpoint opened: the prefix went out with the first bytes, so what
        * arrives on it is the responder's payload. Classifying it again is what the peer's echo tripped over --
        * its first bytes were read as a signal value, refused, and the refusal closed the connection (WT-135). */
-      if (wt_http3_driver_owns_data_stream(driver, stream_id)) {
+      if (wt_http3_driver_is_data_stream(driver, stream_id)) {
         if (sink == NULL || sink->on_stream_data == NULL) return WT_OK;
         return sink->on_stream_data(sink->context, stream_id, frame->as.stream.data,
                                     frame->as.stream.length, frame->as.stream.fin);
@@ -502,6 +534,14 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
           if (held != NULL) forget_pending(driver, stream_id);
           if (classified == WT_OK && start_kind == WT_HTTP3_BIDI_START_WEBTRANSPORT) {
             if (driver->session_id_set != 0 && prefix_session != driver->session_id) return WT_ERR_PROTOCOL;
+            /* The prefix is settled: recorded so that the bytes the peer sends NEXT on this stream are the
+             * session's payload rather than a second prefix or an HTTP/3 frame. A peer may send the prefix and
+             * its message in separate STREAM frames -- which is what aioquic does, and what this tree's own
+             * client never did, so the omission was invisible (WT-156). */
+            {
+              wt_status_t remembered = remember_data_stream(driver, stream_id);
+              if (remembered != WT_OK) return remembered;
+            }
             if (sink != NULL && sink->on_stream_data != NULL) {
               size_t from_assembled = have + copied - consumed;
               if (from_assembled > 0U) {
@@ -743,13 +783,13 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
 
   /* Remembered only once the bytes are away: an owner that has not sent anything yet would make the receive
    * path treat the stream as this endpoint's data stream while the peer has no reason to know it exists. */
-  driver->data_stream_ids[driver->data_stream_count] = stream_id;
-  driver->data_stream_count++;
+  status = remember_data_stream(driver, stream_id);
+  if (status != WT_OK) return status;
   if (out_stream_id != NULL) *out_stream_id = stream_id;
   return WT_OK;
 }
 
-int wt_http3_driver_owns_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id) {
+int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id) {
   size_t index;
 
   if (driver == NULL) return 0;

@@ -45,10 +45,12 @@ extern "C" {
  * than given more memory. */
 #define WT_HTTP3_DRIVER_PENDING_MAX 8U
 
-/* How many WebTransport DATA streams this endpoint may have open at once. A data stream is remembered so that
- * bytes arriving on it are known to be the responder's payload; the number is small because this is a driver
- * for one session's exchange, and a caller past it is refused with WT_ERR_LIMIT rather than given more. */
-#define WT_HTTP3_DRIVER_DATA_STREAMS_MAX 8U
+/* How many WebTransport DATA streams this driver may remember at once. A stream is remembered once its prefix is
+ * settled -- either because this endpoint opened it, or because the peer's prefix was classified -- so that the
+ * bytes after the prefix are the session's payload rather than something to parse again. A caller past the bound
+ * is refused with WT_ERR_LIMIT rather than given more, which is the same rule the endpoint's request table
+ * follows. */
+#define WT_HTTP3_DRIVER_DATA_STREAMS_MAX 32U
 
 typedef struct wt_http3_driver_pending {
   uint64_t stream_id;
@@ -128,11 +130,13 @@ typedef struct wt_http3_driver {
   uint64_t request_stream_id;
   size_t request_length;
   int request_retained;
-  /* The WebTransport DATA streams THIS endpoint opened, by ID. The draft's prefix (`0x41` for a bidirectional
-   * stream, `0x54` for a unidirectional one, then the session ID) is sent by the stream's INITIATOR and by
-   * nobody else (draft-ietf-webtrans-http3-16 sections 4.2 and 4.3), so bytes arriving on a stream opened here
-   * are the responder's payload and must not be read as a prefix a second time. Reading them as one is what
-   * turned a third-party peer's echo into a protocol error that closed the connection (WT-135). */
+  /* The WebTransport DATA streams whose prefix is SETTLED, by ID: the ones this endpoint opened, and the ones a
+   * peer opened whose prefix this driver classified as WebTransport. The draft's prefix (`0x41` for a
+   * bidirectional stream, `0x54` for a unidirectional one, then the session ID) is sent ONCE, by the stream's
+   * initiator (draft-ietf-webtrans-http3-16 sections 4.2 and 4.3), so everything after it on that stream is the
+   * session's payload. Reading the payload as a prefix again closed a connection (WT-135); forgetting the prefix
+   * and parsing the payload as HTTP/3 frames did it too, and only a peer that sends the prefix in one STREAM
+   * frame and its message in the next could show that -- this tree's own client sends both together (WT-156). */
   uint64_t data_stream_ids[WT_HTTP3_DRIVER_DATA_STREAMS_MAX];
   size_t data_stream_count;
 } wt_http3_driver_t;
@@ -326,9 +330,10 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
                                              int unidirectional, const uint8_t *data, size_t length,
                                              int fin, uint64_t now, uint64_t *out_stream_id);
 
-/* Whether `stream_id` is a WebTransport data stream this endpoint opened. The receive path asks, because the
- * answer decides whether the bytes are payload or a prefix. */
-int wt_http3_driver_owns_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id);
+/* Whether `stream_id` is a WebTransport data stream whose prefix is settled, in either direction. The receive
+ * path asks FIRST, because the answer decides whether the bytes are the session's payload or something to
+ * classify. */
+int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id);
 
 /* Answer a request with a status: the response's HEADERS on the stream that carried the request. One per
  * stream, because a second response is not a status an HTTP/3 peer can be given. */

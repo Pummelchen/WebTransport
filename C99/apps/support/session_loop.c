@@ -83,6 +83,25 @@ static void init_side(loop_side_t *side, wt_http3_role_t role) {
 static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint64_t type,
                                          const uint8_t *payload, size_t length, int last) {
   loop_side_t *side = context;
+  /* A DIAGNOSTIC, gated by the same file the request's field section goes to: what this stream carries AFTER the
+   * response. Draft-16 puts the session's capsules on the CONNECT stream, and a third-party peer's flow-control
+   * capsule read as an HTTP/3 frame is a frame whose length runs past the end of the stream (WT-156). */
+  {
+    const char *log_path = getenv("WT_HTTP3_SECTION_LOG");
+    if (log_path != NULL) {
+      FILE *log = fopen(log_path, "a");
+      if (log != NULL) {
+        size_t index;
+        fprintf(log, "frame stream=%llu type=%llu length=%llu last=%d bytes=",
+                (unsigned long long)stream_id, (unsigned long long)type, (unsigned long long)length, last);
+        for (index = 0U; index < length && index < 64U; index++) {
+          fprintf(log, "%02x", payload[index]);
+        }
+        fprintf(log, "\n");
+        (void)fclose(log);
+      }
+    }
+  }
   if (type == WT_HTTP3_FRAME_HEADERS && stream_id == side->request_stream_id) {
     if (side->section_length + length <= sizeof(side->section)) {
       if (length > 0U) memcpy(side->section + side->section_length, payload, length);
