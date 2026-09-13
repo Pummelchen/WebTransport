@@ -2109,6 +2109,29 @@ is exactly as incomplete as one that ends part way through a payload, and the fi
 checked the payload case. The check now covers both, and the test asserts the refusal with the frame error code
 rather than a hang or a silent drop.
 
+### Phase 9's eighth part: the driver as a connection's frame handler
+
+`wt_http3_driver_on_quic_frame` has the shape `wt_quic_connection_set_handlers` wants, so a caller installs the
+driver directly and stops writing routing code. It routes exactly four things, and each has to be here rather
+than in the connection layer: a STREAM frame on a peer-initiated unidirectional stream (reassemble the type
+prefix, then send the bytes either to the frame sink or to the session, depending on a type only the HTTP/3
+layer knows); a STREAM frame on a peer-initiated bidirectional stream (a request stream, whose first frame
+opens it); a DATAGRAM's payload, handed over uninterpreted; and nothing at all for a frame on a stream THIS
+endpoint opened, because the peer's answer on a stream we started belongs to the connection's own stream state
+and routing it here would mean two layers acting on one answer.
+
+The routing is decided by the peer's stream ID bits rather than by a flag the caller passes: RFC 9000 section
+2.1 puts the initiator in the low bit and the direction in the next one, so `wt_quic_stream_id_from_client` and
+`wt_quic_stream_id_is_bidirectional` answer both questions. The test caught exactly that, from the other
+direction: its first draft used stream 3 as a "client-initiated" stream, and 3 has the low bit SET, so it is
+server-initiated -- which the driver correctly treated as its own and refused to route. Reading the stream ID
+rather than trusting a comment is what made the mistake visible.
+
+A switch was the natural shape for the router and `-Wswitch-enum` refused it: the warning wants every
+enumerator named, and this handler acts on two of twenty-odd kinds. The if-chain that replaced it says why in
+the code, because "name twenty-one no-op cases to satisfy a warning" would make the two cases that matter
+harder to find -- the opposite of what the warning exists for.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

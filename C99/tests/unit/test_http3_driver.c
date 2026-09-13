@@ -436,12 +436,165 @@ static void test_frame_boundaries_on_a_stream(void) {
   }
 }
 
+/* A sink that records the session's own data, so the test can assert what the driver handed
+ * over rather than what it happened to leave behind. */
+typedef struct session_log {
+  unsigned streams;
+  size_t stream_bytes;
+  unsigned datagrams;
+  size_t datagram_bytes;
+  uint64_t last_stream_id;
+} session_log_t;
+
+static wt_status_t record_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
+                                      size_t length, int fin) {
+  session_log_t *log = context;
+  (void)data;
+  (void)fin;
+  log->streams++;
+  log->stream_bytes += length;
+  log->last_stream_id = stream_id;
+  return WT_OK;
+}
+
+static wt_status_t record_datagram(void *context, const uint8_t *data, size_t length) {
+  session_log_t *log = context;
+  (void)data;
+  log->datagrams++;
+  log->datagram_bytes += length;
+  return WT_OK;
+}
+
+/* Both logs in one context, because one sink carries all three callbacks: a callback that
+ * cast the context to the wrong log would write into the other one, which is exactly the kind
+ * of mistake this test would then be unable to see. */
+typedef struct route_log {
+  frame_log_t frames;
+  session_log_t session;
+} route_log_t;
+
+static wt_status_t route_frame(void *context, uint64_t stream_id, uint64_t type,
+                               const uint8_t *payload, size_t length, int last) {
+  return record_frame(&((route_log_t *)context)->frames, stream_id, type, payload, length, last);
+}
+
+static wt_status_t route_stream(void *context, uint64_t stream_id, const uint8_t *data,
+                                size_t length, int fin) {
+  return record_stream_data(&((route_log_t *)context)->session, stream_id, data, length, fin);
+}
+
+static wt_status_t route_datagram(void *context, const uint8_t *data, size_t length) {
+  return record_datagram(&((route_log_t *)context)->session, data, length);
+}
+
+static void test_a_connection_frame_is_routed(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_driver_sink_t sink;
+  route_log_t log;
+  wt_quic_frame_t frame;
+  uint8_t prefix[8];
+  uint8_t body[16];
+  size_t prefix_length;
+  size_t i;
+
+  memset(&log, 0, sizeof(log));
+  sink.on_frame_payload = route_frame;
+  sink.on_stream_data = route_stream;
+  sink.on_datagram = route_datagram;
+  sink.context = &log;
+
+  /* A server: the peer is the client, so client-initiated stream IDs (low bit clear) are the
+   * peer's. */
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+
+  /* The draft's WebTransport stream: the prefix, then session bytes that are NOT HTTP/3
+   * log.frames. They go to the session sink, and the frame sink must not see them. */
+  prefix_length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_UNI, prefix, sizeof(prefix));
+  for (i = 0U; i < sizeof(body); i++) body[i] = (uint8_t)(0x10U + i);
+  frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+  frame.as.stream.id = 2U; /* client-initiated unidirectional: low bit clear */
+  frame.as.stream.offset = 0U;
+  frame.as.stream.has_offset = 0;
+  frame.as.stream.fin = 0;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = prefix;
+  frame.as.stream.length = prefix_length;
+  WT_EXPECT_OK("the prefix frame is routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_U64("delivering nothing to the session yet", 0U, (uint64_t)log.session.streams);
+  WT_EXPECT_U64("and nothing to the frame sink", 0U, (uint64_t)log.frames.frames);
+
+  frame.as.stream.offset = prefix_length;
+  frame.as.stream.has_offset = 1;
+  frame.as.stream.data = body;
+  frame.as.stream.length = sizeof(body);
+  WT_EXPECT_OK("the data frame is routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_U64("handing the session its bytes", 1U, (uint64_t)log.session.streams);
+  WT_EXPECT_U64("all of them", (uint64_t)sizeof(body), (uint64_t)log.session.stream_bytes);
+  WT_EXPECT_U64("for that stream", 2U, log.session.last_stream_id);
+
+  /* The control stream's frames go to the FRAME sink instead: the same shape of frame, a
+   * different destination, decided by the stream's type prefix rather than by the caller. */
+  {
+    uint8_t control[32];
+    wt_writer_t cw;
+    wt_http3_frame_t settings = wt_http3_frame_make(WT_HTTP3_FRAME_SETTINGS);
+
+    control[0] = (uint8_t)WT_HTTP3_STREAM_CONTROL;
+    cw = wt_writer_init(control + 1U, sizeof(control) - 1U);
+    settings.payload = NULL;
+    settings.length = 0U;
+    WT_EXPECT_OK("a settings frame writes", wt_http3_frame_encode(&cw, &settings));
+
+    frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+    frame.as.stream.id = 6U; /* client-initiated unidirectional */
+    frame.as.stream.offset = 0U;
+    frame.as.stream.has_offset = 0;
+    frame.as.stream.fin = 0;
+    frame.as.stream.has_length = 1;
+    frame.as.stream.data = control;
+    frame.as.stream.length = 1U + wt_writer_offset(&cw);
+    WT_EXPECT_OK("the control stream's first frame is routed",
+                 wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink,
+                                               64U));
+    WT_EXPECT_U64("to the frame sink", 1U, (uint64_t)log.frames.frames);
+    WT_EXPECT_U64("as SETTINGS", WT_HTTP3_FRAME_SETTINGS, log.frames.last_type);
+    WT_EXPECT_U64("and not to the session", 1U, (uint64_t)log.session.streams);
+  }
+
+  /* A datagram is the session's, uninterpreted. */
+  frame.kind = WT_QUIC_FRAME_KIND_DATAGRAM;
+  frame.as.datagram.data = body;
+  frame.as.datagram.length = 4U;
+  WT_EXPECT_OK("a datagram is routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_U64("as one datagram", 1U, (uint64_t)log.session.datagrams);
+  WT_EXPECT_U64("of its four bytes", 4U, (uint64_t)log.session.datagram_bytes);
+
+  /* A frame on a stream THIS endpoint opened is not routed at all: the peer's answer belongs
+   * to the connection's own stream state. */
+  frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+  frame.as.stream.id = 3U; /* server-initiated: ours, so not routed */
+  WT_EXPECT_OK("our own stream's frame is ignored",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_U64("reaching neither sink", 1U, (uint64_t)log.session.streams);
+
+  /* A frame kind this layer has no interest in is ignored rather than refused. */
+  frame.kind = WT_QUIC_FRAME_KIND_PING;
+  WT_EXPECT_OK("a ping is not ours to route",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
   test_control_and_qpack_reach_the_endpoint();
   test_starting_our_own_streams();
   test_frame_boundaries_on_a_stream();
+  test_a_connection_frame_is_routed();
   test_the_pending_table_is_bounded();
   WT_TEST_MAIN_END("wt_http3_driver");
 }

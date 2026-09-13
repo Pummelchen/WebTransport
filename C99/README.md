@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 70 unit test files and 79,540 checks, run by `ctest` and again under
+- 70 unit test files and 79,558 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -113,7 +113,14 @@ What is here:
     frame's declared length, refused as excessive load before the sink allocates for
     it. A frame whose header or payload is cut off by the stream's end is
     `WT_ERR_TRUNCATED` — one byte of a two-varint header is exactly as incomplete as
-    one byte of a payload, which is the case a naive reassembler misses.
+    one byte of a payload, which is the case a naive reassembler misses. The same header
+    carries the routing that makes the driver installable as a QUIC connection's frame
+    handler: a STREAM frame on a peer's unidirectional stream has its prefix
+    reassembled and its bytes then sent either to the frame sink (HTTP/3's own streams)
+    or to the session (the draft's stream type, whose bytes are not frames at all), a
+    peer's bidirectional stream becomes a request stream, a DATAGRAM's payload goes to
+    the session uninterpreted, and a frame on a stream this endpoint OPENED is not
+    routed at all — the peer's answer belongs to the connection's own stream state.
   - `http3/endpoint.h` — the HTTP/3 endpoint's own streams, which is the lifecycle a
     consumer never sees: our control stream (`0x00`) and QPACK streams (`0x02`/`0x03`)
     exist once each, the peer's unidirectional streams are classified by their type

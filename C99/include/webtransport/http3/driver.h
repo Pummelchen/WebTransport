@@ -28,6 +28,7 @@
 
 #include "webtransport/http3/endpoint.h"
 #include "webtransport/http3/settings.h"
+#include "webtransport/quic/connection.h"
 #include "webtransport/status.h"
 
 #ifdef __cplusplus
@@ -129,8 +130,18 @@ size_t wt_http3_driver_pending_count(const wt_http3_driver_t *driver);
 typedef wt_status_t (*wt_http3_frame_sink_fn)(void *context, uint64_t stream_id, uint64_t type,
                                               const uint8_t *payload, size_t length, int last);
 
+/* The peer's own stream data, which is NOT HTTP/3 framing: a WebTransport stream's bytes
+ * after its prefix are the session's, and a datagram's payload is the session's too. The
+ * driver does not interpret them -- it hands them over, because what they mean is the
+ * session layer's business and buffering them is a bound that layer owns. */
+typedef wt_status_t (*wt_http3_stream_data_fn)(void *context, uint64_t stream_id,
+                                              const uint8_t *data, size_t length, int fin);
+typedef wt_status_t (*wt_http3_datagram_fn)(void *context, const uint8_t *data, size_t length);
+
 typedef struct wt_http3_driver_sink {
   wt_http3_frame_sink_fn on_frame_payload;
+  wt_http3_stream_data_fn on_stream_data;
+  wt_http3_datagram_fn on_datagram;
   void *context;
 } wt_http3_driver_sink_t;
 
@@ -148,6 +159,30 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
 /* Forget a stream's half-read frame when the stream ends or is reset. Returns whether one was
  * in progress, which is what a caller needs to decide between WT_ERR_TRUNCATED and silence. */
 int wt_http3_driver_forget_frame(wt_http3_driver_t *driver, uint64_t stream_id);
+
+/* One frame the connection handed over, routed to whichever of the sink's callbacks owns it.
+ *
+ * This is the shape `wt_quic_connection_set_handlers` wants, so a caller installs the driver
+ * directly:
+ *
+ *     wt_quic_connection_set_handlers(&connection, wt_http3_driver_on_quic_frame, &driver, ...);
+ *
+ * What it routes, and why each has to be here rather than in the connection layer:
+ *   - a STREAM frame on a peer-initiated unidirectional stream: the type prefix is
+ *     reassembled, and then the bytes are either HTTP/3 frames (control, QPACK) or the
+ *     session's own data (the draft's stream type), which is a distinction only the HTTP/3
+ *     layer can make;
+ *   - a STREAM frame on a peer-initiated bidirectional stream: a request stream, whose frames
+ *     are the CONNECT and its response;
+ *   - a DATAGRAM frame: the session's datagram payload, handed over uninterpreted.
+ *
+ * A frame on a stream THIS endpoint initiated is not routed: it is the connection's to track
+ * and this layer has nothing to do with the peer's answer on a stream it did not receive.
+ * Unhandled frame kinds are ignored, which is what a frame handler is for. */
+wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
+                                          const wt_quic_frame_t *frame,
+                                          const wt_http3_driver_sink_t *sink,
+                                          uint64_t max_frame_bytes);
 
 /* Start this endpoint's control stream: the type prefix, then the SETTINGS frame built from
  * `settings`. The bytes go into the caller's writer, which is the stream the connection

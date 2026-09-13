@@ -3,6 +3,7 @@
 #include "webtransport/http3/driver.h"
 
 #include "webtransport/cursor.h"
+#include "webtransport/quic/stream.h"
 #include "webtransport/quic/varint.h"
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint) {
@@ -365,5 +366,121 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
     if (out_error != NULL) *out_error = WT_HTTP3_FRAME_ERROR;
     return WT_ERR_TRUNCATED;
   }
+  return WT_OK;
+}
+
+/* ---------------------------------------------- routing a connection's frames */
+
+/* Whether this endpoint is the one that opens a stream with this ID: the low bit of a QUIC
+ * stream ID says which side initiated it (RFC 9000 section 2.1). */
+static int stream_is_ours(const wt_http3_endpoint_t *endpoint, uint64_t stream_id) {
+  int from_client = wt_quic_stream_id_from_client(stream_id);
+  return endpoint->role == WT_HTTP3_ROLE_CLIENT ? from_client : !from_client;
+}
+
+wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
+                                          const wt_quic_frame_t *frame,
+                                          const wt_http3_driver_sink_t *sink,
+                                          uint64_t max_frame_bytes) {
+  wt_http3_driver_t *driver = context;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  wt_status_t status;
+
+  (void)space;
+  if (driver == NULL || driver->endpoint == NULL || frame == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  /* An if-chain rather than a switch, and the reason is the compiler: -Wswitch-enum requires
+   * every enumerator of a switch to be named, and this handler deliberately acts on two of
+   * them and ignores the rest. Naming twenty-one no-op cases to satisfy the warning would
+   * make the two that matter harder to find, which is the opposite of what the warning is
+   * for. */
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) {
+      uint64_t stream_id = frame->as.stream.id;
+      if (stream_is_ours(driver->endpoint, stream_id)) {
+        /* A stream this endpoint opened carries the peer's ANSWER, which the connection's own
+         * stream state owns; there is nothing here to route. */
+        return WT_OK;
+      }
+      if (wt_quic_stream_id_is_bidirectional(stream_id)) {
+        /* A peer-initiated bidirectional stream is a request stream: the session's own stream
+         * once its extended CONNECT is accepted. */
+        wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
+        if (wt_http3_endpoint_request_state(driver->endpoint, stream_id, &state) != WT_OK) {
+          status = wt_http3_endpoint_on_request_stream(driver->endpoint, stream_id, &error);
+          if (status != WT_OK) return status;
+        }
+        return wt_http3_driver_on_stream_bytes(driver, stream_id, frame->as.stream.data,
+                                               frame->as.stream.length, frame->as.stream.fin,
+                                               max_frame_bytes, sink, &error);
+      }
+
+      /* A peer-initiated unidirectional stream: its type prefix first, then whichever of the
+       * two kinds of bytes the type says follow it. */
+      {
+        wt_http3_endpoint_stream_kind_t kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+        const uint8_t *payload = NULL;
+        size_t payload_length = 0U;
+        size_t consumed = 0U;
+        int finished_prefix;
+
+        /* A stream the endpoint already classified does not carry a prefix any more. */
+        kind = wt_http3_endpoint_stream_kind(driver->endpoint, stream_id);
+        finished_prefix = kind != WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+        if (finished_prefix) {
+          payload = frame->as.stream.data;
+          payload_length = frame->as.stream.length;
+        } else {
+          status = wt_http3_driver_on_uni_stream_data(driver, stream_id, frame->as.stream.offset,
+                                                      frame->as.stream.data, frame->as.stream.length,
+                                                      &kind, &payload, &payload_length, &consumed,
+                                                      &error);
+          if (status != WT_OK) return status;
+          if (kind == WT_HTTP3_ENDPOINT_STREAM_UNKNOWN) {
+            /* The prefix is still not complete: the bytes are held, and nothing is routed. */
+            return WT_OK;
+          }
+        }
+
+        if (kind == WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT) {
+          /* The session's own stream: its bytes are not HTTP/3 frames, so they go to the
+           * session as they are. */
+          if (sink != NULL && sink->on_stream_data != NULL && payload_length > 0U) {
+            return sink->on_stream_data(sink->context, stream_id, payload, payload_length,
+                                        frame->as.stream.fin);
+          }
+          return WT_OK;
+        }
+        if (kind == WT_HTTP3_ENDPOINT_STREAM_UNKNOWN) {
+          /* A stream type this build does not know: section 6.2.1 says stop reading it, so its
+           * bytes are dropped and its end is still reported to the endpoint. */
+          if (frame->as.stream.fin != 0) {
+            return wt_http3_driver_on_uni_stream_end(driver, stream_id, &error);
+          }
+          return WT_OK;
+        }
+
+        /* HTTP/3's own streams carry frames, and the frame boundary is reassembled for them
+         * the same way it is for a request stream. */
+        if (payload_length > 0U || frame->as.stream.fin != 0) {
+          status = wt_http3_driver_on_stream_bytes(driver, stream_id, payload, payload_length,
+                                                   frame->as.stream.fin, max_frame_bytes, sink,
+                                                   &error);
+          if (status != WT_OK) return status;
+        }
+        if (frame->as.stream.fin != 0) {
+          return wt_http3_driver_on_uni_stream_end(driver, stream_id, &error);
+        }
+        return WT_OK;
+      }
+  }
+  if (frame->kind == WT_QUIC_FRAME_KIND_DATAGRAM) {
+    /* The payload is the session's, and this layer does not look inside it: what a datagram
+     * means is the draft's framing, which the session layer reads. */
+    if (sink != NULL && sink->on_datagram != NULL) {
+      return sink->on_datagram(sink->context, frame->as.datagram.data, frame->as.datagram.length);
+    }
+    return WT_OK;
+  }
+  /* Every other kind belongs to the connection or to nobody here. */
   return WT_OK;
 }
