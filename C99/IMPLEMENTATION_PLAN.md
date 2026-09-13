@@ -1106,6 +1106,18 @@ order they were sent, so a witness that overwrites its record describes the newe
 oldest. `tests/unit/test_quic_connection.c` (606 checks) checks the descriptor of the first loss: the
 stream, the offset and the length the packet actually covered.
 
+**Thirtieth part done: STOP_SENDING, the other half of cancellation.** `wt_quic_connection_stop_sending`
+sends RFC 9000 section 19.5's STOP_SENDING, which asks the peer to stop sending on a stream and names the
+application error code it is expected to answer with (section 3.5). With the twenty-eighth part's
+RESET_STREAM the cancellation path is now complete in both roles: a RESET_STREAM cancels what this
+endpoint is sending, and a STOP_SENDING asks the peer to stop what it is sending.
+
+The rules are the mirror image of the reset's and are checked as such: only the RECEIVER of a stream's
+data may ask, only once -- a second is the STREAM_STATE_ERROR the section names rather than something to
+ignore -- and not on a stream whose receive half is already finished. A frame that could not be sent
+leaves the stream as it was, because a caller that retries after WT_ERR_AGAIN must not be told it has
+already asked.
+
 Implement the production network state machine.
 
 Tasks:

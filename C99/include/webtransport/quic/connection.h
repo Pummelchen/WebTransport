@@ -317,6 +317,16 @@ wt_quic_stream_t *wt_quic_connection_stream(wt_quic_connection_t *connection, ui
 wt_status_t wt_quic_connection_reset_stream(wt_quic_connection_t *connection, uint64_t stream_id,
                                             uint64_t error_code, uint64_t now);
 
+/* Ask the peer to stop sending on a stream: RFC 9000 section 19.5's STOP_SENDING, with the application
+ * error code the peer will see in the RESET_STREAM it is expected to answer with (section 3.5).
+ *
+ * It is the other half of cancellation: a RESET_STREAM cancels what THIS endpoint is sending, and a
+ * STOP_SENDING asks the peer to stop what it is sending. The stream must exist and this endpoint must be
+ * receiving on it, and one may only be sent once -- a second is the STREAM_STATE_ERROR of section 19.5
+ * rather than a duplicate to be ignored. */
+wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, uint64_t stream_id,
+                                            uint64_t error_code, uint64_t now);
+
 /* Send one STREAM frame (RFC 9000 section 19.8) carrying `length` bytes of `stream_id` at `offset`,
  * with FIN when this is the end of the stream.
  *

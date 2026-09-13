@@ -1099,6 +1099,43 @@ static int stream_id_allowed(const wt_quic_connection_t *connection, uint64_t st
   return index < granted;
 }
 
+wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, uint64_t stream_id,
+                                            uint64_t error_code, uint64_t now) {
+  wt_quic_stream_t *stream;
+  wt_quic_frame_t frame;
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (!connection->peer_limits.set) return WT_ERR_STATE;
+  stream = wt_quic_stream_table_find(&connection->streams, stream_id);
+  if (stream == NULL) return WT_ERR_STATE;
+  /* Only the receiver of a stream's data may ask for it to stop, and only once: RFC 9000 section 19.5
+   * makes a second one a STREAM_STATE_ERROR rather than something to ignore. The field is the stream
+   * machine's own record of having asked, which is why it is set here rather than kept beside it. */
+  if (wt_quic_stream_id_from_client(stream_id) !=
+          (connection->config.role == WT_QUIC_ROLE_CLIENT) &&
+      !wt_quic_stream_id_is_bidirectional(stream_id)) {
+    return WT_ERR_STATE;
+  }
+  if (stream->sent_stop_sending) return WT_ERR_STATE;
+  if (wt_quic_stream_recv_finished(stream)) return WT_ERR_STATE;
+  stream->sent_stop_sending = 1;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STOP_SENDING);
+  frame.as.stop_sending.id = stream_id;
+  frame.as.stop_sending.application_error_code = error_code;
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent,
+                          now);
+  if (status != WT_OK) {
+    /* A frame that could not be sent leaves the stream as it was, so a caller that retries is not told it
+     * has already asked. */
+    stream->sent_stop_sending = 0;
+    return status;
+  }
+  return sent ? WT_OK : WT_ERR_STATE;
+}
+
 wt_status_t wt_quic_connection_reset_stream(wt_quic_connection_t *connection, uint64_t stream_id,
                                             uint64_t error_code, uint64_t now) {
   wt_quic_stream_t *stream;
