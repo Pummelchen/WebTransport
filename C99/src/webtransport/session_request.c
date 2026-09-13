@@ -73,9 +73,6 @@ wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is
      * limit. */
     status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS_DEPRECATED, 1U);
     if (status != WT_OK) return status;
-  }
-
-  if (is_server) {
     /* RFC 9220 section 3: a client may only send `:protocol` once the server has advertised that it handles
      * extended CONNECT, so a server that serves WebTransport at all has to say so (section 3.1's server list). */
     status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U);

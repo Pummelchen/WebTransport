@@ -57,12 +57,9 @@ int main(int argc, char **argv) {
             argument != NULL ? argument : "");
     return 2;
   }
-  /* The mode is what this tool IS unless the command line chose the other one: a client that
-   * can listen and a server that can connect are one tool with two modes, which is how the
-   * Swift tools are driven too. */
-  if (options.mode == WT_CLI_MODE_NONE && strcmp("none", "none") != 0) {
-    options.mode = WT_CLI_MODE_NONE;
-  }
+  /* This tool has ONE mode, so there is no default to apply: its mode is the scenario suite, and a listening peer
+   * is asked for with --listen. What stood here was `mode == NONE && strcmp("none", "none") != 0`, a comparison of
+   * two literals that is always false and an assignment that therefore never ran (WT-177, found by cppcheck). */
   if (options.help != 0) {
     /* A caller asking what the tool does gets a SUCCESS: `wt_usage` returns the "not implemented" status for the
      * stub path, and a help request is not that. */

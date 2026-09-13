@@ -225,7 +225,8 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
 
   printf("{\"role\":\"hostile-peer\",\"act\":\"%s\",\"established\":true,\"sentHostileFrame\":%s,"
          "\"peerClosed\":%s,\"peerErrorCode\":%llu,\"peerCloseFrameType\":%llu,\"peerCloseKind\":%u}\n",
-         act, sent != 0 ? "true" : "false",
+         act, "true", /* the early returns above are what make this true, and saying so is clearer than a
+                       * condition the reader has to verify (WT-177) */
          session.connection.peer_closed != 0 ? "true" : "false",
          (unsigned long long)session.connection.peer_error_code,
          (unsigned long long)session.connection.peer_frame_type,

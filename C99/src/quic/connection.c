@@ -209,8 +209,7 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
      * inventing a requirement it cannot satisfy would make conformant parameters impossible. */
     if (connection->original_destination_id_length != 0U &&
         (present == 0 || value_length != connection->original_destination_id_length ||
-         (value_length != 0U &&
-          memcmp(value, connection->original_destination_id, value_length) != 0))) {
+         memcmp(value, connection->original_destination_id, value_length) != 0)) {
       return WT_ERR_PROTOCOL;
     }
     value = NULL;
@@ -1766,7 +1765,7 @@ static int local_connection_id_sequence(const wt_quic_connection_t *connection, 
    * protocol violation section 19.16 describes. */
   if (connection->handshake_confirmed == 0 && connection->original_destination_id_length != 0U &&
       length == connection->original_destination_id_length &&
-      (length == 0U || memcmp(id, connection->original_destination_id, length) == 0)) {
+      memcmp(id, connection->original_destination_id, length) == 0) {
     *out_sequence = 0U;
     return 1;
   }

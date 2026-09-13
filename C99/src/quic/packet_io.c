@@ -148,7 +148,6 @@ wt_status_t wt_quic_packet_open(uint8_t *packet, size_t total_len, size_t pn_len
   wt_status_t status;
 
   if (packet == NULL || keys == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (total_len > 0U && packet == NULL) return WT_ERR_INVALID_ARGUMENT;
   memset(out, 0, sizeof(*out));
 
   /* Parsed now that the mask is off: the first byte's low bits are the real packet number length, so the

@@ -139,6 +139,12 @@ jobs:
         # compile commands, so the include paths and defines are the ones the code is really compiled with. A
         # runner without clang reports "unsupported" (exit 3) rather than passing quietly.
         run: C99/scripts/check-static-analysis.sh
+      - name: Run cppcheck over the library and the tools
+        # The second engine, and the one the plan names: cppcheck is a different analyser with different
+        # heuristics, and it finishes in seconds. The style category is off on purpose -- its cross-translation-unit
+        # heuristics report a library's public API as static-able and another unit's reads as unread -- and the
+        # script says so. A runner without cppcheck reports "unsupported" rather than passing quietly.
+        run: C99/scripts/check-cppcheck.sh
       - name: Compile the Windows platform branch
         # The _WIN32 branch of udp_platform.h was written from the inventory. A cross-compiler is enough to say
         # it compiles -- and it found FIONBIO not fitting a signed long on its first run. A machine without a

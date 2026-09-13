@@ -47,7 +47,6 @@ typedef struct loop_side {
   uint8_t data[512];
   size_t data_bytes;
   int data_was_datagram;
-  uint32_t status;
   /* The session and the peer's flow-control account, fed by the capsules on the CONNECT stream (WT-164). The
    * walking and the byte-keeping are `apps/support/capsule_stream.c`, shared with the conformance tool so that
    * "the session's capsules" means one thing in both. */

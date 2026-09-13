@@ -59,7 +59,9 @@ int main(int argc, char **argv) {
   /* The mode is what this tool IS unless the command line chose the other one: a client that
    * can listen and a server that can connect are one tool with two modes, which is how the
    * Swift tools are driven too. */
-  if (options.mode == WT_CLI_MODE_NONE && strcmp("connect", "none") != 0) {
+  /* A literal compared against a literal is not a decision, and that is what stood here: the tool's default mode
+   * is CONNECT, and the comparison could never say anything else (WT-177, found by cppcheck). */
+  if (options.mode == WT_CLI_MODE_NONE) {
     options.mode = WT_CLI_MODE_CONNECT;
   }
   if (options.help != 0) {

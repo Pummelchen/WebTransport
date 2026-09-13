@@ -130,8 +130,10 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
      * bare conversion lets the compiler prove the result may be truncated, and the Windows cross-compile treats
      * that as an error (WT-134). The prefix plus 120 characters leaves room to spare. */
     (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %.120s", opened);
-    capsules_add(report, k_bound, result == WT_CLI_RESULT_PASSED, detail);
-    capsules_add(report, k_flow, result == WT_CLI_RESULT_PASSED, detail);
+    /* Zero, not `result == WT_CLI_RESULT_PASSED`: this branch is the one where it is NOT passed, so the
+     * comparison read as if the outcome were still open (WT-177, found by cppcheck). */
+    capsules_add(report, k_bound, 0, detail);
+    capsules_add(report, k_flow, 0, detail);
     return;
   }
   if (capsules_open_session(&pair, detail, sizeof(detail)) == 0) {

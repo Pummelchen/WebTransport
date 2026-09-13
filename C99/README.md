@@ -624,7 +624,15 @@ What is here:
   wiped by the `memset`, then taken again -- the analyzer called the first assignment what it was), and the tree
   is clean at 92/92 after the fix. A machine without clang reports `unsupported` with its reason, like the
   Windows checks do for a missing cross-compiler; where clang is present a finding fails the build.
-  `check-static-analysis.sh` is registered in CI beside the matrix and portability checks.
+  `check-static-analysis.sh` is registered in CI beside the matrix and portability checks. A SECOND engine runs
+  beside it -- `scripts/check-cppcheck.sh`, the tool the plan names by hand -- and it earns its place: over this
+  tree it found a default mode chosen by comparing two literals in all three tools (`strcmp("connect", "none")`,
+  always true; and `strcmp("none", "none")`, always FALSE, so the conformance tool's assignment never ran), an
+  always-false report boolean in a capsule scenario, a duplicated `is_server` block in the settings builder, two
+  conditions the surrounding checks already establish, a redundant NULL check and a struct member nothing read.
+  Its style category is off on purpose, and the script says why: cross-translation-unit heuristics report a
+  library's public API as static-able and another unit's reads as unread, which is 100-odd items of noise around
+  the eight real ones. Both checks fail the build on a finding, and both were verified by planting a defect.
 - **Parser fuzzing, and a fuzz run that always happens** (WT-175): the plan asks for fuzzing of the QUIC varints,
   QUIC frames, transport parameters, HTTP/3 frames, QPACK, capsules and WebTransport stream prefixes, and the
   malformed-input corpora in the unit suites are what prove the cases somebody thought of. `tests/fuzz/` is the
