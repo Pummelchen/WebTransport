@@ -2361,6 +2361,23 @@ granted. Reproducing that in isolation (set 8, open peer streams, read the grant
 carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
 saw STREAM frames, and it walked frames at all.
 
+### Phase 9's twenty-first part: a contradiction the test has to explain about itself
+
+Probing WT-115 produced a set of facts that cannot all be true of one object, and the honest next step is to
+find out which of the test's two objects the frames actually arrive on. After the milestone assertions pass --
+the CONNECT assembled and decoded on the server side -- the server's CONNECTION reports `is_closed = 0`, close
+code 0, `stream_frames_seen = 0`, and **no streams at all in its table**. A connection that walked zero STREAM
+frames cannot have delivered a STREAM frame to the HTTP/3 driver, and a table with no streams cannot answer on
+any of them, so either the counters are read from a different object than the handler is bound to, or the
+handler is called on a session whose connection is not the one being inspected.
+
+The next probe is therefore one print: the CONNECTION pointer inside the chained handler beside the side
+pointer. `side_on_frame` is bound to `&server` and the session to `&pair.server`, both visibly, so if they are
+the same object in a run then the library is where to look -- and if they are not, this test has been asserting
+the right things about the wrong objects, which is worth knowing before another round of library diagnosis. It
+is recorded as a test-shaped hypothesis FIRST because the evidence points that way: the library's own suites
+(unit, integration and the handshake pair) all pass, and this is the only place the two sides are wired by hand.
+
 ### Phase 9's twentieth part: the response path, and the stream the server does not have
 
 The response side of the exchange now exists in the library -- `wt_http3_endpoint_on_response_headers` decodes a

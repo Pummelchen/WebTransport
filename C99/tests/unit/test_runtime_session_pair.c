@@ -492,6 +492,21 @@ static void test_a_connect_crosses_a_real_connection(void) {
    * the whole exchange without being rewritten. */
   client.request_stream_id = request_stream_id;
   server.request_stream_id = request_stream_id;
+  /* A CONTRADICTION, recorded as the next thing to explain (WT-115). After the milestone assertions pass --
+   * the CONNECT assembled and decoded on this very side -- the server's connection reports:
+   *
+   *     is_closed = 0, close code = 0, stream_frames_seen = 0, and NO streams in its table at all.
+   *
+   * A connection that walked zero STREAM frames cannot have delivered a STREAM frame to the HTTP/3 driver,
+   * and a table with no streams cannot answer on any of them. One of the two objects the test talks to is
+   * therefore not the one the frames arrive on, and the next probe is to print the CONNECTION pointer inside
+   * the chained handler beside the side pointer -- `side_on_frame` is bound to `&server` and the session to
+   * `&pair.server`, and if those are the same object in this test then the library is the place to look.
+   *
+   * The client's sink is told which stream carries the exchange now, so the moment a stream exists to answer
+   * on, the whole exchange can be asserted without rewriting this test. */
+  client.request_stream_id = request_stream_id;
+  server.request_stream_id = request_stream_id;
 
   /* The CONNECT is on the wire. What happens to it on the FAR side is the next part and is NOT
    * asserted here, because it does not happen yet: the client sends, the server reads packets, and the
