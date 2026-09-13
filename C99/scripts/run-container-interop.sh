@@ -61,6 +61,15 @@ for peer in $peers; do
   docker rm -f "wt-interop-$peer" >/dev/null 2>&1 || true
   docker run -d --name "wt-interop-$peer" --network "$network" -e "PORT=$port" "wt-interop-$peer" >/dev/null
   sleep 3
+  # WT_INTEROP_CAPTURE=1 records the exchange from the peer's own network namespace, which is where a question
+  # about packets is answered: it is how the disagreement this round found was seen -- the peer retransmitting its
+  # Handshake flight while the client reported the handshake complete.
+  if [ "${WT_INTEROP_CAPTURE:-0}" = "1" ]; then
+    docker rm -f "wt-capture-$peer" >/dev/null 2>&1 || true
+    docker run -d --name "wt-capture-$peer" --network "container:wt-interop-$peer" \
+      nicolaka/netshoot tcpdump -n -l -i any -c 40 "udp port $port" >/dev/null 2>&1 || true
+    sleep 2
+  fi
   # The client JOINS THE PEER'S NETWORK NAMESPACE rather than sitting beside it: `--trust local-development`
   # refuses to bypass certificate verification for a non-loopback address -- which is the right policy, and it
   # said so the first time this ran ("the development bypass is refused for a non-loopback address"). Sharing the
@@ -68,6 +77,11 @@ for peer in $peers; do
   # address on the command line is the loopback one a developer would use anyway.
   docker run --rm --network "container:wt-interop-$peer" "$client_image" \
     --connect "127.0.0.1:$port" --trust local-development --exchange stream --timeout-ms "$timeout_ms" || true
+  if [ "${WT_INTEROP_CAPTURE:-0}" = "1" ]; then
+    echo "-- capture (client -> peer, then peer -> client):"
+    docker logs "wt-capture-$peer" 2>&1 | grep -E "^[0-9]" | tail -24 || true
+    docker rm -f "wt-capture-$peer" >/dev/null 2>&1 || true
+  fi
   echo "-- $peer said:"
   docker logs "wt-interop-$peer" 2>&1 | tail -6
   docker rm -f "wt-interop-$peer" >/dev/null 2>&1 || true
