@@ -1455,7 +1455,23 @@ was wrong, which is the direction that costs nothing, but it is exactly the kind
 shared between two specifications invites.
 
 Implement full RFC 9204 static table.
-- Implement Huffman encoding and decoding.
+- **Second part done: prefixed integers and strings.** RFC 9204 section 4.1's two primitives are in
+`qpack.h` and `src/http3/qpack_primitives.c`: an integer behind an N-bit prefix, and a string whose length is
+one behind a seven-bit prefix with the H bit above it. Every QPACK representation is built from them, so the
+tests are about the edges -- the value that exactly fills the prefix, which changes the encoding's shape; the
+62-bit bound the section sets, which is refused at both ends; a continuation that never ends and one that
+runs past the bound; a string whose length is longer than the bytes present; and the H bit.
+
+Two decisions are worth recording. The H bit is returned to the caller rather than dropped: this build does
+not decode Huffman yet, and a caller that treated coded bytes as field content would build a header section
+the peer cannot parse -- a silent corruption of exactly the kind the vector rule exists elsewhere to catch.
+And the encoder's flag parameter is the bits ABOVE the prefix, only those: a flag inside the prefix is
+refused rather than masked, because a caller that set one meant something else and dropping it would change
+the representation it asked for. The first version checked the wrong bits (it required the flags to fit in
+the top `8 - prefix_bits` bits, which refuses the perfectly legal 0x80 above a seven-bit prefix) and the
+tests caught it before anything depended on it.
+
+Implement Huffman encoding and decoding.
 - Implement static indexed fields.
 - Implement literal field lines.
 - Implement dynamic table.

@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 45 unit test files and 76,759 checks, run by `ctest` and again under
+- 46 unit test files and 77,321 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -400,6 +400,12 @@ What is here:
   codes. The table is generated from the RFC by `tests/vectors/extract_rfc9204_static_table.py` and checked
   by `check-vectors.sh`, because an encoder and a decoder that disagree on one entry produce two different
   header sections with nothing in the exchange to say so.
+- **Prefixed integers and strings** (Phase 6, second part): QPACK's two primitives (RFC 9204 section 4.1)
+  -- an integer behind an N-bit prefix, and a string whose length is one behind a seven-bit prefix with the
+  H bit above it. The section's 62-bit bound is enforced, a continuation that runs past it or never ends is
+  refused, and a string's Huffman flag is RETURNED rather than ignored: this build does not decode Huffman
+  yet, and a caller that treated coded bytes as field content would produce a header section the peer
+  cannot parse.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

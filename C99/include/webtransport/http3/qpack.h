@@ -18,7 +18,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "webtransport/cursor.h"
 #include "webtransport/status.h"
+#include "webtransport/writer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +59,37 @@ wt_status_t wt_qpack_static_find(const char *name, size_t name_length, const cha
 /* The first entry with this name, whatever its value, for a literal field line
  * with a name reference. WT_ERR_CLOSED when the name is not in the table. */
 wt_status_t wt_qpack_static_find_name(const char *name, size_t name_length, uint64_t *out_index);
+
+/* ------------------------------------------------ RFC 9204 section 4.1's primitives */
+
+/* An integer with an N-bit prefix, as every QPACK field line and the dynamic
+ * table use: the first byte carries as much of the value as fits in the prefix,
+ * and a prefix full of ones means "keep reading seven bits at a time".
+ *
+ * `prefix_bits` is 1..8. Values are limited to 62 bits (section 4.1.1); a peer's
+ * integer that exceeds that, or one whose continuation never ends, is
+ * QPACK_DECOMPRESSION_FAILED, which is what section 8 makes of a malformed
+ * representation. */
+wt_status_t wt_qpack_integer_decode(wt_cursor_t *c, unsigned prefix_bits, uint64_t *out_value);
+
+/* The same integer, on the wire. `prefix_flags` are the bits above the prefix --
+ * the field line's own pattern, already shifted into place -- and only those bits
+ * are written, so a caller cannot accidentally encode part of the value there.
+ * Refuses a value whose low `prefix_bits` would collide with the flags. */
+wt_status_t wt_qpack_integer_encode(wt_writer_t *w, unsigned prefix_bits, uint8_t prefix_flags,
+                                    uint64_t value);
+
+/* A string: a length as an integer with a seven-bit prefix, then that many bytes
+ * (section 4.1.2). The length field's top bit is the H bit, so the bytes may be
+ * Huffman-coded; this returns the bytes as they are on the wire and says which,
+ * because decoding them is the Huffman part's job and a caller that ignored the
+ * flag would read coded bytes as field content. */
+wt_status_t wt_qpack_string_decode(wt_cursor_t *c, const uint8_t **out_bytes, size_t *out_length,
+                                   int *out_huffman);
+
+/* Write a string that is not Huffman-coded. The Huffman encoder is a later part,
+ * so this is what every representation written by this build looks like. */
+wt_status_t wt_qpack_string_encode(wt_writer_t *w, const uint8_t *bytes, size_t length);
 
 #ifdef __cplusplus
 }

@@ -52,6 +52,7 @@ set(WT_UNIT_TESTS
   test_http3_streams
   test_http3_request
   test_qpack_static
+  test_qpack_primitives
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
