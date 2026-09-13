@@ -302,6 +302,17 @@ wt_status_t wt_quic_connection_open_stream(wt_quic_connection_t *connection, int
 wt_quic_stream_table_t *wt_quic_connection_streams(wt_quic_connection_t *connection);
 wt_quic_stream_t *wt_quic_connection_stream(wt_quic_connection_t *connection, uint64_t stream_id);
 
+/* Cancel a stream this endpoint is sending on: RFC 9000 section 19.4's RESET_STREAM ends the send half
+ * with an application error code and the final size the peer needs to tell a truncated stream from a
+ * complete one. The stream's state moves to Reset Sent, which is what stops anything further being sent
+ * on it.
+ *
+ * WT_ERR_STATE before the peer's parameters are known or for a stream that is not this endpoint's to send
+ * on -- a peer's unidirectional stream, or a number that was never opened -- WT_ERR_STATE for a send half
+ * that has already finished, and WT_ERR_AGAIN when the congestion window has no room. */
+wt_status_t wt_quic_connection_reset_stream(wt_quic_connection_t *connection, uint64_t stream_id,
+                                            uint64_t error_code, uint64_t now);
+
 /* Send one STREAM frame (RFC 9000 section 19.8) carrying `length` bytes of `stream_id` at `offset`,
  * with FIN when this is the end of the stream.
  *

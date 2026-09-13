@@ -1153,6 +1153,56 @@ static void test_limit_extension(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 section 19.4: a sender may cancel a stream it is sending on, and the reset ends the send half
+ * with the final size the peer needs. Only the sender may, and only once. */
+static void test_reset_stream_send(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 100000000U;
+  uint64_t id = 0U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0xa0U + i);
+  WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("and reads", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+
+  /* The peer's grant, then one of this endpoint's own bidirectional streams. */
+  {
+    uint8_t payload[64];
+    wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+    wt_quic_transport_parameters_t params;
+    wt_quic_transport_parameters_init(&params);
+    WT_EXPECT_OK("a grant of two",
+                 wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI,
+                                                          2U));
+    WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
+    WT_EXPECT_OK("and is parsed",
+                 wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+  }
+  WT_EXPECT_OK("a stream opens", wt_quic_connection_open_stream(&pair.client, 1, &id));
+  {
+    wt_quic_stream_t *stream = wt_quic_connection_stream(&pair.client, id);
+    WT_EXPECT_TRUE("which the table holds", stream != NULL);
+    WT_EXPECT_INT("with its send half open", 0, wt_quic_stream_send_finished(stream));
+    WT_EXPECT_OK("it is reset", wt_quic_connection_reset_stream(&pair.client, id, 0x0bU, now));
+    if (stream != NULL) {
+      WT_EXPECT_INT("which ends the send half", 1, wt_quic_stream_send_finished(stream));
+      WT_EXPECT_U64("with the final size it had sent", 0U, stream->final_size);
+    }
+    WT_EXPECT_STATUS("and resetting it twice is a state error", WT_ERR_STATE,
+                     wt_quic_connection_reset_stream(&pair.client, id, 0x0bU, now));
+    WT_EXPECT_STATUS("a stream that was never opened cannot be reset", WT_ERR_STATE,
+                     wt_quic_connection_reset_stream(&pair.client, 64U, 0x0bU, now));
+  }
+
+  wt_quic_packet_keys_clear(&keys);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1171,5 +1221,6 @@ int main(void) {
   test_peer_opens_stream();
   test_reset_and_stop();
   test_limit_extension();
+  test_reset_stream_send();
   WT_TEST_MAIN_END("wt_quic_connection");
 }

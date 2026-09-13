@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,880 checks, run by `ctest` and again under
+- 38 unit test files and 75,910 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -279,6 +279,10 @@ What is here:
   received total reaches the limit it granted it sends MAX_DATA for the next window and moves the limit,
   and the same for a stream's MAX_STREAM_DATA -- RFC 9000 section 4.1's rule, applied where arrival is
   consumption because this runtime hands each frame's bytes to the caller immediately.
+- **A sender can cancel a stream** (Phase 4, twenty-eighth part): `wt_quic_connection_reset_stream` sends
+  RESET_STREAM (RFC 9000 section 19.4) with the final size computed from what was sent, moves the send half
+  to Reset Sent, and refuses a stream that is not this endpoint's to send on or one already finished --
+  with the receive side already handling an arriving reset, both directions of the cancellation path exist.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

@@ -1083,6 +1083,15 @@ that is why the extension follows the account rather than a separate read call.
 granted, the endpoint raises its own limit past four, and the PEER reads the MAX_DATA frame the connection
 sent by itself and moves what it may send to match.
 
+**Twenty-eighth part done: a sender can cancel a stream.** `wt_quic_connection_reset_stream` sends RFC 9000
+section 19.4's RESET_STREAM and moves the stream's send half to Reset Sent, which is what stops anything
+further being sent on it. The frame carries the final size the peer needs to tell a truncated stream from a
+complete one -- which is why the state machine computes it from what was actually sent rather than letting
+a caller state it -- and the rules about WHO may reset are the sender's: this endpoint resets its own
+streams and the peer's bidirectional ones, never a peer's unidirectional stream, and never twice. With the
+receive side already handling a reset that arrives, the stream layer now has both directions of the
+cancellation path, which is the "cancellation" item of the phase's task list.
+
 Implement the production network state machine.
 
 Tasks:

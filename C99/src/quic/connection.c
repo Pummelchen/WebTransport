@@ -1098,6 +1098,37 @@ static int stream_id_allowed(const wt_quic_connection_t *connection, uint64_t st
   return index < granted;
 }
 
+wt_status_t wt_quic_connection_reset_stream(wt_quic_connection_t *connection, uint64_t stream_id,
+                                            uint64_t error_code, uint64_t now) {
+  wt_quic_stream_t *stream;
+  wt_quic_frame_t frame;
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (!connection->peer_limits.set) return WT_ERR_STATE;
+  stream = wt_quic_stream_table_find(&connection->streams, stream_id);
+  if (stream == NULL) return WT_ERR_STATE;
+  /* Only the sender of a stream's data may reset it, and this endpoint only sends on its own streams
+   * and on the peer's BIDIRECTIONAL ones (RFC 9000 section 2.1). */
+  if (wt_quic_stream_id_from_client(stream_id) !=
+          (connection->config.role == WT_QUIC_ROLE_CLIENT) &&
+      !wt_quic_stream_id_is_bidirectional(stream_id)) {
+    return WT_ERR_STATE;
+  }
+  status = wt_quic_stream_on_reset_sent(stream, error_code);
+  if (status != WT_OK) return status;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_RESET_STREAM);
+  frame.as.reset_stream.id = stream_id;
+  frame.as.reset_stream.application_error_code = error_code;
+  frame.as.reset_stream.final_size = stream->final_size;
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent,
+                          now);
+  if (status != WT_OK) return status;
+  return sent ? WT_OK : WT_ERR_STATE;
+}
+
 wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uint64_t stream_id,
                                            uint64_t offset, const uint8_t *data, size_t length,
                                            int fin, uint64_t now) {
