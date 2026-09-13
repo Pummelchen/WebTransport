@@ -29,8 +29,13 @@ Windows is the real work. Every item below is a place where the current code ass
 
 ## The adaptation the code needs, in order
 
-1. A private header (`src/runtime/udp_platform.h`) that names the socket type, `close`, non-blocking mode,
-   readiness and the error mapping -- so `udp.c` stops spelling POSIX directly.
+1. **DONE** -- a private header (`src/runtime/udp_platform.h`) names four of the five differences: `close`,
+   non-blocking mode, readiness and the error number (`wt_udp_platform_close`,
+   `wt_udp_platform_set_nonblocking`, `wt_udp_platform_wait_readable`, `wt_udp_platform_last_error`), plus the
+   handle type. `udp.c` names those operations now rather than spelling POSIX in a dozen places. The `_WIN32`
+   branches are written from this inventory and are **not verified** -- nothing here builds them -- and they say
+   so in the header. What remains in `udp.c` is the datagram calls themselves (`recvmsg`/`sendmsg` with
+   `struct iovec`) and the public `int fd` field, which a Windows port must widen to `SOCKET`.
 2. `WSAStartup` somewhere that owns a process lifetime: the UDP layer is the only place this library touches the
    operating system, so a reference count there is the natural home.
 3. The `wt_udp_peek` difference above, which is behavioural rather than syntactic: on Windows a peek cannot see
@@ -38,8 +43,9 @@ Windows is the real work. Every item below is a place where the current code ass
    the shape that needs.
 4. A CMake branch that links `ws2_32` and finds OpenSSL, and a CI job that builds it.
 
-**Status:** the inventory is complete and mechanically checked; the adaptation is NOT done, and no Windows job is
-added until it is -- a job that cannot pass is worse than an absent one, because it teaches people to ignore CI.
+**Status:** the inventory is complete and mechanically checked; step 1 (the platform header) is done and verified
+on POSIX, where behaviour is unchanged; steps 2 to 4 are not, and no Windows job is added until they are -- a job
+that cannot pass is worse than an absent one, because it teaches people to ignore CI.
 
 ## The two symbols this document is checked for
 

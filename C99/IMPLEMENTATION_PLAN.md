@@ -3051,6 +3051,22 @@ deterministically (H3_ID_ERROR for a client, H3_STREAM_CREATION_ERROR for a serv
 it, and **a peer that changes its connection ID during the handshake**, which the tests do not cover because they
 use the same connection ID at both ends -- the recorded transport gap rather than a claimed feature.
 
+### WT-134, second step: the platform header, and POSIX behaviour unchanged
+
+The inventory's first item was a private header naming the differences so that `udp.c` stops spelling POSIX in a
+dozen places, and it is in: `src/runtime/udp_platform.h` defines the handle type and four operations --
+`wt_udp_platform_close`, `wt_udp_platform_set_nonblocking`, `wt_udp_platform_wait_readable` and
+`wt_udp_platform_last_error` -- with a POSIX branch that is what this project builds and a `_WIN32` branch
+written from the inventory. The Windows branch is NOT verified, and the header says so in its first paragraph:
+nothing in this repository builds it, and a port that claims to be finished before it has been compiled once is
+exactly the failure this project refuses.
+
+The POSIX path is unchanged in behaviour and green in debug, release and ASan+UBSan, which is the only claim a
+change like this can make from here. What remains in `udp.c` is deliberately unabstracted and written down in the
+inventory: the datagram calls (`recvmsg`/`sendmsg` with `struct iovec`, whose Windows form is `WSABUF` with
+`WSARecvFrom`/`WSASendTo`) and the public `int fd` field, which a Windows port must widen to `SOCKET` -- a public
+change, and therefore one to make deliberately rather than in passing.
+
 ### WT-134, first step: the platform surface, inventoried and checked
 
 FreeBSD and Windows CI legs are the Definition of Done's CI criterion, and the honest first step is not a YAML

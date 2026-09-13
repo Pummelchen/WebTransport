@@ -7,18 +7,20 @@
 
 #include "webtransport/runtime/udp.h"
 
-#include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
-#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The platform differences live in one private header: closing, non-blocking mode, readability and the error
+ * number. The socket types and the datagram calls are still POSIX here, which is the NEXT step of WT-134 and is
+ * written down in docs/PORTABILITY.md rather than pretended away. */
+#include "udp_platform.h"
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 
 #include "webtransport/time.h"
 
@@ -181,7 +183,6 @@ int wt_udp_address_equal(const wt_udp_address_t *a, const wt_udp_address_t *b) {
 wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
   int domain = family_of(family);
   int fd;
-  int flags;
 
   if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
   out->fd = -1;
@@ -190,14 +191,13 @@ wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
   if (domain < 0) return WT_ERR_INVALID_ARGUMENT;
 
   fd = socket(domain, SOCK_DGRAM, 0);
-  if (fd < 0) return map_errno(errno);
+  if (fd < 0) return map_errno(wt_udp_platform_last_error());
 
   /* Non-blocking from the start: a socket that blocked on receive would make the connection runtime's
    * timers unenforceable, and setting it here means no caller can forget. */
-  flags = fcntl(fd, F_GETFL, 0);
-  if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-    int error = errno;
-    (void)close(fd);
+  if (wt_udp_platform_set_nonblocking(fd) != 0) {
+    int error = wt_udp_platform_last_error();
+    (void)wt_udp_platform_close(fd);
     return map_errno(error);
   }
 
@@ -208,8 +208,8 @@ wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
      * library's address type reports as a family it does not carry. */
     int on = 1;
     if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &on, (socklen_t)sizeof(on)) < 0) {
-      int error = errno;
-      (void)close(fd);
+      int error = wt_udp_platform_last_error();
+      (void)wt_udp_platform_close(fd);
       return map_errno(error);
     }
   }
@@ -233,7 +233,7 @@ wt_status_t wt_udp_bind(wt_udp_socket_t *socket, const wt_udp_address_t *address
   status = to_sockaddr(address, &storage, &storage_len);
   if (status != WT_OK) return status;
   if (bind(socket->fd, (const struct sockaddr *)(const void *)&storage, storage_len) < 0) {
-    return map_errno(errno);
+    return map_errno(wt_udp_platform_last_error());
   }
   socket->port = address->port;
   {
@@ -265,7 +265,7 @@ wt_status_t wt_udp_local_port(const wt_udp_socket_t *socket, uint16_t *out_port)
   if (socket->fd < 0) return WT_ERR_STATE;
   memset(&storage, 0, sizeof(storage));
   if (getsockname(socket->fd, (struct sockaddr *)(void *)&storage, &storage_len) < 0) {
-    return map_errno(errno);
+    return map_errno(wt_udp_platform_last_error());
   }
   if (storage.ss_family == AF_INET) {
     *out_port = ntohs(((const struct sockaddr_in *)(const void *)&storage)->sin_port);
@@ -285,7 +285,7 @@ void wt_udp_close(wt_udp_socket_t *socket) {
      * must not close a descriptor number the process has since reused. */
     int fd = socket->fd;
     socket->fd = -1;
-    (void)close(fd);
+    (void)wt_udp_platform_close(fd);
   }
   socket->port = 0U;
 }
@@ -309,7 +309,7 @@ wt_status_t wt_udp_send(const wt_udp_socket_t *socket, const wt_udp_address_t *t
   if (status != WT_OK) return status;
   written = sendto(socket->fd, data, length, 0, (const struct sockaddr *)(const void *)&storage,
                    storage_len);
-  if (written < 0) return map_errno(errno);
+  if (written < 0) return map_errno(wt_udp_platform_last_error());
   /* A datagram is sent whole or not at all, so a short count is not a partial send: it is a platform
    * that did something this layer does not describe. */
   if ((size_t)written != length) return WT_ERR_IO;
@@ -432,7 +432,7 @@ wt_status_t wt_udp_wait(const wt_udp_socket_t *socket, uint64_t timeout_micros) 
    * caller would time out instead of learning what happened. */
   entry.revents = 0;
 
-  ready = poll(&entry, 1, timeout_ms);
+  ready = wt_udp_platform_wait_readable(entry.fd, timeout_ms);
   if (ready < 0) return map_errno(errno);
   if (ready == 0) return WT_ERR_TIMEOUT;
   return WT_OK;

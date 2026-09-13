@@ -205,15 +205,18 @@ What is here:
   push is refused deterministically by design, and a peer that changes its connection ID during the
   handshake is not tracked, which is the recorded transport gap.
 - **The platform surface, inventoried and checked** (`docs/PORTABILITY.md`): what a Windows or
-  FreeBSD build would need, item by item — socket headers, `WSAStartup`, `ws2_32`, the `SOCKET` type,
-  `closesocket`, `ioctlsocket` for non-blocking, `WSAPoll`, `WSAGetLastError`, `WSABUF`, and the one
-  **behavioural** difference that matters: on Windows a `MSG_PEEK` cannot see a datagram's full
-  length, so a listener must hold the datagram it looked at — which is the shape the runtime
-  session's pending table already has. FreeBSD is close to Debian (same POSIX calls; the difference is
-  the toolchain and the OpenSSL package). `scripts/check-portability.sh` fails if the library uses a
-  POSIX-only call the inventory does not name — it caught `sendto`/`recvfrom` missing on its first
-  run — and CI runs it. **The adaptation is not done and no Windows job is added until it is:** a job
-  that cannot pass teaches people to ignore CI.
+  FreeBSD build would need, item by item — and the first step is done:
+  `src/runtime/udp_platform.h` now names the four differences that used to be spelled out as POSIX
+  in a dozen places (closing, non-blocking mode, waiting for readability, the error number), so a
+  port fills in one header. The `_WIN32` branches are written from the inventory and **are not
+  verified** — nothing here builds them, and the header says so — while the POSIX path is
+  unchanged and green in all three configurations. What remains is the datagram calls
+  (`recvmsg`/`sendmsg`), the public `int fd` field (a Windows port must widen it to `SOCKET`),
+  `WSAStartup` ownership, and then the CMake branch and the job.
+  `scripts/check-portability.sh` fails if the library uses a POSIX-only call the inventory does not
+  name — it caught `sendto`/`recvfrom` missing on its first run — and CI runs it. FreeBSD is close to
+  Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
+
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
   `scripts/score-matrix.sh` rather than from memory: **24 of 24 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 5 of the plan's 9 completion
