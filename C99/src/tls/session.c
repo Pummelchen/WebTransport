@@ -2,6 +2,9 @@
 
 #include "webtransport/tls/session.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "webtransport/crypto/crypto.h"
 
 #include <string.h>
@@ -528,6 +531,28 @@ wt_status_t wt_tls_client_handshake_secrets(const wt_tls_client_t *client,
   }
   memcpy(read_out, client->server_handshake_secret, WT_TLS13_SECRET_LEN);
   memcpy(write_out, client->client_handshake_secret, WT_TLS13_SECRET_LEN);
+  /* A DIAGNOSTIC, at DERIVATION time rather than after the handshake: the CLI's dump of the same field read all
+   * zeros once (WT-135), and the difference between "the secret is zero" and "the secret was cleared" is this
+   * line. Gated by an environment variable because it writes a traffic secret to a file. */
+  {
+    const char *keylog_path = getenv("WT_TLS_SECRET_LOG");
+    if (keylog_path != NULL) {
+      FILE *keylog = fopen(keylog_path, "a");
+      if (keylog != NULL) {
+        unsigned index;
+        fprintf(keylog, "# at-derivation client=");
+        for (index = 0U; index < WT_TLS13_SECRET_LEN; index++) {
+          fprintf(keylog, "%02x", client->client_handshake_secret[index]);
+        }
+        fprintf(keylog, " server=");
+        for (index = 0U; index < WT_TLS13_SECRET_LEN; index++) {
+          fprintf(keylog, "%02x", client->server_handshake_secret[index]);
+        }
+        fprintf(keylog, "\n");
+        (void)fclose(keylog);
+      }
+    }
+  }
   return WT_OK;
 }
 
