@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 52 unit test files and 78,566 checks, run by `ctest` and again under
+- 53 unit test files and 78,616 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -440,6 +440,11 @@ What is here:
   insertions are QPACK_DECODER_STREAM_ERROR. An instruction whose bytes have not all arrived is treated as
   INCOMPLETE rather than malformed, in both stream modules: QPACK delivers instructions in pieces, so the
   caller waits for more, and only a malformed instruction is the peer's error.
+- **The field section prefix** (Phase 6, ninth part): `qpack_header_prefix.c` is RFC 9204 section 4.5.1's
+  Required Insert Count and Base -- the count is sent modulo twice the table's size in entries so it stays
+  inside the window the decoder knows, the Base is a signed delta from it, and both of the section's error
+  exits are enforced. `wt_qpack_max_entries` derives the window from the capacity, which is why the prefix
+  cannot be read without knowing what this endpoint advertised.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

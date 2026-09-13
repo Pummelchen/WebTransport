@@ -320,6 +320,39 @@ wt_status_t wt_qpack_decoder_stream_write_stream_cancellation(wt_writer_t *w, ui
 wt_status_t wt_qpack_decoder_stream_write_insert_count_increment(wt_writer_t *w,
                                                                 uint64_t increment);
 
+/* --------------------------------------- RFC 9204 section 4.5.1's header prefix */
+
+/* Every encoded field section starts with two values: the Required Insert Count,
+ * which says how much of the dynamic table the section needs, and the Base, which
+ * anchors the relative indices inside it. Both are encoded against MaxEntries --
+ * the dynamic table's capacity in units of 32 -- which is why the prefix cannot be
+ * read without knowing the capacity this endpoint advertised.
+ *
+ * MaxEntries is zero when the capacity is below 32, and then no section may
+ * reference the dynamic table at all: an encoder with one would be writing against
+ * a table its peer does not have. */
+typedef struct wt_qpack_header_prefix {
+  uint64_t required_insert_count;
+  uint64_t base;
+} wt_qpack_header_prefix_t;
+
+/* MaxEntries for a capacity: the number of 32-byte entries it can hold. */
+uint64_t wt_qpack_max_entries(size_t capacity);
+
+wt_status_t wt_qpack_header_prefix_encode(wt_writer_t *w, uint64_t required_insert_count,
+                                          uint64_t base, uint64_t max_entries);
+
+/* Read the prefix. `known_insert_count` is how many insertions this endpoint has
+ * received, which is what bounds the wrapped value; the section's two error exits
+ * (an encoded count larger than the full range, and a required count that cannot
+ * describe anything the encoder could have sent) are QPACK_DECOMPRESSION_FAILED. An
+ * incomplete prefix is WT_ERR_TRUNCATED with no error code, like the stream
+ * instructions: a field section arrives in pieces. */
+wt_status_t wt_qpack_header_prefix_decode(wt_cursor_t *c, uint64_t max_entries,
+                                          uint64_t known_insert_count,
+                                          wt_qpack_header_prefix_t *out,
+                                          wt_qpack_error_t *out_error);
+
 #ifdef __cplusplus
 }
 #endif

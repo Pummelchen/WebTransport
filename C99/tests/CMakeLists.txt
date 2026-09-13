@@ -59,6 +59,7 @@ set(WT_UNIT_TESTS
   test_qpack_dynamic
   test_qpack_encoder_stream
   test_qpack_decoder_stream
+  test_qpack_header_prefix
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

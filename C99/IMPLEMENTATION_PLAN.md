@@ -1577,7 +1577,23 @@ assert the distinction -- because a parser that reports "malformed" for "not yet
 split into a connection error.
 
 Implement encoder and decoder streams.
-- Implement Base and post-Base dynamic references.
+- **Ninth part done: the field section prefix.** `src/http3/qpack_header_prefix.c` is RFC 9204 section
+4.5.1's Required Insert Count and Base. The count is not sent plainly: it is sent modulo twice the table's
+size in entries, plus one, so that a long-lived connection's ever-growing count still fits a byte -- and the
+decoder reconstructs it from the window it knows, which is why the prefix cannot be read without the capacity
+this endpoint advertised (`wt_qpack_max_entries`). Both of the section's error exits are enforced: an encoded
+count outside the full range, and a decoded count that is more than the encoder could have inserted. The Base
+is a signed delta from the count, and its negative form subtracts one, so a delta with nothing to subtract
+from is refused.
+
+One finding, and it is the kind that only an exact-byte check catches: the S bit is the MOST significant bit
+of the Base byte, not the one below it. RFC 9204's figures number their bits left to right from the top, and
+reading the figure's `| S | Delta Base (7+) |` as if `S` sat at 0x40 puts the sign inside the seven-bit
+prefix -- which this module's own flag check then rejected, so the encoder refused every prefix whose Base
+was below its required count. The round trip would have hidden it had the flag check been laxer, because both
+sides would have agreed on the wrong bit.
+
+Implement Base and post-Base dynamic references.
 - Enforce table capacity and malformed reference handling.
 
 Completion criteria:
