@@ -37,7 +37,14 @@ private func serveSequentialSessions(concurrencyLimit: Int, rounds: Int) async t
             path: "/wt",
             origin: "https://localhost",
             supportedProtocols: ["demo.v1"],
-            timeoutMilliseconds: 5_000,
+            // The accept has to outlive the longest possible retry, or a recovered
+            // transient would still fail the round: `acceptSession()` takes no timeout of
+            // its own, so its budget is this value while the client's is 5 s per attempt
+            // (see `connectWithTransientRetry`). 25 s covers 4 x 5 s with margin. It costs
+            // nothing on the happy path — the waits return as soon as data arrives — and a
+            // round against a genuinely broken listener fails on the *client's* timeout,
+            // because the connect is what times out first.
+            timeoutMilliseconds: 25_000,
             admission: WebTransportAdmissionPolicy(maxConcurrentConnections: concurrencyLimit)
         )
     )
@@ -45,26 +52,87 @@ private func serveSequentialSessions(concurrencyLimit: Int, rounds: Int) async t
     defer { listener.shutdown() }
 
     for round in 1...rounds {
-        let client = WebTransportClient(
-            configuration: WebTransportClientConfiguration(
-                authority: "localhost",
-                path: "/wt",
-                origin: "https://localhost",
-                availableProtocols: ["demo.v1"],
-                trustPolicy: .localDevelopmentSelfSigned,
-                timeoutMilliseconds: 5_000
-            )
-        )
-        async let accepted = listener.acceptSession()
-        let session = try await client.connect(to: listener.localEndpoint)
-        let serverSession = try await accepted
+        try await serveOneSession(listener: listener, round: round)
+    }
+}
+
+/// Serves one session, retrying a connect the transport could not establish at all.
+///
+/// WT-185: on a loaded runner the framework fails the connection itself —
+/// `NetworkConnection.State.failed` with `ENETDOWN` (50) or `ENOTCONN` (57) — which this
+/// runtime now reports as `WebTransportNetworkRuntimeError.connectionEstablishmentFailed`
+/// instead of rethrowing a bare `POSIXErrorCode`. That is the runner's network stack, not
+/// this package's admission ceiling, so the connect is retried rather than counted against
+/// the property under test.
+///
+/// **The retry cannot hide the defect this file exists for (issue #23).** A listener that
+/// has stopped accepting never completes a handshake, so a round against one fails as a
+/// `timeout` after the client's configured 5 s — and `timeout` is not the case retried
+/// here. Only a named establishment failure whose framework error is one of the transient
+/// POSIX codes is retried, and only `attempts` times; anything else, or an exhausted
+/// budget, is rethrown so the round still fails loudly.
+///
+/// One accept waiter serves the whole round, so a retried connect is served by the same
+/// waiter rather than by a new one. Opening a fresh accept per attempt and abandoning the
+/// previous one would introduce a real hazard: the connection queue removes a cancelled
+/// waiter asynchronously, so a connection can be handed to one that is already gone and
+/// released instead of served — losing the very connection the retry is waiting for.
+///
+/// The waiter is not, however, reserved for the attempt that succeeds. The listener
+/// enqueues a connection as soon as it arrives, independently of what the client's own
+/// state does next, so the waiter can be handed the connection of an attempt that has
+/// since failed. That cannot turn into a false pass — the mismatched client session then
+/// fails on its own — but it can turn a recovered transient into a failure, which is why
+/// the accept's budget is sized to cover the whole retry window.
+private func serveOneSession(listener: WebTransportListeningServer, round: Int) async throws {
+    let accepted = Task { try await listener.acceptSession() }
+    do {
+        let session = try await connectWithTransientRetry(listener: listener)
+        let serverSession = try await accepted.value
         #expect(session.selectedProtocol == "demo.v1")
         #expect(serverSession.selectedProtocol == "demo.v1")
         // Session number `concurrencyLimit + 1` is the one the framework's lifetime
         // cap used to swallow. Close cleanly, as a client loop reconnecting on each
         // launch does, and require the listener to take the next one.
         try await session.close(applicationErrorCode: 0, reason: "round-\(round)")
+    } catch {
+        accepted.cancel()
+        throw error
     }
+}
+
+/// Connects to the listener, retrying only a transient establishment failure (WT-185).
+private func connectWithTransientRetry(listener: WebTransportListeningServer) async throws -> WebTransportSession {
+    let attempts = 4
+    var lastError: (any Error)?
+    for attempt in 1...attempts {
+        do {
+            return try await makeSequentialClient().connect(to: listener.localEndpoint)
+        } catch {
+            lastError = error
+            let runtimeError = error as? WebTransportNetworkRuntimeError
+            guard runtimeError?.isTransientEstablishmentFailure == true, attempt < attempts else {
+                throw error
+            }
+            // A brief pause before asking a stack that has just reported itself
+            // unavailable to build another connection.
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+    throw lastError ?? WebTransportNetworkRuntimeError.timeout(0)
+}
+
+private func makeSequentialClient() -> WebTransportClient {
+    WebTransportClient(
+        configuration: WebTransportClientConfiguration(
+            authority: "localhost",
+            path: "/wt",
+            origin: "https://localhost",
+            availableProtocols: ["demo.v1"],
+            trustPolicy: .localDevelopmentSelfSigned,
+            timeoutMilliseconds: 5_000
+        )
+    )
 }
 
 /// The other half of the ceiling: it has to still refuse.

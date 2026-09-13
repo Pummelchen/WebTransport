@@ -29,6 +29,64 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
     /// reads like an internal truncation rather than a peer that closed a stream it had
     /// not written to.
     case peerClosedStreamWithoutData(streamID: UInt64)
+    /// The transport failed to establish the connection.
+    ///
+    /// `NetworkConnection.State.failed` carries whatever the framework reports, and on a
+    /// loaded host that is a transient POSIX condition — `ENETDOWN`, `ENOTCONN` — rather
+    /// than anything about the endpoint. Rethrowing it verbatim put a bare
+    /// `POSIXErrorCode` in front of a caller, which cannot tell "the local stack was
+    /// momentarily unavailable, try again" from "that address is wrong"; it is also what
+    /// reached `listenerServesMoreSequentialSessionsThanTheDefaultCeiling` under
+    /// Thread Sanitizer as `POSIXErrorCode(rawValue: 50)` and `(rawValue: 57)` (WT-185).
+    ///
+    /// Naming it is what lets a caller apply the documented remedy — establish a new
+    /// connection — and what lets a test retry a condition that is not the property it
+    /// asserts. A POSIX condition is reported as `NSPOSIXErrorDomain` with the errno in
+    /// `code`; anything else keeps the framework's own domain and code. That
+    /// normalisation is deliberate: `NWError.posix` bridges to `NSError` under
+    /// `"Network.NWError"`, so a predicate reading the bridged domain would never match a
+    /// real failure.
+    case connectionEstablishmentFailed(role: String, domain: String, code: Int)
+
+    /// The transport conditions that mean the local stack could not carry a connection
+    /// at that instant, as opposed to the peer refusing or resetting one.
+    ///
+    /// `ENETDOWN` and `ENOTCONN` are the two a saturated macOS CI runner produced, and
+    /// they are named as a class rather than as a single errno precisely because the two
+    /// occurrences were two different codes: a fix that special-cased `ENETDOWN` would
+    /// have missed `ENOTCONN` (WT-185).
+    ///
+    /// Three of the five — `ENETUNREACH`, `EHOSTUNREACH` and `EADDRNOTAVAIL` — can also
+    /// describe a route, host or address that is simply wrong and will not come back. They
+    /// are kept because the same errno is equally what a stack reports while a route or an
+    /// interface is still settling, and this set is not a licence to loop: see the bound
+    /// `isTransientEstablishmentFailure` documents.
+    private static let transientEstablishmentPOSIXCodes: Set<Int> = [
+        Int(POSIXErrorCode.ENETDOWN.rawValue),
+        Int(POSIXErrorCode.ENOTCONN.rawValue),
+        Int(POSIXErrorCode.ENETUNREACH.rawValue),
+        Int(POSIXErrorCode.EHOSTUNREACH.rawValue),
+        Int(POSIXErrorCode.EADDRNOTAVAIL.rawValue),
+    ]
+
+    /// Whether this is a transport condition a fresh connection can clear.
+    ///
+    /// True only for a named establishment failure whose framework error was one of the
+    /// transient POSIX codes above. A caller may retry on it; a wrong address, a refused
+    /// port, or a handshake the peer rejected is not this case and is never retried here.
+    ///
+    /// **A caller that retries must bound the attempts.** This answers "could a fresh
+    /// connection clear it", not "will it" — some of the codes above also describe a route
+    /// or an address that will never come back — so retrying on this property in a loop is
+    /// a way to turn a fast, accurate failure into a slow one.
+    public var isTransientEstablishmentFailure: Bool {
+        guard case .connectionEstablishmentFailed(_, let domain, let code) = self,
+            domain == NSPOSIXErrorDomain
+        else {
+            return false
+        }
+        return Self.transientEstablishmentPOSIXCodes.contains(code)
+    }
 
     public var description: String {
         switch self {
@@ -52,6 +110,10 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
         case .peerClosedStreamWithoutData(let streamID):
             return "the peer ended stream \(streamID) before sending any bytes; "
                 + "the stream cannot be used and the peer is not following the protocol"
+        case .connectionEstablishmentFailed(let role, let domain, let code):
+            return "the transport failed to establish the \(role) connection "
+                + "(\(domain) \(code)); the connection was never established, so opening "
+                + "a new one is the remedy"
         }
     }
 }

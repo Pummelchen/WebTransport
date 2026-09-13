@@ -1691,6 +1691,39 @@ enum InteroperableQUICHelpers {
         return opened
     }
 
+    /// Names a connection the transport failed to establish (WT-185).
+    ///
+    /// `NetworkConnection.State.failed` carries the framework's own error, and on a
+    /// loaded host that is a transient POSIX condition rather than anything about the
+    /// endpoint. Translating it here rather than rethrowing it verbatim is what stops
+    /// *this* path's framework error from reaching a caller as a bare `POSIXErrorCode`:
+    /// the caller gets a case it can recognise and act on, and the framework's error is
+    /// kept for diagnosis.
+    ///
+    /// It does not make raw framework errors unreachable everywhere — an inbound stream
+    /// or a queued connection that fails still surfaces the framework's error through
+    /// `InteroperableQUICInboundStreamCollector.next` and
+    /// `InteroperableQUICConnectionQueue.dequeue`. Establishment is the one path on which
+    /// the condition is recognisable enough to be worth naming.
+    ///
+    /// **A POSIX condition is recognised from the error itself, not from its `NSError`
+    /// domain.** Measured rather than assumed: `NWError.posix(.ENETDOWN)` bridges to
+    /// `NSError` under the domain `"Network.NWError"` — *not* `NSPOSIXErrorDomain` — so a
+    /// predicate reading the bridged domain would never match a real failure. That is the
+    /// trap `isTransientNotConnected` below fell into, and it is why this unwraps the
+    /// `NWError` case and reports the condition under the POSIX domain it actually is.
+    static func establishmentFailure(role: String, error: Error) -> WebTransportNetworkRuntimeError {
+        if let networkError = error as? NWError, case .posix(let posixCode) = networkError {
+            return .connectionEstablishmentFailed(
+                role: role,
+                domain: NSPOSIXErrorDomain,
+                code: Int(posixCode.rawValue)
+            )
+        }
+        let nsError = error as NSError
+        return .connectionEstablishmentFailed(role: role, domain: nsError.domain, code: nsError.code)
+    }
+
     static func waitForReady(
         connection: NetworkConnection<QUIC>,
         role: String = "client",
@@ -1708,7 +1741,7 @@ enum InteroperableQUICHelpers {
         }
         if case .failed(let error) = connection.state {
             InteroperableQUICDebug.log("\(role) connection already failed: \(error)")
-            throw error
+            throw establishmentFailure(role: role, error: error)
         }
         if case .cancelled = connection.state {
             InteroperableQUICDebug.log("\(role) connection already cancelled")
@@ -1732,7 +1765,7 @@ enum InteroperableQUICHelpers {
                         Task {
                             await completion.complete {
                                 InteroperableQUICDebug.log("\(role) connection failed: \(error)")
-                                continuation.resume(throwing: error)
+                                continuation.resume(throwing: establishmentFailure(role: role, error: error))
                             }
                         }
                     case .cancelled:
@@ -1993,7 +2026,20 @@ enum InteroperableQUICHelpers {
         }
     }
 
+    /// Whether a failed stream operation failed because the connection was not connected
+    /// yet, which a retry can clear.
+    ///
+    /// **This predicate was dead for the errors the runtime actually sees.** `NWError.posix`
+    /// bridges to `NSError` under the domain `"Network.NWError"`, not under
+    /// `NSPOSIXErrorDomain`, so the bridged-domain test below never matched a real
+    /// framework error; nor does `error as? POSIXError` succeed for one. The connection's
+    /// own `ENOTCONN` therefore never took the retry branch in `openBidirectionalStream`.
+    /// It unwraps the `NWError` case first, which is the only form that identifies the
+    /// condition. Found while fixing `WT-185`, which is the same misunderstanding.
     static func isTransientNotConnected(_ error: Error) -> Bool {
+        if let networkError = error as? NWError, case .posix(let posixCode) = networkError {
+            return posixCode == .ENOTCONN
+        }
         if let posix = error as? POSIXError {
             return posix.code == .ENOTCONN
         }

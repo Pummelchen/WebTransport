@@ -191,6 +191,25 @@ public enum WebTransportErrorSurface {
         if error is QUICCodecError {
             return "WebTransport protocol codec rejected malformed input"
         }
+        if let runtimeError = error as? WebTransportNetworkRuntimeError {
+            // Named rather than collapsed into the generic line below, and named *without*
+            // the identifiers each case carries: this surface exists to keep transport
+            // identifiers out of user-visible text, and a stream or connection number is
+            // one. The role is a local label rather than peer input, so it is safe.
+            switch runtimeError {
+            case .connectionEstablishmentFailed(let role, _, _):
+                return "WebTransport \(role) connection could not be established"
+            case .peerControlStreamNotDelivered(let role, _):
+                return "WebTransport \(role) did not receive the peer's HTTP/3 control stream"
+            case .peerClosedStreamWithoutData:
+                return "WebTransport peer ended a stream before sending any bytes"
+            case .timeout:
+                return "WebTransport operation timed out"
+            case .invalidEndpoint, .invalidPayload, .invalidTransport, .exporterUnavailable,
+                .unexpectedPacket, .unexpectedFrame:
+                return "WebTransport operation failed"
+            }
+        }
         return "WebTransport operation failed"
     }
 }
