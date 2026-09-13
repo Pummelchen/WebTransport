@@ -66,6 +66,15 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45419 datagram)
   # The process CONTRACT: exit statuses, refused command lines and the JSON report, checked without a peer.
+  # And the same session over IPv6, where the machine has it: 77 is CTest's SKIP_RETURN_CODE, which the script
+  # returns when the conformance tool reports that this machine has no IPv6 loopback -- a fact about the machine
+  # rather than a failure of the tools.
+  add_test(NAME wt_cli_session_ipv6
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
+            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45421 stream "[::1]"
+            $<TARGET_FILE:wt-conformance-c99>)
+  set_tests_properties(wt_cli_session_ipv6 PROPERTIES SKIP_RETURN_CODE 77)
+
   add_test(NAME wt_cli_contract
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-contract.sh
             $<TARGET_FILE:wt-client-c99> $<TARGET_FILE:wt-server-c99>

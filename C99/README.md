@@ -213,6 +213,11 @@ What is here:
   Debian but not FreeBSD or Windows. **Not met** — the five-implementation interop matrix (no C99
   runner and no host here) and the README score, which follows the matrix. Each gap carries a tracker
   number rather than a paragraph.
+- **The CLI tools over IPv6 too** (Phase 10): `wt-client-c99` and `wt-server-c99` exchange a
+  session over `[::1]` as well as IPv4 — the same script, parameterised by host, registered as
+  `wt_cli_session_ipv6`. A machine with no IPv6 loopback returns CTest's **skip** code (77) with the
+  reason, because that is a fact about the machine rather than a failure of the tools; the skip is
+  decided by the conformance tool's own IPv6 scenario, so there is one probe rather than two.
 - **The CLI tools' process contract** (Phase 10): the tools' exit statuses, refused command
   lines and JSON report are part of their interface, because scripts drive them. A CTest script
   checks them without a peer — an unsupported mode exits **2** and names what it refused, no mode

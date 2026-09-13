@@ -2994,6 +2994,18 @@ Completion criteria:
 - Release artifacts are reproducible.
 - Public docs match actual behavior.
 
+### WT-133, first half: the tools over IPv6, and an honest skip
+
+The Definition of Done's third criterion is "the C99 client/server CLI passes local IPv4 and IPv6", and the
+conformance tool covered both families while the two TOOLS themselves had only ever been driven over IPv4.
+`check-cli-session.sh` is parameterised by host now, and `wt_cli_session_ipv6` runs the same two-process session
+over `[::1]` -- handshake, CONNECT accepted, 200 response, and a message each way.
+
+The machine-dependent part is handled the way the conformance tool already handles it: when the host is an IPv6
+literal, the script first asks the conformance tool whether its own IPv6 scenario passes, and returns CTest's
+**skip** code (77) with the reason when it does not. One probe, reused, rather than a second implementation of
+"does this machine have an IPv6 loopback" -- and a skip that says WHY rather than a failure that says nothing.
+
 ### WT-132: the compliance matrix, and a checker that keeps it honest
 
 `docs/COMPLIANCE-MATRIX.md` is the document the Definition of Done's first criterion needs: every requirement

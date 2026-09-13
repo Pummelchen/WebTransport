@@ -15,17 +15,28 @@ server="$1"
 client="$2"
 port="${3:-45417}"
 mode="${4:-stream}"
+host="${5:-127.0.0.1}"
+conformance="${6:-}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-"$server" --listen "127.0.0.1:$port" --message pong --exchange "$mode" --timeout-ms 10000 --json \
+# An IPv6 run needs an IPv6 loopback, and a machine without one is a fact about the machine: the conformance
+# tool's own IPv6 scenario is the probe, and 77 is CTest's SKIP_RETURN_CODE rather than a failure of this code.
+if [ "${host#\[}" != "$host" ] && [ -n "$conformance" ]; then
+  if ! "$conformance" --scenario all --json 2>/dev/null | grep -q '"name":"session-over-ipv6","result":"passed"'; then
+    echo "cli session ($mode): no IPv6 loopback on this machine, skipped"
+    exit 77
+  fi
+fi
+
+"$server" --listen "$host:$port" --message pong --exchange "$mode" --timeout-ms 10000 --json \
   >"$work/server.json" 2>&1 &
 server_pid=$!
 
 # The server must be listening before the client writes; a short pause is enough for a bound socket, and the
 # client retransmits its Initial anyway, which is what a real peer does.
 sleep 1
-"$client" --connect "127.0.0.1:$port" --origin localhost --exchange "$mode" --message ping \
+"$client" --connect "$host:$port" --origin localhost --exchange "$mode" --message ping \
   --timeout-ms 10000 --json >"$work/client.json" 2>&1
 
 wait "$server_pid"
@@ -52,4 +63,4 @@ grep -q "\"receivedDatagram\":$([ "$mode" = datagram ] && echo true || echo fals
   || fail "the client's report does not match the $mode mode"
 grep -q "\"receivedDatagram\":$([ "$mode" = datagram ] && echo true || echo false)" "$work/server.json" \
   || fail "the server's report does not match the $mode mode"
-echo "cli session ($mode): client and server exchanged a WebTransport session over 127.0.0.1:$port"
+echo "cli session ($mode): client and server exchanged a WebTransport session over $host:$port"
