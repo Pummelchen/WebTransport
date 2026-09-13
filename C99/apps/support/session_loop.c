@@ -287,6 +287,21 @@ static wt_status_t loop_close_status(const loop_t *loop) {
   return WT_ERR_PROTOCOL;
 }
 
+/* The status a wait reports when it ended because the connection is CLOSED rather than because its deadline
+ * passed, and whether that is what happened. A loop that kept pumping until its timeout after the transport was
+ * already closed spent the caller's whole `--timeout-ms` to learn nothing -- and reported `timeout`, which is
+ * precisely what did not happen (WT-147: the hostile-peer test waited five seconds for a refusal that had already
+ * arrived). `loop_close_status` names the refusal when this endpoint sent one; WT_ERR_CLOSED is for a peer that
+ * ended the connection while this one waited, which is still not a timeout. */
+static int loop_is_closed(const loop_t *loop) {
+  return wt_quic_connection_is_closed(&loop->session.connection) != 0;
+}
+
+static wt_status_t loop_wait_status(const loop_t *loop) {
+  wt_status_t closed = loop_close_status(loop);
+  return closed != WT_OK ? closed : WT_ERR_CLOSED;
+}
+
 static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->first_receive_error = loop->session.first_receive_error;
   out->receive_errors = loop->session.receive_errors;
@@ -495,14 +510,15 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   deadline_rounds = WT_LOOP_ROUNDS_FOR(config->timeout_ms);
   if (deadline_rounds > WT_LOOP_ROUNDS) deadline_rounds = WT_LOOP_ROUNDS;
 
-  for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0; round++) {
+  for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0 && loop_is_closed(&loop) == 0;
+       round++) {
     pump_once(&loop);
   }
   if (handshake_ready(&loop) == 0) {
     record_oracle(&loop, out);
-      wt_runtime_session_clear(&loop.session);
+    wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
-    return WT_ERR_TIMEOUT;
+    return loop_is_closed(&loop) != 0 ? loop_wait_status(&loop) : WT_ERR_TIMEOUT;
   }
   out->established = 1;
 
@@ -530,14 +546,15 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
       return status;
     }
   }
-  for (round = 0U; round < deadline_rounds && loop.side.section_complete == 0; round++) {
+  for (round = 0U; round < deadline_rounds && loop.side.section_complete == 0 && loop_is_closed(&loop) == 0;
+       round++) {
     pump_once(&loop);
   }
   if (loop.side.section_complete == 0) {
     record_oracle(&loop, out);
-      wt_runtime_session_clear(&loop.session);
+    wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
-    return WT_ERR_TIMEOUT;
+    return loop_is_closed(&loop) != 0 ? loop_wait_status(&loop) : WT_ERR_TIMEOUT;
   }
   {
     wt_status_t status = wt_http3_endpoint_on_response_headers(
@@ -850,14 +867,15 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   /* Bound so that a refusal with an HTTP/3 error reaches the peer as an application close (WT-159). */
   wt_http3_driver_bind_connection(&loop.side.driver, &loop.session.connection);
 
-  for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0; round++) {
+  for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0 && loop_is_closed(&loop) == 0;
+       round++) {
     pump_once(&loop);
   }
   if (handshake_ready(&loop) == 0) {
     record_oracle(&loop, out);
-      wt_runtime_session_clear(&loop.session);
+    wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
-    return WT_ERR_TIMEOUT;
+    return loop_is_closed(&loop) != 0 ? loop_wait_status(&loop) : WT_ERR_TIMEOUT;
   }
   out->established = 1;
 
@@ -885,7 +903,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
 
   /* The CONNECT, its section assembled from the driver's pieces, and the draft-16 decision. */
-  for (round = 0U; round < deadline_rounds && loop.side.section_complete == 0; round++) {
+  for (round = 0U; round < deadline_rounds && loop.side.section_complete == 0 && loop_is_closed(&loop) == 0;
+       round++) {
     /* The sink must know which stream carries the exchange before the section arrives. A client's first
      * bidirectional stream is stream 0 (RFC 9000 section 2.1), and this tool serves one session, so that is the
      * stream the CONNECT is on. */
@@ -893,9 +912,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
   if (loop.side.section_complete == 0) {
     record_oracle(&loop, out);
-      wt_runtime_session_clear(&loop.session);
+    wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
-    return WT_ERR_TIMEOUT;
+    return loop_is_closed(&loop) != 0 ? loop_wait_status(&loop) : WT_ERR_TIMEOUT;
   }
   /* A DIAGNOSTIC, gated by WT_HTTP3_SECTION_LOG: the request's field section exactly as it arrived, so that a
    * decoder disagreement with a third-party encoder can be settled by decoding the same bytes twice instead of by

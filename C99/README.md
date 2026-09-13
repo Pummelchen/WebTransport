@@ -601,6 +601,19 @@ What is here:
   an ACK is replaced rather than repeated, a CONNECTION_CLOSE is section 10's business, a DATAGRAM is never
   retransmitted at all (RFC 9221 section 5.2), a PATH_RESPONSE is sent once while a PATH_CHALLENGE must carry
   a fresh payload, and CRYPTO and STREAM bytes are answered by the layers that own them.
+- **A peer that BREAKS A RULE, and what the tools do about it** (WT-147): every other peer this tree can stand up
+  is well behaved, so the tools' refusal path was only ever exercised in one process. `wt-conformance-c99 --listen
+  <host:port> --hostile <act>` is a LISTENING peer that completes a handshake and then misbehaves -- the first act
+  is `max-streams-decrease`, a MAX_STREAMS below the limit its own parameters granted, which RFC 9000 section 4.6
+  makes a PROTOCOL_VIOLATION naming the frame. The misbehaviour lives in the test peer rather than as a flag on
+  `wt-server-c99`, because a production server that could be told to break a transport rule would be a server
+  nobody could trust. `scripts/check-cli-hostile.sh` (CTest's `wt_cli_hostile_peer`) asserts the whole contract:
+  the client exits **non-zero**, its status is `protocol` rather than `timeout`, and its report carries a transport
+  close with PROTOCOL_VIOLATION (0x0a) naming MAX_STREAMS (0x12) -- on the client's report AND on the peer's, since
+  "the code I sent" and "the code I received" are different claims. The test also found a real defect: a wait loop
+  kept pumping until `--timeout-ms` after the transport was already closed, reporting `timeout` for a refusal that
+  had already arrived; every wait now stops when the connection closes and names what happened
+  (`protocol`, or `closed` for a peer that ended it).
 - **Path validation, driven by the connection** (WT-172): RFC 9000 section 8.2 is the liveness test of section
   10.1.1, and the rules are the protocol's rather than a caller's, so the connection owns them.
   `wt_quic_connection_validate_path` sends a PATH_CHALLENGE with eight unpredictable bytes; a PATH_RESPONSE

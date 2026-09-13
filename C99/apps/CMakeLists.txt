@@ -19,7 +19,8 @@ foreach(app wt-client-c99 wt-server-c99 wt-conformance-c99)
                               ${app}/scenario_capsules.c ${app}/../support/capsule_stream.c
                               ${app}/scenario_control.c ${app}/scenario_headers.c
                               ${app}/scenario_isolation.c ${app}/scenario_matrix.c
-                              ${app}/scenario_protocol.c ${app}/scenario_connection_ids.c)
+                              ${app}/scenario_protocol.c ${app}/scenario_connection_ids.c
+                              ${app}/hostile_peer.c)
     # The support headers, because the capsule stream is shared with the CLI tools rather than copied here.
     set(WT_APP_NEEDS_SUPPORT TRUE)
   endif()
@@ -90,6 +91,12 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45421 stream "[::1]"
             $<TARGET_FILE:wt-conformance-c99>)
   set_tests_properties(wt_cli_session_ipv6 PROPERTIES SKIP_RETURN_CODE 77)
+
+  # A peer that BREAKS A RULE, against the client tool (WT-147): the refusal path of a shipped tool, asserted on
+  # both sides of a real socket -- the client's report says what it sent, and the peer's says what it received.
+  add_test(NAME wt_cli_hostile_peer
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-hostile.sh
+            $<TARGET_FILE:wt-conformance-c99> $<TARGET_FILE:wt-client-c99> 45427)
 
   add_test(NAME wt_cli_contract
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-contract.sh

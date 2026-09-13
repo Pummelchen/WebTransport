@@ -70,7 +70,7 @@ That is the difference between an inventory and a compiler, and it is the argume
 rather than describing it.
 
 `scripts/check-windows-platform.sh` now sweeps the **whole tree** -- every source in `src/`, `tests/` and
-`apps/` -- with the include paths and the one define CMake gives them, and they all compile for Windows: 74 + 100
+`apps/` -- with the include paths and the one define CMake gives them, and they all compile for Windows: 74 + 101
 sources. That is the claim a runner needs before it is worth adding, measured rather than hoped for. The sweep
 found two more defects that clang had been silent about: a dead local `wt_webtransport_capsule_t` in
 `src/webtransport/capsule.c` (GCC's `-Wunused-but-set-variable`, which clang does not diagnose) and a unit test
@@ -99,7 +99,7 @@ destination, which clang accepts and mingw's GCC refuses (`apps/wt-conformance-c
 is a check nobody has tested; this one is on its second real find.
 
 What remains is the Windows RUNNER and FreeBSD, and both are now ONE thing: a way to RUN what already builds. The
-tree compiles for Windows (74 + 100 sources, warnings-as-errors), links for Windows (87 PE32+ executables and a
+tree compiles for Windows (74 + 101 sources, warnings-as-errors), links for Windows (87 PE32+ executables and a
 shared library, enforced in CI), and the FreeBSD surface is the Debian one by the inventory. A job that cannot
 pass is worse than an absent one, because it teaches people to ignore CI -- so the runner is named rather than
 guessed at: Windows 11 needs OpenSSL there and something to execute the test binaries, FreeBSD needs a runner

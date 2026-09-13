@@ -112,7 +112,7 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
                is_flag(argument, "--origin") || is_flag(argument, "--protocol") ||
                is_flag(argument, "--exchange") || is_flag(argument, "--message") ||
                is_flag(argument, "--timeout-ms") || is_flag(argument, "--scenario") ||
-               is_flag(argument, "--address")) {
+               is_flag(argument, "--hostile") || is_flag(argument, "--address")) {
       const char *value;
       /* A flag that takes a value does not take the NEXT FLAG as its value. */
       if (i + 1 >= argc) return fail("missing value", argument, out_error, out_error_argument);
@@ -160,6 +160,13 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
           return fail("unsupported scenario", value, out_error, out_error_argument);
         }
         options->scenario_all = 1;
+      } else if (is_flag(argument, "--hostile")) {
+        /* The act is a NAME, and an unknown one is refused here rather than at the peer: a caller that asked for
+         * a misbehaviour nobody implements should be told, not given a peer that behaves (WT-147). */
+        if (strcmp(value, "max-streams-decrease") != 0) {
+          return fail("unsupported hostile act", value, out_error, out_error_argument);
+        }
+        options->hostile = value;
       } else if (is_flag(argument, "--timeout-ms")) {
         if (!parse_timeout(value, &options->timeout_ms)) {
           return fail("invalid timeout", value, out_error, out_error_argument);
@@ -198,6 +205,13 @@ wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **o
   }
   if (options->timeout_ms == 0U) {
     if (out_error != NULL) *out_error = "a zero timeout would wait forever";
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  /* A hostile act is something a LISTENING PEER does after a handshake, so it is refused anywhere else: a
+   * command line that asked for one and got a well-behaved peer would be a test that passes while testing
+   * nothing. */
+  if (options->hostile != NULL && options->mode != WT_CLI_MODE_LISTEN) {
+    if (out_error != NULL) *out_error = "--hostile is a listening peer's option: it names the act it performs";
     return WT_ERR_INVALID_ARGUMENT;
   }
   /* A Retry is something a SERVER does to a client. A client that asked for one would be asking to be
@@ -252,6 +266,12 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
           options->settings_validation != 0 ? "true" : "false",
           options->retry != 0 ? ",\"retry\":true" : "",
           wt_cli_exchange_name(options->exchange), (unsigned long long)options->timeout_ms);
-  fprintf(stream, ",\"scenario\":%s,\"json\":%s}\n", options->scenario_all != 0 ? "\"all\"" : "null",
+  fprintf(stream, ",\"scenario\":%s,\"hostile\":", options->scenario_all != 0 ? "\"all\"" : "null");
+  if (options->hostile == NULL) {
+    fprintf(stream, "null");
+  } else {
+    fprintf(stream, "\"%s\"", options->hostile);
+  }
+  fprintf(stream, ",\"json\":%s}\n",
           options->json != 0 ? "true" : "false");
 }

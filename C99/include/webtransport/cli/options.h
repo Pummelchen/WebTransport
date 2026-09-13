@@ -67,6 +67,11 @@ typedef struct wt_cli_options {
   uint64_t timeout_ms;
   int timeout_set;
   int scenario_all;
+  /* The conformance tool's LISTENING mode: the act a peer performs after a handshake, so the tools can be tested
+   * against a peer that MISBEHAVES rather than only against one that behaves (WT-147). A flag rather than a
+   * behaviour in the shipped tools, because a server tool that could be made to break a rule would be a server
+   * tool nobody could trust. */
+  const char *hostile;
   int json;
   /* `--help` and `--version` are answered BEFORE the mode and address are checked, because a caller asking what
    * a tool does has not asked it to do anything: a parser that refused them as unknown flags made the tools

@@ -14,6 +14,7 @@
 #include "webtransport/cli/options.h"
 #include "webtransport/cli/report.h"
 
+#include "hostile_peer.h"
 #include "scenario_connection_ids.h"
 #include "scenario_session.h"
 #include "scenario_refusals.h"
@@ -92,6 +93,23 @@ int main(int argc, char **argv) {
       printf("%s %s\n", argv[0], wt_version_string());
       return 0;
     }
+  }
+  /* The LISTENING peer (WT-147): one act of misbehaviour, performed after a handshake, so the CLI tools can be
+   * tested against a peer that breaks a rule. Everything below this line is the in-process scenario suite. */
+  if (options.mode == WT_CLI_MODE_LISTEN) {
+    char hostile_detail[WT_CLI_SCENARIO_DETAIL_MAX];
+    wt_cli_result_t outcome;
+
+    if (options.hostile == NULL) return wt_usage(argv[0]);
+    outcome = wt_scenario_hostile_peer_run(options.address, options.hostile, hostile_detail,
+                                           sizeof(hostile_detail));
+    if (options.json != 0) {
+      printf("{\"result\":\"%s\",\"detail\":\"%s\"}\n", wt_cli_result_name(outcome),
+             hostile_detail);
+    } else {
+      printf("hostile peer: %s (%s)\n", wt_cli_result_name(outcome), hostile_detail);
+    }
+    return outcome == WT_CLI_RESULT_PASSED ? 0 : (outcome == WT_CLI_RESULT_UNSUPPORTED ? 3 : 1);
   }
   if (options.scenario_all == 0) return wt_usage(argv[0]);
 
