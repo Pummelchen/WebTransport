@@ -30,12 +30,23 @@ network="wt-interop-net"
 client_image="wt-interop-c99-client"
 timeout_ms="${WT_CONTAINER_INTEROP_TIMEOUT_MS:-8000}"
 
+# The client's own gated dumps (C99/docs/DIAGNOSTICS.md). They write INSIDE the container, so the log directory is
+# mounted from the host: a diagnostic that dies with the container is a diagnostic nobody reads. Set
+# `WT_INTEROP_PACKET_LOG=1` (or SECRET/TRANSCRIPT/STREAM) and the file is printed after the run.
+log_dir="$(mktemp -d)"
+client_env=""
+[ "${WT_INTEROP_PACKET_LOG:-0}" = "1" ] && client_env="$client_env -e WT_QUIC_PACKET_LOG=/logs/packets.log"
+[ "${WT_INTEROP_SECRET_LOG:-0}" = "1" ] && client_env="$client_env -e WT_TLS_SECRET_LOG=/logs/secrets.log"
+[ "${WT_INTEROP_TRANSCRIPT_LOG:-0}" = "1" ] && client_env="$client_env -e WT_TLS_TRANSCRIPT_LOG=/logs/transcript.log"
+[ "${WT_INTEROP_STREAM_LOG:-0}" = "1" ] && client_env="$client_env -e WT_HTTP3_STREAM_LOG=/logs/stream.log"
+
 cleanup() {
   for peer in $peers; do
     docker rm -f "wt-interop-$peer" >/dev/null 2>&1 || true
   done
   docker rm -f wt-interop-client >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
+  rm -rf "$log_dir"
 }
 trap cleanup EXIT
 
@@ -77,9 +88,16 @@ for peer in $peers; do
   # address on the command line is the loopback one a developer would use anyway.
   # A message is NAMED, because an empty WebTransport stream body carries nothing a peer can observe: `--exchange
   # stream` without `--message` sends the prefix and FIN alone, which is a valid stream and a silent one.
-  docker run --rm --network "container:wt-interop-$peer" "$client_image" \
+  # shellcheck disable=SC2086
+  docker run --rm --network "container:wt-interop-$peer" -v "$log_dir:/logs" $client_env "$client_image" \
     --connect "127.0.0.1:$port" --trust local-development --exchange stream \
     --message "${WT_INTEROP_MESSAGE:-hello-interop}" --timeout-ms "$timeout_ms" || true
+  for dump in packets secrets transcript stream; do
+    if [ -s "$log_dir/$dump.log" ]; then
+      echo "-- client $dump log (last 30 lines):"
+      tail -30 "$log_dir/$dump.log"
+    fi
+  done
   if [ "${WT_INTEROP_CAPTURE:-0}" = "1" ]; then
     echo "-- capture (client -> peer, then peer -> client):"
     docker logs "wt-capture-$peer" 2>&1 | grep -E "^[0-9]" | tail -24 || true
