@@ -399,9 +399,14 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
    * for. */
   if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) {
       uint64_t stream_id = frame->as.stream.id;
-      if (stream_is_ours(driver->endpoint, stream_id)) {
-        /* A stream this endpoint opened carries the peer's ANSWER, which the connection's own
-         * stream state owns; there is nothing here to route. */
+      if (stream_is_ours(driver->endpoint, stream_id) &&
+          !wt_quic_stream_id_is_bidirectional(stream_id)) {
+        /* A UNIDIRECTIONAL stream this endpoint opened: the peer cannot write on it, so there is nothing to
+         * route. A BIDIRECTIONAL one is a different matter, and dropping it here (which this code did) is why
+         * the response never reached the caller: the peer's frames on a stream WE opened ARE the response, and
+         * RFC 9114 section 4.1 gives the two directions of one exchange their own HEADERS frames on that same
+         * stream. The connection delivered the frame, the chain called this layer, and this early return said
+         * there was nothing to route. */
         return WT_OK;
       }
       if (wt_quic_stream_id_is_bidirectional(stream_id)) {

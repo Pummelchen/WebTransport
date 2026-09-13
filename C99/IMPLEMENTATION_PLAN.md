@@ -2361,6 +2361,30 @@ granted. Reproducing that in isolation (set 8, open peer streams, read the grant
 carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
 saw STREAM frames, and it walked frames at all.
 
+### Phase 9's twenty-fourth part: the exchange is complete
+
+**A whole WebTransport exchange now crosses a real connection, and the test file was rewritten to say so
+plainly.** `test_runtime_session_pair` is two self-contained tests: one for the TLS 1.3 handshake inside QUIC,
+one for the exchange -- the client's extended CONNECT, the server's decode and acceptance of it, the server's
+response, and the client's decode of that with `:status 200` -- 99 checks, all green.
+
+Three library fixes came out of this last stretch, and they are the reason it works:
+
+- **A tracked bidirectional stream must be routed, not offered to `on_request_stream` again** (WT-116). The
+  duplicate refusal used to ABORT the frame routing, so a peer's response was never handed to the caller.
+- **A peer's frames on a BIDIRECTIONAL stream this endpoint opened must be routed** (this part). The driver
+  returned early for any stream "we opened", on the reasoning that such a stream carries only the peer's answer,
+  "which the connection's own stream state owns" -- and that early return was where the response died. A
+  UNIDIRECTIONAL stream we opened is the case where nothing can come back; a bidirectional one carries the
+  other direction of the exchange, with its own HEADERS frames (RFC 9114 section 4.1).
+- **The receive grants must match what is advertised** (WT-110's root cause), or the first stream frame is
+  refused as FLOW_CONTROL_ERROR and the connection closes.
+
+The work also produced the rule that the test's own history taught: it was edited by scripted find-and-replace
+seven times, and two of those edits landed blocks in the wrong place -- one cost a round of library diagnosis and
+one cost the file's integrity. It is now written whole, as two readable tests, and the phase records the rule:
+**a test whose ORDER is its subject is edited by hand or rewritten, never nibbled by anchors.**
+
 ### Phase 9's twenty-third part: the response path's routing bug, and a test file that needs a lighter hand
 
 The response could not be reported at all, and the reason is a real library bug now fixed: routing a
