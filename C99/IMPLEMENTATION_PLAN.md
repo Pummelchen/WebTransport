@@ -2346,6 +2346,21 @@ The window was the wrong one, not the conclusion about the whole path. The next 
 the connection's FRAME WALK (`ensure_peer_stream`, `deliver_to_handler`), which is the one place left that no
 measurement has looked at, and WT-110 carries the corrected sequence.
 
+The next counter then went inside the connection's FRAME WALK, and it found the reason in one run. Three
+permanent diagnostics on the connection -- `frames_walked`, `stream_frames_seen`, `frames_delivered` -- showed
+that the server's walk DOES see the client's STREAM frames (`stream_frames_seen` 4, `frames_walked` 2138) and
+that **both connections are CLOSED with transport error code 3, `STREAM_LIMIT_ERROR`**, long before the CONNECT
+matters. `ensure_peer_stream` decided the client had opened more streams than this endpoint granted and closed
+the connection; every later frame is then ignored by design, which is exactly why no stream was created for the
+request and no frame reached the HTTP/3 handler. Three rounds of inference had looked everywhere except at
+whether the connection was still alive.
+
+The admission check reads `local_max_streams[bidirectional ? 0 : 1]`, and the test sets BOTH classes to 8 before
+any stream is opened, so the ACCOUNTING -- not the test -- is what believed a single unidirectional stream was
+granted. Reproducing that in isolation (set 8, open peer streams, read the grant) is the next step, and WT-110
+carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
+saw STREAM frames, and it walked frames at all.
+
 The test asserts only what is true today (the CONNECT goes out, the client records and tracks its request
 stream), and WT-110 carries the measurement and the next step.
 
