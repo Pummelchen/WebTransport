@@ -35,6 +35,11 @@ timeout_ms="${WEBTRANSPORT_VPS_INTEROP_TIMEOUT_MS:-15000}"
 # How many times a proof may be attempted before it counts as failed. A container bridge drops an
 # answer often enough that one attempt measures luck rather than interoperability; see run_proof.
 attempts="${WEBTRANSPORT_VPS_INTEROP_ATTEMPTS:-4}"
+# Some peers serve a bounded number of sessions -- `erlang-webtransport` stops accepting after a couple,
+# which is why its datagram proof passed alone and failed in a full run -- so a matrix needs them fresh.
+# This names a command to run before each proof, given the proof key as its argument. Unset leaves the
+# peers alone, which is the right default for a deployment that does not need it.
+reset_command="${WEBTRANSPORT_VPS_INTEROP_RESET:-}"
 out="${WEBTRANSPORT_VPS_INTEROP_OUT:-$root/out/vps-interop}"
 
 py_port="${WEBTRANSPORT_VPS_INTEROP_PY_PORT:-54001}"
@@ -68,6 +73,12 @@ run_proof() {
   message="$key-$exchange-vps"
   stdout_file="$out/$key-$exchange.stdout"
   json_file="$out/$key-$exchange.json"
+
+  # A peer with a session ceiling is started fresh for its proof rather than being asked to serve a queue.
+  if [ -n "$reset_command" ]; then
+    # shellcheck disable=SC2086
+    $reset_command "$key" >/dev/null 2>&1 || true
+  fi
 
   # A proof is retried on a transient failure, and the count is recorded rather than hidden. Measured: over
   # a container bridge the same peer answers about two attempts in five and times out on the rest, so a

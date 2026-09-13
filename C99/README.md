@@ -175,6 +175,32 @@ What is here:
   the client never adopted the server's Source Connection ID (WT-138), never sent
   `initial_source_connection_id` (WT-141), sent nothing to a peer after a lost frame (WT-135), and
   re-read its own data stream's answer as a prefix (WT-135, above).
+- **The five-implementation VPS matrix** (WT-135, Phase 11): the plan names seven proofs against five
+  independent implementations on a routable host, and `scripts/run-vps-third-party-interop.sh` runs them and
+  emits the aggregate the plan asks for — `testedImplementationCount`, `passedProofCount`,
+  `requiredProofCount`, `allPassed` — by counting the proof files rather than by asserting what the run
+  expected. Measured on the VPS (Debian 13, x86_64) on **13 September 2026: 7 of 7 proofs passed across all
+  5 implementations**, every proof run with `--trust system`, so the chain is validated against the platform
+  trust store and the certificate's name is checked rather than bypassed.
+
+  | Implementation | Version | URL | Third-party OS | Test date | Proof |
+  | --- | --- | --- | --- | --- | --- |
+  | `pywebtransport` / `aioquic` | pywebtransport 0.1.2, aioquic 1.3.0 | https://pypi.org/project/pywebtransport/ | Debian 13 (trixie) x86_64 | 13 September 2026 | stream |
+  | `web-transport-quinn` | 0.11.9 | https://crates.io/crates/web-transport-quinn/0.11.9 | Debian 13 (trixie) x86_64 | 13 September 2026 | stream |
+  | `web-transport-quinn` | 0.11.9 | https://crates.io/crates/web-transport-quinn/0.11.9 | Debian 13 (trixie) x86_64 | 13 September 2026 | datagram |
+  | `web-transport-quiche` | 0.4.1 | https://crates.io/crates/web-transport-quiche/0.4.1 | Debian 13 (trixie) x86_64 | 13 September 2026 | stream |
+  | `hyperium/h3-webtransport` | 0.1.2 | https://github.com/hyperium/h3/tree/master/h3-webtransport | Debian 13 (trixie) x86_64 | 13 September 2026 | datagram |
+  | `erlang-webtransport` | main `f2d4d8dfe60c` | https://github.com/benoitc/erlang-webtransport | Debian 13 (trixie) x86_64 | 13 September 2026 | stream |
+  | `erlang-webtransport` | main `f2d4d8dfe60c` | https://github.com/benoitc/erlang-webtransport | Debian 13 (trixie) x86_64 | 13 September 2026 | datagram |
+
+  Two of the five peers needed a patch before they could pass, and both patches are kept in this repository
+  under `tests/interop/peer/` because the matrix depends on them: `erlang-webtransport` did not send its
+  certificate chain, and `web-transport-quinn` never advertised QUIC DATAGRAM. Both were the peers' doing
+  rather than this client's — the client refused to send a datagram to a peer that had not advertised one,
+  which is the correct behaviour — and an interop result whose peer setup is not recorded is not
+  reproducible. A fresh peer per proof matters as well: `erlang-webtransport` stops accepting after a couple
+  of sessions, so the runner resets the peer set between proofs when told to
+  (`WEBTRANSPORT_VPS_INTEROP_RESET`).
 - **A self-signed identity for local development** (Phase 9): `tls/self_signed.h` generates the
   pair a local server needs *in memory* — an ECDSA P-256 key and a certificate for the loopback
   names — and returns its SHA-256 fingerprint. The pin is the point: a self-signed certificate is
