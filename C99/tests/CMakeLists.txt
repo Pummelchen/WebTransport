@@ -55,6 +55,7 @@ set(WT_UNIT_TESTS
   test_qpack_primitives
   test_qpack_huffman
   test_qpack_huffman_encode
+  test_qpack_field
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

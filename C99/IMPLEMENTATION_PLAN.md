@@ -1505,7 +1505,25 @@ side of this implementation can satisfy by being self-consistent with the other.
 bit packing that carries a code across a byte boundary.
 
 Implement Huffman encoding and decoding.
-- Implement static indexed fields.
+- **Fifth part done: the field line representations.** `src/http3/qpack_field.c` reads and writes all seven
+of RFC 9204 section 4.5's forms. The decision that shaped the API is that the TYPE says which table a line
+needs -- static, dynamic, or post-base -- rather than the decoder assuming: resolving a dynamic index against
+the static table is the mistake that silently produces a different header section, and it is invisible in any
+exchange because both sides believe they are right. So the two static forms resolve to a name through
+`wt_qpack_field_line_static_name` while the dynamic and post-base forms report WT_ERR_STATE, and the dynamic
+table part will consume them deliberately.
+
+Two smaller decisions: the decoder PEEKS the first byte rather than reading it, because each form's index (or
+the literal form's name length) is an integer whose prefix lives in that byte and the integer primitive is
+what reads it; and the N bit (never-indexed) and the H bits travel in the struct rather than being acted on,
+for the same reason the string primitive reports Huffman coding -- the layer that owns the decision is not
+this one.
+
+Three tests: a hand-written wire byte sequence for one line of each prefix family, so a wrong prefix cannot
+pass by round-tripping through the same code; the literal forms including an inline name; and the post-base
+and truncation cases.
+
+Implement static indexed fields.
 - Implement literal field lines.
 - Implement dynamic table.
 - Implement encoder and decoder streams.

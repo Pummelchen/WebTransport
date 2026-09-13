@@ -114,6 +114,65 @@ wt_status_t wt_qpack_huffman_encoded_size(const uint8_t *bytes, size_t length, s
 wt_status_t wt_qpack_huffman_encode(const uint8_t *bytes, size_t length, uint8_t *out,
                                     size_t capacity, size_t *out_length);
 
+/* ------------------------------------------- RFC 9204 section 4.5's field lines */
+
+/* The five representations of section 4.5, split by what a decoder needs to resolve
+ * them: the two that name a static entry need only the static table, the two that
+ * name a dynamic one need the dynamic table, and the two post-base forms need the
+ * header block's base. Modelling the difference in the type is what keeps a decoder
+ * from resolving a dynamic index against the static table by accident -- the bug
+ * that would silently produce a different header section. */
+typedef enum wt_qpack_field_kind {
+  /* 1 1 index(6+): an entry of the static table. */
+  WT_QPACK_FIELD_INDEXED_STATIC = 0,
+  /* 1 0 index(6+): an entry of the dynamic table. */
+  WT_QPACK_FIELD_INDEXED_DYNAMIC = 1,
+  /* 01 N 1 index(4+) then a value string. */
+  WT_QPACK_FIELD_LITERAL_NAME_REF_STATIC = 2,
+  /* 01 N 0 index(4+) then a value string. */
+  WT_QPACK_FIELD_LITERAL_NAME_REF_DYNAMIC = 3,
+  /* 001 N H name-length(3+) then the name and the value. */
+  WT_QPACK_FIELD_LITERAL_LITERAL_NAME = 4,
+  /* 0001 index(4+): a dynamic entry counted from the base. */
+  WT_QPACK_FIELD_POST_BASE_INDEX = 5,
+  /* 0000 N index(3+) then a value string. */
+  WT_QPACK_FIELD_POST_BASE_NAME_REF = 6
+} wt_qpack_field_kind_t;
+
+typedef struct wt_qpack_field_line {
+  wt_qpack_field_kind_t kind;
+  /* The N bit: the field must never be put in a dynamic table. */
+  int never_indexed;
+  /* The index, whose meaning depends on the kind. */
+  uint64_t index;
+  /* The inline name, for the literal-literal form only. */
+  int name_huffman;
+  const uint8_t *name;
+  size_t name_length;
+  /* The value, which every form except the indexed ones carries. Its H bit is
+   * reported rather than acted on, for the reason the string primitive gives. */
+  const uint8_t *value;
+  size_t value_length;
+  int value_huffman;
+  /* How many bytes the representation occupies, so a caller can walk a field
+   * section without re-deriving it. */
+  size_t bytes_consumed;
+} wt_qpack_field_line_t;
+
+/* Read one field line. A truncated representation is WT_ERR_TRUNCATED and a
+ * malformed one WT_ERR_PROTOCOL; the caller maps both to QPACK_DECOMPRESSION_FAILED
+ * (section 8), because a field section that does not parse is not recoverable. */
+wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *out);
+
+/* Write one. Refuses a kind whose fields are not set, so the encoder cannot emit a
+ * representation its own decoder would refuse. */
+wt_status_t wt_qpack_field_line_encode(wt_writer_t *w, const wt_qpack_field_line_t *line);
+
+/* The name of a static-referencing line, from the static table or from the line
+ * itself. WT_ERR_STATE for the kinds that need the dynamic table or a base. */
+wt_status_t wt_qpack_field_line_static_name(const wt_qpack_field_line_t *line, const char **out_name,
+                                            size_t *out_length);
+
 #ifdef __cplusplus
 }
 #endif

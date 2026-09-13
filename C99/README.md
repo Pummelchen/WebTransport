@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 48 unit test files and 78,373 checks, run by `ctest` and again under
+- 49 unit test files and 78,410 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -419,6 +419,11 @@ What is here:
   through this implementation -- an encoder and decoder that share a wrong table round-trip happily -- and
   then over all 256 symbols, which is what says the bit packing survives both the five-bit codes and the
   thirty-bit ones.
+- **The field line representations** (Phase 6, fifth part): `qpack_field.c` reads and writes all seven of
+  RFC 9204 section 4.5's forms, and the TYPE says which table a line needs -- static, dynamic or post-base
+  -- so a decoder cannot resolve a dynamic index against the static table by accident, which is the mistake
+  that silently produces a different header section. The static forms resolve to a name; the dynamic and
+  post-base ones report that they need the dynamic table, which is the next part's work.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

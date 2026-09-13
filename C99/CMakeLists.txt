@@ -129,6 +129,7 @@ set(WT_HTTP3_SOURCES
   src/http3/qpack.c
   src/http3/qpack_primitives.c
   src/http3/qpack_huffman.c
+  src/http3/qpack_field.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_HTTP3_SOURCES})
 
