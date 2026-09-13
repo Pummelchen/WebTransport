@@ -1380,7 +1380,30 @@ range together with the "no new requests" flag.
 Implement GOAWAY.
 - Implement H3 error mapping.
 - Implement stream type prefixes.
-- Enforce request/control stream constraints.
+- **Fifth part done: which frame belongs on which stream.** `include/webtransport/http3/streams.h` is
+RFC 9114 section 7.2's table in one place, because each of its eight frame sections ends with the same
+sentence -- a frame on a stream it has no business on is H3_FRAME_UNEXPECTED -- and a rule stated eight
+times is a rule with seven places to forget it. DATA and HEADERS belong to request and push streams, the
+connection-management frames (SETTINGS, GOAWAY, MAX_PUSH_ID, CANCEL_PUSH) to the control stream,
+PUSH_PROMISE to a request stream from a server, and a QPACK stream carries no HTTP/3 frame at all
+(section 4.2), which is why that kind is refused before the table is consulted. Section 7.2.8's reserved
+types are refused on every kind.
+
+Two of the rules are about the receiving endpoint's ROLE rather than the stream, which is why the role is a
+parameter: section 7.2.7 makes MAX_PUSH_ID a frame only a client sends, so a client that receives one has
+been sent its own frame, and section 7.2.5 makes PUSH_PROMISE a server's with the same consequence in the
+other direction. Unknown frame types are allowed everywhere except on the QPACK streams -- HTTP/3 grows by
+extension frames, and section 9's rule is that a layer ignores what it does not understand.
+
+`wt_http3_stream_kind_for_type` maps a stream type prefix to one of these kinds and reports an unknown
+prefix as WT_ERR_STATE rather than an error, because section 6.2.1 leaves unknown stream types for later
+revisions and the caller ignores the stream.
+
+Five tests, and the first version of one of them was wrong in a way worth recording: it asserted that a
+client may receive MAX_PUSH_ID. The rule is the opposite, and the check that failed was the test's, not the
+code's -- which is the useful direction for that mistake to point.
+
+Enforce request/control stream constraints.
 - Reject duplicate SETTINGS and malformed stream ordering.
 
 Completion criteria:

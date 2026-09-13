@@ -124,6 +124,7 @@ set(WT_HTTP3_SOURCES
   src/http3/settings.c
   src/http3/control.c
   src/http3/goaway.c
+  src/http3/streams.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_HTTP3_SOURCES})
 
@@ -161,6 +162,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/http3/control.h
   include/webtransport/http3/goaway.h
   include/webtransport/http3/role.h
+  include/webtransport/http3/streams.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
   include/webtransport/tls/extension.h
