@@ -3,6 +3,9 @@
 #include "session_loop.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+
+#include <stdio.h>
 #include <string.h>
 
 #include "webtransport/http3/driver.h"
@@ -347,6 +350,27 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
       return status;
     }
   }
+  /* A DIAGNOSTIC, and only a diagnostic: with WT_TLS_SECRET_LOG set, this client appends its own
+   * CLIENT_HANDSHAKE_TRAFFIC_SECRET to that file in the NSS keylog format, so that a peer which writes the same
+   * line can be compared value for value. It exists because a third-party peer could not decrypt this client's
+   * Finished while this client decrypted the peer's (WT-135), and no amount of reading the derivation could say
+   * which of the two values was wrong. Never set in production; the file holds a traffic secret. */
+  {
+    const char *keylog_path = getenv("WT_TLS_SECRET_LOG");
+    if (keylog_path != NULL) {
+      FILE *keylog = fopen(keylog_path, "a");
+      if (keylog != NULL) {
+        unsigned index;
+        fprintf(keylog, "CLIENT_HANDSHAKE_TRAFFIC_SECRET 00");
+        for (index = 0U; index < WT_TLS13_SECRET_LEN; index++) {
+          fprintf(keylog, "%02x", loop.session.handshake.client.client_handshake_secret[index]);
+        }
+        fprintf(keylog, "\n");
+        (void)fclose(keylog);
+      }
+    }
+  }
+
   /* The advertised limits, in force: the promise and the enforcement in one place. */
   (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
   init_side(&loop.side, WT_HTTP3_ROLE_CLIENT);
