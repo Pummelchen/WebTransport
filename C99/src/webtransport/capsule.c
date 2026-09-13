@@ -162,8 +162,6 @@ static wt_status_t parse_two(const wt_webtransport_capsule_t *capsule, uint64_t 
 }
 
 static wt_status_t write_one(wt_writer_t *w, uint64_t type, uint64_t value) {
-  wt_webtransport_capsule_t capsule;
-
   if (w == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (type > WT_QUIC_VARINT_MAX || value > WT_QUIC_VARINT_MAX) return WT_ERR_INVALID_ARGUMENT;
   (void)wt_quic_writer_varint(w, type);
@@ -172,10 +170,9 @@ static wt_status_t write_one(wt_writer_t *w, uint64_t type, uint64_t value) {
    * a decoder reading it would stop after the first byte of a longer number. */
   (void)wt_quic_writer_varint(w, (uint64_t)wt_quic_varint_size(value));
   (void)wt_quic_writer_varint(w, value);
-  capsule.type = type;
-  capsule.value = NULL;
-  capsule.value_length = 0U;
-  capsule.bytes_consumed = 0U;
+  /* Four assignments to a `wt_webtransport_capsule_t` used to sit here, left over from a version that built one
+   * and never read it. clang's `-Wunused-but-set-variable` does not catch that; GCC's does, and the Windows
+   * cross-compile is a GCC -- so the whole library compiles for Windows because a dead local was removed. */
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
 

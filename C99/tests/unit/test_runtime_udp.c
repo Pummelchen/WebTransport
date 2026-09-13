@@ -326,9 +326,12 @@ static void test_refusals(void) {
   /* Closing twice is safe, and the second close must not close a descriptor that has been reused: the
    * field is cleared by the first. */
   wt_udp_close(&socket);
-  WT_EXPECT_INT("the descriptor is cleared", -1, socket.fd);
+  /* The SENTINEL rather than -1: the field holds a platform handle, which is a small signed descriptor on POSIX
+   * and a pointer-sized unsigned SOCKET on Windows whose invalid value is all ones. `WT_UDP_INVALID_FD` is both
+   * of those, and the GCC cross-compile is what insisted on saying so. */
+  WT_EXPECT_TRUE("the descriptor is cleared", socket.fd == WT_UDP_INVALID_FD);
   wt_udp_close(&socket);
-  WT_EXPECT_INT("and closing again is harmless", -1, socket.fd);
+  WT_EXPECT_TRUE("and closing again is harmless", socket.fd == WT_UDP_INVALID_FD);
   wt_udp_close(NULL);
 
   /* Two sockets of different families coexist, which is what the runtime will do when a client is

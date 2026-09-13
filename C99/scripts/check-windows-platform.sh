@@ -43,4 +43,56 @@ trap 'rm -rf "$output"' EXIT
 "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
   -I "$root/include" -c "$root/src/runtime/udp.c" -o "$output/udp.o"
 
-echo "windows platform: udp_platform.h's _WIN32 branch and udp.c compile under $compiler (compiled, not run)"
+# And then the whole library, which is the claim a Windows port would need before a runner is worth adding. The
+# OpenSSL headers are only needed to COMPILE the crypto and TLS sources; a machine without them still checks
+# everything else and says how many it skipped, rather than reporting a pass it did not earn.
+openssl_include=""
+for candidate in /opt/homebrew/opt/openssl@3/include /opt/homebrew/include /usr/local/include /usr/include; do
+  if [ -f "$candidate/openssl/ssl.h" ]; then
+    openssl_include="$candidate"
+    break
+  fi
+done
+
+checked=0
+skipped=0
+for source in $(find "$root/src" -name '*.c' | sort); do
+  if [ -z "$openssl_include" ] && grep -q '#include <openssl' "$source"; then
+    skipped=$((skipped + 1))
+    continue
+  fi
+  "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
+    -I "$root/include" -I "$openssl_include" -c "$source" -o "$output/library.o"
+  checked=$((checked + 1))
+done
+
+# The TESTS and the APPS too, with the include paths and the one define CMake gives them: a Windows port is only
+# worth a runner if the whole tree compiles, and the sweep is what makes that a measurement. The trust-fixture
+# directory is a path, not a file read, so it needs no fixtures to compile.
+checked_tree=0
+skipped_tree=0
+for source in $(find "$root/tests" "$root/apps" -name '*.c' | sort); do
+  case "$source" in
+    */windows/platform_probe.c) continue ;;
+  esac
+  if [ -z "$openssl_include" ] && grep -q '#include <openssl' "$source"; then
+    skipped_tree=$((skipped_tree + 1))
+    continue
+  fi
+  "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
+    -DWT_TRUST_FIXTURE_DIR='"'"'""'"'"' \
+    -I "$root/include" -I "$openssl_include" -I "$root/tests" -I "$root/tests/unit" \
+    -I "$root/tests/vectors" -I "$root/apps/support" -c "$source" -o "$output/tree.o"
+  checked_tree=$((checked_tree + 1))
+done
+
+if [ "$skipped" -gt 0 ]; then
+  echo "windows platform: $checked of the library's sources compile under $compiler; $skipped need OpenSSL headers this machine does not have"
+else
+  echo "windows platform: udp_platform.h's _WIN32 branch and all $checked of the library's sources compile under $compiler (compiled, not run)"
+fi
+if [ "$skipped_tree" -gt 0 ]; then
+  echo "windows platform: $checked_tree of the tests' and apps' sources compile; $skipped_tree need OpenSSL headers this machine does not have"
+else
+  echo "windows platform: all $checked_tree of the tests' and apps' sources compile under $compiler too (compiled, not run)"
+fi
