@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 82 test programs and 82,350 checks, run by `ctest` and again under
+- 82 test programs and 82,350 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -614,6 +614,16 @@ What is here:
   kept pumping until `--timeout-ms` after the transport was already closed, reporting `timeout` for a refusal that
   had already arrived; every wait now stops when the connection closes and names what happened
   (`protocol`, or `closed` for a peer that ended it).
+- **Parser fuzzing, and a fuzz run that always happens** (WT-175): the plan asks for fuzzing of the QUIC varints,
+  QUIC frames, transport parameters, HTTP/3 frames, QPACK, capsules and WebTransport stream prefixes, and the
+  malformed-input corpora in the unit suites are what prove the cases somebody thought of. `tests/fuzz/` is the
+  half that SEARCHES. `fuzz_parsers.c` is a libFuzzer harness whose first input byte selects the family, and it is
+  driven two ways: `fuzz_smoke` (the harness plus `fuzz_driver.c`, a deterministic xorshift driver) runs **200,000
+  generated inputs in CTest on every toolchain**, including under ASan+UBSan, and the `fuzz_parsers` target links
+  libFuzzer's own driver for a coverage-guided search wherever the compiler can (clang ships it; Apple's clang and
+  GCC do not, and the build says which case it is rather than skipping silently). The libFuzzer variant has run
+  **105 million executions with no crash** on this tree. The corpus is generated rather than shipped, so the smoke
+  run cannot rot; `--corpus DIR --seed S` replays an exported corpus or a crash artifact deterministically.
 - **Path validation, driven by the connection** (WT-172): RFC 9000 section 8.2 is the liveness test of section
   10.1.1, and the rules are the protocol's rather than a caller's, so the connection owns them.
   `wt_quic_connection_validate_path` sends a PATH_CHALLENGE with eight unpredictable bytes; a PATH_RESPONSE

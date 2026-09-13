@@ -107,6 +107,61 @@ foreach(test IN LISTS WT_UNIT_TESTS)
   add_test(NAME ${test} COMMAND ${test})
 endforeach()
 
+# Parser fuzzing (WT-175): the plan's "parser fuzzing for QUIC varints, QUIC frames, transport parameters, HTTP/3
+# frames, QPACK, capsules, and WebTransport stream prefixes", in one harness (`tests/fuzz/fuzz_parsers.c` picks a
+# family by the input's first byte).
+#
+# TWO TARGETS, and the reason is that libFuzzer ships with clang only:
+#
+#   - `fuzz_smoke` is the harness plus `fuzz_driver.c`, a deterministic pseudo-random driver, so the fuzz run
+#     happens on EVERY toolchain and under the sanitizers this project already builds with. Its corpus of inputs
+#     is generated, so it always runs; that is the half a CI leg can depend on.
+#   - `fuzz_parsers` is the same harness linked against libFuzzer's driver, built only when the compiler can link
+#     one (probed, because a probe with its own `main` fails for a reason that has nothing to do with fuzzing:
+#     libFuzzer supplies main). That is the coverage-guided search, run where the toolchain allows it.
+#
+# Neither is installed: they are test artifacts, like the unit binaries.
+add_executable(fuzz_smoke fuzz/fuzz_parsers.c fuzz/fuzz_driver.c)
+wt_set_c99(fuzz_smoke)
+wt_apply_warnings(fuzz_smoke)
+target_include_directories(fuzz_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit
+  vectors ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
+target_link_libraries(fuzz_smoke PRIVATE ${WT_LINK_TARGET})
+if(WT_SANITIZER_FLAGS)
+  target_compile_options(fuzz_smoke PRIVATE ${WT_SANITIZER_FLAGS})
+  target_link_options(fuzz_smoke PRIVATE ${WT_SANITIZER_FLAGS})
+endif()
+# 200,000 generated inputs: measured at 0.6 s on the development host, which is cheap enough that the smoke run is
+# a real search rather than a token one, and small enough to sit in a suite that also builds a library.
+add_test(NAME fuzz_parsers_smoke COMMAND fuzz_smoke --runs 200000)
+set_tests_properties(fuzz_parsers_smoke PROPERTIES TIMEOUT 300)
+
+# The driver probe: compile AND link a libFuzzer program that has no `main` of its own, which is exactly what the
+# target needs. `execute_process` rather than a check module because the flag has to reach the link line, which
+# `CMAKE_REQUIRED_FLAGS` does not.
+file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/fuzz_driver_probe.c
+  "int LLVMFuzzerTestOneInput(const unsigned char *data, unsigned long size) { (void)data; (void)size; return 0; }\n")
+execute_process(
+  COMMAND ${CMAKE_C_COMPILER} -fsanitize=fuzzer ${CMAKE_CURRENT_BINARY_DIR}/fuzz_driver_probe.c
+          -o ${CMAKE_CURRENT_BINARY_DIR}/fuzz_driver_probe
+  RESULT_VARIABLE WT_FUZZER_PROBE_RESULT
+  OUTPUT_QUIET ERROR_QUIET)
+if(WT_FUZZER_PROBE_RESULT EQUAL 0 AND NOT WT_SANITIZER_FLAGS)
+  add_executable(fuzz_parsers fuzz/fuzz_parsers.c)
+  wt_set_c99(fuzz_parsers)
+  wt_apply_warnings(fuzz_parsers)
+  target_include_directories(fuzz_parsers PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit
+    vectors ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
+  target_link_libraries(fuzz_parsers PRIVATE ${WT_LINK_TARGET})
+  target_compile_options(fuzz_parsers PRIVATE -fsanitize=fuzzer,address -g)
+  target_link_options(fuzz_parsers PRIVATE -fsanitize=fuzzer,address)
+  add_test(NAME fuzz_parsers_libfuzzer
+    COMMAND fuzz_parsers -runs=50000 -max_len=1024 -artifact_prefix=${CMAKE_CURRENT_BINARY_DIR}/)
+  set_tests_properties(fuzz_parsers_libfuzzer PROPERTIES TIMEOUT 600)
+else()
+  message(STATUS "parser fuzzing: the deterministic smoke run only (this compiler cannot link a libFuzzer driver)")
+endif()
+
 # One test validates certificate chains, so it needs the path to the fixtures it validates
 # against. Passed at configure time rather than guessed from the working directory, which
 # differs between ctest and a direct run.
