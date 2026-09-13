@@ -2302,13 +2302,17 @@ defects came out of writing it, and each is now fixed:
   all. The identity now lives in the pair structure. This is the same class as WT-108's "one number, one owner":
   a borrow whose owner is a stack frame is a borrow that expires.
 
-**And one thing that does not work yet, recorded rather than papered over (WT-110).** The client's bytes go out
-and the server reads packets, but the HTTP/3 layer behind the handshake is NEVER asked about a frame: a counter
-in the test stays at zero while packets are read. The diagnosis is that the connection consumes STREAM frames
-into its own stream state rather than handing them to the frame handler, so the inbound path has to come from
-the connection's stream state -- a stream-data seam -- rather than from the frame handler the driver was written
-against. The test asserts only what is true today (the CONNECT goes out, the request stream is tracked) and
-carries the evidence in a comment; the tracker has the item and the next step.
+**And one thing that does not work yet, recorded rather than papered over (WT-110), with the measurement
+refined twice.** The client's CONNECT goes out and the server reads packets, but the HTTP/3 layer behind the
+handshake is never asked about a frame -- a counter at the top of its chained handler stays at zero. The first
+reading of that was "the connection consumes STREAM frames into its own stream state", and reading
+`connection.c` showed that is wrong: STREAM frames DO reach `deliver_to_handler`, after `ensure_peer_stream`
+has created the stream. The second measurement is sharper and is what the test now records as a comment: on the
+server, `wt_quic_connection_stream(...)` for the request stream is **NULL**, so the server never created the
+stream at all and the frame never reached its frame walk. The next place to look is therefore the CLIENT's
+half of the same question -- whether `wt_quic_connection_send_stream` queued a frame that the flush then sent --
+and that is the next step the tracker carries. The test asserts only what is true today (the CONNECT goes out,
+the client tracks its request stream).
 
 ## Phase 10: Test Port
 
