@@ -401,9 +401,15 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
     if (packet_log_path != NULL && packet_length > 0U) {
       FILE *packet_log = fopen(packet_log_path, "a");
       if (packet_log != NULL) {
-        fprintf(packet_log, "sent space=%d type_bits=%u first=0x%02x length=%zu pn=%llu\n", (int)space,
+        size_t dump_limit = packet_length < 80U ? packet_length : 80U;
+        size_t dump_index;
+        fprintf(packet_log, "sent space=%d type_bits=%u first=0x%02x length=%zu pn=%llu bytes=", (int)space,
                 (unsigned)((packet[0] >> 4) & 0x03U), (unsigned)packet[0], packet_length,
                 (unsigned long long)packet_number);
+        for (dump_index = 0U; dump_index < dump_limit; dump_index++) {
+          fprintf(packet_log, "%02x", packet[dump_index]);
+        }
+        fprintf(packet_log, "\n");
         (void)fclose(packet_log);
       }
     }
