@@ -16,6 +16,17 @@
 #define WT_LOOP_ROUNDS 20000U
 #define WT_LOOP_WAIT_MICROS 2000U
 
+/* How many rounds fit in the timeout the caller asked for, at the interval each wait ACTUALLY uses.
+ *
+ * The deadline used to be `timeout_ms * 2U + 100U` rounds, which is a guess about the wait interval: with a
+ * 2 ms wait that is four times the timeout asked for, so `--timeout-ms 5000` took twenty seconds and a client
+ * pointed at a peer that never answers looked like it had hung (WT-140). The two macros are the two intervals
+ * this file waits for -- `WT_LOOP_WAIT_MICROS`, and ten times that for the peer-discovery peek -- divided into
+ * the timeout, so the number of rounds and the number of milliseconds agree. */
+#define WT_LOOP_ROUNDS_FOR(timeout_ms) (((uint64_t)(timeout_ms) * 1000U) / (uint64_t)WT_LOOP_WAIT_MICROS)
+#define WT_LOOP_PEEK_ROUNDS_FOR(timeout_ms) \
+  (((uint64_t)(timeout_ms) * 1000U) / ((uint64_t)WT_LOOP_WAIT_MICROS * 10U))
+
 typedef struct loop_side {
   wt_http3_endpoint_t endpoint;
   wt_http3_driver_t driver;
@@ -248,7 +259,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &transport);
 
-  deadline_rounds = config->timeout_ms * 2U + 100U;
+  deadline_rounds = WT_LOOP_ROUNDS_FOR(config->timeout_ms);
   if (deadline_rounds > WT_LOOP_ROUNDS) deadline_rounds = WT_LOOP_ROUNDS;
 
   for (round = 0U; round < deadline_rounds && wt_runtime_session_established(&loop.session) == 0; round++) {
@@ -364,7 +375,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
 
   /* The peer's address is not known until a packet arrives, and the runtime takes it from the packet's source:
    * the session's own socket reports it. The wait below is what makes a listener a listener. */
-  deadline_rounds = config->timeout_ms * 2U + 100U;
+  deadline_rounds = WT_LOOP_ROUNDS_FOR(config->timeout_ms);
   if (deadline_rounds > WT_LOOP_ROUNDS) deadline_rounds = WT_LOOP_ROUNDS;
 
   {
@@ -375,7 +386,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     /* The peer is learned by PEEKING, not by receiving: the datagram that names the peer must still be in the
      * queue when the connection is armed, or this side waits for a retransmission it may never get -- which is
      * exactly what the first version did (it received the Initial and dropped it). */
-    for (waited = 0U; waited < 5000U; waited++) {
+    for (waited = 0U; waited < (unsigned)WT_LOOP_PEEK_ROUNDS_FOR(config->timeout_ms); waited++) {
       size_t datagram_length = 0U;
       size_t available = 0U;
       wt_status_t peek_status = wt_udp_peek(&loop.socket, NULL, 0U, &datagram_length, &available, &from);
