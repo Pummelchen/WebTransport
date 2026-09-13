@@ -271,6 +271,54 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   if (wt_runtime_session_established(&loop.session) == 0) {
     wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
+    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
+     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
+     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
+     * when the packets were arriving all along (WT-135). */
+    out->first_receive_error = loop.session.first_receive_error;
+    out->receive_errors = loop.session.receive_errors;
+    out->packets_seen = loop.session.packets_seen;
+    out->last_receive = loop.session.last_receive;
+    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
+     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
+     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
+     * when the packets were arriving all along (WT-135). */
+    out->first_receive_error = loop.session.first_receive_error;
+    out->receive_errors = loop.session.receive_errors;
+    out->packets_seen = loop.session.packets_seen;
+    out->last_receive = loop.session.last_receive;
+    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
+     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
+     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
+     * when the packets were arriving all along (WT-135). */
+    out->first_receive_error = loop.session.first_receive_error;
+    out->receive_errors = loop.session.receive_errors;
+    out->packets_seen = loop.session.packets_seen;
+    out->last_receive = loop.session.last_receive;
+    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
+     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
+     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
+     * when the packets were arriving all along (WT-135). */
+    out->first_receive_error = loop.session.first_receive_error;
+    out->receive_errors = loop.session.receive_errors;
+    out->packets_seen = loop.session.packets_seen;
+    out->last_receive = loop.session.last_receive;
+    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
+     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
+     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
+     * when the packets were arriving all along (WT-135). */
+    out->first_receive_error = loop.session.first_receive_error;
+    out->receive_errors = loop.session.receive_errors;
+    out->packets_seen = loop.session.packets_seen;
+    out->last_receive = loop.session.last_receive;
+    /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
+     * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
+     * measurements -- and "the connection saw 0 packets" was read as a fact about the network
+     * when the packets were arriving all along (WT-135). */
+    out->first_receive_error = loop.session.first_receive_error;
+    out->receive_errors = loop.session.receive_errors;
+    out->packets_seen = loop.session.packets_seen;
+    out->last_receive = loop.session.last_receive;
     return WT_ERR_TIMEOUT;
   }
   out->established = 1;
