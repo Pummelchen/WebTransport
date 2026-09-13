@@ -226,6 +226,15 @@ wt_status_t wt_http3_driver_start_own_streams(wt_http3_driver_t *driver,
                                               const wt_http3_driver_transport_t *transport,
                                               const wt_http3_settings_t *settings, uint64_t now);
 
+/* Open a request stream on the CONNECTION and register it with the ENDPOINT, in one call, so the two
+ * halves of "this stream is a request" cannot disagree. They are two different machines -- the connection
+ * owns the stream ID and its flow control, the endpoint owns the request ordering -- and a caller that
+ * opened one without the other gets a refusal from the connection at the first send, which reads as a
+ * state error rather than as a missing step. (It did: that is why this function exists.) */
+wt_status_t wt_http3_driver_open_request(wt_http3_driver_t *driver,
+                                         const wt_http3_driver_transport_t *transport, uint64_t now,
+                                         uint64_t *out_stream_id, wt_http3_error_t *out_error);
+
 /* Send a request, a response or a trailer on a stream this endpoint owns, as a HEADERS frame.
  * `peer_max_entries` is the peer's advertised QPACK capacity, from its SETTINGS. */
 wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,

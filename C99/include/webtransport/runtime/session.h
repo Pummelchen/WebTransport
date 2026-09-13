@@ -16,6 +16,11 @@
  *     business, so the HTTP/3 layer's handler can be installed behind it. This session installs only the
  *     handshake for now, and `wt_runtime_session_set_frame_handler` is how the next layer joins it.
  *
+ *   - THE PEER'S TRANSPORT PARAMETERS BECOME THE CONNECTION'S LIMITS, as soon as the handshake has them.
+ *     Nothing else does it: the handshake carries the bytes, and a connection whose limits were never
+ *     applied refuses its own HTTP/3 streams -- which presents as a state error from an open call rather
+ *     than as a missing step, and cost this phase a debugging round.
+ *
  *   - A PUMP IS BOUNDED. `wt_runtime_session_pump` reads what is there, flushes what is owed and
  *     returns; it never waits, because a tool that waited inside a library call could not honour its own
  *     `--timeout-ms` and could not be interrupted. The caller owns the clock and passes `now`.
@@ -49,6 +54,10 @@ typedef struct wt_runtime_session {
    * rounds in which something was flushed. */
   unsigned packets_seen;
   unsigned flushes;
+  /* Whether the peer's transport parameters have become this connection's limits. The handshake carries
+   * them; a connection whose limits were never applied refuses the streams HTTP/3 must open before it can
+   * send anything, and the refusal looks like a state error rather than a missing step. */
+  int peer_parameters_applied;
   /* The layer behind the handshake, if one was installed: a function pointer and its context, because
    * the only thing that varies between "no next layer yet" and the HTTP/3 driver is which function. */
   wt_status_t (*next_handler)(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);

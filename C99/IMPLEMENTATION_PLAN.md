@@ -2282,6 +2282,34 @@ The same connection ID is used at both ends, which is what makes the Initial key
 same on both sides. Replacing the peer's ID with the one the server chooses is connection ID management this
 runtime still needs, and it is recorded on the tracker rather than left implicit.
 
+### Phase 9's sixteenth part: HTTP/3 joins the session, and what that exposed
+
+The HTTP/3 driver now joins a live session -- `wt_runtime_session_set_frame_handler` puts it behind the
+handshake's handler exactly as the chaining was designed for -- and `test_runtime_session_pair` drives the
+whole outbound path over a real connection: two handshakes, then the client opening HTTP/3's own control and
+QPACK streams, opening a request stream, and sending an extended CONNECT as a QPACK field section. Three real
+defects came out of writing it, and each is now fixed:
+
+- **The peer's transport parameters were never applied to the connection.** The handshake carries them and
+  nothing turned them into limits, so the connection refused the unidirectional streams HTTP/3 must open
+  before it can send anything -- and the refusal presented as a state error from an open call rather than as a
+  missing step. The session pump now applies them once, the moment the handshake has them.
+- **Opening a request stream was two calls in two machines.** The connection owns the stream ID and its flow
+  control; the endpoint owns the request ordering. A caller that did one without the other got a refusal at
+  the first send. `wt_http3_driver_open_request` does both, and says why in its comment.
+- **A server identity on a returning stack frame.** The handshake keeps the pointer it is given, so the first
+  version of the test's helper left the server signing with freed memory and the test aborted with no output at
+  all. The identity now lives in the pair structure. This is the same class as WT-108's "one number, one owner":
+  a borrow whose owner is a stack frame is a borrow that expires.
+
+**And one thing that does not work yet, recorded rather than papered over (WT-110).** The client's bytes go out
+and the server reads packets, but the HTTP/3 layer behind the handshake is NEVER asked about a frame: a counter
+in the test stays at zero while packets are read. The diagnosis is that the connection consumes STREAM frames
+into its own stream state rather than handing them to the frame handler, so the inbound path has to come from
+the connection's stream state -- a stream-data seam -- rather than from the frame handler the driver was written
+against. The test asserts only what is true today (the CONNECT goes out, the request stream is tracked) and
+carries the evidence in a comment; the tracker has the item and the next step.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

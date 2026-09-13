@@ -535,6 +535,28 @@ wt_status_t wt_http3_driver_start_own_streams(wt_http3_driver_t *driver,
   return WT_OK;
 }
 
+wt_status_t wt_http3_driver_open_request(wt_http3_driver_t *driver,
+                                         const wt_http3_driver_transport_t *transport, uint64_t now,
+                                         uint64_t *out_stream_id, wt_http3_error_t *out_error) {
+  uint64_t stream_id = 0U;
+  wt_status_t status;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (driver == NULL || driver->endpoint == NULL || transport == NULL ||
+      transport->open_stream == NULL || out_stream_id == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+
+  /* A request stream is BIDIRECTIONAL and this endpoint initiates it: HTTP/3 has no server-initiated
+   * request, which the endpoint's own rule also enforces. */
+  status = transport->open_stream(transport->context, 1, &stream_id, now);
+  if (status != WT_OK) return status;
+  status = wt_http3_endpoint_open_request(driver->endpoint, stream_id, out_error);
+  if (status != WT_OK) return status;
+  *out_stream_id = stream_id;
+  return WT_OK;
+}
+
 wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
                                          const wt_http3_driver_transport_t *transport,
                                          uint64_t stream_id, const wt_http3_message_t *message,

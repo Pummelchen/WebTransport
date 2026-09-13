@@ -148,6 +148,17 @@ wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now)
 
   /* One packet per call, and the caller loops: a pump that drained the socket would starve the other
    * endpoint in a two-session test, which is exactly the shape a test has. */
+  /* The peer's transport parameters, applied once, the moment the handshake has them: they ARE this
+   * connection's limits, and a connection without them refuses the unidirectional streams HTTP/3 opens
+   * before it sends anything. */
+  if (session->peer_parameters_applied == 0 && session->handshake.peer_parameters_len > 0U) {
+    status = wt_quic_connection_set_peer_parameters(&session->connection,
+                                                    session->handshake.peer_parameters,
+                                                    session->handshake.peer_parameters_len);
+    if (status != WT_OK) return status;
+    session->peer_parameters_applied = 1;
+  }
+
   received = wt_quic_connection_receive(&session->connection, now);
   if (received == WT_OK) session->packets_seen++;
 
