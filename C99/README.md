@@ -9,8 +9,9 @@ scaffolding.
 ## Current Status
 
 **Phases 0 to 4 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are complete, and
-Phase 5 (HTTP/3) is largely in, and Phase 7 (the draft-16 session layer) has begun: the extended CONNECT
-that starts a session is decided.** Phase 3 finishes the TLS 1.3 handshake end to end, and Phase 4
+Phase 5 (HTTP/3) and Phase 7 (the draft-16 session layer) have their message-level pieces in, and
+Phase 8's public API has begun: one umbrella header exposes every layer and states the rules that hold
+across them.** Phase 3 finishes the TLS 1.3 handshake end to end, and Phase 4
 is the QUIC connection runtime: packet number spaces with ACK generation, loss detection
 and probe timeouts, NewReno congestion control, the stream state machines and flow
 control, QUIC DATAGRAM, the close paths, connection IDs (issued, retired and received),
@@ -45,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 63 unit test files and 79,032 checks, run by `ctest` and again under
+- 64 unit test files and 79,046 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -509,6 +510,11 @@ What is here:
   bidirectional -- and a prefix naming anything else describes a session that cannot exist. An incomplete
   prefix is `WT_ERR_TRUNCATED`; a datagram without its quarter ID is malformed, because a datagram is the
   unit.
+- **The umbrella header** (Phase 8, first part): `include/webtransport/webtransport.h` is the one header a
+  consumer includes, and it states the three rules that hold across every layer -- nothing is allocated for a
+  peer, incomplete is not malformed on a stream (a datagram is the exception), and a refusal keeps the peer's
+  code. A test including ONLY that header uses a piece of every layer, so a module missing from it, or a header
+  that does not include what it uses, fails here rather than in a consumer's build.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

@@ -1814,6 +1814,19 @@ Completion criteria:
 
 ## Phase 8: Public C API
 
+**First part done: the umbrella header.** `include/webtransport/webtransport.h` is the one header a consumer
+includes, and it is where the three rules that hold across EVERY layer are written down: nothing is allocated
+for a peer (a bound is this endpoint's, and the code says so rather than blaming the peer); incomplete is not
+malformed on a stream, with a datagram as the deliberate exception because a datagram is the unit; and a
+refusal keeps the peer's code, because RFC 9000's transport codes, RFC 9114's H3_* codes and RFC 9204's QPACK
+codes all travel as QUIC application error codes and rewriting one would hide what the peer said. The header
+also fixes the ownership rule -- a producer writes into a caller's buffer, a reader returns views into the
+caller's bytes, so nothing here owns memory and no view outlives its buffer.
+
+The test is deliberately a compile-time one: it includes ONLY the umbrella header and then uses a piece of
+every layer, so a module missing from the umbrella, a header that does not include what it uses, or a
+declaration that moved fails to build here rather than in a consumer's project.
+
 Design the public API after the protocol core is stable.
 
 API requirements:
