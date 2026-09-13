@@ -149,6 +149,7 @@ set(WT_WEBTRANSPORT_SOURCES
   src/webtransport/protocol.c
   src/webtransport/session.c
   src/webtransport/framing.c
+  src/webtransport/buffered.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_WEBTRANSPORT_SOURCES})
 
@@ -231,6 +232,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/webtransport/protocol.h
   include/webtransport/webtransport/session.h
   include/webtransport/webtransport/framing.h
+  include/webtransport/webtransport/buffered.h
   include/webtransport/http3/qpack.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h

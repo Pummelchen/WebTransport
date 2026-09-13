@@ -15,6 +15,8 @@
 #include "webtransport/quic/transport_parameters.h"
 #include "webtransport/runtime/server_retry.h"
 #include "webtransport/runtime/session.h"
+#include "webtransport/webtransport/buffered.h"
+#include "webtransport/webtransport/error.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
 #include "webtransport/writer.h"
@@ -34,19 +36,6 @@
 #define WT_LOOP_ROUNDS_FOR(timeout_ms) (((uint64_t)(timeout_ms) * 1000U) / (uint64_t)WT_LOOP_WAIT_MICROS)
 #define WT_LOOP_PEEK_ROUNDS_FOR(timeout_ms) \
   (((uint64_t)(timeout_ms) * 1000U) / ((uint64_t)WT_LOOP_WAIT_MICROS * 10U))
-
-/* How many datagrams that arrived BEFORE this endpoint knew its session's ID are kept, and how large each may
- * be. Draft-16 section 4.6 says such a datagram "SHOULD" be buffered until it can be associated with an
- * established session, and that an endpoint "MUST limit" how many it buffers: this is that bound, and a datagram
- * over it is dropped rather than being allowed to grow the tool. */
-#define WT_LOOP_EARLY_DATAGRAMS 4U
-#define WT_LOOP_EARLY_DATAGRAM_MAX 256U
-
-typedef struct loop_early_datagram {
-  uint64_t quarter;
-  size_t length;
-  uint8_t payload[WT_LOOP_EARLY_DATAGRAM_MAX];
-} loop_early_datagram_t;
 
 typedef struct loop_side {
   wt_http3_endpoint_t endpoint;
@@ -72,13 +61,12 @@ typedef struct loop_side {
   wt_quic_connection_t *connection;
   uint64_t now_for_close;
   /* Whether this endpoint knows which session it is serving -- the client from the moment it starts one, the
-   * server from the moment it accepts the CONNECT. Until then a datagram cannot be associated, so it is parked
-   * (draft-16 section 4.6) and drained when the ID becomes known: the ones that name this session are delivered,
-   * the rest are dropped. `early_dropped` counts what the bound turned away. */
+   * server from the moment it accepts the CONNECT. Until then a stream or datagram cannot be associated, so it
+   * is parked by the LIBRARY's section 4.6 buffer and drained when the ID becomes known: the ones that name this
+   * session are delivered, the rest are dropped. That object owns both halves of the rule and its bounds (WT-180);
+   * this side owns only the memory a datagram's payload is copied into. */
   int session_known;
-  loop_early_datagram_t early[WT_LOOP_EARLY_DATAGRAMS];
-  size_t early_count;
-  uint64_t early_dropped;
+  wt_webtransport_buffered_t buffered;
   /* The HTTP/3 code of the last capsule refusal, for the report: a run that closed the connection should say which
    * rule it closed it over (WT-165). */
   uint64_t capsule_error;
@@ -194,6 +182,27 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
     }
     return status;
   }
+  /* Draft-16 section 4.6's STREAM half (WT-180). A data stream can arrive before the session it names is known --
+   * a client sends its CONNECT, its streams and its datagrams in one flight -- and the draft says to BUFFER it
+   * until it can be associated rather than refuse it. The session the stream names is in its prefix, which the
+   * driver parsed and can be asked for; until the ID is known here, the stream is parked by the section's own
+   * buffer. Over the buffer's bound the section names the answer: "a stream MUST be closed by sending a
+   * RESET_STREAM and/or STOP_SENDING with the WT_BUFFERED_STREAM_REJECTED error code", which the driver sends. */
+  if (side->session_known == 0) {
+    uint64_t named = 0U;
+    if (wt_http3_driver_data_stream_session_id(&side->driver, stream_id, &named) == WT_OK &&
+        wt_webtransport_buffered_park_stream(&side->buffered, stream_id, named,
+                                             wt_quic_stream_id_is_bidirectional(stream_id) == 0 ? 1 : 0,
+                                             data, length) == WT_OK) {
+      return WT_OK;
+    }
+    if (side->connection != NULL) {
+      (void)wt_http3_driver_reject_data_stream(&side->driver, stream_id,
+                                               WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED,
+                                               side->now_for_close);
+    }
+    return WT_OK;
+  }
   if (side->data_bytes + length <= sizeof(side->data)) {
     if (length > 0U) memcpy(side->data + side->data_bytes, data, length);
     side->data_bytes += length;
@@ -231,15 +240,8 @@ static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t l
     /* Draft-16 section 4.6: a datagram can arrive before the session it belongs to is known -- the client sends
      * its CONNECT, its data streams and its datagrams in one flight -- and such a datagram is PARKED rather than
      * refused or delivered, because until the ID is known there is no way to tell "mine, early" from "not mine".
-     * The bound is the section's MUST: over it, a datagram is dropped. */
-    if (side->early_count < WT_LOOP_EARLY_DATAGRAMS && payload_length <= WT_LOOP_EARLY_DATAGRAM_MAX) {
-      loop_early_datagram_t *parked = &side->early[side->early_count++];
-      parked->quarter = quarter;
-      parked->length = payload_length;
-      if (payload_length > 0U) memcpy(parked->payload, payload, payload_length);
-    } else {
-      side->early_dropped++;
-    }
+     * The bound is the section's MUST, and the buffer owns it: a datagram over it is dropped, not refused. */
+    (void)wt_webtransport_buffered_park_datagram(&side->buffered, quarter, payload, payload_length);
     return WT_OK;
   }
 
@@ -253,23 +255,45 @@ static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t l
 
 /* The session's ID is known now: drain what was parked while it was not.
  *
- * This is the other half of section 4.6's buffering rule. A parked datagram that names THIS session is delivered;
- * one that names another is dropped rather than refused, because it was never an error at the time it arrived --
- * the reference point did not exist yet. A datagram that arrives AFTER this point and names another session is
- * the error the section 4.2 rule covers, and `side_on_datagram` refuses it. */
+ * This is the other half of section 4.6's buffering rule, for BOTH halves of it. A parked stream or datagram that
+ * names THIS session is delivered -- the stream's bytes as this session's message, the datagram's payload the
+ * same way -- and one that names another is dropped rather than refused, because it was never an error at the
+ * time it arrived: the reference point did not exist yet. A stream or datagram that arrives AFTER this point and
+ * names another session is the error the section 4.2 rule covers, and the paths above refuse it. */
+static wt_status_t side_take_parked_stream(void *context, uint64_t stream_id, int unidirectional,
+                                           const uint8_t *data, size_t length) {
+  loop_side_t *side = context;
+  (void)stream_id;
+  (void)unidirectional;
+  if (side->data_bytes + length <= sizeof(side->data)) {
+    if (length > 0U) memcpy(side->data + side->data_bytes, data, length);
+    side->data_bytes += length;
+  }
+  side->data_was_datagram = 0;
+  return WT_OK;
+}
+
+static wt_status_t side_take_parked_datagram(void *context, uint64_t quarter_stream_id,
+                                             const uint8_t *payload, size_t length) {
+  loop_side_t *side = context;
+  (void)quarter_stream_id;
+  side_take_datagram(side, payload, length);
+  return WT_OK;
+}
+
 static void side_session_known(loop_side_t *side) {
-  size_t index;
-  uint64_t mine;
+  size_t delivered = 0U;
+  size_t dropped = 0U;
 
   if (side->session_known != 0) return;
   side->session_known = 1;
-  mine = wt_webtransport_quarter_stream_id(side->request_stream_id);
-  for (index = 0U; index < side->early_count; index++) {
-    if (side->early[index].quarter == mine) {
-      side_take_datagram(side, side->early[index].payload, side->early[index].length);
-    }
-  }
-  side->early_count = 0U;
+  /* The streams first, in the order they arrived: a message's bytes are the session's, and the order a session
+   * sees its messages in is the order they arrived in. */
+  (void)wt_webtransport_buffered_drain_streams(&side->buffered, side->request_stream_id,
+                                               side_take_parked_stream, side, &delivered, &dropped);
+  (void)wt_webtransport_buffered_drain_datagrams(
+      &side->buffered, wt_webtransport_quarter_stream_id(side->request_stream_id),
+      side_take_parked_datagram, side, &delivered, &dropped);
 }
 
 static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {

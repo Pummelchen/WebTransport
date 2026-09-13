@@ -61,6 +61,12 @@ extern "C" {
 typedef struct wt_http3_driver_data_stream {
   uint64_t stream_id;
   uint64_t prefix_length;
+  /* The session this stream's prefix named, when it named one (WT-180). A peer's stream carries the ID in its
+   * prefix and it is kept here so a caller can apply section 4.6's "buffer until it can be associated" rule;
+   * for a stream this endpoint opened, the ID is the one `wt_http3_driver_set_session_id` was given, and
+   * `session_id_set` says whether there was one. */
+  uint64_t session_id;
+  int session_id_set;
 } wt_http3_driver_data_stream_t;
 
 /* How many WebTransport CONNECT streams this driver may remember at once. A CONNECT stream is marked when its
@@ -414,6 +420,36 @@ void wt_http3_driver_bind_connection(wt_http3_driver_t *driver, wt_quic_connecti
  * path asks FIRST, because the answer decides whether the bytes are the session's payload or something to
  * classify. */
 int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id);
+
+/* The session a remembered WebTransport data stream's prefix named (draft-16 section 4.2).
+ *
+ * This is what lets a caller apply section 4.6's buffering rule to a STREAM: a stream can arrive before the
+ * session it names is known, and the answer to "may I deliver this yet?" is the ID in its prefix rather than
+ * anything about the stream. The driver is where that prefix was parsed, so it is where the number lives -- it
+ * used to be discarded at the parse, which left a caller with no way to ask.
+ *
+ * WT_OK and `*out_session_id` when the stream is remembered and its prefix named a session; WT_ERR_STATE when
+ * the stream is remembered but this endpoint wrote the prefix itself and no session ID has been set
+ * (`wt_http3_driver_set_session_id`); WT_ERR_CLOSED when the stream is not a remembered data stream at all. */
+wt_status_t wt_http3_driver_data_stream_session_id(const wt_http3_driver_t *driver, uint64_t stream_id,
+                                                   uint64_t *out_session_id);
+
+/* REJECT one WebTransport data stream with `error_code`: section 4.6's answer to a stream that arrives while its
+ * session is unknown and cannot be buffered any longer.
+ *
+ * "When the number of buffered streams is exceeded, a stream MUST be closed by sending a RESET_STREAM and/or
+ * STOP_SENDING with the WT_BUFFERED_STREAM_REJECTED error code." So this is a reset of the send side with that
+ * code -- a Reliable Size of this endpoint's prefix capped by the bytes actually sent, the section 4.4 rule
+ * `wt_http3_driver_end_session_streams` also follows -- plus a STOP_SENDING for a stream this endpoint can still
+ * receive on, because the peer's bytes on it are refused too. The stream is then FORGOTTEN, so the caller cannot
+ * park more of it and a second rejection is WT_ERR_CLOSED rather than a second reset.
+ *
+ * WT_ERR_CLOSED when the stream is not a remembered data stream, and WT_ERR_STATE when no connection is bound (a
+ * reset is a frame). A connection that refuses the reset -- a stream it does not have, a peer that did not
+ * negotiate the reliable reset -- is reported as its own status with the stream still forgotten: the refusal is
+ * the caller's to log, and the stream is over either way. */
+wt_status_t wt_http3_driver_reject_data_stream(wt_http3_driver_t *driver, uint64_t stream_id,
+                                               uint64_t error_code, uint64_t now);
 
 /* Say that a stream is a WebTransport CONNECT stream, so that once its single HEADERS frame has passed, the rest
  * of what arrives on it is the SESSION's capsules rather than HTTP/3 frames (draft-16 section 5).

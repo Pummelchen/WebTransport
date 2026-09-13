@@ -36,12 +36,12 @@ sessions**: the conformance tool stands up both endpoints in one process over IP
 `wt-client-c99` and `wt-server-c99` exchange a session in two processes, and
 `C99/scripts/run-container-interop.sh` completes a whole session **and the message exchange** against
 an independent implementation (`pywebtransport`/`aioquic`) in a container -- the peer logs
-`stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. 83 test programs
-and 91,326 checks pass (plus a 200,000-input parser fuzz run and a Clang Static Analyzer pass over all 93 sources), and every suite runs again under AddressSanitizer and
+`stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. 84 test programs
+and 91,536 checks pass (plus a 200,000-input parser fuzz run and a Clang Static Analyzer pass over all 94 sources), and every suite runs again under AddressSanitizer and
 UndefinedBehaviorSanitizer, on macOS and Linux in CI. Of the plan's nine completion criteria 7 are met
 and 2 partial (the FreeBSD/Windows CI legs, and the interop matrix, which is end to end in both
 directions with `pywebtransport`/`aioquic` and, in the client direction, with `quinn` and `quiche` as
-well — `quiche` was the last, and what it needed was an answer to the Retry its server sends). All 31 of the draft-16
+well — `quiche` was the last, and what it needed was an answer to the Retry its server sends). All 34 of the draft-16
 compliance-matrix rows are exercised by a test. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).

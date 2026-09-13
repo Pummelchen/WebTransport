@@ -2125,12 +2125,18 @@ wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, ui
   if (!connection->peer_limits.set) return WT_ERR_STATE;
   stream = wt_quic_stream_table_find(&connection->streams, stream_id);
   if (stream == NULL) return WT_ERR_STATE;
-  /* Only the receiver of a stream's data may ask for it to stop, and only once: RFC 9000 section 19.5
+  /* Only the RECEIVER of a stream's data may ask for it to stop, and only once: RFC 9000 section 19.5
    * makes a second one a STREAM_STATE_ERROR rather than something to ignore. The field is the stream
-   * machine's own record of having asked, which is why it is set here rather than kept beside it. */
-  if (wt_quic_stream_id_from_client(stream_id) !=
-          (connection->config.role == WT_QUIC_ROLE_CLIENT) &&
-      !wt_quic_stream_id_is_bidirectional(stream_id)) {
+   * machine's own record of having asked, which is why it is set here rather than kept beside it.
+   *
+   * For a unidirectional stream the receiver is the endpoint that did NOT open it, and this test used to be
+   * inverted: it refused a STOP_SENDING for the peer's unidirectional stream -- the very case the frame exists
+   * for -- and allowed one for this endpoint's own, which RFC 9000 section 19.5 makes a STREAM_STATE_ERROR at
+   * the peer. Nothing had exercised it, because the only senders were section 6's resets, which the library
+   * gates on a stream it can receive on; section 4.6's stream rejection is what reached it (WT-188). */
+  if (!wt_quic_stream_id_is_bidirectional(stream_id) &&
+      wt_quic_stream_id_from_client(stream_id) ==
+          (connection->config.role == WT_QUIC_ROLE_CLIENT)) {
     return WT_ERR_STATE;
   }
   if (stream->sent_stop_sending) return WT_ERR_STATE;

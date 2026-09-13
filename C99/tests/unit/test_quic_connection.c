@@ -1366,6 +1366,8 @@ static void test_stop_sending_send(void) {
   wt_quic_transport_parameters_init(&params);
   WT_EXPECT_OK("a grant of two",
                wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
+  WT_EXPECT_OK("and of one unidirectional",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 1U));
   WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
   WT_EXPECT_OK("and is parsed",
                wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
@@ -1382,6 +1384,17 @@ static void test_stop_sending_send(void) {
                      wt_quic_connection_stop_sending(&pair.client, id, 0x0cU, now));
     WT_EXPECT_STATUS("and a stream that was never opened has nothing to ask", WT_ERR_STATE,
                      wt_quic_connection_stop_sending(&pair.client, 64U, 0x0cU, now));
+  }
+  /* The DIRECTION rule of the same section, which had been inverted (WT-188): only the endpoint that RECEIVES
+   * on a unidirectional stream may ask for it to stop, so a stream this endpoint opened is not one it can ask
+   * about -- sending that frame would be a STREAM_STATE_ERROR at the peer, and the connection refuses it here.
+   * The mirror case, a server stopping a client's unidirectional stream, is what section 4.6's rejection needs;
+   * it is asserted on the wire by `test_an_early_stream_is_parked_and_rejected_over_the_bound`. */
+  {
+    uint64_t uni = 0U;
+    WT_EXPECT_OK("a unidirectional stream opens", wt_quic_connection_open_stream(&pair.client, 0, &uni));
+    WT_EXPECT_STATUS("asking to stop a stream this endpoint cannot receive on is a state error",
+                     WT_ERR_STATE, wt_quic_connection_stop_sending(&pair.client, uni, 0x0cU, now));
   }
   wt_quic_packet_keys_clear(&keys);
   close_pair(&pair);

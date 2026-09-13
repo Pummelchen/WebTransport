@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 83 test programs and 91,326 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
+- 84 test programs and 91,536 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -250,7 +250,7 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **31 of 31 draft-16 requirements in
+  `scripts/score-matrix.sh` rather than from memory: **34 of 34 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 7 of the plan's 9 completion
   criteria are met, with 2 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
   which is not the same as being done. The two partial criteria are outside the matrix: the FreeBSD
@@ -627,10 +627,32 @@ What is here:
   tool's isolation scenario had asserted this rule against a model receiver all along; the tool a user runs did
   not follow it. The other half of the draft's rule is there too: **section 4.6** says an endpoint SHOULD buffer a
   stream or datagram that arrives before the session it belongs to is known, and MUST bound how many it keeps --
-  so a datagram that arrives before this endpoint knows its session's ID is **parked** (four datagrams, then
-  dropped and counted) and drained when the ID becomes known, with the ones naming this session delivered and the
-  rest dropped rather than refused, because they were never an error at the time they arrived. A datagram that
-  arrives once the ID IS known and names another session is refused, which is what the hostile act measures.
+  so a datagram that arrives before this endpoint knows its session's ID is **parked** and drained when the ID
+  becomes known, with the ones naming this session delivered and the rest dropped rather than refused, because
+  they were never an error at the time they arrived. A datagram that arrives once the ID IS known and names
+  another session is refused, which is what the hostile act measures.
+- **Section 4.6's buffering rule, both halves, in one object** (WT-180): the draft's words are "endpoints SHOULD
+  buffer streams and datagrams until they can be associated with an established session. To avoid resource
+  exhaustion, endpoints MUST limit the number of buffered streams and datagrams." `wt_webtransport_buffered_t`
+  (`webtransport/buffered.h`) is that rule's one owner, because the reason is the same for both halves: until the
+  session ID is known there is no way to tell "mine, early" from "not mine", so everything is parked, bounded, and
+  resolved when the ID becomes known -- the items naming this session delivered IN ARRIVAL ORDER, the rest dropped.
+  The bounds are the section's MUST and each has the answer the draft gives it: a STREAM over the bound is
+  **rejected**, because the section names the frame -- "a stream MUST be closed by sending a RESET_STREAM and/or
+  STOP_SENDING with the `WT_BUFFERED_STREAM_REJECTED` error code" -- and a DATAGRAM over it is **dropped and
+  counted**, because a datagram is unreliable by definition (RFC 9221 section 5.2) and there is nothing to reject.
+  A stream whose OWN bytes do not fit the hold is rejected the same way, because a stream delivered with its tail
+  cut off would be a corrupt message rather than a short one. Two driver additions make it reachable:
+  `wt_http3_driver_data_stream_session_id` hands back the session a stream's prefix named (it used to be parsed
+  and discarded, which left a caller unable to ask whether the session was known yet), and
+  `wt_http3_driver_reject_data_stream` sends the section's reset for one stream -- the RESET_STREAM when this
+  endpoint has a send half on it, the STOP_SENDING when it has a receive half, which is the section's "and/or"
+  applied to the stream's class. The CLI's session loop parks and drains both halves through that object, so the
+  shipped tools follow the same rule the library states.
+  `test_webtransport_buffered` (98 checks) asserts the parking, the bound, both bound answers, arrival order, a
+  stream arriving in pieces, and a failing callback; `test_runtime_session_pair` drives the whole rule over a real
+  pair in the only order that reaches it -- the client opens its data streams BEFORE the server answers the CONNECT
+  -- and asserts the session ID of an early stream, the rejection, and the reset the peer sees on the wire.
 - **A terminated session resets its streams** (WT-182): draft-16 section 6's MUST -- "Upon learning that the session
   has been terminated, the endpoint MUST reset the send side and abort reading on the receive side of all
   unidirectional and bidirectional streams associated with the session ... using the `WT_SESSION_GONE` error code;
@@ -644,8 +666,10 @@ What is here:
   that were open -- and the driver refuses a new data stream or datagram (the section's MUST NOT) from then on.
   `wt_quic_connection_stream_send_offset` is the accessor that makes the Reliable Size computable at all: a
   commitment past what was sent is a `FRAME_ENCODING_ERROR` at the peer. The CLI calls it from the one place that
-  knows the session closed. What is still absent is section 4.6's other half -- a stream that arrives before its
-  session is known is refused rather than parked and bounded (WT-180).
+  knows the session closed. The frame it needs was broken and is fixed: `wt_quic_connection_stop_sending` refused a
+  STOP_SENDING for the peer's own unidirectional stream -- the one case the frame exists for -- and allowed one for
+  a stream this endpoint had opened, which RFC 9000 section 19.5 makes a `STREAM_STATE_ERROR` at the peer. Section
+  4.6's stream rejection is what reached it (WT-188).
 - **The draft's error codes, and the mapping §4.4 requires** (WT-181): two error spaces, and the difference is a
   MUST. A WebTransport **application** error is a 32-bit integer the application chose, and section 4.4 requires it
   to be remapped into the `WT_APPLICATION_ERROR` range 0x52e4a40fa8db..0x52e5ac983162 -- **skipping** the
@@ -658,9 +682,8 @@ What is here:
   ends of the range as literals from the section, compares the mapping against the section's pseudocode computed a
   second way (an oracle, not a second reading), and asserts that no application error maps to a reserved
   codepoint and that a reserved one is refused in the other direction. What is NOT yet done with them: the two
-  MUSTs that use them -- section 6's "reset the session's streams with WT_SESSION_GONE" (WT-182) and section 4.6's
-  `WT_BUFFERED_STREAM_REJECTED` for a buffered stream over the bound (WT-180) -- because nothing in this tree
-  resets a WebTransport data stream yet.
+  MUSTs that use them are both implemented: section 6's "reset the session's streams with WT_SESSION_GONE"
+  (WT-182) and section 4.6's `WT_BUFFERED_STREAM_REJECTED` for a buffered stream over the bound (WT-180).
 - **Shutdown and cancellation are safe at every point** (WT-178): the Swift suite tests its server's shutdown path
   from the operator's point of view -- refuse at once, return promptly with nothing served, survive being run
   twice -- and those assertions are about a server object this tree does not have. What they are about
@@ -674,13 +697,13 @@ What is here:
   WT-147 fix as an assertion).
 - **Static analysis, run over every source** (WT-176): the Definition of Done's "sanitizers and static checks are
   clean" criterion was carried by warnings-as-errors, and the plan's Phase 13 asks for static analysis by name.
-  `scripts/check-static-analysis.sh` runs the **Clang Static Analyzer** (`clang --analyze`) over all **93 sources**
+  `scripts/check-static-analysis.sh` runs the **Clang Static Analyzer** (`clang --analyze`) over all **94 sources**
   of the library and the tools, replaying each file's own command from `compile_commands.json` so the include
   paths, defines and C standard are the ones the code is really compiled with. It is symbolic execution, not a
   warning flag: it finds the use-after-free, the null dereference on a branch no test takes, the value read
   uninitialised on one path. It found a **dead store in `wt_sha256_init`** (the storage view was taken, then
   wiped by the `memset`, then taken again -- the analyzer called the first assignment what it was), and the tree
-  is clean at 93/93 after the fix. The Linux leg then found what the macOS one could not, because only glibc
+  is clean at 94/94 after the fix. The Linux leg then found what the macOS one could not, because only glibc
   declares `memcpy`/`memcmp` nonnull: **seven `core.NonNullParamChecker` findings** where a NULL with a zero
   length -- legal at these entry points -- was handed to those calls, on paths no test took. Each call is now
   guarded (WT-184), the guards have tests, and both legs are clean. A machine without clang reports `unsupported`

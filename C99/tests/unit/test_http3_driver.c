@@ -890,6 +890,14 @@ static void test_a_bidi_stream_is_routed_by_its_prefix(void) {
   WT_EXPECT_U64("the session is handed the bytes", 1U, (uint64_t)session.streams);
   WT_EXPECT_U64("after the prefix, and only those", 5U, (uint64_t)session.stream_bytes);
   WT_EXPECT_U64("for the stream they arrived on", 0U, session.last_stream_id);
+  /* And the driver can say which session the stream named, which is what section 4.6's buffering rule asks
+   * for when the session is not known yet (WT-180). */
+  {
+    uint64_t named = 0U;
+    WT_EXPECT_OK("the stream's session is readable",
+                 wt_http3_driver_data_stream_session_id(&driver, 0U, &named));
+    WT_EXPECT_U64("as the one its prefix named", 4U, named);
+  }
 
   /* A stream naming ANOTHER session is refused rather than delivered to this one. */
   {
@@ -1003,6 +1011,54 @@ static void test_a_bidirectional_prefix_split_across_frames(void) {
   }
 }
 
+/* A stream that arrives before its session is known has to be answerable: the session is the one its
+ * PREFIX named, and the driver is where the prefix was parsed. This is the interface section 4.6's
+ * buffering rule needs -- "buffer until it can be associated with an established session" -- because
+ * without the ID a caller cannot tell "mine, early" from "not mine" (WT-180). */
+static void test_a_data_stream_knows_its_session(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_endpoint_stream_kind_t kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  const uint8_t *payload = NULL;
+  size_t payload_length = 0U;
+  size_t consumed = 0U;
+  uint8_t wire[16];
+  wt_writer_t w;
+  uint64_t session_id = 0U;
+  size_t wire_length;
+
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  /* The server has NOT accepted a session yet: no ID is set on the driver, which is exactly the state a
+   * stream can arrive in. */
+  WT_EXPECT_STATUS("an unknown stream names no session", WT_ERR_CLOSED,
+                   wt_http3_driver_data_stream_session_id(&driver, 0U, &session_id));
+
+  /* A peer's unidirectional WebTransport stream: the draft's type 0x54, the session it names, then bytes. */
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_OK("a unidirectional prefix writes", wt_webtransport_stream_prefix_write(&w, 1, 8U));
+  wt_writer_bytes(&w, "early", 5U);
+  wire_length = wt_writer_offset(&w);
+  WT_EXPECT_OK("the peer's stream is classified",
+               wt_http3_driver_on_uni_stream_data(&driver, 2U, 0U, wire, wire_length, &kind, &payload,
+                                                  &payload_length, &consumed, &error));
+  WT_EXPECT_INT("as a WebTransport stream", (int)WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT, (int)kind);
+  WT_EXPECT_U64("with the payload after the prefix", 5U, (uint64_t)payload_length);
+  WT_EXPECT_TRUE("and the prefix consumed", consumed > 0U);
+  WT_EXPECT_U64("which the driver remembers", 1U, (uint64_t)wt_http3_driver_is_data_stream(&driver, 2U));
+
+  /* The ID is the one in the prefix -- NOT the driver's own (there is none), and not zero. */
+  WT_EXPECT_OK("and its session is readable", wt_http3_driver_data_stream_session_id(&driver, 2U,
+                                                                                    &session_id));
+  WT_EXPECT_U64("as the session the prefix named", 8U, session_id);
+
+  /* A stream that was never seen is CLOSED, which a caller can tell apart from "remembered but unknown". */
+  WT_EXPECT_STATUS("a stream the driver never saw names nothing", WT_ERR_CLOSED,
+                   wt_http3_driver_data_stream_session_id(&driver, 6U, &session_id));
+
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
@@ -1016,5 +1072,6 @@ int main(void) {
   test_a_bidi_stream_is_routed_by_its_prefix();
   test_a_bidirectional_prefix_split_across_frames();
   test_the_pending_table_is_bounded();
+  test_a_data_stream_knows_its_session();
   WT_TEST_MAIN_END("wt_http3_driver");
 }
