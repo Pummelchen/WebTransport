@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 80 test programs and 80,543 checks, run by `ctest` and again under
+- 80 test programs and 80,561 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -244,7 +244,7 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **25 of 25 draft-16 requirements in
+  `scripts/score-matrix.sh` rather than from memory: **26 of 26 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 7 of the plan's 9 completion
   criteria are met, with 2 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
   which is not the same as being done. The two partial criteria are outside the matrix: the FreeBSD

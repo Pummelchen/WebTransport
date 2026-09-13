@@ -35,6 +35,10 @@ static size_t build_parameters(uint8_t *out, size_t capacity) {
    * that advertises 30000 (quinn) had its 30 seconds taken for 30 milliseconds (WT-145). */
   WT_EXPECT_OK("max_idle_timeout", wt_quic_transport_parameters_add_integer(
                                        &params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 7000U));
+  /* The reliable-stream-reset flag, which a peer signals by PRESENCE: its value is empty, and the limit it
+   * produces is a boolean rather than a number. */
+  WT_EXPECT_OK("reset_stream_at", wt_quic_transport_parameters_add_bytes(
+                                      &params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
   WT_EXPECT_OK("max_udp_payload_size", wt_quic_transport_parameters_add_integer(
                                            &params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE, 1452U));
   WT_EXPECT_OK("initial_max_data", wt_quic_transport_parameters_add_integer(
@@ -112,6 +116,7 @@ static void test_limits(void) {
   WT_EXPECT_U64("the unidirectional stream count", 9U, limits->initial_max_streams_uni);
   WT_EXPECT_U64("the connection ID limit", 11U, limits->active_connection_id_limit);
   WT_EXPECT_U64("and the datagram size", 1200U, limits->max_datagram_frame_size);
+  WT_EXPECT_INT("and the reliable-stream-reset flag, which presence alone sets", 1, limits->reset_stream_at);
 
   /* A limit is what it is, not what the encoder happened to write: the same values through a real
    * round trip of the codec are what the test above read back. */
@@ -182,6 +187,8 @@ static void test_defaults(void) {
   /* The field holds the PEER's value, which is zero when it sent none; the effective timeout is the
    * minimum of the two, which is this endpoint's own here. */
   WT_EXPECT_U64("with no idle timeout from the peer", 0U, limits->max_idle_timeout);
+  WT_EXPECT_INT("and no reliable-stream-reset flag, which a peer that says nothing has not advertised", 0,
+                limits->reset_stream_at);
   WT_EXPECT_OK("so its timer arms for its own", wt_quic_connection_next_timeout(&connection, 0U,
                                                                                &delay));
   WT_EXPECT_U64("which is thirty seconds", 30000000U, delay);

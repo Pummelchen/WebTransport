@@ -90,6 +90,10 @@ typedef struct wt_quic_peer_limits {
   uint64_t initial_max_streams_uni;
   uint64_t active_connection_id_limit;
   uint64_t max_datagram_frame_size; /* 0 when the peer does not support DATAGRAM at all */
+  /* Whether the peer sent the empty `reset_stream_at` parameter, which is what says it can receive a
+   * RESET_STREAM_AT frame: the extension is negotiated by that flag and by nothing else, so a sender that used the
+   * frame without it would be relying on an extension the peer never advertised. */
+  int reset_stream_at;
   int set;                          /* whether a parameter list has been parsed at all */
 } wt_quic_peer_limits_t;
 

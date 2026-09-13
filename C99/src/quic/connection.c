@@ -128,6 +128,16 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   limits.active_connection_id_limit =
       parameter_or(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 2U);
   limits.max_datagram_frame_size = parameter_or(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 0U);
+  /* Presence is the whole parameter: an empty value advertises the extension. `check` has already refused a
+   * non-empty one, so this is a flag rather than a length. */
+  {
+    const uint8_t *value = NULL;
+    size_t value_length = 0U;
+    limits.reset_stream_at =
+        wt_quic_transport_parameters_get(&params, WT_QUIC_TP_RESET_STREAM_AT, &value, &value_length) == WT_OK
+            ? 1
+            : 0;
+  }
   limits.set = 1;
   connection->peer_limits = limits;
   connection->flow.peer_max_data = limits.initial_max_data;

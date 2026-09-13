@@ -11,6 +11,7 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | --- | --- | --- | --- | --- |
 | 3.1 | A WebTransport session starts with an extended CONNECT carrying `:protocol = webtransport` | `wt_webtransport_session_request_validate`, `WT_WEBTRANSPORT_PROTOCOL_TOKEN` | `test_webtransport_session_request`, `wt_conformance_scenarios` | tested |
 | 3.1 | A server that did not advertise WebTransport refuses the session | `wt_webtransport_request_policy_t`, `WT_HTTP3_SETTING_WT_ENABLED` | `test_webtransport_session_request` | tested |
+| 3.1 | Both roles advertise the reliable-stream-reset extension WebTransport requires, with the empty value that makes it a flag | `WT_QUIC_TP_RESET_STREAM_AT`, `wt_quic_transport_parameters_build` | `test_quic_transport_parameters`, `test_quic_peer_limits` | tested |
 | 3.1 | A path or authority the server does not serve is refused with a status | `WT_WEBTRANSPORT_REJECT_NOT_FOUND`, `wt_webtransport_session_request_validate` | `test_webtransport_session_request` | tested |
 | 3.2 | A successful session is answered with a 2xx response on the same stream | `wt_http3_driver_send_response`, `wt_http3_endpoint_on_response_headers` | `test_runtime_session_pair`, `wt_conformance_scenarios` | tested |
 | 3.2 | A refusal is answered with a non-2xx status and no session exists | `wt_http3_message_encode` (response form) | `test_http3_endpoint`, `test_webtransport_session_request` | tested |

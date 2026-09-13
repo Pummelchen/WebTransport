@@ -243,6 +243,18 @@ wt_status_t wt_quic_transport_parameters_check(
   if (status == WT_OK && value > 20U) {
     WT_QUIC_TP_REJECT(WT_QUIC_TP_ACK_DELAY_EXPONENT);
   }
+  /* The reliable-stream-reset parameter is a FLAG: its value is empty, and an endpoint that understands it must
+   * treat a non-empty value as TRANSPORT_PARAMETER_ERROR. A value nobody reads is a negotiation nobody can rely
+   * on, which is why the rule is here rather than in a caller (draft-ietf-quic-reliable-stream-reset). */
+  {
+    const uint8_t *value_bytes = NULL;
+    size_t value_length = 0U;
+    if (wt_quic_transport_parameters_get(params, WT_QUIC_TP_RESET_STREAM_AT, &value_bytes,
+                                         &value_length) == WT_OK &&
+        value_length != 0U) {
+      WT_QUIC_TP_REJECT(WT_QUIC_TP_RESET_STREAM_AT);
+    }
+  }
   /* max_ack_delay is below 2^14 milliseconds. */
   status = wt_quic_transport_parameters_integer(params, WT_QUIC_TP_MAX_ACK_DELAY,
                                                &value);
@@ -435,6 +447,12 @@ wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *p
   status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 8U);
   if (status != WT_OK) return status;
   status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 8U);
+  if (status != WT_OK) return status;
+  /* WebTransport over HTTP/3 requires the reliable-stream-reset extension of BOTH roles (draft-16 section 3.1):
+   * a WebTransport stream carries its session prefix before any payload, and a reset that dropped the prefix would
+   * leave the peer with a stream it cannot attribute to a session at all. The value is empty -- it advertises the
+   * extension rather than configuring it. */
+  status = wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U);
   if (status != WT_OK) return status;
   return wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U);
 }

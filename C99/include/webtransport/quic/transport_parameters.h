@@ -56,6 +56,12 @@ extern "C" {
 #define WT_QUIC_TP_DISABLE_ACTIVE_MIGRATION ((uint64_t)0x0c)
 #define WT_QUIC_TP_PREFERRED_ADDRESS ((uint64_t)0x0d)
 #define WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT ((uint64_t)0x0e)
+/* The reliable-stream-reset extension's parameter, which WebTransport over HTTP/3 REQUIRES of both roles
+ * (draft-ietf-webtrans-http3-16 section 3.1) because a WebTransport stream's prefix must be delivered even when
+ * the stream is reset: `reset_stream_at`. Its value is EMPTY -- it is a flag, and a peer that understands it must
+ * treat a non-empty value as TRANSPORT_PARAMETER_ERROR (draft-ietf-quic-reliable-stream-reset, "Negotiating
+ * Extension Use"). */
+#define WT_QUIC_TP_RESET_STREAM_AT ((uint64_t)0x17f7586d2cb570)
 #define WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID ((uint64_t)0x0f)
 #define WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID ((uint64_t)0x10)
 /* RFC 9221 section 3. */

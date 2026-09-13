@@ -66,6 +66,12 @@ static void test_build_sends_the_mandatory_connection_ids(void) {
       WT_EXPECT_OK("with max_datagram_frame_size present",
                    wt_quic_transport_parameters_integer(&read_back, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, &limit));
       WT_EXPECT_TRUE("and non-zero, because draft-16 section 3.1 requires QUIC datagram support", limit > 0U);
+      /* And the reliable-stream-reset flag draft-16 section 3.1 requires of BOTH roles, which is EMPTY: it
+       * advertises the extension rather than configuring it. */
+      WT_EXPECT_OK("with the reset_stream_at parameter present",
+                   wt_quic_transport_parameters_get(&read_back, WT_QUIC_TP_RESET_STREAM_AT, &value,
+                                                    &value_length));
+      WT_EXPECT_U64("whose value is empty", 0U, (uint64_t)value_length);
     }
   }
 
@@ -361,7 +367,26 @@ int main(void) {
                      wt_quic_transport_parameters_check(&check, &error,
                                                         &offender));
 
-    /* ack_delay_exponent of 20 is fine, 21 is not. */
+    /* reset_stream_at is a FLAG: one byte of value is a TRANSPORT_PARAMETER_ERROR, because a value nobody reads is
+   * a negotiation nobody can rely on. The empty form is the only one that means "I support this extension". */
+  {
+    static const uint8_t k_not_empty[1] = {0x01U};
+    wt_quic_transport_parameters_init(&check);
+    (void)wt_quic_transport_parameters_add_bytes(&check, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U);
+    WT_EXPECT_STATUS("an empty reset_stream_at is accepted", WT_OK,
+                     wt_quic_transport_parameters_check(&check, &error, &offender));
+    wt_quic_transport_parameters_init(&check);
+    (void)wt_quic_transport_parameters_add_bytes(&check, WT_QUIC_TP_RESET_STREAM_AT, k_not_empty,
+                                                 sizeof(k_not_empty));
+    error = 0U;
+    offender = 0U;
+    WT_EXPECT_STATUS("a non-empty reset_stream_at is refused", WT_ERR_PROTOCOL,
+                     wt_quic_transport_parameters_check(&check, &error, &offender));
+    WT_EXPECT_U64("  as a transport parameter error", WT_QUIC_TRANSPORT_PARAMETER_ERROR, error);
+    WT_EXPECT_U64("  naming the parameter", WT_QUIC_TP_RESET_STREAM_AT, offender);
+  }
+
+  /* ack_delay_exponent of 20 is fine, 21 is not. */
     wt_quic_transport_parameters_init(&check);
     (void)wt_quic_transport_parameters_add_integer(
         &check, WT_QUIC_TP_ACK_DELAY_EXPONENT, 20U);
