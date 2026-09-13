@@ -665,6 +665,17 @@ static void test_a_lost_packet_is_retransmitted(void) {
    * space. So the loss is not "declared with nothing to name" -- the loss detector never runs, which leaves the
    * timer arithmetic (or the arming of the loss module) as the thing to read next. The counters are in the
    * connection, so this is a fact the tree keeps rather than a print in a test (WT-135). */
+  /* THE FOURTH MEASUREMENT, and it names the defect: the client HAS outstanding ack-eliciting packets (the
+   * dropped CONNECT among them) and the loss list remembers six -- but the application space's RTT estimator
+   * has NO SAMPLE AT ALL (has_sample = 0), because the peer never acknowledged anything in that space. With no
+   * sample there is no time-threshold loss time, so nothing is ever declared lost; and a probe timeout, when it
+   * fires, sends a PING rather than the outstanding data. RFC 9002 section 6.2.4 says a PTO MUST send new frames
+   * or RETRANSMIT unacknowledged data, so the probe path is where the fix goes (WT-135). */
+  WT_EXPECT_TRUE("the dropped CONNECT is still outstanding",
+                 pair.client.connection.loss.ack_eliciting_in_flight >= 1U);
+  WT_EXPECT_TRUE("the loss list remembers the packets it sent", pair.client.connection.loss.count > 0U);
+  WT_EXPECT_TRUE("and the application space has no RTT sample, so there is no loss time to reach (WT-135)",
+                 pair.client.connection.spaces[WT_QUIC_SPACE_APPLICATION].rtt.has_sample == 0);
   WT_EXPECT_U64("no packet is declared lost in the initial space", 0U,
                 (uint64_t)pair.client.connection.packets_declared_lost[WT_QUIC_SPACE_INITIAL]);
   WT_EXPECT_U64("nor the handshake space", 0U,
