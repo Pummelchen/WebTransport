@@ -2309,10 +2309,19 @@ reading of that was "the connection consumes STREAM frames into its own stream s
 `connection.c` showed that is wrong: STREAM frames DO reach `deliver_to_handler`, after `ensure_peer_stream`
 has created the stream. The second measurement is sharper and is what the test now records as a comment: on the
 server, `wt_quic_connection_stream(...)` for the request stream is **NULL**, so the server never created the
-stream at all and the frame never reached its frame walk. The next place to look is therefore the CLIENT's
-half of the same question -- whether `wt_quic_connection_send_stream` queued a frame that the flush then sent --
-and that is the next step the tracker carries. The test asserts only what is true today (the CONNECT goes out,
-the client tracks its request stream).
+stream at all and the frame never reached its frame walk. The next measurement answered it, and the answer is a LIBRARY finding rather than a test one:
+
+- `wt_quic_connection_send_stream` on the client ACCEPTS an 8-byte send on the request stream and returns
+  WT_OK, but **not one byte arrives** and the client's `stream->send_offset` stays **zero**. `send_offset` is
+  what the stream advances when data is handed to the send path, so the call accepted the data and neither
+  recorded nor sent it.
+- The control stream's own send DID create a stream on the server (stream 2 exists), so packets flow and the
+  fault is specific to sending STREAM data on a stream this endpoint opened AFTER the handshake.
+
+The next step is a minimal reproduction: the handshake suite's pair already exchanges stream data (its
+`g_stream_*` records prove it), so the difference between that setup and this one is the thing to find -- a
+focused test with an assertion on `send_offset` is the way to find it, and WT-110 carries that. The test asserts
+only what is true today (the CONNECT goes out, the client tracks its request stream).
 
 ## Phase 10: Test Port
 

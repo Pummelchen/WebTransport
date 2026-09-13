@@ -480,6 +480,20 @@ static void test_a_connect_crosses_a_real_connection(void) {
    * come from there rather than from the frame handler. That is recorded as WT-110 on the tracker with
    * this evidence, and the test asserts only what is true today: the bytes went out. */
   rounds = pump_pair(&pair, 60U, NULL);
+  /* The measurement this round added, recorded as a comment because it is a FAILURE today and the test
+   * asserts only what is true:
+   *
+   *   - `wt_quic_connection_send_stream` on the client ACCEPTS an 8-byte send on the request stream and
+   *     returns WT_OK, but not one byte arrives (the server has no such stream) and the client's
+   *     `stream->send_offset` stays ZERO -- and `send_offset` is what the stream advances when data is
+   *     handed to the send path, so the call accepted the data and did not record or send it.
+   *   - The control stream's own send DID create a stream on the server (stream 2 exists), so the packet
+   *     path works and the fault is specific to sending STREAM data on a stream that this endpoint opened
+   *     after the handshake.
+   *
+   * The next experiment is therefore a minimal reproduction -- the handshake suite's own pair, which DOES
+   * exchange stream data, plus an assertion on `send_offset` -- to find what differs. WT-110 carries it.
+   */
   WT_EXPECT_TRUE("the client flushed packets", pair.client.flushes > 0U);
   WT_EXPECT_TRUE("and the server read packets", pair.server.packets_seen > 0U);
   /* Where the inbound path stops, MEASURED rather than guessed, and left as a comment because the
