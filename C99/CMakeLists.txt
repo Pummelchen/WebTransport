@@ -121,6 +121,7 @@ list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 # ships.
 set(WT_HTTP3_SOURCES
   src/http3/frame.c
+  src/http3/settings.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_HTTP3_SOURCES})
 
@@ -154,6 +155,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/crypto_stream.h
   include/webtransport/quic/handshake.h
   include/webtransport/http3/frame.h
+  include/webtransport/http3/settings.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
   include/webtransport/tls/extension.h

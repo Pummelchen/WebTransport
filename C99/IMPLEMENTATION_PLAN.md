@@ -1313,7 +1313,33 @@ decoding leaving the following frame intact, the truncated cases, the encode ref
 prefix including a stream whose type is not there.
 
 Implement HTTP/3 frame codec.
-- Implement SETTINGS.
+- **Second part done: SETTINGS.** `include/webtransport/http3/settings.h` parses and encodes RFC 9114
+section 7.2.4's identifier and value pairs into a fixed table. Three of the section's rules decided the
+shape. A reserved HTTP/2 identifier (`0x02` to `0x05`, section 11.2.2) is H3_SETTINGS_ERROR, and so is a
+value above one for `ENABLE_CONNECT_PROTOCOL`, which RFC 9220 section 3 makes a boolean. A duplicate
+identifier is a MAY in the section -- "MAY treat the presence of duplicate setting identifiers as a
+connection error of type H3_SETTINGS_ERROR" -- and this build takes the option, because a peer that names
+the same setting twice is a peer disagreeing with itself and there is no reading of the frame that is not a
+guess.
+
+The third rule is the one that shaped the table rather than the code: unknown identifiers MUST be ignored,
+and the `0x1f * N + 0x21` identifiers exist only to exercise that (a sender SHOULD include one). So the
+table stores identifiers as well as values, which is what lets a duplicate of a setting this build does not
+understand be caught while the setting itself is still ignored, and the parser and the encoder agree on
+which identifiers are reserved. The table is fixed at sixteen entries: a peer that sends more is refused
+with H3_EXCESSIVE_LOAD rather than made the author of this endpoint's memory use. A payload that ends
+between an identifier and its value is H3_SETTINGS_ERROR rather than a short read, because HTTP/3 has no
+partial frame -- the same rule the frame codec follows. The encoder writes ascending identifier order, so a
+set always produces the same bytes, and setting an identifier twice is refused so the encoder cannot
+produce a frame the parser would refuse.
+
+Five tests cover the reserved and exercise identifiers, a round trip whose expected wire bytes are written
+by hand, the malformed cases, the table bound, and the setter's refusals. Writing the hand-written bytes
+caught a real bug in the first version of the sort: it emitted entries twice and skipped others, which the
+round trip alone would not have noticed because parsing still failed -- with PROTOCOL, from the duplicate
+the encoder had produced.
+
+Implement SETTINGS.
 - Implement control stream lifecycle.
 - Implement request stream lifecycle.
 - Implement GOAWAY.

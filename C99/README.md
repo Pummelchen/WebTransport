@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 39 unit test files and 76,388 checks, run by `ctest` and again under
+- 40 unit test files and 76,448 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -361,6 +361,14 @@ What is here:
   -- so a length that does not fit `size_t` or does not fit the bytes present is refused as a frame error,
   a refusal leaves the caller's cursor where it was so the caller can name the frame that failed, and an
   unknown frame type is a frame like any other rather than an error the codec invents.
+- **HTTP/3 SETTINGS** (Phase 5, second part): `http3/settings.h` parses and encodes the identifier/value
+  pairs of RFC 9114 section 7.2.4 into a fixed table, so duplicate detection covers the settings this build
+  does not understand as well as the ones it does. A reserved HTTP/2 identifier (`0x02` to `0x05`) and a
+  non-boolean `ENABLE_CONNECT_PROTOCOL` are H3_SETTINGS_ERROR, a payload that ends between an identifier and
+  its value is one too, more identifiers than the table holds is H3_EXCESSIVE_LOAD, and the exercise
+  identifiers of the `0x1f * N + 0x21` range are ignored rather than refused -- refusing them would break
+  the one rule they exist to exercise. The encoder writes ascending identifier order, so the same set is
+  always the same bytes.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
