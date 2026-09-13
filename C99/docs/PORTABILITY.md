@@ -35,7 +35,10 @@ Windows is the real work. Every item below is a place where the current code ass
    handle type. `udp.c` names those operations now rather than spelling POSIX in a dozen places. The `_WIN32`
    branches are written from this inventory and are **not verified** -- nothing here builds them -- and they say
    so in the header. What remains in `udp.c` is the datagram calls themselves (`recvmsg`/`sendmsg` with
-   `struct iovec`) and the public `int fd` field, which a Windows port must widen to `SOCKET`.
+   `struct iovec`) and the public `int fd` field, which a Windows port must widen to `SOCKET`. Three call sites
+   spell them: `wt_udp_send`, `wt_udp_receive` and `wt_udp_peek`. A partial conversion does not compile here --
+   `-Werror` rejects the unused wrapper -- so this is one focused pass with the datagram-message shape carried
+   into all three at once, which is the shape `wt_udp_platform_message_t` was drafted for.
 2. `WSAStartup` somewhere that owns a process lifetime: the UDP layer is the only place this library touches the
    operating system, so a reference count there is the natural home.
 3. The `wt_udp_peek` difference above, which is behavioural rather than syntactic: on Windows a peek cannot see
