@@ -17,7 +17,7 @@ foreach(app wt-client-c99 wt-server-c99 wt-conformance-c99)
     # generator and the runtime session driver, so they are the tool's own code rather than a copy of a test.
     set(WT_APP_EXTRA_SOURCES ${app}/scenario_session.c ${app}/scenario_refusals.c
                               ${app}/scenario_control.c ${app}/scenario_headers.c
-                              ${app}/scenario_isolation.c)
+                              ${app}/scenario_isolation.c ${app}/scenario_matrix.c)
   endif()
   add_executable(${app} ${app}/main.c ${WT_APP_EXTRA_SOURCES})
   if(WT_APP_NEEDS_SUPPORT)

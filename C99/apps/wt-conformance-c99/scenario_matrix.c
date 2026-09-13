@@ -1,0 +1,226 @@
+/* The interop matrix scenarios (Phase 10). */
+
+#include "scenario_matrix.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#include "webtransport/cursor.h"
+#include "webtransport/http3/driver.h"
+#include "webtransport/webtransport/framing.h"
+#include "webtransport/writer.h"
+
+#include "webtransport/http3/frame.h"
+
+#define WT_MATRIX_MAX_CASES 12U
+
+/* One row of a matrix: what the case is, and whether it held. */
+typedef struct matrix_row {
+  const char *name;
+  int held;
+} matrix_row_t;
+
+static void add(wt_cli_report_t *report, const char *name, int ok, const char *detail) {
+  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+}
+
+/* Write one row and, at the end, the count. EVERY failing row is named, because "eleven of thirteen" is not
+ * a debugging aid on its own. */
+static void report_matrix(wt_cli_report_t *report, const char *scenario, const matrix_row_t *rows,
+                          unsigned count) {
+  char detail[256];
+  unsigned index;
+  unsigned failed = 0U;
+
+  for (index = 0U; index < count; index++) {
+    if (rows[index].held == 0) failed++;
+  }
+  if (failed == 0U) {
+    (void)snprintf(detail, sizeof(detail), "%u of %u stream interop cases hold", count, count);
+  } else {
+    int used = snprintf(detail, sizeof(detail), "%u of %u cases failed:", failed, count);
+    for (index = 0U; index < count; index++) {
+      if (rows[index].held == 0 && used > 0 && (size_t)used < sizeof(detail)) {
+        used += snprintf(detail + used, sizeof(detail) - (size_t)used, " \"%s\"", rows[index].name);
+      }
+    }
+  }
+  add(report, scenario, failed == 0U, detail);
+}
+
+void wt_scenario_matrix_run(wt_cli_report_t *report) {
+  matrix_row_t rows[WT_MATRIX_MAX_CASES];
+  unsigned count = 0U;
+  uint8_t prefix[16];
+  uint8_t classified_bytes[16];
+  size_t prefix_length = 0U;
+  size_t classified_length = 0U;
+
+  /* The bytes a peer would send for a bidirectional prefix, written by the encoder rather than transcribed,
+   * so every case below that classifies them is classifying what this library produces. */
+  {
+    wt_writer_t w = wt_writer_init(prefix, sizeof(prefix));
+    if (wt_webtransport_stream_prefix_write(&w, 0, 4U) == WT_OK) {
+      prefix_length = wt_writer_offset(&w);
+      memcpy(classified_bytes, prefix, prefix_length);
+      classified_length = prefix_length;
+    }
+  }
+
+  /* A bidirectional prefix: written, then read back with its direction and its session. */
+  {
+    wt_writer_t w = wt_writer_init(prefix, sizeof(prefix));
+    wt_cursor_t c;
+    int direction = -1;
+    uint64_t session_id = 0U;
+    int ok = wt_webtransport_stream_prefix_write(&w, 0, 4U) == WT_OK;
+    c = wt_cursor_init(prefix, wt_writer_offset(&w));
+    ok = ok && wt_webtransport_stream_prefix_parse(&c, &direction, &session_id, NULL) == WT_OK &&
+         direction == 0 && session_id == 4U && wt_cursor_at_end(&c) != 0;
+    rows[count].name = "a bidirectional prefix round-trips";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* A unidirectional prefix, the same way: the two types carry different rules, so the flag is the assertion. */
+  {
+    wt_writer_t w = wt_writer_init(prefix, sizeof(prefix));
+    wt_cursor_t c;
+    int direction = -1;
+    uint64_t session_id = 0U;
+    int ok = wt_webtransport_stream_prefix_write(&w, 1, 4U) == WT_OK;
+    c = wt_cursor_init(prefix, wt_writer_offset(&w));
+    ok = ok && wt_webtransport_stream_prefix_parse(&c, &direction, &session_id, NULL) == WT_OK &&
+         direction == 1 && session_id == 4U;
+    rows[count].name = "a unidirectional prefix round-trips";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* A caller asking for a session that cannot exist is a bug rather than a peer, and the write must leave
+   * nothing behind: half a prefix in a buffer is a stream this endpoint would then send as something else. */
+  {
+    wt_writer_t w = wt_writer_init(prefix, sizeof(prefix));
+    int ok = wt_webtransport_stream_prefix_write(&w, 1, 2U) != WT_OK && wt_writer_offset(&w) == 0U;
+    rows[count].name = "a prefix for a stream that cannot be a session is refused and writes nothing";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The PEER's side of the same rule: a prefix naming a stream that cannot be a session is H3_ID_ERROR, and a
+   * prefix whose type is not a WebTransport one is H3_FRAME_UNEXPECTED.
+   *
+   * The bytes are the encoder's, with ONE byte changed -- the session -- rather than written out by hand. The
+   * type and the session are varints, and the two-byte form's first byte is easy to get wrong: 0x41 is a
+   * two-byte form's PREFIX, so a hand-written {0x41, 0x02} is the single varint 258, not the type 0x41 followed
+   * by the session 2. That mistake is what the first version of this matrix made. */
+  {
+    wt_writer_t w = wt_writer_init(prefix, sizeof(prefix));
+    wt_cursor_t c;
+    int direction = -1;
+    uint64_t session_id = 0U;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    int ok = wt_webtransport_stream_prefix_write(&w, 0, 4U) == WT_OK && wt_writer_offset(&w) > 0U;
+    if (ok) {
+      prefix[wt_writer_offset(&w) - 1U] = 0x02U; /* session 2: a client-initiated UNIDIRECTIONAL stream */
+      c = wt_cursor_init(prefix, wt_writer_offset(&w));
+      ok = wt_webtransport_stream_prefix_parse(&c, &direction, &session_id, &error) != WT_OK &&
+           error == WT_HTTP3_ID_ERROR;
+    }
+    rows[count].name = "a peer prefix naming a non-session is H3_ID_ERROR";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    static const uint8_t other_type[] = {0x00U, 0x04U};
+    wt_cursor_t c = wt_cursor_init(other_type, sizeof(other_type));
+    int direction = -1;
+    uint64_t session_id = 0U;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    int ok = wt_webtransport_stream_prefix_parse(&c, &direction, &session_id, &error) != WT_OK &&
+             error == WT_HTTP3_FRAME_UNEXPECTED;
+    rows[count].name = "a peer prefix of another stream type is H3_FRAME_UNEXPECTED";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* Incomplete is a wait on a stream, never a refusal: the rest may be in the next packet. */
+  {
+    static const uint8_t half[] = {0x41U};
+    wt_cursor_t c = wt_cursor_init(half, sizeof(half));
+    int direction = -1;
+    uint64_t session_id = 0U;
+    int ok = wt_webtransport_stream_prefix_parse(&c, &direction, &session_id, NULL) == WT_ERR_TRUNCATED;
+    rows[count].name = "half a prefix is a wait rather than a refusal";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The classifier the driver routes with, on the bytes the encoder just wrote: the session it names and the
+   * number of bytes it consumed are both part of the answer, because the payload starts after them. */
+  {
+    wt_http3_bidi_start_kind_t kind = WT_HTTP3_BIDI_START_REQUEST;
+    uint64_t session_id = 0U;
+    size_t consumed = 0U;
+    int ok = classified_length > 0U &&
+             wt_http3_driver_classify_bidi_start(classified_bytes, classified_length, &kind, &session_id,
+                                                 &consumed) == WT_OK &&
+             kind == WT_HTTP3_BIDI_START_WEBTRANSPORT && session_id == 4U && consumed == classified_length;
+    rows[count].name = "a WebTransport start is classified with its session and its length";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* An HTTP/3 request stream's first bytes are not a WebTransport prefix, and the classifier is what decides
+   * that: type 0x00 is the control stream's, not the draft's. */
+  {
+    static const uint8_t request_start[] = {0x00U, 0x04U, 0x80U};
+    wt_http3_bidi_start_kind_t kind = WT_HTTP3_BIDI_START_WEBTRANSPORT;
+    uint64_t session_id = 0U;
+    size_t consumed = 0U;
+    int ok = wt_http3_driver_classify_bidi_start(request_start, sizeof(request_start), &kind, &session_id,
+                                                 &consumed) == WT_OK &&
+             kind == WT_HTTP3_BIDI_START_REQUEST && consumed == 0U;
+    rows[count].name = "a request start is not classified as WebTransport";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The two waits: the type alone, and a session id whose varint is only half arrived. */
+  {
+    static const uint8_t type_only[] = {0x41U};
+    wt_http3_bidi_start_kind_t kind = WT_HTTP3_BIDI_START_WEBTRANSPORT;
+    uint64_t session_id = 0U;
+    size_t consumed = 0U;
+    int ok = wt_http3_driver_classify_bidi_start(type_only, sizeof(type_only), &kind, &session_id, &consumed) ==
+             WT_ERR_TRUNCATED;
+    rows[count].name = "the type byte alone decides nothing yet";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    /* A session whose id needs the two-byte varint form (64), classified with its last byte missing: the
+     * encoder measures the prefix, so the case is "one byte short of a real one" rather than a guess. */
+    wt_writer_t w = wt_writer_init(prefix, sizeof(prefix));
+    wt_http3_bidi_start_kind_t kind = WT_HTTP3_BIDI_START_REQUEST;
+    uint64_t session_id = 0U;
+    size_t consumed = 0U;
+    int ok = wt_webtransport_stream_prefix_write(&w, 0, 64U) == WT_OK && wt_writer_offset(&w) > 1U &&
+             wt_http3_driver_classify_bidi_start(prefix, wt_writer_offset(&w) - 1U, &kind, &session_id,
+                                                 &consumed) == WT_ERR_TRUNCATED;
+    rows[count].name = "a session id split across the boundary is a wait";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The predicate every direction test is built on. */
+  {
+    int ok = wt_webtransport_is_session_stream_id(0U) == 1 && wt_webtransport_is_session_stream_id(4U) == 1 &&
+             wt_webtransport_is_session_stream_id(2U) == 0 && wt_webtransport_is_session_stream_id(3U) == 0;
+    rows[count].name = "the session predicate is a statement about the stream type";
+    rows[count].held = ok;
+    count++;
+  }
+
+  report_matrix(report, "interop-stream-matrix", rows, count);
+}
