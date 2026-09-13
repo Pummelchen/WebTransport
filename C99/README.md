@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 72 unit test files and 79,751 checks, run by `ctest` and again under
+- 73 unit test files and 79,779 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -69,6 +69,17 @@ What is here:
   with stable field names, and the parser is a library function rather than argv walking
   inside each `main`, which is what lets all of this be a failing check rather than a
   manual attempt.
+- **The tools' local socket** (Phase 9): `cli/endpoint.h` turns a `host:port` into a bound or
+  targeted UDP endpoint, and both tools open theirs and report it in the `--json` output. The
+  FAMILY comes from the address rather than a flag — an IPv4 address on an IPv6 socket is not
+  reachable, because the runtime sets `IPV6_V6ONLY` explicitly (the platform default differs),
+  so a tool that guessed would work on one machine and not the next. A listener binds and
+  reports the port it actually got, which is what makes `--listen 127.0.0.1:0` usable from a
+  test; a client parses without binding, so two clients on one machine can reach one server. A
+  wildcard is spelled `0.0.0.0:4433`, not `:4433`: a host with no family is a guess, and the
+  runtime refuses to make it rather than inventing one. IPv4 is asserted unconditionally and
+  IPv6 is available-or-skipped, because a test that fails without an IPv6 loopback is a test
+  about the machine.
 - **The conformance tool's report** (Phase 9): `cli/report.h` is the machine-readable product
   of a conformance run, and its three rules are all about not lying — a scenario that did not
   run is `unsupported` with a reason and never a pass, the report is ordered and named by the

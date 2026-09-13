@@ -2217,6 +2217,27 @@ while every library test passed. A conformance report that can be wrong about it
 report; the fix was to name the failing VALUE in the detail rather than say "a value did not round trip", which
 is also what made the cause visible in one run.
 
+### Phase 9's thirteenth part: the tools' local socket
+
+The plan's first completion criterion for the tools is that they "run local IPv4 and IPv6 packet sessions",
+and this part is the socket half of it: `cli/endpoint.h` turns a `host:port` into a bound or targeted UDP
+endpoint, and both tools open theirs and report it in the `--json` output.
+
+The family comes from the ADDRESS rather than from a flag, and that is not tidiness: the runtime sets
+`IPV6_V6ONLY` explicitly because the platform default differs between Linux and the BSDs, so an IPv4 address
+on an IPv6 socket is not reachable and a tool that guessed the family would work on one machine and fail on
+the next. A listener binds and reports the port it ACTUALLY got, which is what makes `--listen 127.0.0.1:0`
+usable from a test at all; a client parses without binding, because two clients on one machine must be able to
+reach one server. A wildcard is spelled `0.0.0.0:4433` rather than `:4433`: a host with no family is a guess
+about which family was meant, and the runtime's parser refuses to make it -- the test's first draft expected
+`:4433` to work and was corrected to assert the refusal instead, which is the same lesson as the trailer rule
+in WT-96.
+
+The test asserts IPv4 unconditionally and treats IPv6 as available-or-skipped, because a test that fails on a
+machine without an IPv6 loopback is a test about the machine rather than about this code. A refused bind is
+passed through as the system's own status rather than translated, for the reason the transport adapter gives in
+WT-104: a layer that renames a system refusal hides the reason for it.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.
