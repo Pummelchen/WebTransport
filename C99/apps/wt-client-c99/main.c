@@ -162,6 +162,7 @@ int main(int argc, char **argv) {
              "\"transcriptTypes\":\"%s\","
              "\"peerMaxDataSet\":%s,\"peerMaxData\":%llu,\"peerDrained\":%s,"
              "\"peerSessionClosed\":%s,\"peerSessionCloseCode\":%u,"
+             "\"capsulesRefused\":%u,\"capsuleError\":%llu,"
              "\"acks\":{\"initial\":[%u,%llu],\"handshake\":[%u,%llu],\"application\":[%u,%llu]}}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
@@ -185,6 +186,7 @@ int main(int argc, char **argv) {
              result.peer_max_data_set != 0 ? "true" : "false",
              (unsigned long long)result.peer_max_data, result.peer_drained != 0 ? "true" : "false",
              result.peer_close_code_set != 0 ? "true" : "false", result.peer_close_code,
+             result.capsules_refused, (unsigned long long)result.capsule_error,
              result.acks_initial,
              result.ack_largest_initial, result.acks_handshake, result.ack_largest_handshake,
              result.acks_application, result.ack_largest_application);

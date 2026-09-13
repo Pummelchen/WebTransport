@@ -160,7 +160,8 @@ int main(int argc, char **argv) {
              "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,\"closeCause\":\"%s\","
              "\"closeSent\":%s,\"closeCauseFrame\":%llu,"
              "\"peerMaxDataSet\":%s,\"peerMaxData\":%llu,\"peerDrained\":%s,"
-             "\"peerSessionClosed\":%s,\"peerSessionCloseCode\":%u}\n",
+             "\"peerSessionClosed\":%s,\"peerSessionCloseCode\":%u,"
+             "\"capsulesRefused\":%u,\"capsuleError\":%llu}\n",
              result.request_line, result.request_outcome, (unsigned long long)result.request_status,
              (unsigned long long)result.h3_error,
              result.close_kind, (unsigned long long)result.close_sent_error_code,
@@ -169,7 +170,8 @@ int main(int argc, char **argv) {
              (unsigned long long)result.close_cause_frame,
              result.peer_max_data_set != 0 ? "true" : "false",
              (unsigned long long)result.peer_max_data, result.peer_drained != 0 ? "true" : "false",
-             result.peer_close_code_set != 0 ? "true" : "false", result.peer_close_code);
+             result.peer_close_code_set != 0 ? "true" : "false", result.peer_close_code,
+             result.capsules_refused, (unsigned long long)result.capsule_error);
     } else {
       printf("server: %s on port %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.bound_port, (unsigned long long)result.received_bytes,
