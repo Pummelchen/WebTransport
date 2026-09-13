@@ -71,6 +71,9 @@ typedef struct wt_runtime_session {
    * the only thing that varies between "no next layer yet" and the HTTP/3 driver is which function. */
   wt_status_t (*next_handler)(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);
   void *next_context;
+  /* The layer that owns the frames the handshake does not, told about the ones that were LOST. */
+  void (*lost_handler)(void *context, const wt_quic_tx_frame_t *frame);
+  void *lost_context;
 } wt_runtime_session_t;
 
 /* A RULE THE CALLER MUST KEEP, and the one that cost this phase several rounds: the connection-level
@@ -122,6 +125,19 @@ wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
                                             size_t initial_connection_id_length,
                                             const wt_quic_connection_config_t *connection_config,
                                             const wt_tls_server_config_t *tls_config, uint64_t now);
+
+/* A LOST frame, reported to the layer that sent it.
+ *
+ * `wt_quic_connection_set_handlers` takes a received-frame handler AND a lost-frame one; the runtime installs
+ * its own for both, and until this hook existed the lost one went to the handshake alone -- whose handler returns
+ * immediately for anything that is not CRYPTO. A lost STREAM frame therefore reached nobody and was never
+ * retransmitted, which is what a third-party peer showed and a relayed packet drop reproduces (WT-135). */
+typedef void (*wt_runtime_lost_frame_fn)(void *context, const wt_quic_tx_frame_t *frame);
+
+/* Install that layer. The handshake is always told first, because CRYPTO frames are its business whatever else
+ * is listening. */
+wt_status_t wt_runtime_session_set_lost_frame_handler(wt_runtime_session_t *session,
+                                                      wt_runtime_lost_frame_fn handler, void *context);
 
 /* Install a handler behind the handshake's, for the layer that owns frames it does not. */
 wt_status_t wt_runtime_session_set_frame_handler(wt_runtime_session_t *session,

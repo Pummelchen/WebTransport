@@ -24,7 +24,21 @@ static wt_status_t session_on_frame(void *context, wt_quic_space_t space,
 
 static void session_on_lost(void *context, const wt_quic_tx_frame_t *frame) {
   wt_runtime_session_t *session = context;
+
+  if (session == NULL || frame == NULL) return;
+  /* The handshake first: CRYPTO frames are its business whatever else is listening. */
   wt_quic_handshake_on_lost(&session->handshake, frame);
+  /* And then the layer behind it -- without this, a lost STREAM frame reached nobody and was never
+   * retransmitted (WT-135). */
+  if (session->lost_handler != NULL) session->lost_handler(session->lost_context, frame);
+}
+
+wt_status_t wt_runtime_session_set_lost_frame_handler(wt_runtime_session_t *session,
+                                                      wt_runtime_lost_frame_fn handler, void *context) {
+  if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
+  session->lost_handler = handler;
+  session->lost_context = context;
+  return WT_OK;
 }
 
 static wt_status_t install_initial_keys(wt_runtime_session_t *session, const uint8_t *connection_id,

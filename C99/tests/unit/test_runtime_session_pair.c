@@ -568,6 +568,25 @@ static void test_a_connect_and_its_response_cross_the_connection(void) {
   wt_udp_close(&pair.server_socket);
 }
 
+/* What the lost-frame hook saw. The relay test installs this on the client, so the dropped CONNECT is reported
+ * to the layer that sent it rather than to the handshake alone -- which is the difference between "the bytes are
+ * gone" and "the bytes are owed" (WT-135). */
+typedef struct lost_log {
+  unsigned calls;
+  unsigned non_crypto;
+  size_t last_length;
+} lost_log_t;
+
+static void on_lost_frame(void *context, const wt_quic_tx_frame_t *frame) {
+  lost_log_t *log = context;
+  if (log == NULL || frame == NULL) return;
+  log->calls++;
+  if (!frame->is_crypto) {
+    log->non_crypto++;
+    log->last_length = frame->length;
+  }
+}
+
 /* A packet the peer LOST is retransmitted.
  *
  * This is the property the interop peer exercised first and this tree could not test at all: every other test
@@ -586,11 +605,15 @@ static void test_a_lost_packet_is_retransmitted(void) {
   unsigned drop_this = 0U;
   unsigned round;
   int saw_drop = 0;
+  lost_log_t lost;
 
   memset(&pair, 0, sizeof(pair));
+  memset(&lost, 0, sizeof(lost));
   open_socket(&relay, &relay_address);
   /* Both ends address the relay; the server learns the relay as its peer from the first packet it sees. */
   arm_pair_to(&pair, &relay_address, &relay_address);
+  WT_EXPECT_OK("the layer behind the handshake is told about lost frames",
+               wt_runtime_session_set_lost_frame_handler(&pair.client, on_lost_frame, &lost));
 
   for (round = 0U; round < 600U; round++) {
     uint8_t datagram[2048];
@@ -633,7 +656,14 @@ static void test_a_lost_packet_is_retransmitted(void) {
    * It is asserted in the direction it is TRUE today, with the measurement either side, so the tree stays green
    * and the reproduction stays in it. The line flips to `connect_arrived(&pair) != 0` on the day the
    * retransmission lands, and this comment goes with it. */
-  WT_EXPECT_TRUE("the exchange did NOT complete, because the client never retransmitted (WT-135)",
+  /* THE SECOND MEASUREMENT, and it is not what the hook was added for: the hook is installed and it is NEVER
+   * CALLED. So the dropped CONNECT is not merely unresendable -- its LOSS IS NEVER REPORTED, which means the
+   * probe timeout never fired for the application space at all. Written in the direction that is true today, for
+   * the same reason as the assertion below: the suite stays green, the reproduction stays in the tree, and the
+   * lines flip when the loss path works (WT-135). */
+  WT_EXPECT_TRUE("the lost stream frame is NOT reported yet: the application space never armed its probe (WT-135)",
+                 lost.non_crypto == 0U);
+  WT_EXPECT_TRUE("the exchange did NOT complete, because nothing resends it yet (WT-135)",
                  connect_arrived(&pair) == 0);
 
   wt_runtime_session_clear(&pair.client);
