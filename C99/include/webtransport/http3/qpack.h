@@ -91,6 +91,18 @@ wt_status_t wt_qpack_string_decode(wt_cursor_t *c, const uint8_t **out_bytes, si
  * so this is what every representation written by this build looks like. */
 wt_status_t wt_qpack_string_encode(wt_writer_t *w, const uint8_t *bytes, size_t length);
 
+/* Decode a Huffman-coded string (RFC 7541 appendix B, which RFC 9204 section
+ * 4.1.2 adopts). The code comes from the RFC table generated into the source tree.
+ *
+ * Refuses the EOS symbol -- a string that carries it is malformed, and a decoder
+ * that produced anything for it would accept a representation the peer could not
+ * have meant -- a padding longer than seven bits or one that is not all ones
+ * (section 5.2 makes padding the EOS prefix), and an output larger than the
+ * caller's buffer (WT_ERR_LIMIT), because the decoded size is the peer's to choose
+ * and the caller's to bound. */
+wt_status_t wt_qpack_huffman_decode(const uint8_t *coded, size_t coded_length, uint8_t *out,
+                                    size_t capacity, size_t *out_length);
+
 #ifdef __cplusplus
 }
 #endif

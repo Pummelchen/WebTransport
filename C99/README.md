@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 46 unit test files and 77,321 checks, run by `ctest` and again under
+- 47 unit test files and 77,331 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -406,6 +406,13 @@ What is here:
   refused, and a string's Huffman flag is RETURNED rather than ignored: this build does not decode Huffman
   yet, and a caller that treated coded bytes as field content would produce a header section the peer
   cannot parse.
+- **Huffman decoding** (Phase 6, third part): `qpack_huffman.c` decodes RFC 7541 appendix B's code, which
+  RFC 9204 adopts, against a table generated from the RFC by `tests/vectors/extract_rfc7541_huffman.py` --
+  the script checks the code is symbol-ordered, prefix-free and canonical (and derives the decode index from
+  that) and extracts C.4.1's worked example as the one vector the decoder is checked against. EOS in a
+  string, padding that is not all ones or is longer than seven bits, and a decoded size larger than the
+  caller's buffer are all refused, because accepting a string the peer could not have encoded is how two
+  implementations come to disagree silently.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

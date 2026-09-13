@@ -1471,6 +1471,27 @@ the representation it asked for. The first version checked the wrong bits (it re
 the top `8 - prefix_bits` bits, which refuses the perfectly legal 0x80 above a seven-bit prefix) and the
 tests caught it before anything depended on it.
 
+**Third part done: Huffman decoding.** RFC 7541 appendix B's code -- which RFC 9204 section 4.1.2 adopts
+wholesale -- is generated into `src/http3/qpack_huffman_table.h` by
+`tests/vectors/extract_rfc7541_huffman.py`, together with appendix C.4.1's worked example, which the script
+writes into `tests/vectors/rfc7541_huffman_vectors.h` because it is evidence rather than implementation
+data. The extractor checks what a decoder depends on: 257 rows in symbol order, each row's stated length
+agreeing with its bit string, the code prefix-free, EOS thirty one-bits (which is what padding is made of),
+and the code canonical -- from which it derives the (first code, offset, count) index per length that the
+decoder walks. The decoder refuses EOS inside a string (section 5.2's own rule), padding longer than seven
+bits or not all ones, a code longer than the table's longest, and an output larger than the caller's buffer:
+a string a peer could not have encoded is a decoding error, and accepting one is how two implementations
+come to disagree silently.
+
+Three findings, all in the extractor rather than the codec, and all worth recording because each is a way a
+table parser goes wrong. The appendix prints an ASCII representation before the symbol for printable
+characters -- including `'|'` for symbol 124, which is the one row a pattern excluding pipes loses. The
+table is in SYMBOL order, not canonical order, so the decode index cannot be derived by walking the rows;
+the script sorts by (length, code) and checks the canonical property against every entry. And C.4.1's
+appendix contains two hex blocks -- the encoded block and a per-representation decoding walk -- so the
+extractor has to take the first and stop at the blank line, or it splices the block together with its own
+explanation.
+
 Implement Huffman encoding and decoding.
 - Implement static indexed fields.
 - Implement literal field lines.

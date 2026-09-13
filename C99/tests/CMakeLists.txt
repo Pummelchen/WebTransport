@@ -53,6 +53,7 @@ set(WT_UNIT_TESTS
   test_http3_request
   test_qpack_static
   test_qpack_primitives
+  test_qpack_huffman
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

@@ -79,3 +79,17 @@ if [ ! -f "$rfc9204" ]; then
   fi
 fi
 python3 "$c99_root/tests/vectors/extract_rfc9204_static_table.py" "$rfc9204" --check
+
+# RFC 7541's Huffman code, which QPACK adopts and the codec reads from the source
+# tree; its appendix C.4.1 example is the decoder's vector.
+rfc7541="$rfc_dir/rfc7541.txt"
+if [ ! -f "$rfc7541" ]; then
+  url7541=https://www.rfc-editor.org/rfc/rfc7541.txt
+  echo "check-vectors: fetching $url7541"
+  if ! curl -fsSL "$url7541" -o "$rfc7541"; then
+    rm -f "$rfc7541"
+    echo "check-vectors: could not fetch $url7541" >&2
+    exit 2
+  fi
+fi
+python3 "$c99_root/tests/vectors/extract_rfc7541_huffman.py" "$rfc7541" --check
