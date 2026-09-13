@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 80,022 checks, run by `ctest` and again under
+- 75 unit test files and 80,031 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -84,7 +84,11 @@ What is here:
   release-only crash lived, so the classifier is proven in all three build configurations before
   anything is routed by it. A prefix that has not fully arrived is `WT_ERR_TRUNCATED` — a wait on a
   stream, never a refusal — and a stream with no bytes yet is a request stream until proven
-  otherwise.
+  otherwise. The routing then landed on its own: a WebTransport bidirectional stream reaches the
+  **session** sink with its prefix removed, a stream naming **another session** is refused with
+  HTTP/3's identifier error rather than delivered to the wrong one, and a request-shaped stream goes
+  to the HTTP/3 request path instead — each asserted separately, with all three configurations in the
+  loop from the first build.
 - **The bounded tables, at their bounds** (Phase 10): every table in HTTP/3 and the session
   layer is fixed, because a table that grows with a peer is a heap exhaustion path with the peer's
   name on it. The suite drives each one — the endpoint's peer-stream and request tables, the

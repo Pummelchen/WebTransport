@@ -15,6 +15,8 @@ void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoi
 
   if (driver == NULL) return;
   driver->endpoint = endpoint;
+  driver->session_id = 0U;
+  driver->session_id_set = 0;
   driver->pending_count = 0U;
   driver->frame_count = 0U;
   for (i = 0U; i < WT_HTTP3_DRIVER_FRAMES_MAX; i++) {
@@ -26,6 +28,12 @@ void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoi
     driver->pending[i].stream_id = 0U;
     driver->pending[i].length = 0U;
   }
+}
+
+void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_id) {
+  if (driver == NULL) return;
+  driver->session_id = session_id;
+  driver->session_id_set = 1;
 }
 
 size_t wt_http3_driver_pending_count(const wt_http3_driver_t *driver) {
@@ -445,7 +453,36 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
          * `on_request_stream` again is refused as a duplicate, and the refusal ABORTED the frame routing, so
          * the response was never reported to the caller at all. */
         wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
-        if (wt_http3_endpoint_request_state(driver->endpoint, stream_id, &state) != WT_OK) {
+        int tracked = wt_http3_endpoint_request_state(driver->endpoint, stream_id, &state) == WT_OK;
+
+        if (!tracked && frame->as.stream.offset == 0U && frame->as.stream.length > 0U) {
+          /* A peer-initiated bidirectional stream is EITHER a request stream (whose first bytes are a QPACK
+           * prefix) or a WebTransport bidirectional stream (the draft's `0x41` and the session ID), and the
+           * classifier that tells them apart is proven on its own before this routing uses it -- which is the
+           * rule WT-120's first, crashing attempt earned.
+           *
+           * A prefix that has not fully arrived is NOT a WebTransport stream yet, so it falls through to the
+           * request path: a split prefix across frames on a bidirectional stream is a case this routing does
+           * not reassemble, and the honest place to say so is here rather than to guess at half a varint. */
+          wt_http3_bidi_start_kind_t start = WT_HTTP3_BIDI_START_REQUEST;
+          size_t consumed = 0U;
+          uint64_t prefix_session = 0U;
+          if (wt_http3_driver_classify_bidi_start(frame->as.stream.data, frame->as.stream.length, &start,
+                                                  &prefix_session, &consumed) == WT_OK &&
+              start == WT_HTTP3_BIDI_START_WEBTRANSPORT) {
+            if (driver->session_id_set != 0 && prefix_session != driver->session_id) {
+              /* A WebTransport stream for another session is not this one's to deliver. */
+              return WT_ERR_PROTOCOL;
+            }
+            if (sink != NULL && sink->on_stream_data != NULL && frame->as.stream.length > consumed) {
+              return sink->on_stream_data(sink->context, stream_id, frame->as.stream.data + consumed,
+                                          frame->as.stream.length - consumed, frame->as.stream.fin);
+            }
+            return WT_OK;
+          }
+        }
+
+        if (!tracked) {
           status = wt_http3_endpoint_on_request_stream(driver->endpoint, stream_id, &error);
           if (status != WT_OK) return status;
         }

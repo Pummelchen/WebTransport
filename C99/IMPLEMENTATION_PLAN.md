@@ -2749,6 +2749,26 @@ The count assertions are the ones that matter, and the reason is worth keeping: 
 entry past its bound would show a short, clean run, and "the peer opened one more stream than we allow" is
 exactly the case where a silent drop and a refusal look identical from the outside.
 
+### Phase 10's sixth part: WT-120 lands -- the routing, on its own
+
+The second step is the one the first attempt crashed on, and it is now in: in the driver's bidirectional branch,
+a peer stream that is not already tracked is offered to the proven classifier, and when the answer is a
+WebTransport prefix the bytes AFTER it go to the session sink. A stream that names ANOTHER session is refused
+with HTTP/3's identifier error rather than delivered to the wrong one (the rule every other session-bound
+delivery in this library follows), and a prefix that has not fully arrived falls through to the request path
+rather than being guessed at from half a varint -- with the honest note in the code that a bidi prefix SPLIT
+across frames is a case this routing does not reassemble yet.
+
+The test asserts the three cases separately: a WebTransport stream hands the session exactly its payload and not
+its prefix, a stream for another session is refused and reaches the session never, and a request-shaped stream
+is tracked as an HTTP/3 request and does not appear as session data. All three configurations are green from the
+first build, which is what the two earlier attempts (one crash, one revert) bought: the classifier was proven
+alone first, so the routing had nothing left to hide behind.
+
+**WT-120 is closed**, and the remaining note is narrow and written down: a WebTransport bidirectional prefix that
+arrives SPLIT across frames needs the pending-prefix reassembly the unidirectional path already has, and it is
+recorded rather than half-implemented.
+
 ### Phase 10's fifth part: the bidirectional-stream classifier, isolated first
 
 WT-120's bidirectional WebTransport stream classification is being retried in the small steps its own rule

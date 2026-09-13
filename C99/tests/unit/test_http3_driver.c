@@ -844,6 +844,79 @@ static void test_the_bidi_classifier(void) {
                    wt_http3_driver_classify_bidi_start(wire, length, NULL, &session_id, &consumed));
 }
 
+/* The ROUTING that uses the classifier, which is the step that crashed in the release build when it was first
+ * attempted. The classifier is proven on its own (above); this proves that a WebTransport bidirectional stream
+ * reaches the SESSION sink with its prefix removed, and that a request-shaped stream does not go there. */
+static void test_a_bidi_stream_is_routed_by_its_prefix(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_driver_sink_t sink;
+  session_log_t session;
+  wt_quic_frame_t frame;
+  uint8_t wire[64];
+  uint8_t request[8];
+  wt_writer_t w;
+  size_t wire_length;
+
+  memset(&session, 0, sizeof(session));
+  memset(&sink, 0, sizeof(sink));
+  sink.on_stream_data = record_stream_data;
+  sink.context = &session;
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_driver_set_session_id(&driver, 4U);
+
+  /* The draft's bidirectional prefix and then the session's bytes. */
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_OK("a bidirectional prefix writes", wt_webtransport_stream_prefix_write(&w, 0, 4U));
+  wt_writer_bytes(&w, "hello", 5U);
+  wire_length = wt_writer_offset(&w);
+
+  memset(&frame, 0, sizeof(frame));
+  frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+  frame.as.stream.id = 0U; /* a peer-initiated (client) bidirectional stream */
+  frame.as.stream.offset = 0U;
+  frame.as.stream.fin = 0;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = wire;
+  frame.as.stream.length = wire_length;
+
+  WT_EXPECT_OK("a WebTransport stream is routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
+  WT_EXPECT_U64("the session is handed the bytes", 1U, (uint64_t)session.streams);
+  WT_EXPECT_U64("after the prefix, and only those", 5U, (uint64_t)session.stream_bytes);
+  WT_EXPECT_U64("for the stream they arrived on", 0U, session.last_stream_id);
+
+  /* A stream naming ANOTHER session is refused rather than delivered to this one. */
+  {
+    wt_http3_driver_t other;
+    wt_http3_endpoint_t other_endpoint;
+    wt_http3_driver_init(&other, &other_endpoint);
+    wt_http3_driver_set_session_id(&other, 12U);
+    frame.as.stream.id = 4U;
+    WT_EXPECT_STATUS("a stream for another session is refused", WT_ERR_PROTOCOL,
+                     wt_http3_driver_on_quic_frame(&other, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
+    WT_EXPECT_U64("and reaches the session never", 1U, (uint64_t)session.streams);
+  }
+
+  /* A request-shaped stream is an HTTP/3 request and does NOT go to the session sink. */
+  {
+    wt_writer_t rw = wt_writer_init(request, sizeof(request));
+    wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
+    wt_writer_u8(&rw, 0x00U);
+    wt_writer_u8(&rw, 0x00U);
+    wt_writer_bytes(&rw, "x", 1U);
+    frame.as.stream.id = 8U;
+    frame.as.stream.data = request;
+    frame.as.stream.length = wt_writer_offset(&rw);
+    (void)wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U);
+    WT_EXPECT_U64("a request stream does not reach the session as data", 1U, (uint64_t)session.streams);
+    /* And the endpoint tracks it as a request stream, which is what makes it a request rather than nothing. */
+    WT_EXPECT_OK("while the endpoint tracks it as a request",
+                 wt_http3_endpoint_request_state(&endpoint, 8U, &state));
+  }
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
@@ -854,6 +927,7 @@ int main(void) {
   test_the_outbound_half_sends_what_it_should();
   test_the_quic_transport_forwards();
   test_the_bidi_classifier();
+  test_a_bidi_stream_is_routed_by_its_prefix();
   test_the_pending_table_is_bounded();
   WT_TEST_MAIN_END("wt_http3_driver");
 }

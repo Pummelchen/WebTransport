@@ -109,9 +109,17 @@ typedef struct wt_http3_driver {
   size_t frame_count;
   /* The bytes of the message being sent, measured before the frame around them is written. */
   uint8_t scratch[WT_HTTP3_DRIVER_SCRATCH];
+  /* The session this endpoint serves. A WebTransport stream's prefix must name it, and until it is set a
+   * WebTransport stream is refused rather than delivered to an endpoint that cannot say which session it
+   * belongs to. */
+  uint64_t session_id;
+  int session_id_set;
 } wt_http3_driver_t;
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint);
+
+/* Say which session this endpoint serves, so a WebTransport stream's prefix can be checked against it. */
+void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_id);
 
 /* One unidirectional stream's bytes, as a connection reported them.
  *
