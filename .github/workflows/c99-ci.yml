@@ -3,7 +3,10 @@
 # and a failure in one should not mask the other. The matrix is the plan's
 # Phase 12 list minus the platforms whose runners are not free -- FreeBSD and
 # Windows 11 are still to be added -- and the Windows entries wait on the WSA
-# runtime in Phase 4 rather than on the build system.
+# runtime in Phase 4 rather than on the build system. What the Linux job CAN do
+# about Windows is compile and LINK the whole tree with a cross-compiler, and
+# both steps are here: see C99/docs/PORTABILITY.md for what that does and does
+# not prove.
 
 name: C99 CI
 
@@ -138,10 +141,15 @@ jobs:
         # The stronger claim: every test and app becomes a PE32+ executable, which is what a Windows runner
         # needs before it is worth adding. It needs a WINDOWS OpenSSL, and the MSYS2 package provides one as a
         # plain tarball -- no MSYS2 installation, no Windows runner, and the compiler that checks it is the same
-        # one the compile step uses. Pinned so the job does not move under the project's feet; a fetch failure
-        # falls through to the script's own "unsupported" line rather than failing the job.
-        continue-on-error: true
+        # one the compile step uses. Pinned so the job does not move under the project's feet.
+        #
+        # ENFORCED, and Linux-only. It was `continue-on-error` while nobody had seen it finish; it has now been
+        # run to completion by hand -- 85 PE32+ executables and a shared library -- so a failure here is a real
+        # one. zstd is installed because the pinned package is a zstd tarball and the runner image has no zstd,
+        # which is the only reason the step was ever allowed to fail.
+        if: runner.os == 'Linux'
         run: |
+          sudo apt-get install -y zstd
           curl -sL -o /tmp/mingw-openssl.pkg.tar.zst \
             https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-openssl-3.6.4-1-any.pkg.tar.zst
           zstd -d -f /tmp/mingw-openssl.pkg.tar.zst -o /tmp/mingw-openssl.tar

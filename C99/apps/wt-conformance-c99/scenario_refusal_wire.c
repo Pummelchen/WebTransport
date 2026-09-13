@@ -44,7 +44,10 @@ void wt_scenario_refusal_wire_run(wt_cli_report_t *report) {
   if (opened != WT_CLI_RESULT_PASSED) {
     /* An unsupported machine is a fact about the machine, not a failure of the code, and it is passed through
      * rather than flattened: `session-over-ipv6` reports the same way. */
-    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %s", refusal);
+    /* The precision bounds the composed text on purpose: the reason buffer is the same SIZE as this one, so a
+     * bare conversion lets the compiler prove the result may be truncated, and the Windows cross-compile treats
+     * that as an error (WT-134). The prefix plus 120 characters leaves room to spare. */
+    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %.120s", refusal);
     refusal_wire_add(report, k_closed, opened, detail);
     refusal_wire_add(report, k_told, opened, detail);
     return;

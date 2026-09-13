@@ -70,7 +70,7 @@ That is the difference between an inventory and a compiler, and it is the argume
 rather than describing it.
 
 `scripts/check-windows-platform.sh` now sweeps the **whole tree** -- every source in `src/`, `tests/` and
-`apps/` -- with the include paths and the one define CMake gives them, and they all compile for Windows: 72 + 92
+`apps/` -- with the include paths and the one define CMake gives them, and they all compile for Windows: 72 + 97
 sources. That is the claim a runner needs before it is worth adding, measured rather than hoped for. The sweep
 found two more defects that clang had been silent about: a dead local `wt_webtransport_capsule_t` in
 `src/webtransport/capsule.c` (GCC's `-Wunused-but-set-variable`, which clang does not diagnose) and a unit test
@@ -80,8 +80,10 @@ supplies.
 
 **The tree also LINKS for Windows.** `scripts/check-windows-build.sh` configures the whole tree with
 `cmake/toolchains/mingw-w64.cmake` and a Windows OpenSSL (the MSYS2 package is a plain tarball, so no Windows
-runner or MSYS2 installation is needed), and builds **84 PE32+ executables** plus `libwebtransport.dll`. CI runs
-it on the legs it already has. Not run -- that needs Windows or Wine -- but linked.
+runner or MSYS2 installation is needed), and builds **85 PE32+ executables** plus `libwebtransport.dll`. CI runs
+it on the Linux leg, where the cross-compiler is, and the step is no longer allowed to fail: it was
+`continue-on-error` while nobody had seen it finish, and it has now been run to completion by hand -- which is
+the only honest reason to enforce a job. Not run -- that needs Windows or Wine -- but linked.
 
 **The link found a defect the compile could not**, and it is the kind only an optimiser sees: in a Release build
 GCC could not prove that the loop writing `compression_methods[i]` from the peer's compression-methods length
@@ -90,10 +92,18 @@ satisfy it, because the index came from a struct member -- and the right answer 
 generality the message does not have: a TLS 1.3 ClientHello's vector is ONE byte, so `src/tls/handshake.c` now
 writes the byte by index, which is both inside the table and what RFC 8446 section 4.1.2 says.
 
-What remains is the Windows RUNNER and FreeBSD. A job that cannot pass is worse than an absent one, because it
-teaches people to ignore CI -- and the cross-compile is what makes a job plausible now: the whole tree compiles for
-the platform, while what a runner would still need is a LINKED build (OpenSSL for Windows) and a way to run the
-tests there -- both named, neither guessed at.
+**The compile sweep is LIVE, not decorative**: it caught a real warning the moment the session's capsule
+scenarios landed -- `-Wformat-truncation` on a `snprintf` whose `%s` argument was the same size as its
+destination, which clang accepts and mingw's GCC refuses (`apps/wt-conformance-c99/scenario_capsules.c` and
+`scenario_refusal_wire.c` now bound the interpolation with a precision). A check that has never caught anything
+is a check nobody has tested; this one is on its second real find.
+
+What remains is the Windows RUNNER and FreeBSD, and both are now ONE thing: a way to RUN what already builds. The
+tree compiles for Windows (72 + 97 sources, warnings-as-errors), links for Windows (85 PE32+ executables and a
+shared library, enforced in CI), and the FreeBSD surface is the Debian one by the inventory. A job that cannot
+pass is worse than an absent one, because it teaches people to ignore CI -- so the runner is named rather than
+guessed at: Windows 11 needs OpenSSL there and something to execute the test binaries, FreeBSD needs a runner
+GitHub does not provide natively, and neither is a code change this tree can make and verify from here.
 
 ## The two symbols this document is checked for
 

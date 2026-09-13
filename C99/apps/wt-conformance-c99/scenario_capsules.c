@@ -126,7 +126,10 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
   opened[0] = '\0';
   result = scenario_pair_open(&pair, 0, opened, sizeof(opened));
   if (result != WT_CLI_RESULT_PASSED) {
-    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %s", opened);
+    /* The precision bounds the composed text on purpose: the reason buffer is the same SIZE as this one, so a
+     * bare conversion lets the compiler prove the result may be truncated, and the Windows cross-compile treats
+     * that as an error (WT-134). The prefix plus 120 characters leaves room to spare. */
+    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %.120s", opened);
     capsules_add(report, k_bound, result == WT_CLI_RESULT_PASSED, detail);
     capsules_add(report, k_flow, result == WT_CLI_RESULT_PASSED, detail);
     return;
@@ -187,7 +190,10 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
   opened[0] = '\0';
   result = scenario_pair_open(&pair, 0, opened, sizeof(opened));
   if (result != WT_CLI_RESULT_PASSED) {
-    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %s", opened);
+    /* The precision bounds the composed text on purpose: the reason buffer is the same SIZE as this one, so a
+     * bare conversion lets the compiler prove the result may be truncated, and the Windows cross-compile treats
+     * that as an error (WT-134). The prefix plus 120 characters leaves room to spare. */
+    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %.120s", opened);
     capsules_add(report, k_flow, result == WT_CLI_RESULT_PASSED, detail);
     return;
   }
@@ -248,7 +254,10 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
   opened[0] = '\0';
   result = scenario_pair_open(&pair, 0, opened, sizeof(opened));
   if (result != WT_CLI_RESULT_PASSED) {
-    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %s", opened);
+    /* The precision bounds the composed text on purpose: the reason buffer is the same SIZE as this one, so a
+     * bare conversion lets the compiler prove the result may be truncated, and the Windows cross-compile treats
+     * that as an error (WT-134). The prefix plus 120 characters leaves room to spare. */
+    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %.120s", opened);
     capsules_add(report, k_grant, result == WT_CLI_RESULT_PASSED, detail);
     capsules_add(report, k_ends, result == WT_CLI_RESULT_PASSED, detail);
     return;
