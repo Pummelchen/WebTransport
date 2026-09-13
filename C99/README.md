@@ -208,11 +208,14 @@ What is here:
   FreeBSD build would need, item by item — and the socket is now ONE header:
   `src/runtime/udp_platform.h` names all five differences that used to be spelled out as POSIX in a
   dozen places (closing, non-blocking mode, waiting for readability, the error number, and the
-  datagram calls themselves, through `wt_udp_platform_message_t`). The `_WIN32` branches are
-  written from the inventory and **are not verified** — nothing here builds them, and the header
-  says so — while the POSIX path is unchanged and green in all three configurations. What remains
-  is the public `int fd` field (a Windows port must widen it to `SOCKET`), `WSAStartup` ownership,
-  and then the CMake branch and the job.
+  datagram calls themselves, through `wt_udp_platform_message_t`). The `_WIN32` branch is no longer
+  "written from the inventory": `scripts/check-windows-platform.sh` compiles it with a mingw
+  cross-compiler under the same warnings-as-errors the POSIX build uses — and found a real defect on
+  its first run (`FIONBIO` does not fit a signed `long` on Windows). The socket lifetime owns
+  `WSAStartup` through a reference count, the public handle is `intptr_t` so a pointer-sized `SOCKET`
+  cannot be truncated, and CMake links `ws2_32` on Windows. What remains is the **address layer**
+  (`sockaddr_storage`, `inet_pton`, `ntohs`, the `AF_INET*` constants — about forty uses still
+  spelled POSIX in `udp.c`) and then the CI leg, which comes after it rather than before.
   `scripts/check-portability.sh` fails if the library uses a POSIX-only call the inventory does not
   name — it caught `sendto`/`recvfrom` missing on its first run — and CI runs it. FreeBSD is close to
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.

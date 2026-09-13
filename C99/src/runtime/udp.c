@@ -185,19 +185,29 @@ wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
   int fd;
 
   if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
-  out->fd = -1;
+  out->fd = WT_UDP_INVALID_FD;
   out->family = family;
   out->port = 0U;
   if (domain < 0) return WT_ERR_INVALID_ARGUMENT;
 
+  /* The socket LIFETIME is the platform's first: on Windows this is where Winsock starts, and the matching
+   * release is in `wt_udp_close`, which is the only other end of a socket's life. Every failure below
+   * releases it, so a failed open does not leave the process holding the library. */
+  if (wt_udp_platform_acquire() != 0) return map_errno(wt_udp_platform_last_error());
+
   fd = socket(domain, SOCK_DGRAM, 0);
-  if (fd < 0) return map_errno(wt_udp_platform_last_error());
+  if (fd < 0) {
+    int error = wt_udp_platform_last_error();
+    wt_udp_platform_release();
+    return map_errno(error);
+  }
 
   /* Non-blocking from the start: a socket that blocked on receive would make the connection runtime's
    * timers unenforceable, and setting it here means no caller can forget. */
   if (wt_udp_platform_set_nonblocking(fd) != 0) {
     int error = wt_udp_platform_last_error();
     (void)wt_udp_platform_close(fd);
+    wt_udp_platform_release();
     return map_errno(error);
   }
 
@@ -210,6 +220,7 @@ wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
     if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &on, (socklen_t)sizeof(on)) < 0) {
       int error = wt_udp_platform_last_error();
       (void)wt_udp_platform_close(fd);
+      wt_udp_platform_release();
       return map_errno(error);
     }
   }
@@ -224,7 +235,7 @@ wt_status_t wt_udp_bind(wt_udp_socket_t *socket, const wt_udp_address_t *address
   wt_status_t status;
 
   if (socket == NULL || address == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (socket->fd < 0) return WT_ERR_STATE;
+  if (socket->fd == WT_UDP_INVALID_FD) return WT_ERR_STATE;
   if (address->family != socket->family) {
     /* An IPv4 address cannot be bound to an IPv6 socket here: IPV6_V6ONLY is on, and a silent
      * mismatch would bind the wrong thing. */
@@ -232,7 +243,7 @@ wt_status_t wt_udp_bind(wt_udp_socket_t *socket, const wt_udp_address_t *address
   }
   status = to_sockaddr(address, &storage, &storage_len);
   if (status != WT_OK) return status;
-  if (bind(socket->fd, (const struct sockaddr *)(const void *)&storage, storage_len) < 0) {
+  if (bind((wt_udp_handle_t)socket->fd, (const struct sockaddr *)(const void *)&storage, storage_len) < 0) {
     return map_errno(wt_udp_platform_last_error());
   }
   socket->port = address->port;
@@ -262,9 +273,9 @@ wt_status_t wt_udp_local_port(const wt_udp_socket_t *socket, uint16_t *out_port)
   socklen_t storage_len = (socklen_t)sizeof(storage);
 
   if (socket == NULL || out_port == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (socket->fd < 0) return WT_ERR_STATE;
+  if (socket->fd == WT_UDP_INVALID_FD) return WT_ERR_STATE;
   memset(&storage, 0, sizeof(storage));
-  if (getsockname(socket->fd, (struct sockaddr *)(void *)&storage, &storage_len) < 0) {
+  if (getsockname((wt_udp_handle_t)socket->fd, (struct sockaddr *)(void *)&storage, &storage_len) < 0) {
     return map_errno(wt_udp_platform_last_error());
   }
   if (storage.ss_family == AF_INET) {
@@ -280,12 +291,15 @@ wt_status_t wt_udp_local_port(const wt_udp_socket_t *socket, uint16_t *out_port)
 
 void wt_udp_close(wt_udp_socket_t *socket) {
   if (socket == NULL) return;
-  if (socket->fd >= 0) {
+  if (socket->fd != WT_UDP_INVALID_FD) {
     /* The descriptor is cleared before the call: a close that restarts on a signal or a second call
-     * must not close a descriptor number the process has since reused. */
-    int fd = socket->fd;
-    socket->fd = -1;
-    (void)wt_udp_platform_close(fd);
+     * must not close a descriptor number the process has since reused -- and a second close must not
+     * release the platform's socket lifetime twice, which on Windows would be a WSACleanup with no
+     * matching WSAStartup. */
+    wt_udp_handle_t handle = (wt_udp_handle_t)socket->fd;
+    socket->fd = WT_UDP_INVALID_FD;
+    (void)wt_udp_platform_close(handle);
+    wt_udp_platform_release();
   }
   socket->port = 0U;
 }
@@ -298,7 +312,7 @@ wt_status_t wt_udp_send(const wt_udp_socket_t *socket, const wt_udp_address_t *t
   wt_status_t status;
 
   if (socket == NULL || to == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (socket->fd < 0) return WT_ERR_STATE;
+  if (socket->fd == WT_UDP_INVALID_FD) return WT_ERR_STATE;
   if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
   /* Larger than UDP can carry, refused here rather than at the syscall: the number is knowable, and a
    * caller that asks for the impossible should be told which bound it broke. */
@@ -326,7 +340,7 @@ wt_status_t wt_udp_receive(const wt_udp_socket_t *socket, uint8_t *buffer, size_
   wt_status_t status;
 
   if (socket == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (socket->fd < 0) return WT_ERR_STATE;
+  if (socket->fd == WT_UDP_INVALID_FD) return WT_ERR_STATE;
   if (buffer == NULL && capacity != 0U) return WT_ERR_INVALID_ARGUMENT;
   *out_length = 0U;
 
@@ -370,7 +384,7 @@ wt_status_t wt_udp_peek(const wt_udp_socket_t *socket, uint8_t *buffer, size_t c
   wt_status_t status;
 
   if (socket == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (socket->fd < 0) return WT_ERR_STATE;
+  if (socket->fd == WT_UDP_INVALID_FD) return WT_ERR_STATE;
   if (buffer == NULL && capacity != 0U) return WT_ERR_INVALID_ARGUMENT;
   *out_length = 0U;
   if (out_available != NULL) *out_available = 0U;
@@ -410,7 +424,7 @@ wt_status_t wt_udp_wait(const wt_udp_socket_t *socket, uint64_t timeout_micros) 
   int ready;
 
   if (socket == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (socket->fd < 0) return WT_ERR_STATE;
+  if (socket->fd == WT_UDP_INVALID_FD) return WT_ERR_STATE;
 
   /* poll takes milliseconds and an int, so the conversion is bounded here: a caller asking for longer
    * than an int can express in milliseconds gets the longest wait the platform can represent rather
@@ -425,7 +439,7 @@ wt_status_t wt_udp_wait(const wt_udp_socket_t *socket, uint64_t timeout_micros) 
     timeout_ms = (int)((timeout_micros + 999U) / 1000U);
   }
 
-  entry.fd = socket->fd;
+  entry.fd = (wt_udp_handle_t)socket->fd;
   entry.events = POLLIN;
   /* A pending error or a hangup is reported through these and only surfaced by a receive attempt, so
    * they are waited on as well: otherwise a socket with an error would never look ready and the

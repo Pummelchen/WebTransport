@@ -45,6 +45,19 @@ jobs:
             brew install ninja
           fi
 
+      # A mingw cross-compiler is the only way this project can check its `_WIN32` branch without a Windows
+      # runner: it says whether the branch COMPILES, which is a smaller claim than "the port works" and a much
+      # larger one than "written from the inventory". Failing the install falls through to the check's own
+      # "unsupported" line rather than failing the job, because the POSIX build is what this project ships.
+      - name: Install a Windows cross-compiler
+        continue-on-error: true
+        run: |
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            sudo apt-get install -y gcc-mingw-w64-x86-64
+          else
+            brew install mingw-w64
+          fi
+
       # The warnings are part of the contract, not advice: this build turns them
       # into errors for this project's sources, so a narrowing conversion or an
       # unchecked length arithmetic fails here rather than at run time on a
@@ -116,6 +129,11 @@ jobs:
         # The inventory lists what a Windows or FreeBSD build needs; this fails if the library uses a POSIX-only
         # call the inventory does not name, which is how such a document stays true.
         run: C99/scripts/check-portability.sh
+      - name: Compile the Windows platform branch
+        # The _WIN32 branch of udp_platform.h was written from the inventory. A cross-compiler is enough to say
+        # it compiles -- and it found FIONBIO not fitting a signed long on its first run. A machine without a
+        # cross-compiler reports "unsupported" with that reason instead of failing.
+        run: C99/scripts/check-windows-platform.sh
 
       - name: CLI smoke
         run: |

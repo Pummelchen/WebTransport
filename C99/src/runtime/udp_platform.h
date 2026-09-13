@@ -70,11 +70,33 @@ typedef struct wt_udp_platform_message {
 
 #if defined(_WIN32)
 
+/* WSAStartup belongs to the socket lifetime, and this layer is the only place in the library that touches the
+ * operating system at all: a reference count here means a caller cannot forget it, and cannot call it twice.
+ * The count is the number of OPEN sockets, so the last close is what releases Winsock. */
+static int wt_udp_platform_acquire(void) {
+  static int open_sockets = 0;
+  if (open_sockets == 0) {
+    WSADATA data;
+    if (WSAStartup(MAKEWORD(2, 2), &data) != 0) return -1;
+  }
+  open_sockets++;
+  return 0;
+}
+
+static void wt_udp_platform_release(void) {
+  static int open_sockets = 0;
+  if (open_sockets == 0) return;
+  open_sockets--;
+  if (open_sockets == 0) (void)WSACleanup();
+}
+
 static int wt_udp_platform_close(wt_udp_handle_t handle) { return closesocket(handle); }
 
 static int wt_udp_platform_set_nonblocking(wt_udp_handle_t handle) {
   u_long one = 1UL;
-  return ioctlsocket(handle, FIONBIO, &one) == 0 ? 0 : -1;
+  /* `FIONBIO` is a `long` on Windows whose value does not fit a SIGNED long (0x8004667E > LONG_MAX), and mingw
+   * says so: the cast is what the platform's own headers expect, and the cross-compile is what found it. */
+  return ioctlsocket(handle, (long)FIONBIO, &one) == 0 ? 0 : -1;
 }
 
 /* WSAPoll has the same shape as poll, which is the one piece of luck in this port. */
@@ -112,6 +134,12 @@ static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platfo
 }
 
 #else
+
+/* The POSIX side has nothing to start or stop: the two calls exist so that `udp.c` names one lifetime on
+ * both platforms, and a no-op that says why is better than an `#if` at the call site. */
+static int wt_udp_platform_acquire(void) { return 0; }
+
+static void wt_udp_platform_release(void) {}
 
 static int wt_udp_platform_close(wt_udp_handle_t handle) { return close(handle); }
 

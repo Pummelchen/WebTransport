@@ -29,30 +29,43 @@ Windows is the real work. Every item below is a place where the current code ass
 
 ## The adaptation the code needs, in order
 
-1. **DONE** -- a private header (`src/runtime/udp_platform.h`) names four of the five differences: `close`,
-   non-blocking mode, readiness and the error number (`wt_udp_platform_close`,
-   `wt_udp_platform_set_nonblocking`, `wt_udp_platform_wait_readable`, `wt_udp_platform_last_error`), plus the
-   handle type. `udp.c` names those operations now rather than spelling POSIX in a dozen places. The `_WIN32`
-   branches are written from this inventory and are **not verified** -- nothing here builds them -- and they say
-   so in the header. **DONE**: the datagram calls are the header's business too, through
-   `wt_udp_platform_message_t` and `wt_udp_platform_send_message` / `wt_udp_platform_receive_message`, and the
-   three call sites (`wt_udp_send`, `wt_udp_receive`, `wt_udp_peek`) went over in one pass -- a partial
-   conversion does not compile here, because `-Werror` rejects the wrapper nothing calls. Two things the first
-   two attempts got wrong are worth keeping: the message structure has to be defined AFTER the handle it
-   names (`unknown type name wt_udp_handle_t`), and the two calls cannot have a non-`static` prototype above a
-   `static` definition. What remains in `udp.c` is the public `int fd` field, which a Windows port must widen
-   to `SOCKET`.
-2. `WSAStartup` somewhere that owns a process lifetime: the UDP layer is the only place this library touches the
-   operating system, so a reference count there is the natural home.
+1. **DONE for the operations, NOT for the types** -- a private header (`src/runtime/udp_platform.h`) names the
+   five differences: `close`, non-blocking mode, readiness, the error number and the **datagram calls**
+   (`wt_udp_platform_close`, `wt_udp_platform_set_nonblocking`, `wt_udp_platform_wait_readable`,
+   `wt_udp_platform_last_error`, `wt_udp_platform_send_message`, `wt_udp_platform_receive_message` over
+   `wt_udp_platform_message_t`), plus the handle type and the socket LIFETIME. The three datagram call sites
+   went over in one pass -- a partial conversion does not compile here, because `-Werror` rejects the wrapper
+   nothing calls. What is **still POSIX in `udp.c`** is the ADDRESS layer: `struct sockaddr_storage`,
+   `socklen_t`, `inet_pton`, `ntohs` and the `AF_INET*` constants, about forty uses, plus the three includes
+   that supply them. An earlier version of this document said the datagram calls were the last thing; the
+   cross-compile below is what made the address layer visible, and it is the next step.
+2. **DONE** -- `WSAStartup` is owned by the socket lifetime in the same header: `wt_udp_platform_acquire` is
+   called before the socket is made and released in `wt_udp_close`, with the count being the number of OPEN
+   sockets, so the last close is what releases Winsock and a failed open releases it too. The POSIX side has
+   the same two calls as no-ops, so `udp.c` names one lifetime rather than carrying an `#if`.
+   The public handle is `intptr_t` now -- `WT_UDP_INVALID_FD` is `(intptr_t)-1`, which is both POSIX's `-1` and
+   Windows' `INVALID_SOCKET` -- because a `SOCKET` is pointer-sized and an `int` field would truncate it
+   silently.
 3. The `wt_udp_peek` difference, which is behavioural rather than syntactic and is now named in the header
    rather than discovered: on Windows a peek cannot see past the caller's buffer, so the `FULL_LENGTH` flag
    cannot be honoured there and a listener must hold the datagram it looked at. The runtime session's pending
    table is the shape that needs.
-4. A CMake branch that links `ws2_32` and finds OpenSSL, and a CI job that builds it.
+4. A CMake branch that links `ws2_32` (**DONE**) and finds OpenSSL, and a CI job that builds it.
 
-**Status:** the inventory is complete and mechanically checked; step 1 (the platform header) is done and verified
-on POSIX, where behaviour is unchanged; steps 2 to 4 are not, and no Windows job is added until they are -- a job
-that cannot pass is worse than an absent one, because it teaches people to ignore CI.
+**Status:** the inventory is complete and mechanically checked; the platform header is done and verified on
+POSIX, where behaviour is unchanged; the socket lifetime and `ws2_32` are done; and the `_WIN32` branch is no
+longer "written from the inventory" but **COMPILED**, which is a smaller claim than "the port works" and a much
+larger one than nothing.
+
+`scripts/check-windows-platform.sh` compiles the branch with a mingw cross-compiler -- the same warnings the
+POSIX build turns into errors -- and reports `unsupported` with that reason on a machine that has none. CI
+installs one where it can. **It found a real defect on its first run:** `FIONBIO` does not fit a signed `long`
+on Windows (`0x8004667E` is above `LONG_MAX`), so passing it to `ioctlsocket` is a sign-conversion error, and
+the cast the platform's own headers expect is now there. That is the difference between an inventory and a
+compiler.
+
+What remains is the address layer named in step 1, and the Windows runner: a job that cannot pass is worse than
+an absent one, because it teaches people to ignore CI -- so the job comes after the address layer, not before.
 
 ## The two symbols this document is checked for
 

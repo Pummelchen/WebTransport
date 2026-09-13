@@ -17,7 +17,7 @@ wt_status_t wt_cli_endpoint_open(wt_cli_endpoint_t *endpoint, const char *host_p
 
   if (endpoint == NULL || host_port == NULL) return WT_ERR_INVALID_ARGUMENT;
   memset(endpoint, 0, sizeof(*endpoint));
-  endpoint->socket.fd = -1;
+  endpoint->socket.fd = WT_UDP_INVALID_FD;
 
   /* The address decides the family, and the parser is the runtime's: a second parser here would
    * be a second set of rules about what `[::1]:443` means. */
@@ -47,7 +47,7 @@ void wt_cli_endpoint_close(wt_cli_endpoint_t *endpoint) {
   if (endpoint == NULL) return;
   if (endpoint->open != 0) wt_udp_close(&endpoint->socket);
   endpoint->open = 0;
-  endpoint->socket.fd = -1;
+  endpoint->socket.fd = WT_UDP_INVALID_FD;
 }
 
 void wt_cli_endpoint_write_json(const wt_cli_endpoint_t *endpoint, const char *address, FILE *stream) {

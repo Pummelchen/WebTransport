@@ -62,10 +62,20 @@ typedef struct wt_udp_address {
   uint8_t bytes[16];
 } wt_udp_address_t;
 
+/* The value `fd` holds when there is no open socket. It is spelled once because the two platforms disagree
+ * about what a valid handle looks like -- POSIX uses a small non-negative int, Windows a pointer-sized
+ * SOCKET whose invalid value is all ones -- and `(intptr_t)-1` is that value on both. */
+#define WT_UDP_INVALID_FD ((intptr_t)-1)
+
 /* An open socket. `fd` is exposed because an event loop that already has a poll set wants to add it,
- * and hiding it would mean either a second poll set or a callback API this library does not need. */
+ * and hiding it would mean either a second poll set or a callback API this library does not need.
+ *
+ * It is `intptr_t` rather than `int` because a Windows SOCKET is a pointer-sized handle (WT-134): an `int`
+ * field would truncate it, and the truncation would be silent until a socket handle happened to be large.
+ * On POSIX the value is the small descriptor it always was, so this is a widening of the field and not a
+ * change of meaning. */
 typedef struct wt_udp_socket {
-  int fd;
+  intptr_t fd;
   wt_udp_family_t family;
   uint16_t port;
 } wt_udp_socket_t;

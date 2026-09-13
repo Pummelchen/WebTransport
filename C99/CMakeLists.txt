@@ -406,3 +406,14 @@ if(WEBTRANSPORT_C99_BUILD_APPS)
   install(TARGETS wt-client-c99 wt-server-c99 wt-conformance-c99
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
+
+# Winsock is not in a Windows link's default set, so every target that touches the socket layer asks for it.
+# Guarded by `TARGET` because either library may be built alone, and written here rather than beside the targets
+# so that it reads as one statement about the platform rather than two about the libraries.
+if(WIN32)
+  foreach(wt_winsock_target webtransport_static webtransport_shared)
+    if(TARGET ${wt_winsock_target})
+      target_link_libraries(${wt_winsock_target} PUBLIC ws2_32)
+    endif()
+  endforeach()
+endif()

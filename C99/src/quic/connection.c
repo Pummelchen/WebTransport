@@ -1118,7 +1118,7 @@ wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
   connection->config.local_connection_id = connection->local_connection_id;
   connection->config.peer_connection_id = connection->peer_connection_id;
 
-  connection->socket.fd = -1;
+  connection->socket.fd = WT_UDP_INVALID_FD;
   for (i = 0U; i < WT_QUIC_SPACE_COUNT; i++) {
     wt_quic_pn_space_init(&connection->spaces[i]);
   }
@@ -2029,5 +2029,5 @@ void wt_quic_connection_clear(wt_quic_connection_t *connection) {
     wt_quic_packet_keys_clear(&connection->keys_out[i]);
   }
   connection->has_peer = 0;
-  connection->socket.fd = -1;
+  connection->socket.fd = WT_UDP_INVALID_FD;
 }
