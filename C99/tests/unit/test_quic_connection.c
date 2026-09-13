@@ -1993,6 +1993,67 @@ static void test_crypto_is_permitted_in_the_application_space(void) {
   close_pair(&pair);
 }
 
+/* A server answers to the ID the CLIENT chose for its first Initial, which it cannot know from its own
+ * configuration: a client picks that value arbitrarily (RFC 9000 section 7.2). This tree's two tools shared one
+ * constant across both roles, so a server that accepted only its own ID looked exactly like a server that
+ * accepted the client's -- and a third-party client, which picks its own, would have been refused outright
+ * (WT-151). The packet is a 1-RTT one because an Initial below 1200 bytes is discarded by section 14.1, which
+ * is a different rule and would hide this one. */
+static void test_a_server_answers_to_the_clients_chosen_id(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  uint8_t secret[WT_SHA256_LEN];
+  uint8_t payload[64];
+  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+  uint64_t now = 96000000U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x60U + i);
+  WT_EXPECT_OK("application keys derive",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the client sends with them",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads with them",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+
+  {
+    static const uint8_t k_chosen[8] = {0xdeU, 0xadU, 0xbeU, 0xefU, 0x01U, 0x02U, 0x03U, 0x04U};
+    frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+    WT_EXPECT_OK("the frame encodes", wt_quic_frame_encode(&w, &frame));
+    WT_EXPECT_OK("the server is told what the client chose",
+                 wt_quic_connection_set_original_destination_id(&pair.server, k_chosen, sizeof(k_chosen)));
+    WT_EXPECT_U64("before the handshake is confirmed", 0U, (uint64_t)pair.server.handshake_confirmed);
+
+    send_raw_payload_with_dcid(&pair, payload, wt_writer_offset(&w), k_chosen, sizeof(k_chosen),
+                               &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U);
+    receive_on(&pair.server, &pair.server_socket, now);
+    WT_EXPECT_U64("so the packet reaches the handler", 1U, (uint64_t)pair.server_witness.count);
+    WT_EXPECT_INT("and the connection is not closed", 0, wt_quic_connection_is_closed(&pair.server));
+  }
+
+  /* An ID that is neither this endpoint's nor the client's chosen one is another connection's, and RFC 9000
+   * section 5.2 makes discarding it the rule. */
+  {
+    static const uint8_t k_unknown[8] = {0x0fU, 0x0eU, 0x0dU, 0x0cU, 0x0bU, 0x0aU, 0x09U, 0x08U};
+    unsigned before = (unsigned)pair.server_witness.count;
+    uint64_t discarded_before = pair.server.packets_discarded;
+    w = wt_writer_init(payload, sizeof(payload));
+    frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+    WT_EXPECT_OK("another frame encodes", wt_quic_frame_encode(&w, &frame));
+    now += 1000U;
+    send_raw_payload_with_dcid(&pair, payload, wt_writer_offset(&w), k_unknown, sizeof(k_unknown),
+                               &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 1U);
+    receive_on(&pair.server, &pair.server_socket, now);
+    WT_EXPECT_U64("a packet for an unknown connection is discarded, not delivered", (uint64_t)before,
+                  (uint64_t)pair.server_witness.count);
+    WT_EXPECT_U64("and counted as discarded", discarded_before + 1U, pair.server.packets_discarded);
+  }
+
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -2022,6 +2083,7 @@ int main(void) {
   test_stop_sending_send();
   test_issue_connection_id();
   test_peer_connection_ids();
+  test_a_server_answers_to_the_clients_chosen_id();
   test_retire_connection_id();
   test_retire_handshake_connection_id();
   test_new_connection_id_retire_prior_to_is_refused();

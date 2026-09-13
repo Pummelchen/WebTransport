@@ -16,6 +16,63 @@
 
 #include "webtransport/quic/packet.h"
 
+/* A listener peeks the FRONT of a datagram, so the two connection IDs must be readable from a prefix of a long
+ * header -- which `wt_quic_long_header_decode` cannot do, because it also reads the Length field and hands back
+ * a view of the payload. Requiring the whole packet there meant a 1200-byte Initial could not be read from a
+ * 64-byte peek, and a server that peeked before arming its connection therefore accepted nothing at all
+ * (WT-151). */
+static void test_the_connection_ids_of_a_long_header_can_be_read_from_a_prefix(void) {
+  static const uint8_t k_destination[8] = {0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U, 0x88U};
+  static const uint8_t k_source[4] = {0xaaU, 0xbbU, 0xccU, 0xddU};
+  uint8_t packet[64];
+  uint8_t truncated[8];
+  const uint8_t *destination = NULL;
+  const uint8_t *source = NULL;
+  size_t destination_length = 0U;
+  size_t source_length = 0U;
+  wt_writer_t w = wt_writer_init(packet, sizeof(packet));
+
+  /* A long header: first byte 0xc0 (long, fixed, Initial, packet number length one), version 1, then the two
+   * IDs with their length bytes. The rest of the packet is deliberately absent: this is a PREFIX. */
+  wt_writer_u8(&w, 0xc0U);
+  wt_writer_u32(&w, WT_QUIC_VERSION_1);
+  wt_writer_u8(&w, (uint8_t)sizeof(k_destination));
+  wt_writer_bytes(&w, k_destination, sizeof(k_destination));
+  wt_writer_u8(&w, (uint8_t)sizeof(k_source));
+  wt_writer_bytes(&w, k_source, sizeof(k_source));
+  WT_EXPECT_TRUE("the prefix is shorter than a packet", wt_writer_offset(&w) < 32U);
+
+  WT_EXPECT_OK("the IDs read from the prefix",
+               wt_quic_long_header_connection_ids(packet, wt_writer_offset(&w), &destination,
+                                                  &destination_length, &source, &source_length));
+  WT_EXPECT_U64("with the destination's length", (uint64_t)sizeof(k_destination), (uint64_t)destination_length);
+  WT_EXPECT_BYTES("and its bytes", k_destination, destination, sizeof(k_destination));
+  WT_EXPECT_U64("the source's length", (uint64_t)sizeof(k_source), (uint64_t)source_length);
+  WT_EXPECT_BYTES("and its bytes", k_source, source, sizeof(k_source));
+
+  /* A prefix that stops inside the source ID is not a header: truncation is the answer, not a guess. */
+  WT_EXPECT_STATUS("a prefix that stops inside the source ID is truncated", WT_ERR_TRUNCATED,
+                   wt_quic_long_header_connection_ids(packet, 16U, &destination, &destination_length, &source,
+                                                      &source_length));
+  /* A short header has no long-header IDs: its destination ID is the length the receiver already knows. */
+  {
+    uint8_t short_packet[16];
+    memset(short_packet, 0, sizeof(short_packet));
+    short_packet[0] = 0x40U;
+    WT_EXPECT_STATUS("and a short header is not one", WT_ERR_PROTOCOL,
+                     wt_quic_long_header_connection_ids(short_packet, sizeof(short_packet), &destination,
+                                                        &destination_length, &source, &source_length));
+  }
+  /* A missing fixed bit is not a version-1 packet at all (RFC 9000 section 17.2). */
+  truncated[0] = 0x80U;
+  WT_EXPECT_STATUS("as is a long header without the fixed bit", WT_ERR_PROTOCOL,
+                   wt_quic_long_header_connection_ids(truncated, sizeof(truncated), &destination,
+                                                      &destination_length, &source, &source_length));
+  WT_EXPECT_STATUS("and a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_long_header_connection_ids(packet, wt_writer_offset(&w), NULL, &destination_length,
+                                                      &source, &source_length));
+}
+
 int main(void) {
   /* Big enough for the RFC's 1200-byte packet, which is re-encoded into it. */
   uint8_t buffer[2048];
@@ -474,5 +531,6 @@ int main(void) {
   WT_EXPECT_STR("unknown", "unknown",
                 wt_quic_packet_type_name((wt_quic_packet_type_t)9));
 
+  test_the_connection_ids_of_a_long_header_can_be_read_from_a_prefix();
   WT_TEST_MAIN_END("wt_quic_packet");
 }

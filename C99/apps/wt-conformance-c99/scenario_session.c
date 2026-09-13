@@ -118,12 +118,13 @@ static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_
 /* The endpoint's transport parameters, built by the LIBRARY: the mandatory connection-ID parameters live in
  * `wt_quic_transport_parameters_build` so that this file cannot forget one. It did forget one -- the parameter
  * that says which Source Connection ID these packets carry -- and only a third-party peer ever said so (WT-141). */
-static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *connection_id,
-                                 size_t connection_id_length) {
+static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *source,
+                                 size_t source_length, const uint8_t *original_destination,
+                                 size_t original_length) {
   wt_quic_transport_parameters_t params;
   wt_writer_t w = wt_writer_init(out, capacity);
-  if (wt_quic_transport_parameters_build(&params, is_server, connection_id, connection_id_length,
-                                         connection_id, connection_id_length) != WT_OK) {
+  if (wt_quic_transport_parameters_build(&params, is_server, source, source_length, original_destination,
+                                         original_length) != WT_OK) {
     return 0U;
   }
   if (wt_quic_transport_parameters_encode(&w, &params) != WT_OK) return 0U;
@@ -157,8 +158,14 @@ static void pump_once(scenario_pair_t *pair) {
 }
 
 wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_size) {
+  /* The CLIENT's own ID, which it also chooses as the destination of its first Initial. */
   static const uint8_t k_connection_id[8] = {0x21U, 0x32U, 0x43U, 0x54U,
                                              0x65U, 0x76U, 0x87U, 0x98U};
+  /* And the server's OWN Source Connection ID, deliberately different: the rule that a client adopts it (RFC 9000
+   * section 7.2) is only exercised when the two differ, and one shared constant is exactly how a client that never
+   * adopted it -- and a server that answered only to its own ID -- passed every test in this tree (WT-151). */
+  static const uint8_t k_server_connection_id[8] = {0x12U, 0x34U, 0x56U, 0x78U,
+                                                    0x9aU, 0xbcU, 0xdeU, 0xf0U};
   scenario_pair_t pair;
   uint8_t parameters[256];
   uint8_t server_parameters[256];
@@ -189,9 +196,10 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
    * ID, a server sends that PLUS the Destination Connection ID the client's first Initial carried (RFC 9000
    * section 7.3). One buffer for both was the shape that made the omission invisible. */
   parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_connection_id,
-                                    sizeof(k_connection_id));
-  server_parameters_len = build_parameters(server_parameters, sizeof(server_parameters), 1, k_connection_id,
-                                           sizeof(k_connection_id));
+                                    sizeof(k_connection_id), NULL, 0U);
+  server_parameters_len = build_parameters(server_parameters, sizeof(server_parameters), 1,
+                                           k_server_connection_id, sizeof(k_server_connection_id),
+                                           k_connection_id, sizeof(k_connection_id));
   if (parameters_len == 0U) {
     detail_set(detail, detail_size, "the transport parameters did not encode");
     return WT_CLI_RESULT_FAILED;
@@ -251,7 +259,11 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
   wt_tls_self_signed_identity(&pair.identity, &identity);
 
   connection_config(&client_config, WT_QUIC_ROLE_CLIENT, k_connection_id, sizeof(k_connection_id));
-  connection_config(&server_config, WT_QUIC_ROLE_SERVER, k_connection_id, sizeof(k_connection_id));
+  connection_config(&server_config, WT_QUIC_ROLE_SERVER, k_server_connection_id,
+                    sizeof(k_server_connection_id));
+  /* The server answers the client, so the client's own ID is what it sends TO. */
+  server_config.peer_connection_id = k_connection_id;
+  server_config.peer_connection_id_length = sizeof(k_connection_id);
   memset(&client_tls, 0, sizeof(client_tls));
   memset(&server_tls, 0, sizeof(server_tls));
   client_tls.host_name = "localhost";

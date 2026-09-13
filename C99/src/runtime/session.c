@@ -132,6 +132,13 @@ wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
   if (status != WT_OK) return status;
   status = wt_quic_connection_attach(&session->connection, socket, peer);
   if (status != WT_OK) return status;
+  /* What the client chose as its first destination, which is what the Initial keys come from AND what this
+   * server must answer to until the client has its own Source Connection ID (RFC 9000 section 7.2). A client
+   * chooses it arbitrarily, so a server that does not accept it refuses every client that does not happen to
+   * pick the server's own ID (WT-151). */
+  status = wt_quic_connection_set_original_destination_id(&session->connection, initial_connection_id,
+                                                         initial_connection_id_length);
+  if (status != WT_OK) return status;
   status = install_initial_keys(session, initial_connection_id, initial_connection_id_length, 1);
   if (status != WT_OK) return status;
   wt_quic_connection_set_handlers(&session->connection, session_on_frame, session, session_on_lost,

@@ -90,6 +90,43 @@ static wt_status_t wt_quic_read_connection_id(
   return WT_OK;
 }
 
+/* The two connection IDs a long header names -- see the header for why a listener cannot ask the full decoder
+ * for this. It is deliberately strict about what it has READ and uninterested in everything it has not: the
+ * Length field, the token and the payload are the receive path's business, and requiring them here is what made
+ * a 1200-byte Initial undecodable from a 64-byte peek. */
+wt_status_t wt_quic_long_header_connection_ids(const uint8_t *data, size_t length,
+                                               const uint8_t **out_destination,
+                                               size_t *out_destination_length,
+                                               const uint8_t **out_source,
+                                               size_t *out_source_length) {
+  wt_cursor_t c;
+  uint8_t first;
+
+  if (data == NULL || out_destination == NULL || out_destination_length == NULL || out_source == NULL ||
+      out_source_length == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  *out_destination = NULL;
+  *out_destination_length = 0U;
+  *out_source = NULL;
+  *out_source_length = 0U;
+  if (length == 0U) return WT_ERR_TRUNCATED;
+  first = data[0];
+  if ((first & WT_QUIC_LONG_HEADER_BIT) == 0U) return WT_ERR_PROTOCOL;
+  if ((first & WT_QUIC_FIXED_BIT) == 0U) return WT_ERR_PROTOCOL;
+
+  c = wt_cursor_init(data, length);
+  (void)wt_cursor_u8(&c);
+  if (wt_cursor_bytes(&c, WT_BE32_SIZE) == NULL) return WT_ERR_TRUNCATED;
+  if (wt_quic_read_connection_id(&c, out_destination, out_destination_length, NULL) != WT_OK) {
+    return WT_ERR_TRUNCATED;
+  }
+  if (wt_quic_read_connection_id(&c, out_source, out_source_length, NULL) != WT_OK) {
+    return WT_ERR_TRUNCATED;
+  }
+  return WT_OK;
+}
+
 wt_status_t wt_quic_protected_pn_offset(const uint8_t *data, size_t length,
                                         size_t local_connection_id_len,
                                         size_t *out_offset, size_t *out_total_len,

@@ -144,6 +144,20 @@ typedef enum wt_quic_packet_kind {
 wt_status_t wt_quic_packet_kind(const uint8_t *data, size_t length,
                                 wt_quic_packet_kind_t *out);
 
+/* The two connection IDs a LONG header names, and nothing else.
+ *
+ * A listener needs exactly this and cannot use `wt_quic_long_header_decode` to get it: that function reads the
+ * Length field and hands back a view of the payload, so it needs the WHOLE packet, and the datagram a listener
+ * peeks is typically 1200 bytes of Initial while the header is under 64. A truncated read here means the header
+ * is not all present, which is the same answer the receive path gives a truncated packet.
+ *
+ * The views point into the caller's own bytes. Both are set only on WT_OK. */
+wt_status_t wt_quic_long_header_connection_ids(const uint8_t *data, size_t length,
+                                               const uint8_t **out_destination,
+                                               size_t *out_destination_length,
+                                               const uint8_t **out_source,
+                                               size_t *out_source_length);
+
 /* Parse a long header. `c` is left past the whole packet, so a caller that wants
  * to walk a coalesced datagram can call this repeatedly.
  *

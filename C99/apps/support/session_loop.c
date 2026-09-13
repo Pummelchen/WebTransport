@@ -8,8 +8,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "webtransport/cursor.h"
 #include "webtransport/http3/driver.h"
 #include "webtransport/http3/settings.h"
+#include "webtransport/quic/packet.h"
 #include "webtransport/quic/transport_parameters.h"
 #include "webtransport/runtime/session.h"
 #include "webtransport/webtransport/framing.h"
@@ -133,15 +135,20 @@ static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_
 
 /* The endpoint's transport parameters, built by the LIBRARY: the mandatory connection-ID parameters live in
  * `wt_quic_transport_parameters_build` so that this file cannot forget one. It did forget one -- the parameter
- * that says which Source Connection ID these packets carry -- and only a third-party peer ever said so (WT-141). */
-static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *connection_id,
-                                 size_t connection_id_length) {
+ * that says which Source Connection ID these packets carry -- and only a third-party peer ever said so (WT-141).
+ *
+ * `source` is the ID these packets carry; `original_destination` is the one the CLIENT put in its first Initial,
+ * which only a server sends (RFC 9000 section 7.3) and which the client validates. They were the same constant
+ * here, and that is why this tree could not see the connection-ID rule at all: with one ID on both ends the ID
+ * never has to change, so a client that kept sending to its own ID looked exactly like one that had adopted the
+ * server's (WT-151). */
+static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *source,
+                                 size_t source_length, const uint8_t *original_destination,
+                                 size_t original_length) {
   wt_quic_transport_parameters_t params;
   wt_writer_t w = wt_writer_init(out, capacity);
-  /* The same connection ID on both sides of this local exchange, so it is both the Source Connection ID these
-   * packets carry and, for the server, the Destination Connection ID the client's first Initial used. */
-  if (wt_quic_transport_parameters_build(&params, is_server, connection_id, connection_id_length,
-                                         connection_id, connection_id_length) != WT_OK) {
+  if (wt_quic_transport_parameters_build(&params, is_server, source, source_length, original_destination,
+                                         original_length) != WT_OK) {
     return 0U;
   }
   if (wt_quic_transport_parameters_encode(&w, &params) != WT_OK) return 0U;
@@ -323,7 +330,8 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   memset(out, 0, sizeof(*out));
   memset(&loop, 0, sizeof(loop));
   loop.now = 1000U;
-  parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_connection_id, sizeof(k_connection_id));
+  parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_connection_id,
+                                   sizeof(k_connection_id), NULL, 0U);
   if (parameters_len == 0U) return WT_ERR_LIMIT;
 
   {
@@ -486,8 +494,16 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
 }
 
 wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t *out) {
-  static const uint8_t k_connection_id[8] = {0x11U, 0x22U, 0x33U, 0x44U,
-                                             0x55U, 0x66U, 0x77U, 0x88U};
+  /* A server chooses its OWN Source Connection ID, and it is deliberately not the client's: the rule that a
+   * client adopts it (RFC 9000 section 7.2) is only exercised when the two differ, and a local exchange that
+   * shared one ID is exactly how a client that never adopted it passed every test in this tree (WT-151). */
+  static const uint8_t k_connection_id[8] = {0x21U, 0x32U, 0x43U, 0x54U,
+                                             0x65U, 0x76U, 0x87U, 0x98U};
+  uint8_t initial_header[64];
+  const uint8_t *client_destination_id = NULL;
+  size_t client_destination_id_length = 0U;
+  const uint8_t *client_source_id = NULL;
+  size_t client_source_id_length = 0U;
   loop_t loop;
   uint8_t parameters[256];
   uint64_t parameters_len;
@@ -511,9 +527,6 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   memset(out, 0, sizeof(*out));
   memset(&loop, 0, sizeof(loop));
   loop.now = 1000U;
-  parameters_len = build_parameters(parameters, sizeof(parameters), 1, k_connection_id, sizeof(k_connection_id));
-  if (parameters_len == 0U) return WT_ERR_LIMIT;
-
   {
     char joined[WT_LOOP_HOST_MAX + 16U];
     (void)snprintf(joined, sizeof(joined), "%s:%u", config->host, (unsigned)config->port);
@@ -526,36 +539,51 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
   out->bound_port = loop.socket.port;
 
-  connection_config(&connection, WT_QUIC_ROLE_SERVER, k_connection_id, sizeof(k_connection_id));
-  wt_tls_self_signed_identity(config->identity, &identity);
-  memset(&tls, 0, sizeof(tls));
-  tls.identity = &identity;
-  tls.alpn = "h3";
-  tls.require_transport_parameters = 1;
-  tls.transport_parameters = parameters;
-  tls.transport_parameters_len = (size_t)parameters_len;
-
   /* The peer's address is not known until a packet arrives, and the runtime takes it from the packet's source:
    * the session's own socket reports it. The wait below is what makes a listener a listener. */
   deadline_rounds = WT_LOOP_ROUNDS_FOR(config->timeout_ms);
   if (deadline_rounds > WT_LOOP_ROUNDS) deadline_rounds = WT_LOOP_ROUNDS;
 
   {
-    wt_udp_address_t from;
     unsigned waited;
     int arrived = 0;
 
     /* The peer is learned by PEEKING, not by receiving: the datagram that names the peer must still be in the
      * queue when the connection is armed, or this side waits for a retransmission it may never get -- which is
-     * exactly what the first version did (it received the Initial and dropped it). */
+     * exactly what the first version did (it received the Initial and dropped it). The peek reads the HEADER as
+     * well, because the client's first Initial names both connection IDs this server needs and nothing else on
+     * the wire will: its own Source Connection ID is what the server must address its answer to, and the
+     * destination it chose is the `original_destination_connection_id` the client validates (RFC 9000 sections
+     * 7.2 and 7.3).
+     *
+     * The peek buffer is deliberately smaller than an Initial, so `available` is NOT required to equal the
+     * datagram's length: the connection IDs are at the FRONT of a packet and 64 bytes covers the longest header
+     * possible (version and two 20-byte connection IDs), while an Initial is 1200. `wt_quic_long_header_connection_ids`
+     * reads exactly those and refuses a header that is not all there -- the full decoder needs the Length field
+     * and a view of the payload, so it cannot be asked for this at all, and requiring the whole datagram in the
+     * buffer meant no packet was ever accepted and the server timed out having read nothing. */
     for (waited = 0U; waited < (unsigned)WT_LOOP_PEEK_ROUNDS_FOR(config->timeout_ms); waited++) {
       size_t datagram_length = 0U;
       size_t available = 0U;
-      wt_status_t peek_status = wt_udp_peek(&loop.socket, NULL, 0U, &datagram_length, &available, &from);
+      wt_udp_address_t candidate;
+      wt_status_t peek_status = wt_udp_peek(&loop.socket, initial_header, sizeof(initial_header),
+                                            &datagram_length, &available, &candidate);
       if (peek_status == WT_OK) {
-        loop.peer = from;
-        arrived = 1;
-        break;
+        const uint8_t *destination = NULL;
+        size_t destination_length = 0U;
+        const uint8_t *source = NULL;
+        size_t source_length = 0U;
+        if (wt_quic_long_header_connection_ids(initial_header, available, &destination, &destination_length,
+                                               &source, &source_length) == WT_OK &&
+            destination_length > 0U && source_length > 0U) {
+          loop.peer = candidate;
+          client_destination_id = destination;
+          client_destination_id_length = destination_length;
+          client_source_id = source;
+          client_source_id_length = source_length;
+          arrived = 1;
+          break;
+        }
       }
       (void)wt_udp_wait(&loop.socket, WT_LOOP_WAIT_MICROS * 10U);
     }
@@ -565,9 +593,32 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     }
   }
 
+  parameters_len = build_parameters(parameters, sizeof(parameters), 1, k_connection_id,
+                                   sizeof(k_connection_id), client_destination_id,
+                                   client_destination_id_length);
+  if (parameters_len == 0U) {
+    wt_udp_close(&loop.socket);
+    return WT_ERR_LIMIT;
+  }
+
+  connection_config(&connection, WT_QUIC_ROLE_SERVER, k_connection_id, sizeof(k_connection_id));
+  /* Its own Source Connection ID is the one it chose; the client's is the one it answers. */
+  connection.peer_connection_id = client_source_id;
+  connection.peer_connection_id_length = client_source_id_length;
+  wt_tls_self_signed_identity(config->identity, &identity);
+  memset(&tls, 0, sizeof(tls));
+  tls.identity = &identity;
+  tls.alpn = "h3";
+  tls.require_transport_parameters = 1;
+  tls.transport_parameters = parameters;
+  tls.transport_parameters_len = (size_t)parameters_len;
+
   {
+    /* The Initial secret is derived from the Destination Connection ID of the client's FIRST Initial (RFC 9001
+     * section 5.2), which is the one the peek above read -- not this server's own ID, which is what it was. */
     wt_status_t status = wt_runtime_session_start_server(&loop.session, &loop.socket, &loop.peer,
-                                                         k_connection_id, sizeof(k_connection_id),
+                                                         client_destination_id,
+                                                         client_destination_id_length,
                                                          &connection, &tls, loop.now);
     wt_udp_address_t bound;
     if (status != WT_OK) {

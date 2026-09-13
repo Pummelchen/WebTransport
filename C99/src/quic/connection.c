@@ -1137,6 +1137,18 @@ static int local_connection_id_sequence(const wt_quic_connection_t *connection, 
     *out_sequence = 0U;
     return 1;
   }
+  /* The ID the CLIENT chose, which a server reads from the first Initial and must answer to until the client
+   * has the server's own Source Connection ID (RFC 9000 section 7.2). Without this a server accepts only a
+   * client that happens to pick the server's ID -- which is what this tree's two tools did, one constant shared
+   * by both roles, so no local test could tell the difference (WT-151). Sequence 0 is what it is reported as:
+   * it was never issued, so a RETIRE_CONNECTION_ID naming sequence 0 while this ID is in use is exactly the
+   * protocol violation section 19.16 describes. */
+  if (connection->handshake_confirmed == 0 && connection->original_destination_id_length != 0U &&
+      length == connection->original_destination_id_length &&
+      (length == 0U || memcmp(id, connection->original_destination_id, length) == 0)) {
+    *out_sequence = 0U;
+    return 1;
+  }
   for (i = 0U; i < WT_QUIC_CONNECTION_IDS_MAX; i++) {
     if (connection->issued_ids[i].in_use && connection->issued_ids[i].length == length &&
         (length == 0U || memcmp(id, connection->issued_ids[i].id, length) == 0)) {
@@ -2152,6 +2164,16 @@ const wt_quic_close_state_t *wt_quic_connection_close_state(const wt_quic_connec
 wt_status_t wt_quic_connection_close_cause(const wt_quic_connection_t *connection) {
   if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
   return connection->close_cause;
+}
+
+wt_status_t wt_quic_connection_set_original_destination_id(wt_quic_connection_t *connection,
+                                                           const uint8_t *id, size_t length) {
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (id == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (length > WT_QUIC_MAX_CONNECTION_ID_LENGTH) return WT_ERR_INVALID_ARGUMENT;
+  if (length > 0U) memcpy(connection->original_destination_id, id, length);
+  connection->original_destination_id_length = length;
+  return WT_OK;
 }
 
 int wt_quic_connection_close_was_sent(const wt_quic_connection_t *connection) {

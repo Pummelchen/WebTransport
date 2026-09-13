@@ -198,6 +198,14 @@ typedef struct wt_quic_connection {
   size_t local_connection_id_length;
   uint8_t peer_connection_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
   size_t peer_connection_id_length;
+  /* The value the CLIENT put in the Destination Connection ID of its first Initial, which only a server has.
+   * A client chooses it arbitrarily (RFC 9000 section 7.2), so a server cannot know it from its configuration --
+   * and until it is accepted, a third-party client's first packet looks like a packet for another connection.
+   * It is also what an Initial packet's keys are derived from (RFC 9001 section 5.2), which is why the runtime
+   * learns it before the connection is armed. Accepted until the handshake is confirmed, by which time the
+   * client has the server's own Source Connection ID and stops using this one. */
+  uint8_t original_destination_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  size_t original_destination_id_length;
 
   /* One key set per space and direction. A direction that has not been installed -- the Handshake
    * keys before the handshake produces them -- means a packet for that space cannot be read or sent,
@@ -582,6 +590,14 @@ int wt_quic_connection_is_closed(const wt_quic_connection_t *connection);
  * it has been used (WT-144). The state is owned by the connection and the reason phrase is a view into the
  * caller's bytes, so it lives as long as whatever passed them to `wt_quic_connection_close`. */
 const wt_quic_close_state_t *wt_quic_connection_close_state(const wt_quic_connection_t *connection);
+
+/* Tell a SERVER which connection ID the client used as the destination of its first Initial, so that the
+ * packets which carry it are this connection's rather than another's. A client chooses that value arbitrarily
+ * (RFC 9000 section 7.2), so there is nowhere else for the server to learn it, and a server that does not
+ * accept it refuses every third-party client whose choice differs from its own Source Connection ID. Ignored
+ * for a client, which has no such ID. */
+wt_status_t wt_quic_connection_set_original_destination_id(wt_quic_connection_t *connection,
+                                                           const uint8_t *id, size_t length);
 
 /* The status of the handler whose refusal closed this connection, or WT_OK when no handler refused -- a close
  * this endpoint chose deliberately, or one the peer sent, has no cause here. A tool asks because a session that
