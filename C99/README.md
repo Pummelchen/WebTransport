@@ -205,14 +205,14 @@ What is here:
   push is refused deterministically by design, and a peer that changes its connection ID during the
   handshake is not tracked, which is the recorded transport gap.
 - **The platform surface, inventoried and checked** (`docs/PORTABILITY.md`): what a Windows or
-  FreeBSD build would need, item by item — and the first step is done:
-  `src/runtime/udp_platform.h` now names the four differences that used to be spelled out as POSIX
-  in a dozen places (closing, non-blocking mode, waiting for readability, the error number), so a
-  port fills in one header. The `_WIN32` branches are written from the inventory and **are not
-  verified** — nothing here builds them, and the header says so — while the POSIX path is
-  unchanged and green in all three configurations. What remains is the datagram calls
-  (`recvmsg`/`sendmsg`), the public `int fd` field (a Windows port must widen it to `SOCKET`),
-  `WSAStartup` ownership, and then the CMake branch and the job.
+  FreeBSD build would need, item by item — and the socket is now ONE header:
+  `src/runtime/udp_platform.h` names all five differences that used to be spelled out as POSIX in a
+  dozen places (closing, non-blocking mode, waiting for readability, the error number, and the
+  datagram calls themselves, through `wt_udp_platform_message_t`). The `_WIN32` branches are
+  written from the inventory and **are not verified** — nothing here builds them, and the header
+  says so — while the POSIX path is unchanged and green in all three configurations. What remains
+  is the public `int fd` field (a Windows port must widen it to `SOCKET`), `WSAStartup` ownership,
+  and then the CMake branch and the job.
   `scripts/check-portability.sh` fails if the library uses a POSIX-only call the inventory does not
   name — it caught `sendto`/`recvfrom` missing on its first run — and CI runs it. FreeBSD is close to
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.

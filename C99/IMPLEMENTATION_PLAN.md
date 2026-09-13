@@ -3111,10 +3111,10 @@ nothing in this repository builds it, and a port that claims to be finished befo
 exactly the failure this project refuses.
 
 The POSIX path is unchanged in behaviour and green in debug, release and ASan+UBSan, which is the only claim a
-change like this can make from here. What remains in `udp.c` is deliberately unabstracted and written down in the
-inventory: the datagram calls (`recvmsg`/`sendmsg` with `struct iovec`, whose Windows form is `WSABUF` with
-`WSARecvFrom`/`WSASendTo`) and the public `int fd` field, which a Windows port must widen to `SOCKET` -- a public
-change, and therefore one to make deliberately rather than in passing.
+change like this can make from here. The datagram calls have since joined the header too
+(`wt_udp_platform_message_t`, `wt_udp_platform_send_message`, `wt_udp_platform_receive_message`), so what
+remains in `udp.c` is the public `int fd` field, which a Windows port must widen to `SOCKET` -- a public change,
+and therefore one to make deliberately rather than in passing.
 
 ### WT-134, first step: the platform surface, inventoried and checked
 
