@@ -613,6 +613,62 @@ static int frame_forbidden_in_space(wt_quic_frame_type_t kind, wt_quic_space_t s
   return space != WT_QUIC_SPACE_APPLICATION;
 }
 
+/* The stream a received frame is about, opening it if this is the first frame that mentions it.
+ *
+ * RFC 9000 section 3.2: a stream is created by its first frame, so a frame for a peer-initiated stream
+ * this endpoint has never seen OPENS it -- no separate message announces a stream. Two rules decide
+ * whether that is allowed, and both are the peer's fault when it is not: a frame for a LOCALLY-initiated
+ * stream that was never opened is the STREAM_STATE_ERROR of section 19.8, and a peer-initiated stream
+ * beyond the count this endpoint granted is the STREAM_LIMIT_ERROR of section 4.6. A full table is
+ * neither -- it is this endpoint's own bound -- so it is reported as a limit for the caller to act on.
+ */
+static wt_status_t ensure_peer_stream(wt_quic_connection_t *connection, uint64_t stream_id,
+                                      uint64_t frame_type, uint64_t now,
+                                      wt_quic_stream_t **out_stream) {
+  wt_quic_stream_t *stream = wt_quic_stream_table_find(&connection->streams, stream_id);
+  int bidirectional;
+  uint64_t granted;
+  wt_status_t status;
+
+  if (out_stream != NULL) *out_stream = NULL;
+  if (stream != NULL) {
+    if (out_stream != NULL) *out_stream = stream;
+    return WT_OK;
+  }
+  if (wt_quic_stream_id_from_client(stream_id) ==
+      (connection->config.role == WT_QUIC_ROLE_CLIENT)) {
+    /* This endpoint's own number, never opened: the peer is inventing a stream. */
+    return close_with(connection, WT_QUIC_STREAM_STATE_ERROR, frame_type, now);
+  }
+  bidirectional = wt_quic_stream_id_is_bidirectional(stream_id);
+  granted = connection->local_max_streams[bidirectional ? 0 : 1];
+  if (wt_quic_stream_id_index(stream_id) >= granted) {
+    /* More streams than this endpoint allowed. */
+    return close_with(connection, WT_QUIC_STREAM_LIMIT_ERROR, frame_type, now);
+  }
+  status = wt_quic_stream_table_open(&connection->streams, stream_id, 0, granted);
+  if (status != WT_OK) return status;
+  stream = wt_quic_stream_table_find(&connection->streams, stream_id);
+  if (stream != NULL) {
+    stream->max_stream_data = connection->config.local_max_stream_data;
+    stream->window = connection->config.local_max_stream_data;
+  }
+  if (out_stream != NULL) *out_stream = stream;
+  return WT_OK;
+}
+
+static uint64_t frame_stream_id(const wt_quic_frame_t *frame) {
+  /* If-chains rather than a switch: this tree compiles with -Wswitch-enum, which wants every enumerator
+   * named, and a frame that does not name a stream has no identifier to report. */
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) return frame->as.stream.id;
+  if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM) return frame->as.reset_stream.id;
+  if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM_AT) return frame->as.reset_stream_at.id;
+  if (frame->kind == WT_QUIC_FRAME_KIND_STOP_SENDING) return frame->as.stop_sending.id;
+  if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA) return frame->as.max_stream_data.id;
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM_DATA_BLOCKED) return frame->as.stream_data_blocked.id;
+  return 0U;
+}
+
 /* Hand one frame to the caller's handler, which is where everything this layer does not own goes. A
  * handler that refuses a frame is refusing the connection, and the code it named -- if it named one --
  * is what the peer is told. */
@@ -694,16 +750,33 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
                           visit->now);
       }
       return deliver_to_handler(connection, visit, frame);
-    case WT_QUIC_FRAME_KIND_PING:
-    case WT_QUIC_FRAME_KIND_CRYPTO:
+    case WT_QUIC_FRAME_KIND_MAX_STREAM_DATA:
     case WT_QUIC_FRAME_KIND_STREAM:
     case WT_QUIC_FRAME_KIND_RESET_STREAM:
     case WT_QUIC_FRAME_KIND_RESET_STREAM_AT:
     case WT_QUIC_FRAME_KIND_STOP_SENDING:
+    case WT_QUIC_FRAME_KIND_STREAM_DATA_BLOCKED: {
+      /* Every frame that names a stream makes that stream exist if it does not (RFC 9000 section 3.2),
+       * and MAX_STREAM_DATA then raises the one stream's allowance -- the per-stream counterpart of
+       * MAX_DATA, and the only one of these this layer acts on for now; the rest are the stream
+       * machine's, and are handed on below. */
+      wt_quic_stream_t *stream = NULL;
+      wt_status_t status = ensure_peer_stream(connection, frame_stream_id(frame),
+                                              wire_type_of(frame->kind), visit->now, &stream);
+      if (status != WT_OK) return status;
+      if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA && stream != NULL) {
+        status = wt_quic_stream_on_max_stream_data(stream, frame->as.max_stream_data.maximum);
+        if (status != WT_OK) {
+          return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION,
+                            wire_type_of(frame->kind), visit->now);
+        }
+      }
+      return deliver_to_handler(connection, visit, frame);
+    }
+    case WT_QUIC_FRAME_KIND_PING:
+    case WT_QUIC_FRAME_KIND_CRYPTO:
     case WT_QUIC_FRAME_KIND_NEW_TOKEN:
-    case WT_QUIC_FRAME_KIND_MAX_STREAM_DATA:
     case WT_QUIC_FRAME_KIND_DATA_BLOCKED:
-    case WT_QUIC_FRAME_KIND_STREAM_DATA_BLOCKED:
     case WT_QUIC_FRAME_KIND_STREAMS_BLOCKED:
     case WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID:
     case WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID:
@@ -935,7 +1008,10 @@ static int stream_id_allowed(const wt_quic_connection_t *connection, uint64_t st
   uint64_t index = stream_id >> 2;
   uint64_t granted;
 
-  if (!ours) return 1;
+  /* A peer's stream is theirs to send on when it is BIDIRECTIONAL; a unidirectional one carries data
+   * one way, and that way is the peer's (RFC 9000 section 2.1). Allowing this endpoint to send there was
+   * a bug the receive-side creation rule exposed. */
+  if (!ours) return bidi;
   granted = bidi ? connection->peer_limits.initial_max_streams_bidi
                  : connection->peer_limits.initial_max_streams_uni;
   return index < granted;

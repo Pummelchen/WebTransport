@@ -433,6 +433,14 @@ static void test_handshake(wt_udp_family_t family) {
       static const uint8_t k_stream[6] = {0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U};
       int arrived = 0;
 
+      /* The server must grant the streams ITS OWN transport parameters advertised (four each way), or
+       * the receive path is right to refuse a STREAM frame for one of them (RFC 9000 section 4.6). */
+      WT_EXPECT_OK("the server grants what it advertised",
+                   wt_quic_connection_set_max_streams(&server.connection, WT_QUIC_STREAM_BIDIRECTIONAL,
+                                                      4U));
+      WT_EXPECT_OK("in both directions",
+                   wt_quic_connection_set_max_streams(&server.connection, WT_QUIC_STREAM_UNIDIRECTIONAL,
+                                                      2U));
       g_stream_length = 0U;
       WT_EXPECT_OK("the client sends stream data",
                    wt_quic_connection_send_stream(&client.connection, 0U, 0U, k_stream,
@@ -452,15 +460,12 @@ static void test_handshake(wt_udp_family_t family) {
       WT_EXPECT_STATUS("a stream beyond the peer's grant is a limit", WT_ERR_LIMIT,
                        wt_quic_connection_send_stream(&client.connection, 16U, 0U, k_stream, 1U, 0,
                                                       now));
-      /* A peer-initiated stream is theirs, so sending on it is not bounded by their grant. */
-      WT_EXPECT_OK("a peer-initiated stream is always sendable",
-                   wt_quic_connection_send_stream(&client.connection, 3U, 0U, k_stream, 1U,
-                                                              0, now));
-      now += 1000U;
-      g_now = now;
-      WT_EXPECT_OK("and reaches the peer", pump(&server, now, &arrived));
-      WT_EXPECT_INT("on the stream it names", 1, arrived);
-      WT_EXPECT_U64("whose number is the peer's", 3U, g_stream_id);
+      /* Stream 3 is the SERVER's unidirectional stream: a unidirectional stream carries data one way,
+       * and that way is the server's, so the client may not send on it. This end's own unidirectional
+       * streams would be 2, 6, 10 (RFC 9000 section 2.1). */
+      WT_EXPECT_STATUS("a peer's unidirectional stream is not this end's to send on", WT_ERR_LIMIT,
+                       wt_quic_connection_send_stream(&client.connection, 3U, 0U, k_stream, 1U, 0,
+                                                      now));
     }
 
     /* The limit this endpoint GRANTS the peer is the other direction from the one it obeys: it has to
@@ -494,15 +499,9 @@ static void test_handshake(wt_udp_family_t family) {
      * (RFC 9000 section 4.6), and the two directions are counted separately. */
     {
       int arrived = 0;
-      WT_EXPECT_STATUS("a stream count before the seed is a state error", WT_ERR_STATE,
-                       wt_quic_connection_send_max_streams(&server.connection,
-                                                           WT_QUIC_STREAM_BIDIRECTIONAL, 8U, now));
-      WT_EXPECT_OK("the server seeds the bidirectional count",
-                   wt_quic_connection_set_max_streams(&server.connection,
-                                                      WT_QUIC_STREAM_BIDIRECTIONAL, 4U));
-      WT_EXPECT_OK("and the unidirectional one",
-                   wt_quic_connection_set_max_streams(&server.connection,
-                                                      WT_QUIC_STREAM_UNIDIRECTIONAL, 2U));
+      /* The counts are already seeded above -- the receive path needs them there, because a STREAM
+       * frame for a stream this endpoint granted arrives before this block runs -- so what is checked
+       * here is the raising, which is what an application that has finished with streams does. */
       WT_EXPECT_U64("which read back separately", 4U,
                     wt_quic_connection_max_streams(&server.connection,
                                                    WT_QUIC_STREAM_BIDIRECTIONAL));
