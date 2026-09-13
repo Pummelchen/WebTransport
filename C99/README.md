@@ -45,7 +45,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 59 unit test files and 78,870 checks, run by `ctest` and again under
+- 60 unit test files and 78,904 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -487,6 +487,12 @@ What is here:
   (it applies to the plain CONNECT), and a server that never advertised `WT_ENABLED` refuses rather than
   serving a session the client could not have known about. `:protocol` is now a recognised request
   pseudo-header in the HTTP/3 layer, which is what makes any of this reachable.
+- **WebTransport capsules** (Phase 7, second part): `webtransport/capsule.h` reads and writes the CONNECT
+  stream's control messages -- a varint type, a varint length and that many bytes -- with the draft's capsule
+  types, `DRAIN_WEBTRANSPORT_SESSION` (no value) and `CLOSE_WEBTRANSPORT_SESSION` (a four-byte code and a
+  reason no longer than 1024 bytes). An incomplete capsule is `WT_ERR_TRUNCATED` rather than malformed, an
+  unknown type is handed on rather than refused, and a value longer than the caller will buffer is
+  `H3_EXCESSIVE_LOAD` -- the same three rules the QPACK instruction parsers and the frame codec follow.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

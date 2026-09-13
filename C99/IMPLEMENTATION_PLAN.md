@@ -1723,6 +1723,21 @@ layer that inherited the exception would accept a request it cannot route. And a
 `WT_ENABLED` refuses with 501 rather than serving a session the client could not have known about, which is
 what makes the setting mean anything.
 
+**Second part done: the session capsules.** `include/webtransport/webtransport/capsule.h` reads and writes
+the CONNECT stream's control messages as RFC 9297 capsules -- a varint type, a varint length and that many bytes
+-- with the draft-16 registry: the flow-control capsules, DRAIN_WEBTRANSPORT_SESSION, which carries no value, and
+CLOSE_WEBTRANSPORT_SESSION, whose value is a four-byte application error code and a UTF-8 reason of at most
+1024 bytes. The close writer enforces that ceiling and the parser enforces the four-byte minimum, so this build
+cannot send a close its own reader would refuse and a value too short to hold the code is a malformed capsule
+rather than one with nothing to say.
+
+The three rules it shares with the layers below are stated in the same words, deliberately: an incomplete
+capsule is WT_ERR_TRUNCATED rather than malformed, because a stream delivers in pieces; an unknown capsule type
+is decoded and handed on, because RFC 9297 section 3.2 has a receiver ignore what it does not understand; and a
+value longer than the caller will buffer is H3_EXCESSIVE_LOAD, because the bound is this endpoint's. Those are
+now the fourth, fifth and sixth appearances of the same three decisions, which is why they are recorded as this
+project's standing rules rather than as each part's local choice.
+
 Port the Swift WebTransport session layer.
 
 Tasks:
