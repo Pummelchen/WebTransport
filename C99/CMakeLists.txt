@@ -143,6 +143,7 @@ list(APPEND WT_CORE_SOURCES ${WT_API_SOURCES})
 set(WT_WEBTRANSPORT_SOURCES
   src/webtransport/session_request.c
   src/webtransport/capsule.c
+  src/webtransport/protocol.c
   src/webtransport/session.c
   src/webtransport/framing.c
 )
@@ -224,6 +225,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/http3/message.h
   include/webtransport/webtransport/session_request.h
   include/webtransport/webtransport/capsule.h
+  include/webtransport/webtransport/protocol.h
   include/webtransport/webtransport/session.h
   include/webtransport/webtransport/framing.h
   include/webtransport/http3/qpack.h
