@@ -121,6 +121,7 @@ list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 # ships.
 set(WT_CLI_SOURCES
   src/cli/options.c
+  src/cli/report.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_CLI_SOURCES})
 
@@ -170,6 +171,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/status.h
   include/webtransport/api/endpoint.h
   include/webtransport/cli/options.h
+  include/webtransport/cli/report.h
   include/webtransport/api/events.h
   include/webtransport/api/flow.h
   include/webtransport/api/session.h

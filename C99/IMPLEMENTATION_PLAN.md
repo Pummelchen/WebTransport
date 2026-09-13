@@ -2195,6 +2195,28 @@ refused outside loopback", so the three tools cannot disagree about what a usabl
 writes the parsed options as one object with stable field names, and the test asserts the text of that object,
 because a field that moves changes a machine's input.
 
+### Phase 9's twelfth part: the conformance report, and the scenarios that can be run today
+
+`cli/report.h` is the conformance tool's product, and its rules are all about not lying. A scenario that did not
+run is `unsupported` with a reason -- never a pass, never a failure -- because a tool whose report cannot
+distinguish "verified" from "not attempted" has a green line that means nothing. The report is ordered and named
+by the tool rather than by the run, so two runs compare without sorting. The exit status carries the same
+information rather than replacing it: 0 when everything passed, 1 when anything failed, and 3 when nothing
+failed but something was not attempted, which is the status this project already uses for a build that cannot
+do what was asked.
+
+`wt-conformance-c99 --scenario all [--json]` now runs the scenarios this build can GENUINELY verify -- QUIC
+varints across every form and the boundaries where the form changes, a WebTransport close capsule's round trip
+with the peer's code, and the draft-16 decision on a decoded extended CONNECT -- and reports the two
+session-over-IP scenarios as unsupported with the reason. The report grows as the CLI grows, and the unsupported
+entries become passes when the packet-session wiring lands rather than being deleted.
+
+The tool found a bug in ITSELF on its first run, which is worth recording because it is the point of the
+exercise: the varint scenario compared each decoded value against a stale loop index and reported `failed`,
+while every library test passed. A conformance report that can be wrong about its own subject is worse than no
+report; the fix was to name the failing VALUE in the detail rather than say "a value did not round trip", which
+is also what made the cause visible in one run.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

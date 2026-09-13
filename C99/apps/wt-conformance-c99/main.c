@@ -7,10 +7,16 @@
  * implemented" so that a script driving it cannot read a stub as success.
  */
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "webtransport/cli/options.h"
+#include "webtransport/cli/report.h"
+#include "webtransport/http3/qpack.h"
+#include "webtransport/quic/varint.h"
+#include "webtransport/webtransport/capsule.h"
+#include "webtransport/webtransport/session_request.h"
 #include "webtransport/version.h"
 
 static int wt_usage(const char *program) {
@@ -44,7 +50,7 @@ int main(int argc, char **argv) {
   if (options.mode == WT_CLI_MODE_NONE && strcmp("none", "none") != 0) {
     options.mode = WT_CLI_MODE_NONE;
   }
-  if (wt_cli_options_check(&options, &error) != WT_OK) {
+  if (options.scenario_all == 0 && wt_cli_options_check(&options, &error) != WT_OK) {
     if (options.json != 0) {
       printf("{\"error\":\"missing mode or address\"}\n");
     } else {
@@ -65,5 +71,118 @@ int main(int argc, char **argv) {
       return 0;
     }
   }
-  return wt_usage(argv[0]);
+  if (options.scenario_all == 0) return wt_usage(argv[0]);
+
+  /* The scenarios this build can actually RUN are the in-process ones: a codec, a capsule, a
+   * field section and the draft-16 decision. The session scenarios need two endpoints and a
+   * socket, which is the rest of Phase 9, and they are reported as UNSUPPORTED with the reason
+   * rather than left out -- a report whose green line cannot be told from "not attempted" is
+   * worth nothing. */
+  {
+    wt_cli_report_t report;
+    wt_cli_report_init(&report);
+
+    /* QUIC varints: every form, and the boundaries where the form changes. The detail names
+     * the value that failed rather than saying "a value did", because a report that cannot say
+     * WHICH case failed makes the reader reproduce the whole scenario to find out. */
+    {
+      static const uint64_t values[] = {0U, 1U, 63U, 64U, 16383U, 16384U, 1073741823U, 1073741824U};
+      char detail[WT_CLI_SCENARIO_DETAIL_MAX];
+      wt_cli_result_t result = WT_CLI_RESULT_PASSED;
+      size_t value_index;
+
+      detail[0] = '\0';
+      for (value_index = 0U; value_index < sizeof(values) / sizeof(values[0]); value_index++) {
+        uint8_t encoded[8];
+        wt_cursor_t varint_cursor;
+        uint64_t decoded_value = 0U;
+        size_t encoded_length = wt_quic_varint_encode(values[value_index], encoded, sizeof(encoded));
+        size_t expected_length = wt_quic_varint_size(values[value_index]);
+        varint_cursor = wt_cursor_init(encoded, encoded_length != 0U ? encoded_length : 1U);
+        if (encoded_length == 0U || encoded_length != expected_length ||
+            wt_quic_varint_decode(&varint_cursor, &decoded_value) != WT_OK ||
+            decoded_value != values[value_index]) {
+          result = WT_CLI_RESULT_FAILED;
+          (void)snprintf(detail, sizeof(detail), "value %llu round-tripped wrongly",
+                         (unsigned long long)values[value_index]);
+          break;
+        }
+      }
+      if (result == WT_CLI_RESULT_PASSED) {
+        (void)snprintf(detail, sizeof(detail), "%llu values across every varint form",
+                       (unsigned long long)(sizeof(values) / sizeof(values[0])));
+      }
+      (void)wt_cli_report_add(&report, "quic-varint-round-trip", result, detail);
+    }
+
+    /* A WebTransport capsule: the close capsule, with the peer's code and a reason. */
+    {
+      uint8_t bytes[64];
+      wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
+      wt_cursor_t cursor;
+      wt_webtransport_capsule_t capsule;
+      uint32_t code = 0U;
+      wt_http3_error_t h3_error = WT_HTTP3_NO_ERROR;
+      int ok = 0;
+      if (wt_webtransport_close_session_write(&w, 0x1234U, (const uint8_t *)"bye", 3U) == WT_OK) {
+        cursor = wt_cursor_init(bytes, wt_writer_offset(&w));
+        if (wt_webtransport_capsule_decode(&cursor, 64U, &capsule, &h3_error) == WT_OK &&
+            wt_webtransport_close_session_parse(&capsule, &code, NULL, NULL, &h3_error) == WT_OK &&
+            code == 0x1234U) {
+          ok = 1;
+        }
+      }
+      (void)wt_cli_report_add(&report, "webtransport-close-capsule",
+                              ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                              ok != 0 ? "the peer's code survives the round trip"
+                                      : "the close capsule did not round trip");
+    }
+
+    /* The draft-16 decision on a decoded request: the layer that says yes or no. */
+    {
+      wt_http3_message_t message;
+      wt_webtransport_request_policy_t policy;
+      wt_webtransport_session_request_t decision;
+      wt_http3_error_t h3_error = WT_HTTP3_NO_ERROR;
+      uint8_t value[16];
+      wt_writer_t w = wt_writer_init(value, sizeof(value));
+      int ok = 0;
+      memset(&message, 0, sizeof(message));
+      message.type = WT_HTTP3_HEADER_REQUEST;
+      message.method = (const uint8_t *)"CONNECT";
+      message.method_length = 7U;
+      message.scheme = (const uint8_t *)"https";
+      message.scheme_length = 5U;
+      message.authority = (const uint8_t *)"localhost";
+      message.authority_length = 9U;
+      message.path = (const uint8_t *)"/chat";
+      message.path_length = 5U;
+      message.protocol = (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN;
+      message.protocol_length = strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN);
+      policy.authority = "localhost";
+      policy.path = "/chat";
+      policy.wt_enabled = 1;
+      if (wt_webtransport_session_request_validate(&message, &policy, &decision, &h3_error) == WT_OK &&
+          decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT) {
+        ok = 1;
+      }
+      (void)wt_cli_report_add(&report, "draft16-session-request",
+                              ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                              ok != 0 ? "an extended CONNECT is accepted for its own path"
+                                      : "the request decision differed");
+      (void)w;
+    }
+
+    (void)wt_cli_report_add(&report, "session-over-ipv4", WT_CLI_RESULT_UNSUPPORTED,
+                            "needs the packet-session wiring (rest of Phase 9)");
+    (void)wt_cli_report_add(&report, "session-over-ipv6", WT_CLI_RESULT_UNSUPPORTED,
+                            "needs the packet-session wiring (rest of Phase 9)");
+
+    if (options.json != 0) {
+      wt_cli_report_write_json(&report, stdout);
+    } else {
+      wt_cli_report_write_text(&report, stdout);
+    }
+    return wt_cli_report_exit_status(&report);
+  }
 }

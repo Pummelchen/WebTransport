@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 71 unit test files and 79,653 checks, run by `ctest` and again under
+- 72 unit test files and 79,751 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -69,6 +69,16 @@ What is here:
   with stable field names, and the parser is a library function rather than argv walking
   inside each `main`, which is what lets all of this be a failing check rather than a
   manual attempt.
+- **The conformance tool's report** (Phase 9): `cli/report.h` is the machine-readable product
+  of a conformance run, and its three rules are all about not lying — a scenario that did not
+  run is `unsupported` with a reason and never a pass, the report is ordered and named by the
+  tool so two runs compare without sorting, and the exit status carries the same information
+  rather than replacing it (0 all passed, 1 anything failed, 3 nothing failed but something
+  was not attempted). `wt-conformance-c99 --scenario all [--json]` runs the in-process
+  scenarios this build can genuinely verify — varints across every form, a capsule round trip,
+  an extended CONNECT decision — and reports the two session scenarios as unsupported with the
+  reason. The tool found a real bug in itself on its first run: a scenario compared against a
+  stale loop index and reported `failed`, which is exactly what a conformance report is for.
 - **The public API** (Phase 8), which is what a consumer outside this repository
   builds against; `docs/PUBLIC-API.md` is its contract, and
   `apps/wt-api-sample/main.c` is a consumer that includes only the umbrella header
