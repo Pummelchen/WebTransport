@@ -48,6 +48,7 @@ set(WT_UNIT_TESTS
   test_http3_frame
   test_http3_settings
   test_http3_control
+  test_http3_goaway
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

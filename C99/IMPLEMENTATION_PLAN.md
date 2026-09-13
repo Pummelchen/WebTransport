@@ -1361,7 +1361,23 @@ refused sets after SETTINGS, and the one-stream and closure rules.
 
 Implement control stream lifecycle.
 - Implement request stream lifecycle.
-- Implement GOAWAY.
+- **Fourth part done: GOAWAY.** `include/webtransport/http3/goaway.h` carries RFC 9114 section 7.2.6 and
+section 5.2's shutdown rules. The payload is one varint, so the work is in what the identifier means and
+when it may change: a server's is a client-initiated bidirectional stream ID (section 7.2.6 makes any other
+stream type H3_ID_ERROR, and RFC 9000 section 2.1's two low bits are zero exactly for that type) while a
+client's is a push ID; the identifier may not grow between frames, and a larger one later is H3_ID_ERROR
+because a client may already have retried the requests it was told were not processed; requests at or above
+it are rejected and no new request may be started once it has arrived; and the graceful-shutdown pattern the
+monotonic rule exists to make usable is the maximum first -- `2^62 - 4` for a server, `2^62 - 1` for a
+client -- followed by what was really processed. A payload that is not exactly one varint is a frame error,
+the same rule the frame codec follows, because a second field is a frame this implementation cannot
+interpret.
+
+Five tests: the payload round trip including both maxima, the malformed payloads, the stream type a server
+may name, the monotonic rule across both directions including the equal-and-lower cases, and the rejection
+range together with the "no new requests" flag.
+
+Implement GOAWAY.
 - Implement H3 error mapping.
 - Implement stream type prefixes.
 - Enforce request/control stream constraints.

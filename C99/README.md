@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 41 unit test files and 76,525 checks, run by `ctest` and again under
+- 42 unit test files and 76,596 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -375,6 +375,12 @@ What is here:
   stream closing at any point (H3_CLOSED_CRITICAL_STREAM), and a frame the section does not allow there,
   including a second SETTINGS and the types section 7.2.8 reserved for HTTP/2 (H3_FRAME_UNEXPECTED). It
   decides permission only: what a SETTINGS, GOAWAY or MAX_PUSH_ID frame says is parsed by whoever owns it.
+- **GOAWAY** (Phase 5, fourth part): `http3/goaway.h` carries RFC 9114 sections 7.2.6 and 5.2 -- the
+  identifier is a client-initiated bidirectional stream ID from a server (anything else is H3_ID_ERROR)
+  and a push ID from a client, it may not grow between frames (H3_ID_ERROR), requests at or above it are
+  rejected, no new request may be started after it arrives, and the graceful-shutdown maximum is `2^62 - 4`
+  for a server and `2^62 - 1` for a client. The payload is exactly one varint: a second field or a trailing
+  byte is a frame error rather than a frame read partially.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
