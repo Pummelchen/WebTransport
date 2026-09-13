@@ -45,7 +45,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 62 unit test files and 78,989 checks, run by `ctest` and again under
+- 63 unit test files and 79,032 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -503,6 +503,12 @@ What is here:
   varints, with a value that is not exactly that being a message error rather than a bigger number. The
   connection-level limits may only grow: a limit below one already granted would invalidate data sent against
   the old one, so it is `WT_FLOW_CONTROL_ERROR` rather than a new limit.
+- **Stream and datagram framing** (Phase 7, fifth part): `webtransport/framing.h` is the draft's stream prefix
+  (type 0x41 or 0x54, then the session ID) and its datagram frame (a quarter stream ID, then the data), with
+  the identifier SHAPE checked: a session ID must be the CONNECT stream's -- client-initiated and
+  bidirectional -- and a prefix naming anything else describes a session that cannot exist. An incomplete
+  prefix is `WT_ERR_TRUNCATED`; a datagram without its quarter ID is malformed, because a datagram is the
+  unit.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

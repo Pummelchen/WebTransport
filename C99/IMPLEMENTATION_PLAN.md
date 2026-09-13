@@ -1767,6 +1767,26 @@ one-varint capsule, so a value of 100000 -- a four-byte varint -- was described 
 its first byte. Every small test value passed. The length is the value's own encoded size, and the test that
 caught it used a limit large enough to need more than one byte.
 
+**Fifth part done: stream and datagram framing.** `include/webtransport/webtransport/framing.h` is the
+draft's stream prefix -- type 0x41 for bidirectional and 0x54 for unidirectional, then the session ID -- and
+its datagram frame, which is a QUARTER stream ID followed by the session's data. What the two have in common
+is that the identifier is checked for SHAPE rather than value: a session ID is the CONNECT stream's, so it is
+client-initiated and bidirectional (RFC 9000 section 2.1's two low bits clear), and a prefix naming anything
+else is describing a session that cannot exist rather than one this endpoint has not heard of. The quarter ID
+is the same number divided by four, and the reverse is what a receiver reconstructs before it can find the
+session at all.
+
+The two halves also sit on opposite sides of this project's standing rule about incomplete input, and that is
+deliberate: an incomplete stream prefix is WT_ERR_TRUNCATED, because a stream delivers in pieces, while a
+datagram that does not hold its quarter ID is malformed, because a datagram IS the unit. The tests state both
+in those terms.
+
+Writing them turned up a test-vector mistake worth recording: the stream type 0x41 is above 63, so its varint
+is TWO bytes (0x40 0x41) and the first byte is not the type. A test comparing the first byte with the value
+would have been checking the varint's shape by accident, and the hand-built prefix in the same test was short
+by a byte for the same reason. Varint boundaries are where this tree has now hidden two bugs and one wrong
+test; the tests that cross them are worth writing first.
+
 Port the Swift WebTransport session layer.
 
 Tasks:

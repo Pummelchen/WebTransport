@@ -57,6 +57,7 @@ set(WT_UNIT_TESTS
   test_webtransport_capsule
   test_webtransport_flow
   test_webtransport_session
+  test_webtransport_framing
   test_qpack_static
   test_qpack_primitives
   test_qpack_huffman
