@@ -64,6 +64,9 @@ for peer in $peers; do
   docker rm -f wt-server-under-test >/dev/null 2>&1 || true
   # The server under test, with a message of its own so that BOTH directions are exercised: the peer learns the
   # session is up from the response, and this is what it should receive on a stream the server opens.
+  # `--origin localhost` because that is the authority the peer SENDS: pywebtransport/aioquic derives `:authority`
+  # from its configured server name ("localhost") rather than from the host in the URL, which is why the request the
+  # server reports reads `CONNECT webtransport localhost /` even though the client connected to 127.0.0.1.
   # The server's window has to outlast the peer's start-up, and the readiness wait cannot be a log line: a
   # container's stdout is block-buffered when it is not a TTY, so the reports only appear when the process EXITS
   # -- which the first version of this script mistook for "not bound yet", waited ten seconds for, and then found
@@ -71,9 +74,9 @@ for peer in $peers; do
   # starts after a short pause that only has to cover `docker run`.
   server_timeout_ms=$((timeout_ms * 4))
   docker run -d --name wt-server-under-test --network "$network" \
-    --entrypoint /build/apps/wt-server-c99 "$server_image" \
-    --listen "0.0.0.0:$port" --origin 127.0.0.1 --message "$message" --exchange stream \
     -e "WT_HTTP3_SECTION_LOG=${WT_SERVER_SECTION_LOG:-/dev/null}" \
+    --entrypoint /build/apps/wt-server-c99 "$server_image" \
+    --listen "0.0.0.0:$port" --origin localhost --message "$message" --exchange stream \
     --timeout-ms "$server_timeout_ms" --json >/dev/null
   sleep 2
   # The peer joins the SERVER's namespace: the server is then 127.0.0.1 for the client, which is what the

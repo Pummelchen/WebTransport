@@ -266,6 +266,9 @@ typedef struct wt_quic_connection {
    * "what did we actually send" reads nothing -- which is how a tool reported a successful session after the
    * connection had been closed with INTERNAL_ERROR (WT-144). */
   wt_status_t close_cause;
+  /* The frame whose delivery produced `close_cause`, by wire type: "a handler returned TRUNCATED" names no frame,
+   * and which frame it was is the whole question a caller has left (WT-154). */
+  uint64_t close_cause_frame;
   wt_quic_frame_lost_fn lost_handler;
   void *lost_context;
 

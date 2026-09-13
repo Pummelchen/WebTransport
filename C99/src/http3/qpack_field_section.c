@@ -2,9 +2,10 @@
 
 #include "webtransport/http3/qpack.h"
 
-/* An inline string may be Huffman-coded, and a resolved field must be plain bytes,
- * so it is decoded into the caller's scratch. `*scratch_used` advances so a name and
- * a value can share the buffer within one line. */
+/* An inline string may be Huffman-coded, and a resolved field must be plain bytes, so it is decoded into the
+ * caller's scratch. `*scratch_used` advances so that a name and a value can share the buffer within one line --
+ * AND so that a line cannot overwrite the line before it, which is the defect this cursor exists to prevent
+ * (WT-154). */
 static wt_status_t materialise(const uint8_t *bytes, size_t length, int huffman, uint8_t *scratch,
                                size_t capacity, size_t *scratch_used, const uint8_t **out,
                                size_t *out_length) {
@@ -16,6 +17,10 @@ static wt_status_t materialise(const uint8_t *bytes, size_t length, int huffman,
     *out_length = length;
     return WT_OK;
   }
+  /* The cursor is the SECTION's, so it can be past the end of the buffer the caller gave the decoder -- a section
+   * with more inline strings than the buffer holds. Subtracting then would wrap to a huge size and the decode
+   * would write past the caller's buffer, so this is a bound rather than a formality (WT-154). */
+  if (*scratch_used > capacity) return WT_ERR_LIMIT;
   status = wt_qpack_huffman_decode(bytes, length, scratch + *scratch_used, capacity - *scratch_used,
                                   &decoded);
   if (status == WT_ERR_PROTOCOL) return WT_ERR_PROTOCOL;
@@ -43,10 +48,10 @@ static wt_status_t dynamic_lookup(const wt_qpack_dynamic_table_t *table, uint64_
 
 wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_prefix_t *prefix,
                                         const wt_qpack_dynamic_table_t *table, uint8_t *scratch,
-                                        size_t scratch_capacity, wt_qpack_resolved_field_t *out,
+                                        size_t scratch_capacity, size_t *scratch_used,
+                                        wt_qpack_resolved_field_t *out,
                                         wt_qpack_error_t *out_error) {
   wt_qpack_field_line_t line;
-  size_t scratch_used = 0U;
   const uint8_t *inline_value = NULL;
   size_t inline_value_length = 0U;
   const uint8_t *entry_name = NULL;
@@ -56,7 +61,7 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
   wt_status_t status;
 
   if (out_error != NULL) *out_error = WT_QPACK_ERROR_NONE;
-  if (c == NULL || prefix == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (c == NULL || prefix == NULL || out == NULL || scratch_used == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (scratch == NULL && scratch_capacity != 0U) return WT_ERR_INVALID_ARGUMENT;
 
   /* The end of the section is not an error: the caller asked for the next field and
@@ -74,7 +79,7 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
    * first keeps the name resolution below free of the scratch arithmetic. */
   if (line.kind != WT_QPACK_FIELD_INDEXED_STATIC && line.kind != WT_QPACK_FIELD_INDEXED_DYNAMIC) {
     status = materialise(line.value, line.value_length, line.value_huffman, scratch,
-                         scratch_capacity, &scratch_used, &inline_value, &inline_value_length);
+                         scratch_capacity, scratch_used, &inline_value, &inline_value_length);
     if (status != WT_OK) {
       if (out_error != NULL) {
         *out_error = status == WT_ERR_LIMIT ? WT_QPACK_ERROR_NONE
@@ -155,7 +160,7 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
     }
     case WT_QPACK_FIELD_LITERAL_LITERAL_NAME: {
       status = materialise(line.name, line.name_length, line.name_huffman, scratch,
-                           scratch_capacity, &scratch_used, &out->name, &out->name_length);
+                           scratch_capacity, scratch_used, &out->name, &out->name_length);
       if (status != WT_OK) {
         if (out_error != NULL) {
           *out_error = status == WT_ERR_LIMIT ? WT_QPACK_ERROR_NONE

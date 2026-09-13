@@ -389,10 +389,18 @@ typedef struct wt_qpack_resolved_field {
  * sent. `scratch` holds the decoded inline strings; WT_ERR_LIMIT means it was too
  * small, which is the caller's bound rather than the peer's error.
  *
+ * `scratch_used` is the cursor INTO that buffer and it belongs to the SECTION, not to the call: the caller
+ * starts it at zero and passes the same variable for every line, because what a resolved field points at must
+ * stay valid until the caller has finished with the section. A cursor reset per line is a real defect and a
+ * third-party one -- every literal value was decoded into the same bytes, so a later field overwrote an earlier
+ * one and the earlier field's pointer then read the new value's head over the old value's tail
+ * ("localhostort" for ":protocol webtransport", WT-154).
+ *
  * WT_ERR_CLOSED from the cursor's end is the ordinary "the section is finished". */
 wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_prefix_t *prefix,
                                         const wt_qpack_dynamic_table_t *table, uint8_t *scratch,
-                                        size_t scratch_capacity, wt_qpack_resolved_field_t *out,
+                                        size_t scratch_capacity, size_t *scratch_used,
+                                        wt_qpack_resolved_field_t *out,
                                         wt_qpack_error_t *out_error);
 
 /* A whole field section: the prefix, then lines until the bytes run out. The state
@@ -409,6 +417,9 @@ typedef struct wt_qpack_field_section_decoder {
   wt_qpack_header_prefix_t prefix;
   const wt_qpack_dynamic_table_t *table;
   wt_cursor_t cursor;
+  /* How much of the caller's scratch the fields resolved so far have used, so that every one of them stays
+   * readable until the section is finished (see the note on `_next` above). */
+  size_t scratch_used;
 } wt_qpack_field_section_decoder_t;
 
 /* Read the section's prefix. `known_insert_count` is how many insertions this endpoint

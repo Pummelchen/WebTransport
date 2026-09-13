@@ -236,6 +236,7 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->close_sent_error_code = loop->session.connection.close.error_code;
   out->close_sent_frame_type = loop->session.connection.close.frame_type;
   out->close_cause = loop->session.connection.close_cause;
+  out->close_cause_frame = loop->session.connection.close_cause_frame;
   out->close_was_sent = wt_quic_connection_close_was_sent(&loop->session.connection);
   out->packets_discarded = loop->session.connection.packets_discarded;
   out->has_initial_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];

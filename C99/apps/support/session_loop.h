@@ -80,6 +80,7 @@ typedef struct wt_loop_result {
   uint64_t close_sent_error_code;
   uint64_t close_sent_frame_type;
   wt_status_t close_cause;
+  uint64_t close_cause_frame;
   /* Whether that close was actually SENT to the peer. The idle timeout closes silently (RFC 9000 section 10.1),
    * so the fields above are set either way and only this says whether the peer was told -- which is the
    * difference between a session this endpoint ended and one it merely stopped (WT-144, WT-145). */

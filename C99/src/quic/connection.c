@@ -898,6 +898,7 @@ static wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_
      * from a cleared hint: a caller that asked got `WT_OK` and `close_code_set == 0`, which reads exactly like a
      * connection that never closed (WT-144). */
     connection->close_cause = status;
+    connection->close_cause_frame = wire_type_of(frame->kind);
     (void)close_with(connection, code, type, visit->now);
   }
   return status;

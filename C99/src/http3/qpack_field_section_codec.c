@@ -14,6 +14,9 @@ wt_status_t wt_qpack_field_section_begin(wt_qpack_field_section_decoder_t *decod
 
   decoder->table = table;
   decoder->cursor = wt_cursor_init(bytes, length);
+  /* The cursor into the caller's scratch belongs to the SECTION: every field this decoder resolves has to stay
+   * readable until the caller is done with the section (WT-154). */
+  decoder->scratch_used = 0U;
   status = wt_qpack_header_prefix_decode(&decoder->cursor, max_entries, known_insert_count,
                                          &decoder->prefix, out_error);
   if (status != WT_OK) return status;
@@ -34,7 +37,7 @@ wt_status_t wt_qpack_field_section_decoder_next(wt_qpack_field_section_decoder_t
   if (out_error != NULL) *out_error = WT_QPACK_ERROR_NONE;
   if (decoder == NULL) return WT_ERR_INVALID_ARGUMENT;
   return wt_qpack_field_section_next(&decoder->cursor, &decoder->prefix, decoder->table, scratch,
-                                     scratch_capacity, out, out_error);
+                                     scratch_capacity, &decoder->scratch_used, out, out_error);
 }
 
 wt_status_t wt_qpack_field_section_encode(wt_writer_t *w, const wt_qpack_header_prefix_t *prefix,
