@@ -346,6 +346,20 @@ static int probe_time(const wt_quic_connection_t *connection, wt_quic_space_t sp
 
 /* A packet that was declared lost: the descriptor goes back to the pool and the owner is told, which
  * is what lets it send the bytes again. A packet with no descriptor carried nothing worth resending. */
+static wt_status_t send_encoded_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                      const uint8_t *payload, size_t payload_length, int ack_eliciting,
+                                      uint64_t tag, int *out_sent, uint64_t now);
+
+/* A descriptor for a re-sent control frame: the SAME slot, so a second loss answers the same obligation and the
+ * slot is released once by the acknowledgement that finally arrives. The descriptor table being full means the
+ * re-send goes out without one, which a further loss cannot answer -- bounded, and the connection's frame count
+ * is what says so. */
+static uint64_t tag_for_control(wt_quic_connection_t *connection, size_t slot) {
+  int index = alloc_frame(connection, connection->control_frames[slot].space, 0, WT_QUIC_CONTROL_STREAM_ID,
+                          (uint64_t)slot, connection->control_frames[slot].wire_length);
+  return index < 0 ? (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX : (uint64_t)index;
+}
+
 static void on_lost(void *context, const wt_quic_sent_packet_t *packet) {
   wt_quic_connection_t *connection = context;
   uint64_t tag = packet->tag;
@@ -360,7 +374,18 @@ static void on_lost(void *context, const wt_quic_sent_packet_t *packet) {
   if (tag < (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX && connection->frames[tag].in_use) {
     const wt_quic_tx_frame_t descriptor = connection->frames[tag];
     connection->frames[tag].in_use = 0;
-    if (connection->lost_handler != NULL) {
+    if (descriptor.stream_id == WT_QUIC_CONTROL_STREAM_ID) {
+      /* The connection's OWN frame: it is re-sent from the slot the descriptor names, because this layer is what
+       * decided to send it and the bytes are what the frame was (RFC 9000 section 13.3). The slot stays in_use:
+       * the re-sent packet answers for the same obligation. */
+      size_t slot = (size_t)descriptor.offset;
+      if (slot < WT_QUIC_CONTROL_FRAMES_MAX && connection->control_frames[slot].in_use) {
+        wt_quic_control_frame_t *kept = &connection->control_frames[slot];
+        int sent = 0;
+        (void)send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1,
+                                 tag_for_control(connection, slot), &sent, connection->last_activity);
+      }
+    } else if (connection->lost_handler != NULL) {
       connection->lost_handler(connection->lost_context, &descriptor);
     }
   }
@@ -576,6 +601,112 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
   return WT_OK;
 }
 
+static wt_status_t send_control_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                      const wt_quic_frame_t *frame, int ack_eliciting, int *out_sent,
+                                      uint64_t now);
+static wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                  const wt_quic_frame_t *frame, int ack_eliciting, int has_descriptor,
+                                  int is_crypto, uint64_t stream_id, uint64_t offset, size_t length,
+                                  int *out_sent, uint64_t now);
+
+/* Which frames the loss of a packet obliges this layer to send again (RFC 9000 section 13.3, read as the list of
+ * frames whose retransmission still carries information). The kinds left out are left out for a REASON each, and
+ * the reasons are not all the same one:
+ *
+ *   - PING and PADDING "contain no information, so lost PING or PADDING frames do not require repair". A
+ *     retransmitted PING would be a probe the loss detector has already replaced, and holding a slot for it would
+ *     let a probe timeout evict a MAX_DATA that needs the room.
+ *   - An ACK "carries the most recent set of acknowledgments": section 13.3 warns that resending an old one
+ *     inflates the peer's RTT sample, and a fresh one is generated from the received set anyway.
+ *   - A CONNECTION_CLOSE is "not sent again when packet loss is detected"; section 10 says when it is repeated.
+ *   - A DATAGRAM is never retransmitted at all (RFC 9221 section 5.2).
+ *   - A PATH_RESPONSE "is sent just once", and a PATH_CHALLENGE must carry a DIFFERENT payload each time
+ *     (section 13.3), so re-sending these bytes would be sending the wrong frame.
+ *   - CRYPTO and STREAM bytes belong to the crypto and stream layers, which answer their own losses; a second
+ *     owner here would send the same bytes twice.
+ *
+ * Everything else -- the flow-control and blocked frames, the connection-ID frames, NEW_TOKEN, RESET_STREAM,
+ * STOP_SENDING and HANDSHAKE_DONE -- is kept, so that a loss can be answered from the bytes that were sent. */
+static int control_frame_is_retained(wt_quic_frame_type_t kind) {
+  switch (kind) {
+    case WT_QUIC_FRAME_KIND_RESET_STREAM:
+    case WT_QUIC_FRAME_KIND_RESET_STREAM_AT:
+    case WT_QUIC_FRAME_KIND_STOP_SENDING:
+    case WT_QUIC_FRAME_KIND_NEW_TOKEN:
+    case WT_QUIC_FRAME_KIND_MAX_DATA:
+    case WT_QUIC_FRAME_KIND_MAX_STREAM_DATA:
+    case WT_QUIC_FRAME_KIND_MAX_STREAMS:
+    case WT_QUIC_FRAME_KIND_DATA_BLOCKED:
+    case WT_QUIC_FRAME_KIND_STREAM_DATA_BLOCKED:
+    case WT_QUIC_FRAME_KIND_STREAMS_BLOCKED:
+    case WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID:
+    case WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID:
+    case WT_QUIC_FRAME_KIND_HANDSHAKE_DONE:
+      return 1;
+    case WT_QUIC_FRAME_KIND_PADDING:
+    case WT_QUIC_FRAME_KIND_PING:
+    case WT_QUIC_FRAME_KIND_ACK:
+    case WT_QUIC_FRAME_KIND_CRYPTO:
+    case WT_QUIC_FRAME_KIND_STREAM:
+    case WT_QUIC_FRAME_KIND_PATH_CHALLENGE:
+    case WT_QUIC_FRAME_KIND_PATH_RESPONSE:
+    case WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT:
+    case WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION:
+    case WT_QUIC_FRAME_KIND_DATAGRAM:
+      return 0;
+  }
+  return 0;
+}
+
+/* Send a frame THE CONNECTION OWNS -- MAX_DATA, a RETIRE_CONNECTION_ID, HANDSHAKE_DONE -- keeping it so that a
+ * lost packet carrying it can be answered. RFC 9000 section 13.3 retransmits control frames until they are
+ * acknowledged, and nothing else can re-send one of these: the value is this layer's, and for a retire there is
+ * no value left to re-derive from at all. The frame is encoded ONCE here into a slot, the descriptor points at
+ * that slot, and `on_lost` sends those bytes again.
+ *
+ * `control_frame_is_retained` decides which kinds are kept, and its comment is where the section 13.3 reading
+ * lives. A kept frame that finds no slot, or is larger than a slot holds (a NEW_TOKEN carrying a long token is
+ * the realistic case), still goes out -- and `control_frames_unretained` counts it, because a frame that CAN be
+ * retransmitted and is not is exactly the difference this function exists for. */
+static wt_status_t send_control_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                      const wt_quic_frame_t *frame, int ack_eliciting, int *out_sent,
+                                      uint64_t now) {
+  uint8_t wire[WT_QUIC_CONTROL_WIRE_MAX];
+  wt_writer_t kept = wt_writer_init(wire, sizeof(wire));
+  size_t slot = WT_QUIC_CONTROL_FRAMES_MAX;
+  size_t i;
+
+  if (out_sent != NULL) *out_sent = 0;
+  if (!control_frame_is_retained(frame->kind)) {
+    /* No slot, by design -- and NOT counted, because nothing about this frame was promised: see the kinds above. */
+    return send_one_frame(connection, space, frame, ack_eliciting, 0, 0, 0U, 0U, 0U, out_sent, now);
+  }
+  for (i = 0U; i < WT_QUIC_CONTROL_FRAMES_MAX; i++) {
+    if (!connection->control_frames[i].in_use) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot == WT_QUIC_CONTROL_FRAMES_MAX || wt_quic_frame_encode(&kept, frame) != WT_OK ||
+      !wt_writer_ok(&kept)) {
+    /* No room to keep it, or it is bigger than a slot holds: it goes out, and a loss of it is not answered. */
+    connection->control_frames_unretained++;
+    return send_one_frame(connection, space, frame, ack_eliciting, 0, 0, 0U, 0U, 0U, out_sent, now);
+  }
+
+  connection->control_frames[slot].in_use = 1;
+  connection->control_frames[slot].space = space;
+  connection->control_frames[slot].wire_length = wt_writer_offset(&kept);
+  memcpy(connection->control_frames[slot].wire, wire, wt_writer_offset(&kept));
+  {
+    wt_status_t status = send_one_frame(connection, space, frame, ack_eliciting, 1, 0,
+                                        WT_QUIC_CONTROL_STREAM_ID, (uint64_t)slot,
+                                        wt_writer_offset(&kept), out_sent, now);
+    if (status != WT_OK) connection->control_frames[slot].in_use = 0;
+    return status;
+  }
+}
+
 /* Encode one frame into a payload, pad it to what header protection needs, and send it. `*out_sent`
  * says whether a packet went out, because WT_OK with nothing sent is the ordinary case for a flush
  * that had nothing to acknowledge. */
@@ -614,7 +745,19 @@ static wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_spac
     if (index < 0) return WT_ERR_LIMIT;
     tag = (uint64_t)index;
   }
+  return send_encoded_frame(connection, space, payload, payload_length, ack_eliciting, tag, out_sent, now);
+}
 
+/* Send bytes that are ALREADY a padded payload, with `tag` naming the descriptor that answers for it (or
+ * WT_QUIC_CONNECTION_FRAMES_MAX for none). Split out of `send_one_frame` so that a control frame kept in the
+ * table can be sent again without encoding it a second time -- the bytes are the frame, and re-encoding it from
+ * a struct would be a different frame. */
+static wt_status_t send_encoded_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
+                                      const uint8_t *payload, size_t payload_length, int ack_eliciting,
+                                      uint64_t tag, int *out_sent, uint64_t now) {
+  wt_status_t status;
+
+  if (out_sent != NULL) *out_sent = 0;
   status = send_packet(connection, space, payload, payload_length, ack_eliciting, tag, now);
   if (status != WT_OK) {
     if (tag != (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX) free_frame(connection, tag);
@@ -746,6 +889,20 @@ static wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t 
      * refused a packet that was acknowledged before, so each packet is counted once and a repeated acknowledgement
      * of the same range changes nothing (WT-145). */
     connection->packets_acked[space]++;
+    /* And the packet's RETRANSMISSION DESCRIPTOR comes back here. `on_lost` releases one for a packet that is
+     * declared lost, and an acknowledged packet never is -- so this is the only place that can, and without it
+     * the table filled at sixteen retransmittable packets net of losses: every later send that needed a
+     * descriptor was refused with WT_ERR_LIMIT, which is a session that stops after sixteen messages and names
+     * nothing (WT-170). */
+    if (snapshot[i].tag < (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX) {
+      /* A control frame that has been acknowledged is DONE: the peer has it, so the slot is free and the frame
+       * is never sent again (RFC 9000 section 13.3's "until acknowledged"). */
+      if (connection->frames[snapshot[i].tag].stream_id == WT_QUIC_CONTROL_STREAM_ID &&
+          connection->frames[snapshot[i].tag].offset < (uint64_t)WT_QUIC_CONTROL_FRAMES_MAX) {
+        connection->control_frames[connection->frames[snapshot[i].tag].offset].in_use = 0;
+      }
+      free_frame(connection, snapshot[i].tag);
+    }
     if (!has_largest || snapshot[i].packet_number > largest_newly_acked) {
       has_largest = 1;
       largest_newly_acked = snapshot[i].packet_number;
@@ -1145,7 +1302,8 @@ static wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_
   connection->frames_delivered++;
   wt_status_t status;
 
-  visit->ack_eliciting = 1;
+  /* The flag is set once, in `visit_frame`, from the frame's KIND (RFC 9000 section 13.2.1), which is where the
+   * rule belongs: a handler that had to remember would be a second owner of it. */
   if (connection->handler == NULL) return WT_OK;
   status = connection->handler(connection->handler_context, visit->space, frame);
   if (status == WT_OK) return WT_OK;
@@ -1226,6 +1384,20 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
     return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, wire_type_of(frame->kind), visit->now);
   }
 
+  /* RFC 9000 section 13.2.1: "All frames other than ACK, PADDING, and CONNECTION_CLOSE are considered
+   * ack-eliciting." That makes it a property of the PACKET -- any such frame makes the whole packet one that
+   * asks for an acknowledgement -- so this is OR-ed and never cleared: a padded Initial's trailing PADDING frames
+   * must not undo the CRYPTO frame that asked for it, which is exactly what a first version of this did.
+   *
+   * Doing it here rather than in each case is also why MAX_DATA, MAX_STREAMS, a NEW_CONNECTION_ID, a
+   * RETIRE_CONNECTION_ID and a HANDSHAKE_DONE were treated as NOTHING: the peer never acknowledged the packets
+   * carrying them, so a sender could not learn that they had arrived, and a frame re-sent on loss would be
+   * re-sent for ever (WT-170). */
+  if (frame->kind != WT_QUIC_FRAME_KIND_ACK && frame->kind != WT_QUIC_FRAME_KIND_PADDING &&
+      frame->kind != WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT &&
+      frame->kind != WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION) {
+    visit->ack_eliciting = 1;
+  }
   switch (frame->kind) {
     case WT_QUIC_FRAME_KIND_PADDING:
       return WT_OK;
@@ -1641,8 +1813,7 @@ wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connect
   frame.as.new_connection_id.connection_id = id;
   frame.as.new_connection_id.connection_id_length = length;
   frame.as.new_connection_id.stateless_reset_token = reset_token;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent,
-                          now);
+  status = send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, &sent, now);
   if (status != WT_OK) return status;
   if (!sent) return WT_ERR_STATE;
 
@@ -1696,7 +1867,7 @@ wt_status_t wt_quic_connection_send_max_data(wt_quic_connection_t *connection, u
 
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_DATA);
   frame.as.max_data.maximum = maximum;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent, now);
+  status = send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, &sent, now);
   if (status != WT_OK) return status;
   if (sent) connection->local_max_data = maximum;
   return sent ? WT_OK : WT_ERR_STATE;
@@ -1751,7 +1922,7 @@ wt_status_t wt_quic_connection_send_max_streams(wt_quic_connection_t *connection
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_STREAMS);
   frame.as.max_streams.direction = direction;
   frame.as.max_streams.maximum = maximum;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent, now);
+  status = send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, &sent, now);
   if (status != WT_OK) return status;
   if (sent) connection->local_max_streams[index] = maximum;
   return sent ? WT_OK : WT_ERR_STATE;
@@ -1803,8 +1974,7 @@ wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, ui
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STOP_SENDING);
   frame.as.stop_sending.id = stream_id;
   frame.as.stop_sending.application_error_code = error_code;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent,
-                          now);
+  status = send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, &sent, now);
   if (status != WT_OK) {
     /* A frame that could not be sent leaves the stream as it was, so a caller that retries is not told it
      * has already asked. */
@@ -1847,8 +2017,7 @@ wt_status_t wt_quic_connection_reset_stream_at(wt_quic_connection_t *connection,
   frame.as.reset_stream_at.application_error_code = error_code;
   frame.as.reset_stream_at.final_size = stream->final_size;
   frame.as.reset_stream_at.reliable_size = reliable_size;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent,
-                          now);
+  status = send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -1878,8 +2047,7 @@ wt_status_t wt_quic_connection_reset_stream(wt_quic_connection_t *connection, ui
   frame.as.reset_stream.id = stream_id;
   frame.as.reset_stream.application_error_code = error_code;
   frame.as.reset_stream.final_size = stream->final_size;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent,
-                          now);
+  status = send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -1990,8 +2158,9 @@ wt_status_t wt_quic_connection_send_datagram(wt_quic_connection_t *connection, c
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_DATAGRAM);
   frame.as.datagram.data = data;
   frame.as.datagram.length = length;
-  /* No descriptor: a DATAGRAM frame is never sent again, which is the whole point of it. */
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent, now);
+  /* A DATAGRAM frame is never sent again, which is the whole point of it (RFC 9221 section 5.2): said once, in
+   * `control_frame_is_retained`, so that no sender can forget it. */
+  status = send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -2025,10 +2194,9 @@ wt_status_t wt_quic_connection_send_frame(wt_quic_connection_t *connection, wt_q
   if (space >= WT_QUIC_SPACE_COUNT) return WT_ERR_INVALID_ARGUMENT;
   if (wt_quic_connection_is_closed(connection)) return WT_ERR_STATE;
 
-  /* A frame with nothing to retransmit carries no descriptor, so a loss of its packet costs the
-   * congestion controller but asks nobody to send it again -- which is right for a HANDSHAKE_DONE and
-   * wrong for a STREAM frame, whose caller has its own retransmission to do. */
-  status = send_one_frame(connection, space, frame, ack_eliciting, 0, 0, 0U, 0U, 0U, &sent, now);
+  /* The frame's KIND decides whether this layer answers for its loss (see `control_frame_is_retained`): a
+   * HANDSHAKE_DONE sent by the handshake is kept and re-sent, a caller's PATH_RESPONSE or DATAGRAM is not. */
+  status = send_control_frame(connection, space, frame, ack_eliciting, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -2051,7 +2219,7 @@ static wt_status_t flush_space(wt_quic_connection_t *connection, wt_quic_space_t
 
   if (probe) {
     frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
-    return send_one_frame(connection, space, &frame, 1, 0, 0, 0U, 0U, 0U, &sent, now);
+    return send_control_frame(connection, space, &frame, 1, &sent, now);
   }
 
   if (!space_state->received.ack_pending) return WT_OK;
@@ -2078,7 +2246,7 @@ static wt_status_t flush_space(wt_quic_connection_t *connection, wt_quic_space_t
   frame.as.ack.ranges = range_bytes;
   frame.as.ack.ranges_len = range_length;
 
-  status = send_one_frame(connection, space, &frame, 0, 0, 0, 0U, 0U, 0U, &sent, now);
+  status = send_control_frame(connection, space, &frame, 0, &sent, now);
   if (status != WT_OK) return status;
   if (sent) {
     wt_quic_ack_sent(&space_state->received);
@@ -2108,7 +2276,7 @@ wt_status_t wt_quic_connection_flush(wt_quic_connection_t *connection, uint64_t 
       memset(&frame, 0, sizeof(frame));
       status = wt_quic_close_frame(&connection->close, &frame);
       if (status != WT_OK) return status;
-      status = send_one_frame(connection, space, &frame, 0, 0, 0, 0U, 0U, 0U, &sent, now);
+      status = send_control_frame(connection, space, &frame, 0, &sent, now);
       if (status != WT_OK) return status;
       if (sent) {
         connection->close_sent = 1;

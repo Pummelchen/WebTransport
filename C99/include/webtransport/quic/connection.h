@@ -169,9 +169,34 @@ typedef struct wt_quic_tx_frame {
    * again. */
   int is_crypto;
   uint64_t stream_id;
+  /* A CONTROL frame is the CONNECTION's own -- MAX_DATA, a RETIRE_CONNECTION_ID, HANDSHAKE_DONE -- and it has no
+   * stream to name. The sentinel is what tells it apart in `on_lost`, where the two owners are told different
+   * things: a CRYPTO or STREAM frame goes back to the layer that keeps its bytes, and a control frame is
+   * re-sent by this layer from the table below, because the connection is what decided to send it. Stream IDs
+   * are below 2^62 (RFC 9000 section 2.1), so the value cannot collide with one. `offset` is the table index for
+   * such a descriptor and `length` is its wire length. */
   uint64_t offset;
   size_t length;
 } wt_quic_tx_frame_t;
+
+/* A control frame this connection sent and has not had acknowledged, kept so that a LOST packet carrying it can
+ * be answered (RFC 9000 section 13.3: the frames whose retransmission still carries information are sent again
+ * until acknowledged). The WIRE BYTES are kept rather than the frame, because a value that has moved on
+ * (MAX_DATA's limit) must be re-sent as it was: re-deriving it would be re-sending a different frame under the
+ * same obligation, and for a RETIRE_CONNECTION_ID there is nothing to re-derive from at all. */
+#define WT_QUIC_CONTROL_STREAM_ID UINT64_MAX
+#define WT_QUIC_CONTROL_FRAMES_MAX 8U
+/* The longest control frame this table keeps. NEW_CONNECTION_ID is the largest of the fixed ones at 54 bytes; a
+ * NEW_TOKEN carrying a long token is the realistic overflow, and a frame longer than this goes out with no slot
+ * and is counted (`control_frames_unretained`). */
+#define WT_QUIC_CONTROL_WIRE_MAX 64U
+
+typedef struct wt_quic_control_frame {
+  int in_use;
+  wt_quic_space_t space;
+  uint8_t wire[WT_QUIC_CONTROL_WIRE_MAX];
+  size_t wire_length;
+} wt_quic_control_frame_t;
 
 /* A frame this layer does not act on. The return value stops the walk of that packet: WT_OK continues,
  * anything else ends it and is returned by the receive call, which is how a handler reports a protocol
@@ -270,6 +295,11 @@ typedef struct wt_quic_connection {
   wt_quic_datagram_queue_t datagrams;
 
   wt_quic_tx_frame_t frames[WT_QUIC_CONNECTION_FRAMES_MAX];
+  /* The connection's own unacknowledged control frames, re-sent when the packet carrying one is lost. */
+  wt_quic_control_frame_t control_frames[WT_QUIC_CONTROL_FRAMES_MAX];
+  /* Control frames sent WITHOUT a slot, because the table was full: a bound this endpoint enforces rather than
+   * a table it grows, counted so that "the retransmission did not happen" is visible. */
+  uint64_t control_frames_unretained;
 
   wt_quic_frame_handler_fn handler;
   void *handler_context;

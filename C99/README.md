@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 80 test programs and 80,732 checks, run by `ctest` and again under
+- 80 test programs and 82,018 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -589,6 +589,16 @@ What is here:
   flight the congestion controller will read, and the probe timeout with its backoff. The list is
   bounded and being at the bound is an error rather than a drop, because a forgotten packet is one
   that is never retransmitted.
+- **Control-frame retransmission** (WT-170): RFC 9000 section 13.3 asks for a frame's *information* to be sent
+  again rather than the packet, and the frames carrying the connection's OWN state -- MAX_DATA, MAX_STREAMS,
+  NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, HANDSHAKE_DONE, RESET_STREAM, STOP_SENDING -- had no owner that
+  could re-send them, so a lost one was simply gone. `send_control_frame` encodes such a frame once into an
+  eight-slot table, the packet's descriptor names the slot, and `on_lost` sends those bytes again -- a new
+  packet carrying the same frame -- until an acknowledgement releases the slot. Which kinds are kept is
+  decided in ONE predicate rather than by each sender remembering: PING and PADDING "contain no information",
+  an ACK is replaced rather than repeated, a CONNECTION_CLOSE is section 10's business, a DATAGRAM is never
+  retransmitted at all (RFC 9221 section 5.2), a PATH_RESPONSE is sent once while a PATH_CHALLENGE must carry
+  a fresh payload, and CRYPTO and STREAM bytes are answered by the layers that own them.
 - **Congestion control** (Phase 4, third part): `quic/congestion.h` is RFC 9002 section 7's NewReno
   -- the initial window with its 14720-byte bound, slow start, congestion avoidance's fractional
   increment, the recovery epoch that makes a burst of losses cost one halving, the two-datagram
