@@ -98,9 +98,9 @@ typedef struct wt_loop_result {
   unsigned long long ack_largest_application;
   uint8_t transcript_types[16];
   size_t transcript_types_length;
-  /* The stream id the driver opened for the request, and how many streams this endpoint opened in each class:
-   * a request on a stream the peer reads as unidirectional is an interop-only defect, and the id is the only
-   * thing that says which it is (WT-135). */
+  /* The stream id the driver opened for the request, and how many streams this endpoint opened in each class: a
+   * data stream's class is what says whether a peer can answer it, and the id is the only thing that says which
+   * it is (WT-135). */
   uint64_t request_stream_id;
   unsigned streams_opened_bidi;
   unsigned streams_opened_uni;

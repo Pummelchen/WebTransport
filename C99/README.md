@@ -155,13 +155,26 @@ What is here:
   would accept one. A datagram IS the unit, so there is no reassembly and no ordering — what
   arrives is the whole thing or nothing.
 - **A message on a WebTransport stream** (Phase 9): `--exchange stream` end to end. After the
-  exchange's response, the client opens a unidirectional WebTransport stream — the draft's `0x54`
-  type **and the session ID**, then the session's own bytes — and the server's session sink
-  receives exactly the message. The fix this needed is one of the draft's own details: the type
-  classifier reads only the TYPE, so the session ID is part of the prefix that must be consumed
-  before the session sees any data. Passing it through as data arrived as one leading byte nobody
-  could explain, and a prefix that stops after the type is `WT_ERR_TRUNCATED` rather than a stream
-  whose payload begins with its own session ID.
+  exchange's response, the client opens a **bidirectional** WebTransport data stream — the draft's
+  signal value (`0x41`, encoded as the two-byte varint `40 41`) **and the session ID**, then the
+  session's own bytes, FINishing the stream with them — and the server's session sink receives
+  exactly the message. Two of the draft's own details are the whole of it. The classifier reads
+  only the TYPE, so the session ID is part of the prefix that must be consumed before the session
+  sees any data: passing it through as data arrived as one leading byte nobody could explain, and a
+  prefix that stops after the type is `WT_ERR_TRUNCATED` rather than a stream whose payload begins
+  with its own session ID. And the prefix belongs to the stream's **initiator** and to nobody else
+  (§4.2/§4.3), so a peer's bytes on a stream this endpoint opened are payload: the driver remembers
+  the data streams it opens, which is why the Swift library's shape — open a bidirectional stream,
+  send with `endOfStream: true` — is the one both ends speak.
+- **A session with an independent implementation** (WT-135): the C99 client against
+  `pywebtransport`/`aioquic` in a container, one Docker network, the client in the peer's own
+  network namespace. `"connectAccepted":true "responseStatus":200` and **the peer's echo of the
+  message arrives**: the peer logs `stream in: 13 bytes`, `stream echoed`, and the client reports
+  `received 13 byte(s)`. This is the criterion no self-test could satisfy — every local test runs
+  both ends of this same code — and it is the reason four separate defects were found only here:
+  the client never adopted the server's Source Connection ID (WT-138), never sent
+  `initial_source_connection_id` (WT-141), sent nothing to a peer after a lost frame (WT-135), and
+  re-read its own data stream's answer as a prefix (WT-135, above).
 - **A self-signed identity for local development** (Phase 9): `tls/self_signed.h` generates the
   pair a local server needs *in memory* — an ECDSA P-256 key and a certificate for the loopback
   names — and returns its SHA-256 fingerprint. The pin is the point: a self-signed certificate is
@@ -233,11 +246,13 @@ What is here:
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
   `scripts/score-matrix.sh` rather than from memory: **25 of 25 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 7 of the plan's 9 completion
-  criteria are met, 1 partial and 1 not met.** The matrix coverage is 100% *of the matrix*, which is
-  not the same as being done: the criteria that are not met are outside the matrix and outside this
-  repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
-  Windows CI legs need portability work before a job for them would be anything but red. The one
-  partial criterion is those CI legs. The conformance-coverage criterion is now **met**, and the
+  criteria are met, with 2 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
+  which is not the same as being done. The two partial criteria are outside the matrix: the FreeBSD
+  and Windows CI legs need portability work before a job for them would be anything but red, and the
+  interop matrix now **runs** — `scripts/run-container-interop.sh` completes a whole session and the
+  message exchange against `pywebtransport`/`aioquic`, while `quinn` (handshake, no session:
+  `WT-145`) and `quiche` (no handshake: `WT-146`) are measured to a named point, and the VPS matrix's
+  five implementations still need a host. The conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
   forty-six C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the

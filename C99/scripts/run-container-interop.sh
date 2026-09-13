@@ -75,8 +75,11 @@ for peer in $peers; do
   # said so the first time this ran ("the development bypass is refused for a non-loopback address"). Sharing the
   # namespace makes the peer 127.0.0.1, so the bypass is allowed, no NAT is involved in either direction, and the
   # address on the command line is the loopback one a developer would use anyway.
+  # A message is NAMED, because an empty WebTransport stream body carries nothing a peer can observe: `--exchange
+  # stream` without `--message` sends the prefix and FIN alone, which is a valid stream and a silent one.
   docker run --rm --network "container:wt-interop-$peer" "$client_image" \
-    --connect "127.0.0.1:$port" --trust local-development --exchange stream --timeout-ms "$timeout_ms" || true
+    --connect "127.0.0.1:$port" --trust local-development --exchange stream \
+    --message "${WT_INTEROP_MESSAGE:-hello-interop}" --timeout-ms "$timeout_ms" || true
   if [ "${WT_INTEROP_CAPTURE:-0}" = "1" ]; then
     echo "-- capture (client -> peer, then peer -> client):"
     docker logs "wt-capture-$peer" 2>&1 | grep -E "^[0-9]" | tail -24 || true

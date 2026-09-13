@@ -15,6 +15,7 @@
 #include "webtransport/http3/message.h"
 #include "webtransport/http3/settings.h"
 #include "webtransport/quic/varint.h"
+#include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
 
 #define RECORDED_STREAMS 8U
@@ -157,7 +158,148 @@ static void test_the_streams_a_session_start_opens(void) {
   }
 }
 
+/* The prefix belongs to the stream's INITIATOR, and to nobody else (draft-16 sections 4.2 and 4.3). A data
+ * stream this endpoint opens carries the signal value and the session ID in its first bytes, so the peer's bytes
+ * on the SAME stream are payload -- there is no second prefix. Reading them as one is exactly what the interop
+ * peer's echo tripped over: `hello-interop`'s first byte was read as a signal value, the classification refused
+ * it, and the refusal closed the connection with INTERNAL_ERROR while the tool went on reporting success
+ * (WT-135). The other half of the rule is asserted too: on a stream this endpoint did NOT open the bytes ARE a
+ * prefix, and payload sent there is not delivered as this session's payload. */
+
+typedef struct data_stream_fake {
+  int opened;
+  int opened_bidirectional;
+  uint64_t stream_id;
+  uint8_t sent[64];
+  size_t sent_length;
+  int sent_fin;
+} data_stream_fake_t;
+
+typedef struct data_stream_sink {
+  unsigned calls;
+  uint64_t stream_id;
+  uint8_t bytes[64];
+  size_t length;
+  int fin;
+} data_stream_sink_t;
+
+static wt_status_t data_stream_open(void *context, int bidirectional, uint64_t *out_stream_id, uint64_t now) {
+  data_stream_fake_t *fake = context;
+  (void)now;
+  if (fake->opened != 0) return WT_ERR_STATE;
+  fake->opened = 1;
+  fake->opened_bidirectional = bidirectional;
+  /* RFC 9000 section 2.1: the low bit says who initiated the stream (clear for this endpoint), the next says
+   * the direction. */
+  fake->stream_id = bidirectional ? 0U : 2U;
+  *out_stream_id = fake->stream_id;
+  return WT_OK;
+}
+
+static wt_status_t data_stream_send(void *context, uint64_t stream_id, const uint8_t *data, size_t length,
+                                    int fin, uint64_t now) {
+  data_stream_fake_t *fake = context;
+  (void)now;
+  if (stream_id != fake->stream_id) return WT_ERR_INVALID_ARGUMENT;
+  if (fake->sent_length + length > sizeof(fake->sent)) return WT_ERR_LIMIT;
+  if (length > 0U) memcpy(fake->sent + fake->sent_length, data, length);
+  fake->sent_length += length;
+  fake->sent_fin = fin;
+  return WT_OK;
+}
+
+static wt_status_t data_stream_on_data(void *context, uint64_t stream_id, const uint8_t *data, size_t length,
+                                       int fin) {
+  data_stream_sink_t *sink = context;
+  sink->calls++;
+  sink->stream_id = stream_id;
+  if (length > sizeof(sink->bytes)) return WT_ERR_LIMIT;
+  if (length > 0U) memcpy(sink->bytes, data, length);
+  sink->length = length;
+  sink->fin = fin;
+  return WT_OK;
+}
+
+static void test_a_data_stream_this_endpoint_opened(void) {
+  static const uint8_t k_message[] = {'h', 'e', 'l', 'l', 'o'};
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_driver_transport_t transport;
+  data_stream_fake_t fake;
+  data_stream_sink_t sink_log;
+  wt_http3_driver_sink_t sink;
+  uint64_t stream_id = 0U;
+  wt_quic_frame_t frame;
+  uint8_t prefix[4];
+  size_t prefix_length;
+
+  memset(&fake, 0, sizeof(fake));
+  memset(&sink_log, 0, sizeof(sink_log));
+  memset(&sink, 0, sizeof(sink));
+  memset(&transport, 0, sizeof(transport));
+  transport.open_stream = data_stream_open;
+  transport.send_stream = data_stream_send;
+  transport.context = &fake;
+  sink.context = &sink_log;
+  sink.on_stream_data = data_stream_on_data;
+
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_CLIENT);
+  wt_http3_driver_init(&driver, &endpoint);
+  /* The session is the CONNECT stream's ID. The app path that learns it is
+   * `wt_http3_driver_start_session`; here it is set directly because no session is started. */
+  wt_http3_driver_set_session_id(&driver, 0U);
+
+  /* The signal value as QUIC's own varint encoding, which is NOT one byte: 0x41 is above the single-byte range,
+   * so the wire form is `40 41` and the session ID follows it. Written here with the encoder rather than by hand,
+   * because a hand-written expectation is what got this wrong the first time. */
+  prefix_length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_BIDI, prefix, sizeof(prefix));
+  prefix_length += wt_quic_varint_encode(0U, prefix + prefix_length, sizeof(prefix) - prefix_length);
+
+  WT_EXPECT_OK("a data stream opens and the message goes out",
+               wt_http3_driver_open_data_stream(&driver, &transport, 0, k_message, sizeof(k_message), 1,
+                                                1000U, &stream_id));
+  WT_EXPECT_INT("as a bidirectional one", 1, fake.opened_bidirectional);
+  WT_EXPECT_U64("on the stream the transport gave", fake.stream_id, stream_id);
+  WT_EXPECT_U64("carrying the prefix and then the message", (uint64_t)(prefix_length + sizeof(k_message)),
+                (uint64_t)fake.sent_length);
+  WT_EXPECT_BYTES("whose first bytes are the signal value and the session", prefix, fake.sent, prefix_length);
+  WT_EXPECT_BYTES("and whose rest is the message", k_message, fake.sent + prefix_length, sizeof(k_message));
+  WT_EXPECT_INT("and the message finishes the stream", 1, fake.sent_fin);
+  WT_EXPECT_INT("and the stream is remembered as this endpoint's", 1,
+                wt_http3_driver_owns_data_stream(&driver, stream_id));
+
+  /* The ANSWER on the same stream: payload with NO prefix, which is what a responder sends. */
+  memset(&frame, 0, sizeof(frame));
+  frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+  frame.as.stream.id = stream_id;
+  frame.as.stream.offset = 0U;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = k_message;
+  frame.as.stream.length = sizeof(k_message);
+  frame.as.stream.fin = 1;
+  WT_EXPECT_OK("the answer is routed",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_U64("straight to the session sink", 1U, (uint64_t)sink_log.calls);
+  WT_EXPECT_U64("for the stream it arrived on", stream_id, sink_log.stream_id);
+  WT_EXPECT_BYTES("as the payload, unchanged", k_message, sink_log.bytes, sizeof(k_message));
+  WT_EXPECT_INT("with the peer's end of stream", 1, sink_log.fin);
+
+  /* And the other half of the rule: a stream this endpoint did NOT open is where a prefix belongs, so the same
+   * bytes there are an HTTP/3 request stream's and not this session's payload. */
+  memset(&frame, 0, sizeof(frame));
+  frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+  frame.as.stream.id = 4U; /* client-initiated and bidirectional, and NOT one this endpoint opened */
+  frame.as.stream.offset = 0U;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = k_message;
+  frame.as.stream.length = sizeof(k_message);
+  (void)wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U);
+  WT_EXPECT_U64("an unowned bidirectional stream is not this session's payload", 1U,
+                (uint64_t)sink_log.calls);
+}
+
 int main(void) {
   test_the_streams_a_session_start_opens();
+  test_a_data_stream_this_endpoint_opened();
   WT_TEST_MAIN_END("wt_http3_driver_streams");
 }

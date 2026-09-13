@@ -256,8 +256,12 @@ static void pump_once(loop_t *loop) {
   loop->now += 1000U;
 }
 
-/* The message, on the mode the caller chose. A stream carries the draft's prefix and then the bytes; a datagram
- * carries the quarter stream ID and then the bytes. */
+/* The message, on the mode the caller chose. A stream carries the draft's prefix and then the bytes, and the
+ * stream is FINISHED with them: the Swift library's exchange opens a bidirectional stream and sends the message
+ * with `endOfStream: true`, and a peer that reads a stream to its end cannot answer a message that never ends
+ * (WT-135). The driver opens it, because the driver is what knows this endpoint owns the prefix -- the peer's
+ * bytes on the same stream are payload, and an endpoint that re-read them as a prefix refuses its own answer. A
+ * datagram carries the quarter stream ID and then the bytes, because a datagram IS the unit. */
 static wt_status_t send_message(loop_t *loop, const wt_http3_driver_transport_t *transport,
                                 const wt_loop_config_t *config) {
   uint8_t framed[512];
@@ -271,17 +275,8 @@ static wt_status_t send_message(loop_t *loop, const wt_http3_driver_transport_t 
     }
     return transport->send_datagram(transport->context, framed, wt_writer_offset(&w));
   }
-  {
-    uint64_t stream_id = 0U;
-    wt_status_t status = transport->open_stream(transport->context, 0, &stream_id, loop->now);
-    if (status != WT_OK) return status;
-    if (wt_webtransport_stream_prefix_write(&w, 1, loop->side.request_stream_id) != WT_OK) {
-      return WT_ERR_LIMIT;
-    }
-    wt_writer_bytes(&w, config->message, message_length);
-    return transport->send_stream(transport->context, stream_id, framed, wt_writer_offset(&w), 0,
-                                  loop->now);
-  }
+  return wt_http3_driver_open_data_stream(&loop->side.driver, transport, 0, (const uint8_t *)config->message,
+                                          message_length, 1, loop->now, NULL);
 }
 
 wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t *out) {

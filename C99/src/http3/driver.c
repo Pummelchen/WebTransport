@@ -13,23 +13,13 @@
 #include "webtransport/quic/varint.h"
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint) {
-  size_t i;
-
   if (driver == NULL) return;
+  /* Zeroed WHOLE rather than field by field. Naming every field was here so that adding one would force this
+   * function to be revisited -- and it did not work: `data_stream_count` was added and left holding whatever the
+   * caller's stack had, which is a segfault the moment the receive path asks how many data streams there are.
+   * Zeroing the struct makes a forgotten field impossible, and the one field that is not zero is named here. */
+  memset(driver, 0, sizeof(*driver));
   driver->endpoint = endpoint;
-  driver->session_id = 0U;
-  driver->session_id_set = 0;
-  driver->pending_count = 0U;
-  driver->frame_count = 0U;
-  for (i = 0U; i < WT_HTTP3_DRIVER_FRAMES_MAX; i++) {
-    driver->frames[i].stream_id = 0U;
-    driver->frames[i].header_length = 0U;
-    driver->frames[i].in_frame = 0;
-  }
-  for (i = 0U; i < WT_HTTP3_DRIVER_PENDING_MAX; i++) {
-    driver->pending[i].stream_id = 0U;
-    driver->pending[i].length = 0U;
-  }
 }
 
 void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_id) {
@@ -435,6 +425,14 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
    * for. */
   if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) {
       uint64_t stream_id = frame->as.stream.id;
+      /* A WebTransport data stream THIS endpoint opened: the prefix went out with the first bytes, so what
+       * arrives on it is the responder's payload. Classifying it again is what the peer's echo tripped over --
+       * its first bytes were read as a signal value, refused, and the refusal closed the connection (WT-135). */
+      if (wt_http3_driver_owns_data_stream(driver, stream_id)) {
+        if (sink == NULL || sink->on_stream_data == NULL) return WT_OK;
+        return sink->on_stream_data(sink->context, stream_id, frame->as.stream.data,
+                                    frame->as.stream.length, frame->as.stream.fin);
+      }
       if (stream_is_ours(driver->endpoint, stream_id) &&
           !wt_quic_stream_id_is_bidirectional(stream_id)) {
         /* A UNIDIRECTIONAL stream this endpoint opened: the peer cannot write on it, so there is nothing to
@@ -705,6 +703,62 @@ wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
                                 wt_writer_offset(&w), fin, now);
 }
 
+wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
+                                             const wt_http3_driver_transport_t *transport,
+                                             int unidirectional, const uint8_t *data, size_t length,
+                                             int fin, uint64_t now, uint64_t *out_stream_id) {
+  uint8_t framed[WT_HTTP3_DRIVER_PREFIX_MAX + WT_HTTP3_DRIVER_SCRATCH];
+  wt_writer_t w = wt_writer_init(framed, sizeof(framed));
+  uint64_t stream_id = 0U;
+  wt_status_t status;
+
+  if (driver == NULL || driver->endpoint == NULL || transport == NULL ||
+      transport->open_stream == NULL || transport->send_stream == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (length > (size_t)WT_HTTP3_DRIVER_SCRATCH) return WT_ERR_LIMIT;
+  /* The session must be known before a stream names it: a prefix that names no session is one the peer has to
+   * refuse, which is a worse outcome than saying so here. */
+  if (driver->session_id_set == 0) return WT_ERR_STATE;
+  if (driver->data_stream_count >= WT_HTTP3_DRIVER_DATA_STREAMS_MAX) return WT_ERR_LIMIT;
+
+  if (wt_webtransport_stream_prefix_write(&w, unidirectional, driver->session_id) != WT_OK) {
+    return WT_ERR_LIMIT;
+  }
+  wt_writer_bytes(&w, data, length);
+  if (!wt_writer_ok(&w)) return WT_ERR_LIMIT;
+
+  /* Opened before the prefix is written, because which class of stream the ID is comes from the transport and
+   * the prefix's type has to agree with it. */
+  status = transport->open_stream(transport->context, unidirectional ? 0 : 1, &stream_id, now);
+  if (status != WT_OK) return status;
+  if (wt_quic_stream_id_is_bidirectional(stream_id) != (unidirectional ? 0 : 1)) {
+    /* The transport handed back a stream of the other class, so this prefix would describe the wrong thing. */
+    return WT_ERR_STATE;
+  }
+
+  status = transport->send_stream(transport->context, stream_id, framed, wt_writer_offset(&w), fin, now);
+  if (status != WT_OK) return status;
+
+  /* Remembered only once the bytes are away: an owner that has not sent anything yet would make the receive
+   * path treat the stream as this endpoint's data stream while the peer has no reason to know it exists. */
+  driver->data_stream_ids[driver->data_stream_count] = stream_id;
+  driver->data_stream_count++;
+  if (out_stream_id != NULL) *out_stream_id = stream_id;
+  return WT_OK;
+}
+
+int wt_http3_driver_owns_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id) {
+  size_t index;
+
+  if (driver == NULL) return 0;
+  for (index = 0U; index < driver->data_stream_count; index++) {
+    if (driver->data_stream_ids[index] == stream_id) return 1;
+  }
+  return 0;
+}
+
 wt_status_t wt_http3_driver_resend_request(wt_http3_driver_t *driver,
                                            const wt_http3_driver_transport_t *transport, uint64_t now) {
   if (driver == NULL || transport == NULL || transport->send_stream == NULL) {
@@ -770,6 +824,10 @@ wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
 
   status = wt_http3_driver_open_request(driver, transport, now, &stream_id, out_error);
   if (status != WT_OK) return status;
+  /* The session IS the request stream (draft-16 section 3.2: "Session IDs are derived from the stream ID of the
+   * CONNECT stream"), so this is where the driver learns which session it serves -- and a prefix it writes or
+   * reads names this stream's ID. Nothing else sets it, which is why a data stream had no session to name. */
+  wt_http3_driver_set_session_id(driver, stream_id);
 
   /* The extended CONNECT of draft-16 section 3.1, as the fields the request line needs: CONNECT with a
    * :protocol, over https, for the authority and path the caller named. */
@@ -800,6 +858,9 @@ wt_status_t wt_http3_driver_send_response(wt_http3_driver_t *driver,
   wt_http3_message_t response;
 
   if (driver == NULL || driver->endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* The request stream this answers IS the session (draft-16 section 3.2), so answering it is also the moment
+   * this endpoint knows which session its own streams and prefixes name. */
+  wt_http3_driver_set_session_id(driver, stream_id);
   memset(&response, 0, sizeof(response));
   response.type = WT_HTTP3_HEADER_RESPONSE;
   response.status = (uint64_t)status;

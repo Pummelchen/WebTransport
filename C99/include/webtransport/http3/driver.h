@@ -45,6 +45,11 @@ extern "C" {
  * than given more memory. */
 #define WT_HTTP3_DRIVER_PENDING_MAX 8U
 
+/* How many WebTransport DATA streams this endpoint may have open at once. A data stream is remembered so that
+ * bytes arriving on it are known to be the responder's payload; the number is small because this is a driver
+ * for one session's exchange, and a caller past it is refused with WT_ERR_LIMIT rather than given more. */
+#define WT_HTTP3_DRIVER_DATA_STREAMS_MAX 8U
+
 typedef struct wt_http3_driver_pending {
   uint64_t stream_id;
   uint8_t bytes[WT_HTTP3_DRIVER_PREFIX_MAX];
@@ -123,6 +128,13 @@ typedef struct wt_http3_driver {
   uint64_t request_stream_id;
   size_t request_length;
   int request_retained;
+  /* The WebTransport DATA streams THIS endpoint opened, by ID. The draft's prefix (`0x41` for a bidirectional
+   * stream, `0x54` for a unidirectional one, then the session ID) is sent by the stream's INITIATOR and by
+   * nobody else (draft-ietf-webtrans-http3-16 sections 4.2 and 4.3), so bytes arriving on a stream opened here
+   * are the responder's payload and must not be read as a prefix a second time. Reading them as one is what
+   * turned a third-party peer's echo into a protocol error that closed the connection (WT-135). */
+  uint64_t data_stream_ids[WT_HTTP3_DRIVER_DATA_STREAMS_MAX];
+  size_t data_stream_count;
 } wt_http3_driver_t;
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint);
@@ -301,6 +313,22 @@ wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
                                          const wt_http3_driver_transport_t *transport,
                                          uint64_t stream_id, const wt_http3_message_t *message,
                                          uint64_t peer_max_entries, int fin, uint64_t now);
+
+/* Open a WebTransport DATA stream and send `data` on it, prefix and all.
+ *
+ * The prefix is written HERE rather than by the caller, because this function is also where the stream becomes
+ * one this endpoint OWNS: the draft gives the prefix to the stream's initiator, so the responder's bytes on the
+ * same stream are payload, and only the owner knows that (WT-135). `unidirectional` chooses the prefix's type
+ * and the stream's class; `fin` ends the stream with the bytes. `*out_stream_id` is the stream that was opened,
+ * which a caller needs to match the answer to its own stream. */
+wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
+                                             const wt_http3_driver_transport_t *transport,
+                                             int unidirectional, const uint8_t *data, size_t length,
+                                             int fin, uint64_t now, uint64_t *out_stream_id);
+
+/* Whether `stream_id` is a WebTransport data stream this endpoint opened. The receive path asks, because the
+ * answer decides whether the bytes are payload or a prefix. */
+int wt_http3_driver_owns_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id);
 
 /* Answer a request with a status: the response's HEADERS on the stream that carried the request. One per
  * stream, because a second response is not a status an HTTP/3 peer can be given. */
