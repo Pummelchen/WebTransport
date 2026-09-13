@@ -3027,6 +3027,24 @@ deterministically (H3_ID_ERROR for a client, H3_STREAM_CREATION_ERROR for a serv
 it, and **a peer that changes its connection ID during the handshake**, which the tests do not cover because they
 use the same connection ID at both ends -- the recorded transport gap rather than a claimed feature.
 
+### WT-136: the score, measured rather than remembered
+
+The Definition of Done's last criterion is that the README's status goes "from 0% to the measured final score",
+and a number nobody can reproduce is a guess. `scripts/score-matrix.sh` counts the compliance matrix's rows by
+status -- separating the rows that are DRAFT-16 requirements from the rows that describe the QUIC, HTTP/3 and TLS
+layers the session runs on -- and prints the nine Definition-of-Done criteria as they stand. Its answer today:
+
+    24 of 24 draft-16 requirements exercised by a test in this tree
+    0 partial, 5 rows describing lower layers
+    5 of 9 criteria met, 2 partial, 2 not met
+
+The README carries exactly that, with the distinction stated where a reader cannot miss it: **100% of the matrix
+is not 100% done.** The criteria that are not met are outside the matrix and outside this repository's reach --
+the five-implementation interop matrix needs a host, and the FreeBSD and Windows CI legs need portability work
+(a sockets/poll adaptation) before a job for them would be anything but red. Writing one number and letting it
+mean everything is the failure the Definition of Done's own wording guards against, which is why the score is
+reported as three measured quantities rather than as a percentage.
+
 ## Definition of Done audit (measured, 89 rounds in)
 
 Every claim below names the evidence, and the ones that are NOT met name what they still need. This is the

@@ -204,15 +204,18 @@ What is here:
   missing, and CI runs it. The two rows that are not "tested" are stated rather than hidden — server
   push is refused deterministically by design, and a peer that changes its connection ID during the
   handshake is not tracked, which is the recorded transport gap.
-- **Where this stands against the plan's Definition of Done** (an audit with evidence, kept in
-  `IMPLEMENTATION_PLAN.md`): **met** — the CLIs run local IPv4 and IPv6 sessions, sanitizers and
-  static checks are clean, the public API is documented, and nothing placeholder-shaped is exposed as
-  production. **Partial** — the protocol layers are complete but the draft-16 *compliance matrix* for
-  this tree is not written (there is nothing to measure "full spec matrix" against), the conformance
-  tool has five scenarios where the Swift tools have two 40-scenario suites, and CI covers macOS and
-  Debian but not FreeBSD or Windows. **Not met** — the five-implementation interop matrix (no C99
-  runner and no host here) and the README score, which follows the matrix. Each gap carries a tracker
-  number rather than a paragraph.
+- **Where this stands, measured** — the score the plan's Definition of Done asks for, from
+  `scripts/score-matrix.sh` rather than from memory: **24 of 24 draft-16 requirements in
+  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 5 of the plan's 9 completion
+  criteria are met, 2 partial and 2 not met.** The matrix coverage is 100% *of the matrix*, which is
+  not the same as being done: the criteria that are not met are outside the matrix and outside this
+  repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
+  Windows CI legs need portability work before a job for them would be anything but red. The two
+  partial criteria are conformance scenario breadth (five end-to-end scenarios against the Swift
+  tools' two 40-scenario suites) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
+  sessions, sanitizers and static checks are clean, the public API is documented, nothing
+  placeholder-shaped is exposed as production, and the matrix itself exists and is checked.
+
 - **The CLI tools over IPv6 too** (Phase 10): `wt-client-c99` and `wt-server-c99` exchange a
   session over `[::1]` as well as IPv4 — the same script, parameterised by host, registered as
   `wt_cli_session_ipv6`. A machine with no IPv6 loopback returns CTest's **skip** code (77) with the
