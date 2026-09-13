@@ -173,6 +173,66 @@ wt_status_t wt_qpack_field_line_encode(wt_writer_t *w, const wt_qpack_field_line
 wt_status_t wt_qpack_field_line_static_name(const wt_qpack_field_line_t *line, const char **out_name,
                                             size_t *out_length);
 
+/* -------------------------------------------- RFC 9204 section 3.2's dynamic table */
+
+/* The table's bounds. A dynamic table is peer-driven state, so it is bounded like
+ * every other table in this library: a peer that inserts more than this, or an
+ * entry bigger than this endpoint's capacity, is refused rather than grown for. */
+#define WT_QPACK_DYNAMIC_MAX_ENTRIES 32U
+#define WT_QPACK_DYNAMIC_MAX_BYTES 4096U
+
+/* One entry's size is its name and value plus 32 (section 3.2.1), which is what
+ * the capacity counts. */
+#define WT_QPACK_DYNAMIC_ENTRY_OVERHEAD 32U
+
+typedef struct wt_qpack_dynamic_entry_meta {
+  /* The absolute index of this entry: insertions are numbered from zero for the
+   * life of the connection, so an index never changes meaning (section 3.2.3). */
+  uint64_t absolute_index;
+  uint32_t offset;
+  uint16_t name_length;
+  uint16_t value_length;
+} wt_qpack_dynamic_entry_meta_t;
+
+typedef struct wt_qpack_dynamic_table {
+  /* The live entries, oldest first, with their bytes in `bytes`. */
+  wt_qpack_dynamic_entry_meta_t entries[WT_QPACK_DYNAMIC_MAX_ENTRIES];
+  uint8_t bytes[WT_QPACK_DYNAMIC_MAX_BYTES];
+  size_t used;
+  size_t count;
+  /* The sum of the live entries' sizes, which the capacity bounds. */
+  size_t size;
+  /* The maximum, from SETTINGS_QPACK_MAX_TABLE_CAPACITY. Zero means the peer may
+   * not use a dynamic table at all. */
+  size_t capacity;
+  /* How many insertions have happened, which is the absolute index the NEXT one
+   * will carry. */
+  uint64_t insert_count;
+  /* How many entries have been evicted, so the oldest live entry's absolute index
+   * is known without storing it twice. */
+  uint64_t dropped;
+} wt_qpack_dynamic_table_t;
+
+/* An empty table with this capacity. Capacity is the peer's to choose through
+ * SETTINGS; zero is legal and means no dynamic table. */
+void wt_qpack_dynamic_init(wt_qpack_dynamic_table_t *table, size_t capacity);
+
+/* Change the capacity (section 3.2.2): entries are evicted from the oldest end
+ * until the size fits, and a shrinking capacity can empty the table. */
+void wt_qpack_dynamic_set_capacity(wt_qpack_dynamic_table_t *table, size_t capacity);
+
+/* Insert an entry and return its absolute index. WT_ERR_LIMIT when the entry is
+ * larger than the capacity (section 3.2.1: "the encoder MUST NOT insert an entry
+ * that is larger than the maximum capacity") or when the fixed table is full. */
+wt_status_t wt_qpack_dynamic_insert(wt_qpack_dynamic_table_t *table, const uint8_t *name,
+                                    size_t name_length, const uint8_t *value, size_t value_length,
+                                    uint64_t *out_absolute_index);
+
+/* The entry at an absolute index, or WT_ERR_CLOSED when it has been evicted. */
+wt_status_t wt_qpack_dynamic_entry(const wt_qpack_dynamic_table_t *table, uint64_t absolute_index,
+                                   const uint8_t **out_name, size_t *out_name_length,
+                                   const uint8_t **out_value, size_t *out_value_length);
+
 #ifdef __cplusplus
 }
 #endif

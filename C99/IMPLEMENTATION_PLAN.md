@@ -1525,7 +1525,24 @@ and truncation cases.
 
 Implement static indexed fields.
 - Implement literal field lines.
-- Implement dynamic table.
+- **Sixth part done: the dynamic table.** `src/http3/qpack_dynamic.c` is RFC 9204 section 3.2's FIFO: entries
+sized as name plus value plus 32, evicted from the oldest end when the capacity would be exceeded, with
+absolute indices that never change meaning, so a reference to an evicted entry is reported (WT_ERR_CLOSED)
+rather than resolved to whatever now occupies its place. The capacity is the peer's through
+SETTINGS_QPACK_MAX_TABLE_CAPACITY, zero is legal and means no dynamic table, and a shrinking capacity evicts
+until the size fits -- section 3.2.2's rule, which can empty the table.
+
+The table is bounded like every other piece of peer-driven state in this library: 32 entries and a 4 KiB
+arena, with a refusal rather than growth beyond them, and an entry larger than the capacity refused because
+section 3.2.1 says the encoder must not insert one. The arena is compacted when the oldest entry is evicted,
+which is what keeps a long-lived table from running out of space after capacity's worth of traffic.
+
+One bug, found by the test that inserts three entries into a two-entry table: the eviction moved the
+surviving entries' BYTES down but left their recorded offsets behind, so entry two's name pointed into what
+had been entry one's value -- a wrong name read out of a well-formed table, which is the quietest way for
+QPACK to produce a different header section. Both the fix and the reason are in the code.
+
+Implement dynamic table.
 - Implement encoder and decoder streams.
 - Implement Base and post-Base dynamic references.
 - Enforce table capacity and malformed reference handling.

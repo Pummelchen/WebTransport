@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 49 unit test files and 78,410 checks, run by `ctest` and again under
+- 50 unit test files and 78,478 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -424,6 +424,11 @@ What is here:
   -- so a decoder cannot resolve a dynamic index against the static table by accident, which is the mistake
   that silently produces a different header section. The static forms resolve to a name; the dynamic and
   post-base ones report that they need the dynamic table, which is the next part's work.
+- **The dynamic table** (Phase 6, sixth part): `qpack_dynamic.c` is RFC 9204 section 3.2's FIFO with the
+  section's size rule (name and value plus 32), eviction from the oldest end, and absolute indices that never
+  change meaning, so a reference to an evicted entry is reported as such rather than resolved to whatever now
+  occupies its place. It is bounded like every other peer-driven table here: 32 entries, a 4 KiB arena, and an
+  entry larger than the capacity refused rather than truncated.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
