@@ -89,6 +89,8 @@ wt_status_t wt_http3_message_decode(wt_http3_message_t *message, wt_http3_header
       remember(&field, &message->path, &message->path_length);
     } else if (name_is(&field, ":authority")) {
       remember(&field, &message->authority, &message->authority_length);
+    } else if (name_is(&field, ":protocol")) {
+      remember(&field, &message->protocol, &message->protocol_length);
     } else if (name_is(&field, ":status")) {
       if (!parse_status(field.value, field.value_length, &message->status)) {
         if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;

@@ -1702,6 +1702,27 @@ Completion criteria:
 
 ## Phase 7: WebTransport Draft-16 Core
 
+**First part done: the WebTransport session request, and the pseudo-header that makes it reachable.**
+`include/webtransport/webtransport/session_request.h` decides what a decoded request is: an ordinary request, a
+plain CONNECT, an extended CONNECT for another protocol, or a WebTransport session request that this server
+accepts or refuses with a status. The outcome is a DECISION rather than an error, because "not mine" and "mine,
+but refused" are ordinary answers with status codes, while a malformed request is already the message error the
+HTTP/3 layer raised.
+
+Landing it exposed a gap in the layer below, which is the more useful half of the part: `:protocol` was NOT a
+recognised pseudo-header, so RFC 9220's extended CONNECT -- the request a WebTransport session actually begins
+with -- was refused as an unknown pseudo-header and therefore H3_MESSAGE_ERROR. The HTTP/3 message layer now
+recognises it for requests (and refuses it on a response), keeps its value, and the draft layer reads it. That
+is the kind of gap a port finds only when the layer above starts asking for something, and it is worth
+recording: the HTTP/3 layer was complete for RFC 9114 and incomplete for RFC 9220, which RFC 9114 itself
+references.
+
+Two rules are tested in both directions because each is easy to get backwards. The CONNECT exception in RFC
+9114 section 4.1 covers the PLAIN CONNECT, so a WebTransport request must still carry :scheme and :path -- a
+layer that inherited the exception would accept a request it cannot route. And a server that never advertised
+`WT_ENABLED` refuses with 501 rather than serving a session the client could not have known about, which is
+what makes the setting mean anything.
+
 Port the Swift WebTransport session layer.
 
 Tasks:

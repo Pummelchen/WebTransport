@@ -6,8 +6,8 @@
  *   - pseudo-header fields (the ones starting with ':') come first, and a regular
  *     field before one is H3_MESSAGE_ERROR (section 4.3);
  *   - each pseudo-header appears at most once, and only the ones the message type
- *     defines -- :method, :scheme, :path and :authority for a request, :status for a
- *     response (sections 4.1 and 4.3);
+ *     defines -- :method, :scheme, :path, :authority and (RFC 9220 section 3) :protocol
+ *     for a request, :status for a response (sections 4.1 and 4.3);
  *   - a request carries :method, :scheme and :path, except CONNECT, which carries
  *     only :method and :authority (section 4.4);
  *   - field names are lowercase (section 4.2), a name that is not is H3_MESSAGE_ERROR;
@@ -47,6 +47,9 @@ typedef enum wt_http3_header_message {
 #define WT_HTTP3_PSEUDO_PATH ((uint32_t)1U << 2)
 #define WT_HTTP3_PSEUDO_AUTHORITY ((uint32_t)1U << 3)
 #define WT_HTTP3_PSEUDO_STATUS ((uint32_t)1U << 4)
+/* RFC 9220 section 3: the pseudo-header that makes a CONNECT an EXTENDED one. It is a
+ * request pseudo-header, and a response carrying it is a message error. */
+#define WT_HTTP3_PSEUDO_PROTOCOL ((uint32_t)1U << 5)
 
 typedef struct wt_http3_header_validation {
   wt_http3_header_message_t message;

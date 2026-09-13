@@ -41,6 +41,9 @@ typedef struct wt_http3_message {
   size_t path_length;
   const uint8_t *authority;
   size_t authority_length;
+  /* The extended CONNECT's :protocol value (RFC 9220 section 3), absent otherwise. */
+  const uint8_t *protocol;
+  size_t protocol_length;
   /* The status, when the message is a response and it parsed as section 4.3 requires:
    * three digits, 100 to 599. */
   uint64_t status;

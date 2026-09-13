@@ -9,7 +9,8 @@ scaffolding.
 ## Current Status
 
 **Phases 0 to 4 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are complete, and
-Phase 5 (HTTP/3) has started: its frame codec and stream type prefixes are in.** Phase 3 finishes the TLS 1.3 handshake end to end, and Phase 4
+Phase 5 (HTTP/3) is largely in, and Phase 7 (the draft-16 session layer) has begun: the extended CONNECT
+that starts a session is decided.** Phase 3 finishes the TLS 1.3 handshake end to end, and Phase 4
 is the QUIC connection runtime: packet number spaces with ACK generation, loss detection
 and probe timeouts, NewReno congestion control, the stream state machines and flow
 control, QUIC DATAGRAM, the close paths, connection IDs (issued, retired and received),
@@ -44,7 +45,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 58 unit test files and 78,848 checks, run by `ctest` and again under
+- 59 unit test files and 78,870 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -478,6 +479,14 @@ What is here:
   live at this layer: a `:status` must be three digits in 100..599, and the values that must be present must
   also be non-empty. A blocked section is WT_ERR_AGAIN, and QPACK's own failure codes travel through
   unchanged -- they are HTTP/3 application errors, so they belong in the same place.
+- **The WebTransport session request** (Phase 7, first part): `webtransport/session_request.h` decides what a
+  decoded request is -- an ordinary request, an extended CONNECT for another protocol, or a WebTransport
+  session request this server accepts or refuses with a status. It is a DECISION rather than an error, because
+  "not mine" and "mine, but refused" are ordinary answers. Two rules are easy to get backwards and are tested
+  both ways: the CONNECT exception does NOT excuse a WebTransport request from carrying :scheme and :path
+  (it applies to the plain CONNECT), and a server that never advertised `WT_ENABLED` refuses rather than
+  serving a session the client could not have known about. `:protocol` is now a recognised request
+  pseudo-header in the HTTP/3 layer, which is what makes any of this reachable.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

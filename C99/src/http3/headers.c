@@ -52,6 +52,11 @@ wt_status_t wt_http3_header_validate(wt_http3_header_validation_t *validation, c
         bit = WT_HTTP3_PSEUDO_PATH;
       } else if (equals(name, name_length, ":authority")) {
         bit = WT_HTTP3_PSEUDO_AUTHORITY;
+      } else if (equals(name, name_length, ":protocol")) {
+        /* RFC 9220 section 3: an extended CONNECT names the protocol it is for here.
+         * Without this the WebTransport request would be an unknown pseudo-header and
+         * therefore H3_MESSAGE_ERROR, which is the wrong answer to a legal request. */
+        bit = WT_HTTP3_PSEUDO_PROTOCOL;
       }
       if (bit == WT_HTTP3_PSEUDO_METHOD && equals(value, value_length, "CONNECT")) {
         /* Section 4.4: CONNECT is the one method without :scheme and :path, and it
