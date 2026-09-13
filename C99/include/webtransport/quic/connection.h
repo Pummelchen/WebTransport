@@ -216,6 +216,11 @@ typedef struct wt_quic_connection {
    * an endpoint that issued them without a bound would be growing on its own instructions. */
   wt_quic_issued_connection_id_t issued_ids[WT_QUIC_CONNECTION_IDS_MAX];
   size_t issued_count;
+  /* The sequence number the next issued ID will carry. RFC 9000 section 5.1.1 gives the connection ID the
+   * handshake used sequence 0, so the first ID a peer is TOLD about is sequence 1: numbering the spares
+   * from zero would announce a second ID under a sequence the handshake's ID already owns, and a
+   * RETIRE_CONNECTION_ID naming that sequence would be ambiguous. */
+  uint64_t next_issued_sequence;
   /* And the ones the peer has issued to this endpoint. */
   wt_quic_peer_connection_id_t peer_ids[WT_QUIC_PEER_CONNECTION_IDS_MAX];
   size_t peer_id_count;

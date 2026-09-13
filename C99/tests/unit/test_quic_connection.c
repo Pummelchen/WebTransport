@@ -1392,13 +1392,19 @@ static void test_issue_connection_id(void) {
                wt_quic_connection_issue_connection_id(&pair.client, first_id, sizeof(first_id), token,
                                                       now));
   {
-    const wt_quic_issued_connection_id_t *issued = wt_quic_connection_issued_id(&pair.client, 0U);
+    /* RFC 9000 section 5.1.1: sequence 0 is the connection ID the handshake used, so the first ID this
+     * endpoint announces is sequence 1. Numbering the spares from zero would collide with it. */
+    const wt_quic_issued_connection_id_t *issued = wt_quic_connection_issued_id(&pair.client, 1U);
     WT_EXPECT_TRUE("and remembered by sequence", issued != NULL);
     if (issued != NULL) {
       WT_EXPECT_U64("with its length", (uint64_t)sizeof(first_id), (uint64_t)issued->length);
       WT_EXPECT_BYTES("and its bytes", first_id, issued->id, sizeof(first_id));
     }
+    WT_EXPECT_U64("while the next sequence to hand out is the one after it", 2U,
+                  pair.client.next_issued_sequence);
   }
+  WT_EXPECT_TRUE("and the handshake's own sequence is not in the table",
+                 wt_quic_connection_issued_id(&pair.client, 0U) == NULL);
   WT_EXPECT_STATUS("the same ID again is a caller error", WT_ERR_STATE,
                    wt_quic_connection_issue_connection_id(&pair.client, first_id, sizeof(first_id),
                                                           token, now));
@@ -1496,6 +1502,118 @@ static void test_peer_connection_ids(void) {
    * so testing the decoder's refusal needs a hand-built packet, which is recorded as a task. */
 }
 
+/* RFC 9000 section 19.16: a RETIRE_CONNECTION_ID gives up an ID this endpoint issued. The two sequences
+ * the section makes a PROTOCOL_VIOLATION are tested separately: one that was never issued, and the one
+ * the carrying packet was addressed to. A repeat of a retirement already made is not an error, because
+ * the frame is retransmitted when it is lost. */
+static void test_retire_connection_id(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  wt_quic_transport_parameters_t params;
+  uint8_t secret[WT_SHA256_LEN];
+  uint8_t payload[64];
+  static const uint8_t first_id[5] = {0x21U, 0x22U, 0x23U, 0x24U, 0x25U};
+  static const uint8_t replacement_id[5] = {0x31U, 0x32U, 0x33U, 0x34U, 0x35U};
+  uint8_t token[16];
+  uint64_t now = 105000000U;
+  size_t i;
+
+  memset(token, 0x77, sizeof(token));
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x40U + i);
+  WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  /* The server issues the ID and reads the peer's frames, so both directions of the application keys are
+   * needed on the server: one to announce the ID, one to decrypt the packet that retires it. */
+  WT_EXPECT_OK("the server writes",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("and reads",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  /* Three IDs allowed, so there is room for the issued ID, the retirement, and its replacement. */
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("a limit of three connection IDs",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 3U));
+  {
+    wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+    WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&pw, &params));
+    WT_EXPECT_OK("and are parsed",
+                 wt_quic_connection_set_peer_parameters(&pair.server, payload, wt_writer_offset(&pw)));
+  }
+  WT_EXPECT_OK("the server issues one",
+               wt_quic_connection_issue_connection_id(&pair.server, first_id, sizeof(first_id), token,
+                                                      now));
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID);
+  frame.as.retire_connection_id.sequence = 1U;
+  send_application_frame(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("retiring an issued ID does not close the connection", 0,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("the slot is given up", 0U, (uint64_t)pair.server.issued_count);
+  WT_EXPECT_TRUE("and the ID is no longer known", wt_quic_connection_issued_id(&pair.server, 1U) == NULL);
+
+  /* The room the retirement freed is usable again, under a sequence that has never been handed out. */
+  WT_EXPECT_OK("a replacement is issued",
+               wt_quic_connection_issue_connection_id(&pair.server, replacement_id,
+                                                      sizeof(replacement_id), token, now));
+  WT_EXPECT_TRUE("under the next sequence", wt_quic_connection_issued_id(&pair.server, 2U) != NULL);
+  WT_EXPECT_TRUE("while the retired sequence stays retired",
+                 wt_quic_connection_issued_id(&pair.server, 1U) == NULL);
+
+  /* The same retirement again is a retransmission of a frame whose effect is already in place. */
+  frame.as.retire_connection_id.sequence = 1U;
+  send_application_frame(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 1U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("a repeated retirement is tolerated", 0, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("and does not touch the replacement", 1U, (uint64_t)pair.server.issued_count);
+
+  /* `next_issued_sequence` is 3, so sequence 3 has never been sent to the peer. */
+  frame.as.retire_connection_id.sequence = 3U;
+  send_application_frame(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 2U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("a sequence that was never issued closes it", 1,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a protocol violation", (uint64_t)WT_QUIC_PROTOCOL_VIOLATION,
+                pair.server.close.error_code);
+  WT_EXPECT_U64("naming the frame that caused it", (uint64_t)WT_QUIC_FRAME_RETIRE_CONNECTION_ID,
+                pair.server.close.frame_type);
+  close_pair(&pair);
+}
+
+/* RFC 9000 section 19.16: an endpoint cannot retire the connection ID that the packet carrying the frame
+ * was addressed to. This endpoint accepts packets only on the ID the handshake used, which section 5.1.1
+ * numbers 0. */
+static void test_retire_handshake_connection_id(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 106000000U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x50U + i);
+  WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the server reads",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID);
+  frame.as.retire_connection_id.sequence = 0U;
+  send_application_frame(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("retiring the handshake's own connection ID closes it", 1,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a protocol violation", (uint64_t)WT_QUIC_PROTOCOL_VIOLATION,
+                pair.server.close.error_code);
+  WT_EXPECT_U64("naming the frame that caused it", (uint64_t)WT_QUIC_FRAME_RETIRE_CONNECTION_ID,
+                pair.server.close.frame_type);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1519,5 +1637,7 @@ int main(void) {
   test_stop_sending_send();
   test_issue_connection_id();
   test_peer_connection_ids();
+  test_retire_connection_id();
+  test_retire_handshake_connection_id();
   WT_TEST_MAIN_END("wt_quic_connection");
 }

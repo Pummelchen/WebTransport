@@ -762,6 +762,40 @@ static wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_
   return status;
 }
 
+/* A RETIRE_CONNECTION_ID from the peer (RFC 9000 section 19.16): give up an ID this endpoint issued.
+ *
+ * Section 19.16 makes two sequences a PROTOCOL_VIOLATION: one that was never issued, and the one the peer
+ * used as the Destination Connection ID of the packet that carried the frame -- the peer cannot ask for
+ * the ID it is addressing. This endpoint accepts packets only on the ID the handshake used
+ * (`wt_quic_connection_receive_datagram` matches that one ID), which section 5.1.1 numbers 0, so sequence
+ * 0 is always the ID of the carrying packet here.
+ *
+ * A repeat of a sequence that was already retired is not an error: RETIRE_CONNECTION_ID is retransmitted
+ * when it is lost, so the second copy describes a state the endpoint is already in. The frame still
+ * reaches the handler either way, because replacing a retired ID needs a fresh ID and reset token that
+ * only the caller can produce (section 5.1.2 asks the endpoint to keep one available).
+ */
+static wt_status_t handle_retire_connection_id(wt_quic_connection_t *connection,
+                                               const wt_quic_frame_t *frame,
+                                               wt_quic_visit_t *visit) {
+  uint64_t sequence = frame->as.retire_connection_id.sequence;
+  size_t i;
+
+  if (sequence == 0U || sequence >= connection->next_issued_sequence) {
+    return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, WT_QUIC_FRAME_RETIRE_CONNECTION_ID,
+                      visit->now);
+  }
+  for (i = 0U; i < WT_QUIC_CONNECTION_IDS_MAX; i++) {
+    if (connection->issued_ids[i].in_use && connection->issued_ids[i].sequence == sequence) {
+      connection->issued_ids[i].in_use = 0;
+      /* `issued_count` was incremented only for an entry that is in use, so it cannot underflow here. */
+      connection->issued_count--;
+      break;
+    }
+  }
+  return deliver_to_handler(connection, visit, frame);
+}
+
 static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
   wt_quic_visit_t *visit = context;
   wt_quic_connection_t *connection = visit->connection;
@@ -923,12 +957,13 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
     }
     case WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID:
       return handle_new_connection_id(connection, frame, visit->now);
+    case WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID:
+      return handle_retire_connection_id(connection, frame, visit);
     case WT_QUIC_FRAME_KIND_PING:
     case WT_QUIC_FRAME_KIND_CRYPTO:
     case WT_QUIC_FRAME_KIND_NEW_TOKEN:
     case WT_QUIC_FRAME_KIND_DATA_BLOCKED:
     case WT_QUIC_FRAME_KIND_STREAMS_BLOCKED:
-    case WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID:
     case WT_QUIC_FRAME_KIND_PATH_CHALLENGE:
     case WT_QUIC_FRAME_KIND_PATH_RESPONSE:
     case WT_QUIC_FRAME_KIND_DATAGRAM:
@@ -998,6 +1033,9 @@ wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
   wt_quic_flow_init(&connection->flow, 0U, 0U);
   wt_quic_congestion_init(&connection->congestion, (uint64_t)config->max_datagram_size);
   wt_quic_close_state_init(&connection->close);
+  /* Sequence 0 belongs to the connection ID the handshake used (RFC 9000 section 5.1.1), so the first ID
+   * this endpoint announces to the peer is sequence 1. */
+  connection->next_issued_sequence = 1U;
   return WT_OK;
 }
 
@@ -1103,7 +1141,7 @@ wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connect
   if ((uint64_t)connection->issued_count >= allowed) return WT_ERR_LIMIT;
 
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID);
-  frame.as.new_connection_id.sequence = (uint64_t)connection->issued_count;
+  frame.as.new_connection_id.sequence = connection->next_issued_sequence;
   frame.as.new_connection_id.retire_prior_to = 0U;
   frame.as.new_connection_id.connection_id = id;
   frame.as.new_connection_id.connection_id_length = length;
@@ -1119,6 +1157,9 @@ wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connect
   connection->issued_ids[slot].length = length;
   memcpy(connection->issued_ids[slot].reset_token, reset_token, 16U);
   connection->issued_count++;
+  /* The sequence is spent whether or not this ID is ever retired: RFC 9000 section 5.1.1 keys every
+   * reference to an ID by its sequence, so a number is never reused. */
+  connection->next_issued_sequence++;
   return WT_OK;
 }
 
