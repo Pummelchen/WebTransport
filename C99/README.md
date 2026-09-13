@@ -218,8 +218,10 @@ What is here:
   **it now compiles for Windows**, which is the claim that check is measured by. The cross-compile
   found four real differences the inventory had not named, including `EHOSTDOWN` not existing there
   (which is why the error *classification*, not just the number, is per platform) and `inet_ntop`'s
-  length type. What remains is the Windows runner (a linked build needs OpenSSL for Windows) and
-  FreeBSD.
+  length type. The check now sweeps the **whole tree** — 72 library sources and 92 test/app sources —
+  and they all compile for Windows, which is the claim a runner needs before it is worth adding. Two
+  more defects came out of that sweep, both invisible to clang. What remains is the Windows runner (a
+  *linked* build needs OpenSSL for Windows, plus a way to run the tests there) and FreeBSD.
   `scripts/check-portability.sh` fails if the library uses a POSIX-only call the inventory does not
   name — it caught `sendto`/`recvfrom` missing on its first run — and CI runs it. FreeBSD is close to
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.

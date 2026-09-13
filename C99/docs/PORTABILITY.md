@@ -69,10 +69,19 @@ named:**
 That is the difference between an inventory and a compiler, and it is the argument for checking a branch
 rather than describing it.
 
+`scripts/check-windows-platform.sh` now sweeps the **whole tree** -- every source in `src/`, `tests/` and
+`apps/` -- with the include paths and the one define CMake gives them, and they all compile for Windows: 72 + 92
+sources. That is the claim a runner needs before it is worth adding, measured rather than hoped for. The sweep
+found two more defects that clang had been silent about: a dead local `wt_webtransport_capsule_t` in
+`src/webtransport/capsule.c` (GCC's `-Wunused-but-set-variable`, which clang does not diagnose) and a unit test
+comparing a platform handle with `-1` rather than the sentinel. It also showed why an ad-hoc loop is not a
+check: eight files "failed" only because the loop omitted the include paths and the trust-fixture define CMake
+supplies.
+
 What remains is the Windows RUNNER and FreeBSD. A job that cannot pass is worse than an absent one, because it
-teaches people to ignore CI -- and the cross-compile is what makes a job plausible now: `udp.c` compiles for the
-platform, while what a runner would still need is a linked build (OpenSSL for Windows) and a way to run the
-tests there.
+teaches people to ignore CI -- and the cross-compile is what makes a job plausible now: the whole tree compiles for
+the platform, while what a runner would still need is a LINKED build (OpenSSL for Windows) and a way to run the
+tests there -- both named, neither guessed at.
 
 ## The two symbols this document is checked for
 
