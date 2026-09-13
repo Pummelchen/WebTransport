@@ -643,7 +643,11 @@ What is here:
   protection key is the one thing an update does not change (section 6.1); and the connection keeps the two
   packet numbers section 6 reasons about, since the phase being retired and the phase arriving carry the SAME
   bit (section 6.5). A packet whose tag does not verify is wiped by design, so a second attempt at one packet
-  reads a saved copy.
+  reads a saved copy. And the limits that exist to make an update happen (RFC 9001 section 6.6) are counted
+  and enforced: the packets protected with each key set, the received packets that fail authentication across
+  the connection's whole life, the two very different limits the suite implies (2^23 and 2^52 for AES-GCM,
+  2^36 for ChaCha20-Poly1305's integrity), a rotation before the limit is reached, and `AEAD_LIMIT_REACHED`
+  when a rotation is not possible.
 - **The CRYPTO stream** (Phase 4, ninth part): `quic/crypto_stream.h` is the handshake bytes, which
   arrive by offset rather than in order. The receive half is a window with a bitmap of what has
   arrived, delivering only up to the first hole, so a ClientHello split across two packets reads
