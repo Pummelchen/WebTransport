@@ -191,6 +191,13 @@ typedef struct wt_quic_tx_frame {
  * and is counted (`control_frames_unretained`). */
 #define WT_QUIC_CONTROL_WIRE_MAX 64U
 
+/* Path validation (RFC 9000 section 8.2, WT-172): how many PATH_CHALLENGEs are sent before the path is declared
+ * unvalidated. Each carries a DIFFERENT payload, which is why the section says the payload must differ -- a
+ * repeated one would be indistinguishable from the packet of an attacker replaying an old challenge. Three is the
+ * shape RFC 9002 uses for a probe ("one, two, then give up"), and the wait between them is the connection's own
+ * probe timeout. */
+#define WT_QUIC_PATH_VALIDATION_ATTEMPTS 3U
+
 typedef struct wt_quic_control_frame {
   int in_use;
   wt_quic_space_t space;
@@ -293,6 +300,22 @@ typedef struct wt_quic_connection {
   /* The datagrams that have arrived and not been read, bounded and with the newest discarded when it
    * is full (RFC 9221's frames are unreliable, so dropping one is not an error). */
   wt_quic_datagram_queue_t datagrams;
+
+  /* PATH VALIDATION of the path this connection is on (RFC 9000 section 8.2, and section 10.1.1's liveness test,
+   * WT-172). The connection drives it itself because every part of it is a protocol rule rather than a policy: a
+   * challenge the peer must echo, a payload that must be NEW on every attempt, a timer, and a bound after which
+   * the path is declared unvalidated. Only the DECISION to validate -- and what to do about a failure -- belongs
+   * to the caller, which is why there is an entry point and not a caller-supplied frame. */
+  int path_validating;
+  int path_challenge_pending;
+  uint8_t path_challenge[WT_QUIC_PATH_CHALLENGE_LENGTH];
+  unsigned path_validation_attempts;
+  uint64_t path_validation_deadline;
+  int path_validated;
+  uint64_t path_challenges_sent;
+  uint64_t path_responses_sent;
+  uint64_t path_responses_matched;
+  uint64_t path_validation_failures;
 
   wt_quic_tx_frame_t frames[WT_QUIC_CONNECTION_FRAMES_MAX];
   /* The connection's own unacknowledged control frames, re-sent when the packet carrying one is lost. */
@@ -791,6 +814,29 @@ int wt_quic_connection_key_update_allowed(const wt_quic_connection_t *connection
  * A caller uses this to migrate, or simply to stop being linkable by a connection ID it has used for a while
  * (section 9.5). */
 wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *connection, uint64_t now);
+
+/* Start validating the path this connection is on (RFC 9000 section 8.2.1): a PATH_CHALLENGE with eight
+ * unpredictable bytes goes out, the peer's PATH_RESPONSE with the SAME bytes proves the path works in both
+ * directions, and a path that does not answer is retried with a NEW payload up to
+ * `WT_QUIC_PATH_VALIDATION_ATTEMPTS` times before it is declared unvalidated (section 8.2.4).
+ *
+ * In this tree a connection has ONE peer address, which its caller gave it at `attach`; what is validated is
+ * therefore that path -- a liveness test a caller runs on a session it has not heard from, which is what section
+ * 10.1.1 asks for. This is also the RFC's own first use for a PATH_CHALLENGE, and the reason the connection owns
+ * the machinery rather than the caller: a challenge whose payload does not change between attempts is the one
+ * mistake section 8.2.1 names by hand.
+ *
+ * The decision to validate is the caller's, and so is the reaction to a failure: a path that stops answering is
+ * a diagnostic here (`wt_quic_connection_path_validation_failures`), not a close, because only the caller knows
+ * whether it has another path to try. WT_ERR_STATE when the connection is closed, and WT_OK when a validation is
+ * already running -- asking twice is not an error, and a caller that wants a fresh one can wait for the first to
+ * finish or fail. */
+wt_status_t wt_quic_connection_validate_path(wt_quic_connection_t *connection, uint64_t now);
+int wt_quic_connection_path_validating(const wt_quic_connection_t *connection);
+int wt_quic_connection_path_validated(const wt_quic_connection_t *connection);
+uint64_t wt_quic_connection_path_challenges_sent(const wt_quic_connection_t *connection);
+uint64_t wt_quic_connection_path_responses_sent(const wt_quic_connection_t *connection);
+uint64_t wt_quic_connection_path_validation_failures(const wt_quic_connection_t *connection);
 
 /* Retire a connection ID the PEER issued that this endpoint is NOT using (RFC 9000 section 5.1.2), which is also
  * how a caller asks the peer for a replacement: "Sending a RETIRE_CONNECTION_ID frame ... requests that the peer

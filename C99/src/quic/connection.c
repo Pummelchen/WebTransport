@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "webtransport/crypto/crypto.h"
 #include "webtransport/quic/frame.h"
 #include "webtransport/quic/packet_number.h"
 #include "webtransport/quic/packet_io.h"
@@ -604,6 +605,9 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
 static wt_status_t send_control_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
                                       const wt_quic_frame_t *frame, int ack_eliciting, int *out_sent,
                                       uint64_t now);
+/* The path-validation steps the public entry point uses and the handlers below define (WT-172). */
+static wt_status_t arm_path_challenge(wt_quic_connection_t *connection);
+static wt_status_t flush_path_challenge(wt_quic_connection_t *connection, uint64_t now);
 static wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
                                   const wt_quic_frame_t *frame, int ack_eliciting, int has_descriptor,
                                   int is_crypto, uint64_t stream_id, uint64_t offset, size_t length,
@@ -1200,6 +1204,44 @@ wt_status_t wt_quic_connection_retire_peer_connection_id(wt_quic_connection_t *c
   return forgotten != 0 ? WT_OK : WT_ERR_STATE;
 }
 
+wt_status_t wt_quic_connection_validate_path(wt_quic_connection_t *connection, uint64_t now) {
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (wt_quic_connection_is_closed(connection) != 0) return WT_ERR_STATE;
+  /* Asking twice is not an error: the second call is a caller that wants the path validated, and one is already
+   * on its way. A caller that wants a FRESH validation waits for the first to answer or fail. */
+  if (connection->path_validating != 0) return WT_OK;
+
+  status = arm_path_challenge(connection);
+  if (status != WT_OK) return status;
+  connection->path_validating = 1;
+  connection->path_validation_attempts = 1U;
+  connection->path_validation_deadline = now + pto_of(connection);
+  /* And it goes out now rather than at the next flush: a caller asking to validate a path is asking now. */
+  return flush_path_challenge(connection, now);
+}
+
+int wt_quic_connection_path_validating(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->path_validating : 0;
+}
+
+int wt_quic_connection_path_validated(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->path_validated : 0;
+}
+
+uint64_t wt_quic_connection_path_challenges_sent(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->path_challenges_sent : 0U;
+}
+
+uint64_t wt_quic_connection_path_responses_sent(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->path_responses_sent : 0U;
+}
+
+uint64_t wt_quic_connection_path_validation_failures(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->path_validation_failures : 0U;
+}
+
 uint64_t wt_quic_connection_peer_ids_retired(const wt_quic_connection_t *connection) {
   return connection != NULL ? connection->peer_ids_retired : 0U;
 }
@@ -1379,6 +1421,105 @@ static wt_status_t handle_retire_connection_id(wt_quic_connection_t *connection,
     }
   }
   return deliver_to_handler(connection, visit, frame);
+}
+
+/* A PATH_CHALLENGE from the peer (RFC 9000 section 8.2.2): echo its payload in a PATH_RESPONSE.
+ *
+ * "An endpoint MUST NOT delay transmission of a packet containing a PATH_RESPONSE frame unless constrained by
+ * congestion control", so the response goes out HERE rather than at the next flush -- a peer that is validating a
+ * path it has migrated to is waiting on this packet before it will use the path at all. The frame is sent through
+ * the ordinary send path and carries no retransmission descriptor, because section 13.3 sends a PATH_RESPONSE
+ * "just once": the peer's own challenge, retried with a new payload, is what produces another one.
+ *
+ * A response that cannot be sent (no room, no Application keys, congestion) is NOT an error here: the peer will
+ * challenge again, and refusing the frame would close a connection over a probe. It is counted instead. */
+static wt_status_t handle_path_challenge(wt_quic_connection_t *connection, const wt_quic_frame_t *frame,
+                                        wt_quic_visit_t *visit) {
+  wt_quic_frame_t response = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PATH_RESPONSE);
+  int sent = 0;
+
+  response.as.path_response.data = frame->as.path_challenge.data;
+  if (frame->as.path_challenge.data != NULL) {
+    if (send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &response, 1, &sent, visit->now) == WT_OK &&
+        sent != 0) {
+      connection->path_responses_sent++;
+    }
+  }
+  return deliver_to_handler(connection, visit, frame);
+}
+
+/* A PATH_RESPONSE from the peer (RFC 9000 section 8.2.3): the path is validated when the payload is the one this
+ * endpoint challenged with. A response that does not match is not an error either -- section 8.2.1 lets an
+ * endpoint send challenges for several paths at once, and an implementation that closed on a stranger's response
+ * would be closing on a packet anybody could write. The frame still reaches the handler, because a caller that is
+ * validating something of its own may want to see it. */
+static wt_status_t handle_path_response(wt_quic_connection_t *connection, const wt_quic_frame_t *frame,
+                                        wt_quic_visit_t *visit) {
+  if (connection->path_validating != 0 && frame->as.path_response.data != NULL &&
+      wt_ct_equal(connection->path_challenge, frame->as.path_response.data,
+                  WT_QUIC_PATH_CHALLENGE_LENGTH) != 0) {
+    connection->path_validating = 0;
+    connection->path_challenge_pending = 0;
+    connection->path_validated = 1;
+    connection->path_responses_matched++;
+  }
+  return deliver_to_handler(connection, visit, frame);
+}
+
+/* The next PATH_CHALLENGE, with a payload nothing has seen before: section 8.2.1 asks for eight bytes "that are
+ * hard for other entities to guess", and a REPEATED payload would make this endpoint's retry indistinguishable
+ * from an attacker's replay of an old challenge. Returns WT_OK when one is owed. */
+static wt_status_t arm_path_challenge(wt_quic_connection_t *connection) {
+  wt_status_t status = wt_random_bytes(connection->path_challenge, WT_QUIC_PATH_CHALLENGE_LENGTH);
+  if (status != WT_OK) return status;
+  connection->path_challenge_pending = 1;
+  return WT_OK;
+}
+
+/* Send the pending challenge, if there is one and this endpoint can protect an Application packet. The frame is
+ * acked by the peer's response rather than by an acknowledgement, and it is deliberately NOT retransmitted by the
+ * loss machinery: a retransmitted PATH_CHALLENGE would carry the same payload, which section 8.2.1 forbids. The
+ * timer in `on_timeout` is what produces the next attempt, with a new payload. */
+static wt_status_t flush_path_challenge(wt_quic_connection_t *connection, uint64_t now) {
+  wt_quic_frame_t challenge = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PATH_CHALLENGE);
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection->path_challenge_pending == 0) return WT_OK;
+  if (!connection->has_keys_out[WT_QUIC_SPACE_APPLICATION]) return WT_OK;
+
+  challenge.as.path_challenge.data = connection->path_challenge;
+  status = send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &challenge, 1, &sent, now);
+  if (status != WT_OK) return status;
+  if (sent == 0) return WT_OK;
+  connection->path_challenge_pending = 0;
+  connection->path_challenges_sent++;
+  return WT_OK;
+}
+
+/* The path-validation timer (RFC 9000 section 8.2.4): a challenge that has not been answered by its deadline is
+ * replaced -- new payload, new deadline -- until the attempts run out, at which point the path is unvalidated and
+ * the failure is counted for the caller to act on. */
+static wt_status_t path_validation_on_timeout(wt_quic_connection_t *connection, uint64_t now) {
+  wt_status_t status;
+
+  if (connection->path_validating == 0) return WT_OK;
+  if (now < connection->path_validation_deadline) return WT_OK;
+
+  if (connection->path_validation_attempts >= WT_QUIC_PATH_VALIDATION_ATTEMPTS) {
+    connection->path_validating = 0;
+    connection->path_challenge_pending = 0;
+    connection->path_validation_failures++;
+    return WT_OK;
+  }
+  connection->path_validation_attempts++;
+  connection->path_validation_deadline = now + pto_of(connection);
+  status = arm_path_challenge(connection);
+  if (status != WT_OK) return status;
+  /* And it goes out on this timer rather than waiting for a flush: the timer is what the caller's loop runs, and
+   * a challenge that armed here but left the sending to a later call would be a probe this endpoint decided to
+   * send and then did not. */
+  return flush_path_challenge(connection, now);
 }
 
 static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
@@ -1581,7 +1722,9 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
     case WT_QUIC_FRAME_KIND_DATA_BLOCKED:
     case WT_QUIC_FRAME_KIND_STREAMS_BLOCKED:
     case WT_QUIC_FRAME_KIND_PATH_CHALLENGE:
+      return handle_path_challenge(connection, frame, visit);
     case WT_QUIC_FRAME_KIND_PATH_RESPONSE:
+      return handle_path_response(connection, frame, visit);
     case WT_QUIC_FRAME_KIND_DATAGRAM:
       /* Everything that is not PADDING, an acknowledgement or a close makes the packet
        * ack-eliciting, whether or not this layer acts on it itself (RFC 9000 section 13.2.1). */
@@ -2311,7 +2454,10 @@ wt_status_t wt_quic_connection_flush(wt_quic_connection_t *connection, uint64_t 
     status = flush_space(connection, (wt_quic_space_t)i, 0, 0, now);
     if (status != WT_OK) return status;
   }
-  return WT_OK;
+  /* And a PATH_CHALLENGE this connection owes (WT-172), after the spaces: a challenge is a probe, not a
+   * handshake message, and a flush that sent it before an owed acknowledgement would delay the peer's own
+   * progress to ask it a question of our own. */
+  return flush_path_challenge(connection, now);
 }
 
 /* Discard a Retry, counting it. Every discard below is a rule from RFC 9000 section 17.2.5.2, and each is counted
@@ -2982,6 +3128,11 @@ wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint
       if (status != WT_OK) return status;
     }
   }
+
+  /* The path-validation timer (WT-172) before the probe timeout: a challenge that is due is a question this
+   * endpoint asked, and re-asking it is cheaper than a probe. */
+  status = path_validation_on_timeout(connection, now);
+  if (status != WT_OK) return status;
 
   /* The probe timeout is one timer for the connection (RFC 9002 section 6.2.2), armed for the space
    * whose deadline comes first. The backoff is advanced once, because the timer that fired is one. */

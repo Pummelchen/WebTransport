@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 82 test programs and 82,167 checks, run by `ctest` and again under
+- 82 test programs and 82,293 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -601,6 +601,19 @@ What is here:
   an ACK is replaced rather than repeated, a CONNECTION_CLOSE is section 10's business, a DATAGRAM is never
   retransmitted at all (RFC 9221 section 5.2), a PATH_RESPONSE is sent once while a PATH_CHALLENGE must carry
   a fresh payload, and CRYPTO and STREAM bytes are answered by the layers that own them.
+- **Path validation, driven by the connection** (WT-172): RFC 9000 section 8.2 is the liveness test of section
+  10.1.1, and the rules are the protocol's rather than a caller's, so the connection owns them.
+  `wt_quic_connection_validate_path` sends a PATH_CHALLENGE with eight unpredictable bytes; a PATH_RESPONSE
+  carrying those bytes validates the path; a path that does not answer is retried with a **new payload** -- which
+  section 8.2.1 requires by hand, because a repeated one is indistinguishable from an attacker replaying an old
+  challenge -- up to `WT_QUIC_PATH_VALIDATION_ATTEMPTS` times, and the failure is then counted for the caller.
+  The retry is driven by the connection's own probe timeout rather than by the loss machinery, for that same
+  reason: a retransmitted PATH_CHALLENGE would carry the payload that must not repeat. A peer's challenge is
+  echoed IMMEDIATELY, from inside the receive, because section 8.2.2 forbids delaying a PATH_RESPONSE. The
+  decision to validate is the caller's, and so is the reaction to a failure -- a path that stops answering is a
+  diagnostic, not a close, because only the caller knows whether it has another path to try. **MIGRATION is
+  deliberately out of scope** for this tree: a connection has ONE peer address, given at `attach`, and a caller
+  that needs to move a session re-establishes it rather than migrating this one.
 - **A server can send a Retry, and serve the client that answers it** (WT-168): RFC 9000 section 8.1.2 lets a
   server answer a client's first Initial with a Retry, which proves the client's address before the server has
   spent any state on it -- the only defence section 21.3 accepts, and the reason quiche's server retries.
