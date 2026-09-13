@@ -52,6 +52,7 @@ set(WT_UNIT_TESTS
   test_http3_streams
   test_http3_request
   test_http3_headers
+  test_http3_message
   test_qpack_static
   test_qpack_primitives
   test_qpack_huffman

@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 57 unit test files and 78,815 checks, run by `ctest` and again under
+- 58 unit test files and 78,848 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -472,6 +472,12 @@ What is here:
   :method/:scheme/:path required except for CONNECT (which requires :authority), lowercase names, the
   connection-specific fields forbidden and `te` only for `trailers`. Every breach is H3_MESSAGE_ERROR, and the
   validator consumes fields one at a time because the rules are about ORDER.
+- **HTTP/3 messages** (Phase 5, eighth part): `http3/message.h` is the join between the two phases -- a
+  QPACK field section in, a validated request or response out, with the method, scheme, path, authority and
+  status kept where a caller can read them instead of walking the fields again. It adds the two rules that
+  live at this layer: a `:status` must be three digits in 100..599, and the values that must be present must
+  also be non-empty. A blocked section is WT_ERR_AGAIN, and QPACK's own failure codes travel through
+  unchanged -- they are HTTP/3 application errors, so they belong in the same place.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

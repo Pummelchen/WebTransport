@@ -1437,6 +1437,20 @@ validator that enforced :scheme and :path unconditionally would reject every ext
 exactly the request a WebTransport session begins with (draft-ietf-webtrans-http3 section 3.1). That
 connection is why this part is HTTP/3's side of the line rather than QPACK's.
 
+**Eighth part done: HTTP/3 messages.** `include/webtransport/http3/message.h` is the join between the two
+phases: a QPACK field section in, a validated request or response out, with the method, scheme, path,
+authority and status kept where a caller can read them rather than walking the fields again -- which is what
+the CONNECT handling of the draft-16 session layer will want. It adds the two rules that belong here rather
+than in either neighbouring layer: a `:status` has to be three digits in 100..599 (section 4.3.2), and a value
+that must be PRESENT must also be non-empty, so an empty `:path` is refused even though the field arrived.
+
+Two interface details came out of it. A blocked section is WT_ERR_AGAIN, as the QPACK layer reports it, and
+the caller that gives up is the one that turns it into an error -- the same rule as the two parts before. And
+the two error enums do not share a zero value: QPACK's success is 0 and HTTP/3's is 0x0100, so passing one
+through as the other would hand a caller a "no error" that is not its type's no-error. Every QPACK result is
+translated, and the codes themselves need no mapping because RFC 9204 section 8 makes them HTTP/3 application
+errors in the first place.
+
 Enforce request/control stream constraints.
 - Reject duplicate SETTINGS and malformed stream ordering.
 

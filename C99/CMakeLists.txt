@@ -127,6 +127,7 @@ set(WT_HTTP3_SOURCES
   src/http3/streams.c
   src/http3/request.c
   src/http3/headers.c
+  src/http3/message.c
   src/http3/qpack.c
   src/http3/qpack_primitives.c
   src/http3/qpack_huffman.c
@@ -178,6 +179,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/http3/streams.h
   include/webtransport/http3/request.h
   include/webtransport/http3/headers.h
+  include/webtransport/http3/message.h
   include/webtransport/http3/qpack.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
