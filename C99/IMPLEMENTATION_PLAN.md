@@ -1092,6 +1092,20 @@ streams and the peer's bidirectional ones, never a peer's unidirectional stream,
 receive side already handling a reset that arrives, the stream layer now has both directions of the
 cancellation path, which is the "cancellation" item of the phase's task list.
 
+**Twenty-ninth part done: a lost stream packet names what to send again.** A STREAM send now carries a
+retransmission descriptor -- the stream, the offset and the length -- so that when RFC 9002's loss
+detection declares its packet lost, the connection hands the descriptor to the owner and the owner sends
+the bytes again. WHO KEEPS THE BYTES IS THE POINT: this layer cannot, and should not, so the descriptor is
+the whole mechanism -- the same shape the CRYPTO stream already uses, which is why `wt_quic_tx_frame_t`
+grew a `stream_id` and the handshake driver's lost handler ignores anything that is not its own.
+
+Two things the test had to get right and are worth remembering. The acknowledgement must be in the SAME
+packet number space as the packets it acknowledges -- an ACK in the Initial space says nothing about
+Application-space packets (RFC 9000 section 12.3) -- and a burst of losses reports several packets, in the
+order they were sent, so a witness that overwrites its record describes the newest rather than the
+oldest. `tests/unit/test_quic_connection.c` (606 checks) checks the descriptor of the first loss: the
+stream, the offset and the length the packet actually covered.
+
 Implement the production network state machine.
 
 Tasks:

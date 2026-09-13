@@ -1203,6 +1203,114 @@ static void test_reset_stream_send(void) {
   close_pair(&pair);
 }
 
+/* What a lost STREAM packet tells its owner: RFC 9002 section 6.1 hands a lost packet back to whoever
+ * can send it again, and for a stream that is the layer that keeps the bytes. This checks the
+ * descriptor the connection reports -- the stream, the offset and the length -- because a descriptor
+ * that named the wrong range would resend the wrong bytes just as silently as no descriptor at all. */
+typedef struct lost_witness {
+  size_t count;
+  uint64_t stream_id;
+  uint64_t offset;
+  size_t length;
+  int is_crypto;
+} lost_witness_t;
+
+static void record_stream_loss(void *context, const wt_quic_tx_frame_t *frame) {
+  lost_witness_t *witness = context;
+  /* The FIRST loss is the one described here: losses are reported in the order the packets were sent,
+   * so the first is the oldest, and a burst reports several. */
+  if (witness->count == 0U) {
+    witness->stream_id = frame->stream_id;
+    witness->offset = frame->offset;
+    witness->length = frame->length;
+    witness->is_crypto = frame->is_crypto;
+  }
+  witness->count++;
+}
+
+static void test_stream_retransmit_descriptor(void) {
+  connection_pair_t pair;
+  lost_witness_t witness;
+  uint8_t payload[64];
+  wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+  wt_quic_transport_parameters_t params;
+  size_t i;
+  uint64_t now = 101000000U;
+
+  memset(&witness, 0, sizeof(witness));
+  open_pair(WT_UDP_IPV4, &pair);
+  {
+    wt_quic_packet_keys_t keys;
+    uint8_t secret[WT_SHA256_LEN];
+    size_t bit;
+    for (bit = 0U; bit < sizeof(secret); bit++) secret[bit] = (uint8_t)(0xc0U + bit);
+    WT_EXPECT_OK("application keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+    WT_EXPECT_OK("client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+    WT_EXPECT_OK("client reads", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+    WT_EXPECT_OK("server writes", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+    WT_EXPECT_OK("server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  }
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("a stream grant",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 4U));
+  WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
+  WT_EXPECT_OK("and is parsed by the client",
+               wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+  WT_EXPECT_OK("the client sends stream data",
+               wt_quic_connection_open_stream(&pair.client, 1, &now));
+  wt_quic_connection_set_handlers(&pair.client, NULL, NULL, record_stream_loss, &witness);
+  for (i = 0U; i < 4U; i++) {
+    uint8_t data[2] = {(uint8_t)i, (uint8_t)(0xf0U + i)};
+    WT_EXPECT_OK("a stream payload is sent",
+                 wt_quic_connection_send_stream(&pair.client, 0U, i * 2U, data, sizeof(data), 0,
+                                                now));
+    now += 100U;
+  }
+  WT_EXPECT_U64("four packets are in flight", 4U, (uint64_t)wt_quic_loss_count(&pair.client.loss));
+
+  /* The server acknowledges only the last one, which puts the first beyond the packet threshold. */
+  {
+    wt_quic_frame_t ack = wt_quic_frame_make(WT_QUIC_FRAME_KIND_ACK);
+    uint8_t frame_bytes[64];
+    uint8_t datagram[128];
+    wt_writer_t w = wt_writer_init(frame_bytes, sizeof(frame_bytes));
+    size_t frame_len;
+    size_t datagram_len = 0U;
+    wt_quic_packet_build_t build;
+
+    ack.as.ack.largest = 3U;
+    ack.as.ack.delay = 0U;
+    ack.as.ack.first_range = 0U;
+    ack.as.ack.range_count = 0U;
+    WT_EXPECT_OK("an acknowledgement encodes", wt_quic_frame_encode(&w, &ack));
+    frame_len = wt_writer_offset(&w);
+    memset(&build, 0, sizeof(build));
+    /* A short header, because the packets being acknowledged are in the APPLICATION space: an
+     * acknowledgement in another space says nothing about them (RFC 9000 section 12.3). */
+    build.short_header = 1;
+    build.version = WT_QUIC_VERSION_1;
+    build.destination_connection_id = k_dcid;
+    build.destination_connection_id_len = sizeof(k_dcid);
+    build.packet_number = 7U;
+    build.packet_number_length = 1U;
+    build.payload = frame_bytes;
+    build.payload_len = frame_len;
+    build.keys = &pair.server.keys_out[WT_QUIC_SPACE_APPLICATION];
+    WT_EXPECT_OK("the packet builds",
+                 wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+    WT_EXPECT_OK("the server's socket sends it",
+                 wt_udp_send(&pair.server_socket, &pair.client_address, datagram, datagram_len));
+  }
+  now += 1000U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_TRUE("packets are reported lost", witness.count >= 1U);
+  WT_EXPECT_INT("and it is a stream packet", 0, witness.is_crypto);
+  WT_EXPECT_U64("on the stream it was sent on", 0U, witness.stream_id);
+  WT_EXPECT_U64("at the offset it covered", 0U, witness.offset);
+  WT_EXPECT_U64("with the length it covered", 2U, (uint64_t)witness.length);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1222,5 +1330,6 @@ int main(void) {
   test_reset_and_stop();
   test_limit_extension();
   test_reset_stream_send();
+  test_stream_retransmit_descriptor();
   WT_TEST_MAIN_END("wt_quic_connection");
 }

@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,910 checks, run by `ctest` and again under
+- 38 unit test files and 75,949 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -283,6 +283,10 @@ What is here:
   RESET_STREAM (RFC 9000 section 19.4) with the final size computed from what was sent, moves the send half
   to Reset Sent, and refuses a stream that is not this endpoint's to send on or one already finished --
   with the receive side already handling an arriving reset, both directions of the cancellation path exist.
+- **A lost stream packet names what to send again** (Phase 4, twenty-ninth part): a STREAM send carries a
+  retransmission descriptor -- the stream, the offset and the length -- which the connection hands to the
+  owner when loss detection declares its packet lost, so the layer that keeps the bytes can send them
+  again. The same shape the CRYPTO stream uses, with the stream id added to `wt_quic_tx_frame_t`.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

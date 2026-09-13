@@ -173,13 +173,14 @@ static size_t sample_minimum(size_t packet_number_length) {
 /* A descriptor for a retransmittable payload, or -1 when every slot is taken. Slots are indexed by
  * the loss list's `tag`, so a lost packet finds its own descriptor without a search. */
 static int alloc_frame(wt_quic_connection_t *connection, wt_quic_space_t space, int is_crypto,
-                       uint64_t offset, size_t length) {
+                       uint64_t stream_id, uint64_t offset, size_t length) {
   size_t i;
   for (i = 0U; i < WT_QUIC_CONNECTION_FRAMES_MAX; i++) {
     if (!connection->frames[i].in_use) {
       connection->frames[i].in_use = 1;
       connection->frames[i].space = space;
       connection->frames[i].is_crypto = is_crypto;
+      connection->frames[i].stream_id = stream_id;
       connection->frames[i].offset = offset;
       connection->frames[i].length = length;
       return (int)i;
@@ -352,8 +353,8 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
  * that had nothing to acknowledge. */
 static wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
                                   const wt_quic_frame_t *frame, int ack_eliciting,
-                                  int has_descriptor, int is_crypto, uint64_t offset, size_t length,
-                                  int *out_sent, uint64_t now) {
+                                  int has_descriptor, int is_crypto, uint64_t stream_id,
+                                  uint64_t offset, size_t length, int *out_sent, uint64_t now) {
   uint8_t payload[WT_QUIC_CONNECTION_PAYLOAD_MAX];
   wt_writer_t w = wt_writer_init(payload, sizeof(payload));
   size_t packet_number_length;
@@ -381,7 +382,7 @@ static wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_spac
   payload_length = wt_writer_offset(&w);
 
   if (has_descriptor) {
-    int index = alloc_frame(connection, space, is_crypto, offset, length);
+    int index = alloc_frame(connection, space, is_crypto, stream_id, offset, length);
     if (index < 0) return WT_ERR_LIMIT;
     tag = (uint64_t)index;
   }
@@ -821,7 +822,7 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
           uint64_t next = wt_quic_flow_next_max_data(&connection->flow);
           int granted = 0;
           grant.as.max_data.maximum = next;
-          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U,
+          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U, 0U,
                                   &granted, visit->now);
           if (status == WT_OK && granted) {
             wt_quic_flow_on_max_data_sent(&connection->flow, next);
@@ -834,7 +835,7 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
           int granted = 0;
           grant.as.max_stream_data.id = frame->as.stream.id;
           grant.as.max_stream_data.maximum = next;
-          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U,
+          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U, 0U,
                                   &granted, visit->now);
           if (status == WT_OK && granted) {
             wt_quic_stream_on_max_stream_data_sent(stream, next);
@@ -981,7 +982,7 @@ wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_
   frame.as.crypto.data = data;
   frame.as.crypto.length = length;
 
-  status = send_one_frame(connection, space, &frame, 1, 1, 1, offset, length, &sent, now);
+  status = send_one_frame(connection, space, &frame, 1, 1, 1, 0U, offset, length, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -1017,7 +1018,7 @@ wt_status_t wt_quic_connection_send_max_data(wt_quic_connection_t *connection, u
 
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_DATA);
   frame.as.max_data.maximum = maximum;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent, now);
   if (status != WT_OK) return status;
   if (sent) connection->local_max_data = maximum;
   return sent ? WT_OK : WT_ERR_STATE;
@@ -1072,7 +1073,7 @@ wt_status_t wt_quic_connection_send_max_streams(wt_quic_connection_t *connection
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_STREAMS);
   frame.as.max_streams.direction = direction;
   frame.as.max_streams.maximum = maximum;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent, now);
   if (status != WT_OK) return status;
   if (sent) connection->local_max_streams[index] = maximum;
   return sent ? WT_OK : WT_ERR_STATE;
@@ -1123,7 +1124,7 @@ wt_status_t wt_quic_connection_reset_stream(wt_quic_connection_t *connection, ui
   frame.as.reset_stream.id = stream_id;
   frame.as.reset_stream.application_error_code = error_code;
   frame.as.reset_stream.final_size = stream->final_size;
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent,
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent,
                           now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
@@ -1152,9 +1153,10 @@ wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uin
   frame.as.stream.fin = fin;
   frame.as.stream.data = data;
 
-  /* No descriptor: this function does not own the bytes, so it cannot send them again. The stream layer
-   * that does keeps them. */
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+  /* A descriptor, so a loss names the stream and the range to send again: the CALLER keeps the bytes --
+   * this layer cannot, and should not -- and the lost handler hands the descriptor back to it. */
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 1, 0, stream_id, offset,
+                          length, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -1235,7 +1237,7 @@ wt_status_t wt_quic_connection_send_datagram(wt_quic_connection_t *connection, c
   frame.as.datagram.data = data;
   frame.as.datagram.length = length;
   /* No descriptor: a DATAGRAM frame is never sent again, which is the whole point of it. */
-  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -1272,7 +1274,7 @@ wt_status_t wt_quic_connection_send_frame(wt_quic_connection_t *connection, wt_q
   /* A frame with nothing to retransmit carries no descriptor, so a loss of its packet costs the
    * congestion controller but asks nobody to send it again -- which is right for a HANDSHAKE_DONE and
    * wrong for a STREAM frame, whose caller has its own retransmission to do. */
-  status = send_one_frame(connection, space, frame, ack_eliciting, 0, 0, 0U, 0U, &sent, now);
+  status = send_one_frame(connection, space, frame, ack_eliciting, 0, 0, 0U, 0U, 0U, &sent, now);
   if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
@@ -1295,7 +1297,7 @@ static wt_status_t flush_space(wt_quic_connection_t *connection, wt_quic_space_t
 
   if (probe) {
     frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
-    return send_one_frame(connection, space, &frame, 1, 0, 0, 0U, 0U, &sent, now);
+    return send_one_frame(connection, space, &frame, 1, 0, 0, 0U, 0U, 0U, &sent, now);
   }
 
   if (!space_state->received.ack_pending) return WT_OK;
@@ -1322,7 +1324,7 @@ static wt_status_t flush_space(wt_quic_connection_t *connection, wt_quic_space_t
   frame.as.ack.ranges = range_bytes;
   frame.as.ack.ranges_len = range_length;
 
-  status = send_one_frame(connection, space, &frame, 0, 0, 0, 0U, 0U, &sent, now);
+  status = send_one_frame(connection, space, &frame, 0, 0, 0, 0U, 0U, 0U, &sent, now);
   if (status != WT_OK) return status;
   if (sent) wt_quic_ack_sent(&space_state->received);
   return WT_OK;
@@ -1346,7 +1348,7 @@ wt_status_t wt_quic_connection_flush(wt_quic_connection_t *connection, uint64_t 
       memset(&frame, 0, sizeof(frame));
       status = wt_quic_close_frame(&connection->close, &frame);
       if (status != WT_OK) return status;
-      status = send_one_frame(connection, space, &frame, 0, 0, 0, 0U, 0U, &sent, now);
+      status = send_one_frame(connection, space, &frame, 0, 0, 0, 0U, 0U, 0U, &sent, now);
       if (status != WT_OK) return status;
       if (sent) {
         connection->close_sent = 1;

@@ -130,9 +130,13 @@ typedef struct wt_quic_connection_config {
 typedef struct wt_quic_tx_frame {
   int in_use;
   wt_quic_space_t space;
-  /* A CRYPTO payload: `offset` and `length` describe bytes of the sender's handshake stream. Streams
-   * are the next layer's business and get their own descriptor there. */
+  /* WHAT THE PACKET CARRIED, so the owner can send it again: a CRYPTO payload is bytes of the
+   * handshake stream, and a STREAM payload is bytes of one stream. `stream_id` is meaningful only when
+   * `is_crypto` is clear, and the tag's use is the same in both cases -- the connection hands the
+   * descriptor back when the packet is declared lost, and the layer that keeps the bytes sends them
+   * again. */
   int is_crypto;
+  uint64_t stream_id;
   uint64_t offset;
   size_t length;
 } wt_quic_tx_frame_t;
