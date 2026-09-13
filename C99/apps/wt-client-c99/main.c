@@ -8,9 +8,12 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "webtransport/cli/endpoint.h"
+#include "session_loop.h"
+
 #include "webtransport/cli/options.h"
 #include "webtransport/version.h"
 
@@ -86,5 +89,53 @@ int main(int argc, char **argv) {
       return 0;
     }
   }
+  /* The session itself: connect, CONNECT, response, and one message each way. This is the tool's whole job
+   * when it was asked to connect; the usage below stays for the case where it was not. */
+  fprintf(stderr, "DIAG mode=%d address=%s\n", (int)options.mode,
+          options.address != NULL ? options.address : "(null)");
+  if (options.mode == WT_CLI_MODE_CONNECT) {
+    wt_loop_config_t loop;
+    wt_loop_result_t result;
+    wt_tls_self_signed_t identity;
+    wt_status_t status;
+    const char *colon;
+    char host[WT_LOOP_HOST_MAX];
+
+    memset(&loop, 0, sizeof(loop));
+    memset(&identity, 0, sizeof(identity));
+    colon = strrchr(options.address, ':');
+    if (colon == NULL || (size_t)(colon - options.address) + 1U >= sizeof(host)) {
+      fprintf(stderr, "wt: the address must be host:port\n");
+      return 2;
+    }
+    memcpy(host, options.address, (size_t)(colon - options.address));
+    host[colon - options.address] = '\0';
+    (void)snprintf(loop.host, sizeof(loop.host), "%s", host);
+    loop.port = (uint16_t)strtoul(colon + 1, NULL, 10);
+    loop.authority = options.origin != NULL ? options.origin : "localhost";
+    loop.path = "/";
+    loop.timeout_ms = options.timeout_ms;
+    loop.datagram = options.exchange == WT_CLI_EXCHANGE_DATAGRAM;
+    loop.message = options.message;
+    /* The development bypass is restricted to loopback names, so a pin is generated here only to be printed:
+     * a real deployment passes --trust system and a certificate that validates. */
+    (void)wt_tls_self_signed_generate(&identity, "localhost");
+    loop.pin = NULL; /* the loopback development bypass: a pinned run is what a real deployment uses */
+
+    status = wt_loop_run_client(&loop, &result);
+    if (options.json != 0) {
+      printf("{\"role\":\"client\",\"status\":\"%s\",\"established\":%s,\"connectAccepted\":%s,"
+             "\"responseStatus\":%u,\"receivedBytes\":%llu,\"receivedDatagram\":%s}\n",
+             wt_loop_status_name(status), result.established != 0 ? "true" : "false",
+             result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
+             (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false");
+    } else {
+      printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
+             (unsigned)result.status, (unsigned long long)result.received_bytes,
+             result.received_datagram != 0 ? " as a datagram" : " on a stream");
+    }
+    return status == WT_OK ? 0 : 1;
+  }
+
   return wt_usage(argv[0]);
 }

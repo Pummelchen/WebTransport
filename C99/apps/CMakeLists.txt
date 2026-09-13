@@ -6,12 +6,24 @@
 
 foreach(app wt-client-c99 wt-server-c99 wt-conformance-c99)
   set(WT_APP_EXTRA_SOURCES)
+  set(WT_APP_NEEDS_SUPPORT FALSE)
+  if(app STREQUAL "wt-client-c99" OR app STREQUAL "wt-server-c99")
+    # The one-sided loops both tools use: one side of a real socket pair, where the conformance tool drives both.
+    set(WT_APP_EXTRA_SOURCES ${app}/../support/session_loop.c)
+    set(WT_APP_NEEDS_SUPPORT TRUE)
+  endif()
   if(app STREQUAL "wt-conformance-c99")
     # The session scenarios: two endpoints in one process, over loopback. They need the self-signed identity
     # generator and the runtime session driver, so they are the tool's own code rather than a copy of a test.
     set(WT_APP_EXTRA_SOURCES ${app}/scenario_session.c)
   endif()
   add_executable(${app} ${app}/main.c ${WT_APP_EXTRA_SOURCES})
+  if(WT_APP_NEEDS_SUPPORT)
+    # AFTER add_executable: a target_* call before the target exists fails configure, which is how this line
+    # first went in -- and a failed configure leaves the previous binaries in place, so the tools kept their old
+    # behaviour and the build looked clean.
+    target_include_directories(${app} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/support)
+  endif()
   wt_set_c99(${app})
   wt_apply_warnings(${app})
   target_link_libraries(${app} PRIVATE ${WT_LINK_TARGET})

@@ -2599,6 +2599,29 @@ TRUST LAYER accept it, checks that a different pin is refused, that no pin at al
 generations differ -- because a generator tested against its own output proves nothing about whether anything can
 trust it.
 
+### Phase 9's thirtieth part: the client and server tools run a loop, and the accept path is the missing piece
+
+Both tools now drive a REAL one-sided session loop through a shared `apps/support/session_loop.c`: the client
+connects, sends the CONNECT, waits for the response and exchanges a message; the server binds, waits for a peer,
+answers the CONNECT and exchanges a message. Both report machine-readable JSON
+(`{"role":"client","status":"...","established":...,"connectAccepted":...,"responseStatus":...}`), so the tools'
+behaviour is a value a script reads rather than prose it greps.
+
+**The exchange does not complete yet, and the measurement says why:** run against each other,
+`wt-client-c99 --connect` reports `{"status":"timeout","established":false}`. The server has to know its peer's
+address before it can arm a session, and the first implementation discovered it by RECEIVING the client's first
+Initial and dropping it -- which costs a retransmission round and, worse, discards the very packet that names the
+peer. The fix is structural rather than a tweak: the runtime session needs a LISTEN mode that arms itself from
+the first datagram it reads (holding that datagram and processing it once the connection exists), or the UDP
+layer needs a peek that leaves the packet for the connection to read. That is WT-124.
+
+Three things this part settled. The conformance tool's own scenarios (WT-123) are unaffected and still run real
+IPv4 and IPv6 sessions in one process, which is what the phase's stated criteria ask for. The tools' CMake
+ordering bug that hid this work for a round is worth remembering: a `target_include_directories` call placed
+BEFORE `add_executable` fails configure, and a failed configure leaves the previous binaries in place -- so the
+tools kept their old behaviour and the build looked clean. And the tools now have a JSON contract of their own,
+which is the shape the plan's `--json` flag asks for.
+
 ### Phase 9's twenty-ninth part: the completion criteria are met
 
 **The conformance tool runs local IPv4 and IPv6 packet sessions and produces stable machine-readable output.**

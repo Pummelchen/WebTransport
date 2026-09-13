@@ -8,9 +8,12 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "webtransport/cli/endpoint.h"
+#include "session_loop.h"
+
 #include "webtransport/cli/options.h"
 #include "webtransport/version.h"
 
@@ -90,5 +93,63 @@ int main(int argc, char **argv) {
       return 0;
     }
   }
+  /* The session itself: listen, accept one, answer it, and exchange a message. */
+  if (options.mode == WT_CLI_MODE_LISTEN) {
+    wt_loop_config_t loop;
+    wt_loop_result_t result;
+    wt_tls_self_signed_t identity;
+    wt_status_t status;
+    const char *colon;
+    char host[WT_LOOP_HOST_MAX];
+
+    memset(&loop, 0, sizeof(loop));
+    memset(&identity, 0, sizeof(identity));
+    colon = strrchr(options.address, ':');
+    if (colon == NULL || (size_t)(colon - options.address) + 1U >= sizeof(host)) {
+      fprintf(stderr, "wt: the address must be host:port\n");
+      return 2;
+    }
+    memcpy(host, options.address, (size_t)(colon - options.address));
+    host[colon - options.address] = '\0';
+    (void)snprintf(loop.host, sizeof(loop.host), "%s", host);
+    loop.port = (uint16_t)strtoul(colon + 1, NULL, 10);
+    loop.authority = options.origin != NULL ? options.origin : "localhost";
+    loop.path = "/";
+    loop.timeout_ms = options.timeout_ms;
+    loop.datagram = options.exchange == WT_CLI_EXCHANGE_DATAGRAM;
+    loop.message = options.message;
+    /* An identity generated in memory for a local session: the client reaches it by pinning its fingerprint,
+     * which this prints so the other side can be told what to expect. */
+    status = wt_tls_self_signed_generate(&identity, "localhost");
+    if (status != WT_OK) {
+      fprintf(stderr, "wt: no identity could be generated: %s\n", wt_loop_status_name(status));
+      return 1;
+    }
+    loop.identity = &identity;
+
+    status = wt_loop_run_server(&loop, &result);
+    if (options.json != 0) {
+      printf("{\"role\":\"server\",\"status\":\"%s\",\"boundPort\":%u,\"established\":%s,"
+             "\"connectAccepted\":%s,\"receivedBytes\":%llu,\"receivedDatagram\":%s,\"pin\":\"",
+             wt_loop_status_name(status), (unsigned)result.bound_port,
+             result.established != 0 ? "true" : "false",
+             result.connect_accepted != 0 ? "true" : "false",
+             (unsigned long long)result.received_bytes,
+             result.received_datagram != 0 ? "true" : "false");
+      {
+        size_t pin_index;
+        for (pin_index = 0U; pin_index < WT_SHA256_LEN; pin_index++) {
+          printf("%02x", (unsigned)identity.fingerprint[pin_index]);
+        }
+      }
+      printf("\"}\n");
+    } else {
+      printf("server: %s on port %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
+             (unsigned)result.bound_port, (unsigned long long)result.received_bytes,
+             result.received_datagram != 0 ? " as a datagram" : " on a stream");
+    }
+    return status == WT_OK ? 0 : 1;
+  }
+
   return wt_usage(argv[0]);
 }
