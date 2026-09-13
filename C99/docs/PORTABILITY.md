@@ -78,6 +78,18 @@ comparing a platform handle with `-1` rather than the sentinel. It also showed w
 check: eight files "failed" only because the loop omitted the include paths and the trust-fixture define CMake
 supplies.
 
+**The tree also LINKS for Windows.** `scripts/check-windows-build.sh` configures the whole tree with
+`cmake/toolchains/mingw-w64.cmake` and a Windows OpenSSL (the MSYS2 package is a plain tarball, so no Windows
+runner or MSYS2 installation is needed), and builds **84 PE32+ executables** plus `libwebtransport.dll`. CI runs
+it on the legs it already has. Not run -- that needs Windows or Wine -- but linked.
+
+**The link found a defect the compile could not**, and it is the kind only an optimiser sees: in a Release build
+GCC could not prove that the loop writing `compression_methods[i]` from the peer's compression-methods length
+stayed inside `compression_methods[4]`, and said so with `-Wstringop-overflow`. An explicit bound check did not
+satisfy it, because the index came from a struct member -- and the right answer was to stop describing
+generality the message does not have: a TLS 1.3 ClientHello's vector is ONE byte, so `src/tls/handshake.c` now
+writes the byte by index, which is both inside the table and what RFC 8446 section 4.1.2 says.
+
 What remains is the Windows RUNNER and FreeBSD. A job that cannot pass is worse than an absent one, because it
 teaches people to ignore CI -- and the cross-compile is what makes a job plausible now: the whole tree compiles for
 the platform, while what a runner would still need is a LINKED build (OpenSSL for Windows) and a way to run the

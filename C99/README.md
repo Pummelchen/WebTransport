@@ -220,8 +220,12 @@ What is here:
   (which is why the error *classification*, not just the number, is per platform) and `inet_ntop`'s
   length type. The check now sweeps the **whole tree** — 72 library sources and 92 test/app sources —
   and they all compile for Windows, which is the claim a runner needs before it is worth adding. Two
-  more defects came out of that sweep, both invisible to clang. What remains is the Windows runner (a
-  *linked* build needs OpenSSL for Windows, plus a way to run the tests there) and FreeBSD.
+  more defects came out of that sweep, both invisible to clang. It goes further than compiling now: with
+  a mingw toolchain and a Windows OpenSSL the whole tree **links** — 84 PE32+ executables and
+  `libwebtransport.dll` — and CI does that on the legs it already has, because the MSYS2 OpenSSL
+  package is a plain tarball. That link found a defect the compile could not (`-Wstringop-overflow` in
+  a Release build, which clang never reported). What remains is *running* those binaries, which needs
+  Windows or Wine, and FreeBSD.
   `scripts/check-portability.sh` fails if the library uses a POSIX-only call the inventory does not
   name — it caught `sendto`/`recvfrom` missing on its first run — and CI runs it. FreeBSD is close to
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
