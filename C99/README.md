@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 70 unit test files and 79,505 checks, run by `ctest` and again under
+- 70 unit test files and 79,540 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -105,7 +105,15 @@ What is here:
     from the caller's settings, measured into scratch before the frame is written — the
     same measure-then-write rule as everywhere else — and the QPACK streams are their
     prefixes alone, with the endpoint's once-per-connection rule refusing a second one
-    before any bytes go out.
+    before any bytes go out. The same header reassembles a stream's HTTP/3 FRAME
+    boundaries, where a frame's own varints can be split the same way — and it
+    deliberately does not buffer a frame's payload: it reports pieces to a sink with a
+    `last` flag, because how much of a HEADERS section to hold is a bound, and a bound
+    belongs to whoever owns the memory. The one number the driver does bound is the
+    frame's declared length, refused as excessive load before the sink allocates for
+    it. A frame whose header or payload is cut off by the stream's end is
+    `WT_ERR_TRUNCATED` — one byte of a two-varint header is exactly as incomplete as
+    one byte of a payload, which is the case a naive reassembler misses.
   - `http3/endpoint.h` — the HTTP/3 endpoint's own streams, which is the lifecycle a
     consumer never sees: our control stream (`0x00`) and QPACK streams (`0x02`/`0x03`)
     exist once each, the peer's unidirectional streams are classified by their type

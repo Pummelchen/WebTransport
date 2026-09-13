@@ -48,11 +48,31 @@ typedef struct wt_http3_driver_pending {
   size_t length;
 } wt_http3_driver_pending_t;
 
+/* The longest frame header: two varints, at most eight bytes each. */
+#define WT_HTTP3_DRIVER_FRAME_HEADER_MAX 16U
+
+/* How many streams may be mid-frame at once. Each holds only a frame header, so this is a
+ * limit on interleaving rather than on memory; a stream past it is WT_ERR_LIMIT. */
+#define WT_HTTP3_DRIVER_FRAMES_MAX 8U
+
+typedef struct wt_http3_driver_frame_state {
+  uint64_t stream_id;
+  uint8_t header[WT_HTTP3_DRIVER_FRAME_HEADER_MAX];
+  size_t header_length;
+  int in_frame;
+  uint64_t type;
+  uint64_t payload_length;
+  uint64_t payload_received;
+} wt_http3_driver_frame_state_t;
+
 typedef struct wt_http3_driver {
   /* The endpoint whose streams these are. Not owned. */
   wt_http3_endpoint_t *endpoint;
   wt_http3_driver_pending_t pending[WT_HTTP3_DRIVER_PENDING_MAX];
   size_t pending_count;
+  /* Streams part way through a frame's header. */
+  wt_http3_driver_frame_state_t frames[WT_HTTP3_DRIVER_FRAMES_MAX];
+  size_t frame_count;
 } wt_http3_driver_t;
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint);
@@ -84,6 +104,50 @@ wt_status_t wt_http3_driver_on_uni_stream_end(wt_http3_driver_t *driver, uint64_
 /* How many opening streams are waiting for the rest of their prefix, for a caller that logs
  * occupancy or bounds its own buffering. */
 size_t wt_http3_driver_pending_count(const wt_http3_driver_t *driver);
+
+/* ---------------------------------------------- frame boundaries on a stream
+
+ * A stream carries a sequence of HTTP/3 frames, and a frame's own header -- a type varint
+ * and a length varint -- can be SPLIT across the STREAM frames a connection hands over, the
+ * same way a stream's type prefix can. This part of the driver reassembles the boundary, and
+ * it deliberately does NOT buffer the payload: it reports the frame's payload to a sink in
+ * whatever pieces arrive, with a `last` flag on the final one.
+ *
+ * That division is the point. The driver's job is framing, and framing needs sixteen bytes of
+ * state per stream; the PAYLOAD is policy -- how much of a HEADERS section this endpoint will
+ * hold is a bound, and a bound belongs to whoever owns the memory. A driver that buffered
+ * every stream's frames would be carrying that policy silently, with a fixed size nobody
+ * chose.
+ *
+ * The one thing the driver does bound is the frame's declared length, because a length is
+ * the peer's to choose and this endpoint has to refuse absurdity before the sink allocates
+ * for it: over `max_frame_bytes` it is H3_EXCESSIVE_LOAD. */
+
+/* What a frame's payload is delivered to. Called once per piece that arrives, in order, with
+ * `last` set on the piece that completes the frame; a zero-length frame reports one piece of
+ * zero bytes with `last` set, so a sink never has to special-case an empty frame. */
+typedef wt_status_t (*wt_http3_frame_sink_fn)(void *context, uint64_t stream_id, uint64_t type,
+                                              const uint8_t *payload, size_t length, int last);
+
+typedef struct wt_http3_driver_sink {
+  wt_http3_frame_sink_fn on_frame_payload;
+  void *context;
+} wt_http3_driver_sink_t;
+
+/* Bytes arriving on a stream that carries HTTP/3 frames (the control stream, the QPACK
+ * streams, a request stream). `fin` says the peer ended the stream here.
+ *
+ * WT_ERR_TRUNCATED means the stream ended in the middle of a frame: an incomplete frame on a
+ * stream is not malformed until there is nothing more coming, which is what `fin` decides. */
+wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t stream_id,
+                                            const uint8_t *data, size_t length, int fin,
+                                            uint64_t max_frame_bytes,
+                                            const wt_http3_driver_sink_t *sink,
+                                            wt_http3_error_t *out_error);
+
+/* Forget a stream's half-read frame when the stream ends or is reset. Returns whether one was
+ * in progress, which is what a caller needs to decide between WT_ERR_TRUNCATED and silence. */
+int wt_http3_driver_forget_frame(wt_http3_driver_t *driver, uint64_t stream_id);
 
 /* Start this endpoint's control stream: the type prefix, then the SETTINGS frame built from
  * `settings`. The bytes go into the caller's writer, which is the stream the connection

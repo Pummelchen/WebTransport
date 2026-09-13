@@ -2,6 +2,7 @@
 
 #include "webtransport/http3/driver.h"
 
+#include "webtransport/cursor.h"
 #include "webtransport/quic/varint.h"
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint) {
@@ -10,6 +11,12 @@ void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoi
   if (driver == NULL) return;
   driver->endpoint = endpoint;
   driver->pending_count = 0U;
+  driver->frame_count = 0U;
+  for (i = 0U; i < WT_HTTP3_DRIVER_FRAMES_MAX; i++) {
+    driver->frames[i].stream_id = 0U;
+    driver->frames[i].header_length = 0U;
+    driver->frames[i].in_frame = 0;
+  }
   for (i = 0U; i < WT_HTTP3_DRIVER_PENDING_MAX; i++) {
     driver->pending[i].stream_id = 0U;
     driver->pending[i].length = 0U;
@@ -189,4 +196,174 @@ wt_status_t wt_http3_driver_on_uni_stream_end(wt_http3_driver_t *driver, uint64_
     return WT_OK;
   }
   return wt_http3_endpoint_on_uni_stream_end(driver->endpoint, stream_id, out_error);
+}
+
+/* ---------------------------------------------- frame boundaries */
+
+static wt_http3_driver_frame_state_t *find_frame_state(wt_http3_driver_t *driver,
+                                                       uint64_t stream_id) {
+  size_t i;
+  for (i = 0U; i < driver->frame_count; i++) {
+    if (driver->frames[i].stream_id == stream_id) return &driver->frames[i];
+  }
+  return NULL;
+}
+
+int wt_http3_driver_forget_frame(wt_http3_driver_t *driver, uint64_t stream_id) {
+  size_t i;
+
+  if (driver == NULL) return 0;
+  for (i = 0U; i < driver->frame_count; i++) {
+    if (driver->frames[i].stream_id == stream_id) {
+      int was_in_frame = driver->frames[i].in_frame;
+      driver->frames[i].in_frame = 0;
+      driver->frames[i].header_length = 0U;
+      driver->frames[i].payload_received = 0U;
+      driver->frames[i].payload_length = 0U;
+      /* The slot is kept while the stream lives: a stream's frames are its own sequence. */
+      return was_in_frame;
+    }
+  }
+  return 0;
+}
+
+/* A varint at the start of `bytes`, and how many bytes it took, or zero when it is not yet
+ * complete. */
+static size_t read_varint(const uint8_t *bytes, size_t length, uint64_t *out) {
+  wt_cursor_t c = wt_cursor_init(bytes, length);
+  uint64_t value = 0U;
+  if (wt_quic_varint_decode(&c, &value) != WT_OK) return 0U;
+  *out = value;
+  return length - wt_cursor_remaining(&c);
+}
+
+wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t stream_id,
+                                            const uint8_t *data, size_t length, int fin,
+                                            uint64_t max_frame_bytes,
+                                            const wt_http3_driver_sink_t *sink,
+                                            wt_http3_error_t *out_error) {
+  wt_http3_driver_frame_state_t *state;
+  size_t position = 0U;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (driver == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+
+  state = find_frame_state(driver, stream_id);
+  if (state == NULL) {
+    if (driver->frame_count >= WT_HTTP3_DRIVER_FRAMES_MAX) return WT_ERR_LIMIT;
+    state = &driver->frames[driver->frame_count];
+    state->stream_id = stream_id;
+    state->header_length = 0U;
+    state->in_frame = 0;
+    driver->frame_count++;
+  }
+
+  while (position < length) {
+    if (!state->in_frame) {
+      /* Fill the header before the payload: the length is what says how much payload to
+       * expect, so the header has to be complete first. */
+      while (position < length &&
+             state->header_length < (size_t)WT_HTTP3_DRIVER_FRAME_HEADER_MAX) {
+        state->header[state->header_length] = data[position];
+        state->header_length++;
+        position++;
+        {
+          uint64_t type = 0U;
+          uint64_t payload_length = 0U;
+          size_t type_bytes = read_varint(state->header, state->header_length, &type);
+          size_t length_bytes;
+          if (type_bytes == 0U) continue;
+          length_bytes = read_varint(state->header + type_bytes, state->header_length - type_bytes,
+                                     &payload_length);
+          if (length_bytes == 0U) continue;
+          if (payload_length > max_frame_bytes) {
+            /* The peer's declared length is over what this endpoint will deliver, so it is
+             * excessive load rather than a buffer to allocate. */
+            state->header_length = 0U;
+            if (out_error != NULL) *out_error = WT_HTTP3_EXCESSIVE_LOAD;
+            return WT_ERR_LIMIT;
+          }
+          state->type = type;
+          state->payload_length = payload_length;
+          state->payload_received = 0U;
+          state->in_frame = 1;
+          /* The header's bytes are consumed; what is left of it in the buffer is the start of
+           * the payload, which the loop below delivers. */
+          {
+            size_t header_bytes = type_bytes + length_bytes;
+            size_t leftover = state->header_length - header_bytes;
+            size_t i;
+            for (i = 0U; i < leftover; i++) state->header[i] = state->header[header_bytes + i];
+            state->header_length = leftover;
+          }
+          break;
+        }
+      }
+      if (!state->in_frame) continue;
+    }
+
+    /* Inside a frame: deliver what has arrived, up to what is left of it. */
+    {
+      uint64_t remaining = state->payload_length - state->payload_received;
+      size_t available = length - position;
+      size_t take = available;
+      int last;
+
+      if (state->header_length > 0U) {
+        /* Bytes that arrived with the header are the payload's start. */
+        size_t from_header = state->header_length;
+        if ((uint64_t)from_header >= remaining) from_header = (size_t)remaining;
+        if (sink != NULL && sink->on_frame_payload != NULL) {
+          last = ((uint64_t)from_header == remaining) ? 1 : 0;
+          {
+            wt_status_t status = sink->on_frame_payload(sink->context, stream_id, state->type,
+                                                       state->header, from_header, last);
+            if (status != WT_OK) return status;
+          }
+        }
+        state->payload_received += (uint64_t)from_header;
+        state->header_length = 0U;
+        if (state->payload_received == state->payload_length) {
+          state->in_frame = 0;
+          continue;
+        }
+      }
+
+      if ((uint64_t)take > remaining) take = (size_t)remaining;
+      if (take > 0U) {
+        if (sink != NULL && sink->on_frame_payload != NULL) {
+          last = ((uint64_t)take == remaining) ? 1 : 0;
+          {
+            wt_status_t status = sink->on_frame_payload(sink->context, stream_id, state->type,
+                                                       data + position, take, last);
+            if (status != WT_OK) return status;
+          }
+        }
+        state->payload_received += (uint64_t)take;
+        position += take;
+      }
+      if (state->payload_received == state->payload_length) {
+        if (state->payload_length == 0U && sink != NULL && sink->on_frame_payload != NULL) {
+          /* An empty frame is still a frame: report it once, with nothing in it. */
+          wt_status_t status = sink->on_frame_payload(sink->context, stream_id, state->type, NULL,
+                                                      0U, 1);
+          if (status != WT_OK) return status;
+        }
+        state->in_frame = 0;
+      }
+    }
+  }
+
+  if (fin != 0 && (state->in_frame || state->header_length > 0U)) {
+    /* The stream ended part way through a frame -- and a partial frame HEADER counts, which is
+     * the case a naive implementation misses: one byte of a two-varint header is exactly as
+     * incomplete as one byte of a payload. Nothing more is coming, which is what turns the
+     * wait into a refusal. */
+    state->in_frame = 0;
+    state->header_length = 0U;
+    if (out_error != NULL) *out_error = WT_HTTP3_FRAME_ERROR;
+    return WT_ERR_TRUNCATED;
+  }
+  return WT_OK;
 }

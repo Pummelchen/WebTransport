@@ -2091,6 +2091,24 @@ not fit the caller's scratch -- is WT_ERR_LIMIT with no error code, and the test
 out when it happens, because a caller that cannot tell "nothing happened" from "half of it happened" cannot
 recover.
 
+### Phase 9's seventh part: HTTP/3 frame boundaries on a stream
+
+A stream carries a sequence of HTTP/3 frames, and a frame's own header -- a type varint and a length varint --
+can be split across the STREAM frames a connection hands over, exactly as a stream's type prefix can. The
+driver reassembles that boundary now, per stream, in sixteen bytes of state each.
+
+It deliberately does NOT buffer the payload: it reports the payload to a sink in the pieces that arrive, with
+`last` on the final one. That division is the design. Framing needs sixteen bytes per stream; the payload is
+POLICY -- how much of a HEADERS section this endpoint will hold is a bound, and a bound belongs to whoever owns
+the memory. A driver that buffered frames would be carrying that policy silently, at a size nobody chose. The
+one number the driver does bound is the frame's DECLARED length, because that is the peer's to choose: over the
+caller's `max_frame_bytes` it is H3_EXCESSIVE_LOAD, refused before the sink is asked for anything.
+
+Writing the test found the case a naive reassembler misses: a stream that ends part way through a frame HEADER
+is exactly as incomplete as one that ends part way through a payload, and the first version of the code only
+checked the payload case. The check now covers both, and the test asserts the refusal with the frame error code
+rather than a hang or a silent drop.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.
