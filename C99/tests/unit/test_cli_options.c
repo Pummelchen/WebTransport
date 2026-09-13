@@ -56,6 +56,33 @@ static void test_the_required_flags(void) {
   }
 }
 
+static void test_help_and_version_are_not_flags_to_refuse(void) {
+  wt_cli_options_t options;
+  const char *error = NULL;
+  {
+    const char *argv[] = {"wt-client-c99", "--help"};
+    WT_EXPECT_OK("--help parses", parse(argv, 2, &options, &error));
+    WT_EXPECT_INT("and is recorded", 1, options.help);
+  }
+  {
+    const char *argv[] = {"wt-client-c99", "-h"};
+    WT_EXPECT_OK("-h parses", parse(argv, 2, &options, &error));
+    WT_EXPECT_INT("as help too", 1, options.help);
+  }
+  {
+    const char *argv[] = {"wt-client-c99", "--version"};
+    WT_EXPECT_OK("--version parses", parse(argv, 2, &options, &error));
+    WT_EXPECT_INT("and is recorded", 1, options.version);
+  }
+  {
+    /* Asking what a tool does is not asking it to do anything: the mode check must not refuse it. */
+    const char *argv[] = {"wt-client-c99", "--help"};
+    wt_cli_options_t asked;
+    WT_EXPECT_OK("and --help alone parses", parse(argv, 2, &asked, &error));
+    WT_EXPECT_INT("with no mode", (int)WT_CLI_MODE_NONE, (int)asked.mode);
+  }
+}
+
 static void test_unsupported_modes_are_refused_by_name(void) {
   wt_cli_options_t options;
   const char *error = NULL;
@@ -217,6 +244,7 @@ static void test_the_names_and_the_json(void) {
 }
 
 int main(void) {
+  test_help_and_version_are_not_flags_to_refuse();
   test_the_required_flags();
   test_unsupported_modes_are_refused_by_name();
   test_a_value_is_never_the_next_flag();

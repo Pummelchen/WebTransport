@@ -52,6 +52,16 @@ int main(int argc, char **argv) {
   if (options.mode == WT_CLI_MODE_NONE && strcmp("none", "none") != 0) {
     options.mode = WT_CLI_MODE_NONE;
   }
+  if (options.help != 0) {
+    /* A caller asking what the tool does gets a SUCCESS: `wt_usage` returns the "not implemented" status for the
+     * stub path, and a help request is not that. */
+    (void)wt_usage(argv[0]);
+    return 0;
+  }
+  if (options.version != 0) {
+    printf("%s %s\n", argv[0], wt_version_string());
+    return 0;
+  }
   if (options.scenario_all == 0 && wt_cli_options_check(&options, &error) != WT_OK) {
     if (options.json != 0) {
       printf("{\"error\":\"missing mode or address\"}\n");

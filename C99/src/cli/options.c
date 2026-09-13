@@ -94,7 +94,11 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
   for (i = 1; i < argc; i++) {
     const char *argument = argv[i];
 
-    if (is_flag(argument, "--listen")) {
+    if (is_flag(argument, "--help") || is_flag(argument, "-h")) {
+      options->help = 1;
+    } else if (is_flag(argument, "--version")) {
+      options->version = 1;
+    } else if (is_flag(argument, "--listen")) {
       options->mode = WT_CLI_MODE_LISTEN;
     } else if (is_flag(argument, "--connect")) {
       options->mode = WT_CLI_MODE_CONNECT;

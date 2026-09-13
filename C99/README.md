@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 80,044 checks, run by `ctest` and again under
+- 75 unit test files and 80,056 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -194,6 +194,14 @@ What is here:
   runtime refuses to make it rather than inventing one. IPv4 is asserted unconditionally and
   IPv6 is available-or-skipped, because a test that fails without an IPv6 loopback is a test
   about the machine.
+- **The CLI tools' process contract** (Phase 10): the tools' exit statuses, refused command
+  lines and JSON report are part of their interface, because scripts drive them. A CTest script
+  checks them without a peer — an unsupported mode exits **2** and names what it refused, no mode
+  exits 2, `--help` exits **0** and prints usage, and a client that cannot reach anybody exits
+  **non-zero** while reporting `"established":false` and never `"status":"ok"`. It found a real
+  usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
+  `--help` and `--version` are now the parser's business and are answered *before* the mode and
+  address are checked — asking what a tool does is not asking it to do anything.
 - **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
   stands up two endpoints in **one process** over loopback — a generated, pinned identity, a real
   TLS 1.3 handshake inside QUIC, an extended CONNECT accepted by the draft-16 layer, the response,

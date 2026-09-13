@@ -65,6 +65,11 @@ typedef struct wt_cli_options {
   int timeout_set;
   int scenario_all;
   int json;
+  /* `--help` and `--version` are answered BEFORE the mode and address are checked, because a caller asking what
+   * a tool does has not asked it to do anything: a parser that refused them as unknown flags made the tools
+   * unusable in the one way every command-line tool must be usable. */
+  int help;
+  int version;
   /* How many arguments were consumed, so a caller can tell a clean parse from one that stopped
    * at an unknown flag. */
   int parsed;

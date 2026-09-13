@@ -2843,6 +2843,23 @@ Two of the three build configurations were green through every wrong version of 
 phase's rule is about counters and not about configurations alone: **a frame path is changed with a counter in
 it** -- the configurations say whether the change is SAFE, and the counter says whether it is RIGHT.
 
+### Phase 10's tenth part: the CLI tools' process contract, and the bug it found
+
+The plan's test port names "CLI process behavior" as a group, and the part of it that scripts depend on is the
+CONTRACT: exit statuses, refused command lines, and the machine-readable report. `scripts/check-cli-contract.sh`
+checks all three without a peer, which is what makes it fast enough to run on every build: an unsupported mode
+exits 2 and names what it refused, no mode exits 2, `--help` exits 0 and prints usage, and a client that cannot
+reach anybody exits non-zero while reporting `"established":false` and never `"status":"ok"`.
+
+**It found a real bug on its first run, and the bug is the kind that only a contract test finds:** `--help` was
+rejected as an UNKNOWN FLAG by the options parser, because the mains handled `--help` in a loop that ran after
+parsing had already failed. The parser now owns `--help`, `-h` and `--version`, and the tools answer them BEFORE
+the mode and address are checked -- asking what a tool does is not asking it to do anything. The unit suite for
+the parser covers the three flags and asserts that `--help` alone parses with no mode at all.
+
+That is Phase 10's malformed-input spirit applied to the tools rather than to the wire: feed the program the
+command lines a person actually types and check what the process DOES, not what a function returns.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

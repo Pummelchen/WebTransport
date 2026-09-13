@@ -65,4 +65,9 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   add_test(NAME wt_cli_session_datagram
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45419 datagram)
+  # The process CONTRACT: exit statuses, refused command lines and the JSON report, checked without a peer.
+  add_test(NAME wt_cli_contract
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-contract.sh
+            $<TARGET_FILE:wt-client-c99> $<TARGET_FILE:wt-server-c99>
+            $<TARGET_FILE:wt-conformance-c99>)
 endif()
