@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 80 test programs and 82,018 checks, run by `ctest` and again under
+- 80 test programs and 82,078 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -262,7 +262,7 @@ What is here:
   answering one (WT-166) is what closed it. What keeps the criterion partial is the VPS matrix's five
   implementations, which still need a host. The conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
-  fifty-two C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
+  fifty-three C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
   product list is the three tools and nothing that tests them), and every remaining entry mapped to
   the unit suite that covers it. The walk found one real gap, `protocol-structured-fields`, which is
@@ -283,7 +283,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-two scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-three scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -334,7 +334,9 @@ What is here:
   negotiation** (three entries: the client's list offered through `wt-protocol`, the server selecting the
   first token it supports, the client accepting the answer only because it offered it, a required
   selection that cannot be met answering 400, and a response naming an unoffered token being refused),
-  and the two **real sessions** over IPv4 and IPv6. The
+  and the two **real sessions** over IPv4 and IPv6, and one **connection-ID scenario** (WT-171: both sides keep a
+  spare, the client retires the server's and the server replaces it with the next sequence, with both connections
+  still up -- the case where the two endpoints' bookkeeping has to agree on which IDs are still active). The
   reserved-SETTINGS scenario is what **found** a real spec violation in this tree's own parser, and
   the fix is in — see `IMPLEMENTATION_PLAN.md`. Registered with CTest.
 - **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
@@ -667,6 +669,19 @@ What is here:
   carries it, so when the ID in use is one of the retired ones the replacement in that same frame is adopted
   first and the retires ride it. A test caught exactly that: the first version retired first and the peer refused
   the frame, which is what a test with a real peer is for.
+- **A connection ID the peer retires is REPLACED** (WT-171): RFC 9000 section 5.1.2 makes a
+  RETIRE_CONNECTION_ID a request -- "Sending a RETIRE_CONNECTION_ID frame ... requests that the peer replace it
+  with a new connection ID" -- and section 5.1.1 sizes the spare, because the peer's
+  `active_connection_id_limit` COUNTS the handshake's ID: the default of two allows exactly one.
+  `wt_runtime_session_keep_spare_connection_id` is that policy, opt-in, and it needs no state of its own: it
+  issues a spare once the peer's limit is known and this endpoint can protect a 1-RTT packet, and issues another
+  whenever `issued_count` shows one was retired, in the same pump round that read the retire. The bytes come from
+  `wt_random_bytes`, which is what sections 5.1 and 10.3.2 ask of an ID and its stateless reset token.
+  `wt_quic_connection_retire_peer_connection_id` is the other half a caller needs, and it exists because the test
+  found the hole: retiring an ID sends the frame AND forgets it here, in that order, and a caller that built its
+  own RETIRE_CONNECTION_ID frame left this layer holding an ID the peer counted as gone -- so the peer's
+  replacement was refused with CONNECTION_ID_LIMIT_ERROR, a healthy connection closed by our own bookkeeping.
+  The pair test and the `a-retired-connection-id-is-replaced` scenario both drive it.
 - **The CRYPTO stream** (Phase 4, ninth part): `quic/crypto_stream.h` is the handshake bytes, which
   arrive by offset rather than in order. The receive half is a window with a bitmap of what has
   arrived, delivering only up to the first hole, so a ClientHello split across two packets reads

@@ -14,6 +14,7 @@
 #include "webtransport/cli/options.h"
 #include "webtransport/cli/report.h"
 
+#include "scenario_connection_ids.h"
 #include "scenario_session.h"
 #include "scenario_refusals.h"
 #include "scenario_capsules.h"
@@ -235,6 +236,17 @@ int main(int argc, char **argv) {
     /* And the session's OWN capsules over the same pair: a flow-control grant, a drain and a close, which draft-16
      * section 5 carries on the CONNECT stream (WT-164). */
     wt_scenario_capsules_run(&report);
+
+    /* WT-171 over the same pair: both sides keep a spare connection ID, the client retires the server's, and the
+     * server replaces it. IPv4 only -- what is under test is the connection-ID bookkeeping, and the pair's IPv6
+     * path is exercised by the session scenarios above. */
+    {
+      static char connection_id_detail[WT_CLI_SCENARIO_DETAIL_MAX];
+      (void)wt_cli_report_add(
+          &report, "a-retired-connection-id-is-replaced",
+          wt_scenario_connection_ids_run(0, connection_id_detail, sizeof(connection_id_detail)),
+          connection_id_detail);
+    }
 
     {
       static char ipv4_detail[WT_CLI_SCENARIO_DETAIL_MAX];

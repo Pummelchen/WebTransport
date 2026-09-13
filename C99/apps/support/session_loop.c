@@ -473,6 +473,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
 
   /* The advertised limits, in force: the promise and the enforcement in one place. */
   (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
+  /* And one spare connection ID kept out there (WT-171), so a peer that retires one is answered with a
+   * replacement instead of talking to an endpoint that runs out. */
+  (void)wt_runtime_session_keep_spare_connection_id(&loop.session);
   init_side(&loop.side, WT_HTTP3_ROLE_CLIENT);
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &loop.transport);
@@ -717,6 +720,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
   /* The advertised limits, in force: the promise and the enforcement in one place. */
   (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
+  /* And one spare connection ID kept out there (WT-171), so a peer that retires one is answered with a
+   * replacement instead of talking to an endpoint that runs out. */
+  (void)wt_runtime_session_keep_spare_connection_id(&loop.session);
   init_side(&loop.side, WT_HTTP3_ROLE_SERVER);
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &loop.transport);

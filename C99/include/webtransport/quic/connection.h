@@ -792,6 +792,23 @@ int wt_quic_connection_key_update_allowed(const wt_quic_connection_t *connection
  * (section 9.5). */
 wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *connection, uint64_t now);
 
+/* Retire a connection ID the PEER issued that this endpoint is NOT using (RFC 9000 section 5.1.2), which is also
+ * how a caller asks the peer for a replacement: "Sending a RETIRE_CONNECTION_ID frame ... requests that the peer
+ * replace it with a new connection ID using a NEW_CONNECTION_ID frame."
+ *
+ * The frame and the forgetting are ONE CALL because they are one act -- "An endpoint MUST NOT forget a connection
+ * ID without retiring it" -- and a caller that built its own RETIRE_CONNECTION_ID frame would leave this layer's
+ * table holding an ID the peer counts as gone. The next NEW_CONNECTION_ID would then be refused with
+ * CONNECTION_ID_LIMIT_ERROR, which is this endpoint closing a healthy connection with its own bookkeeping; the
+ * test that drove a real retire through a real pair found exactly that (WT-171).
+ *
+ * WT_ERR_STATE when the sequence names the ID currently in use -- section 19.16 forbids a RETIRE_CONNECTION_ID
+ * from naming the destination of the packet carrying it, and `wt_quic_connection_use_new_connection_id` is the
+ * call that gives that ID up by adopting another first -- when the sequence is not stored (including one already
+ * retired), and when the connection is closed. */
+wt_status_t wt_quic_connection_retire_peer_connection_id(wt_quic_connection_t *connection,
+                                                         uint64_t sequence, uint64_t now);
+
 /* How many connection IDs this endpoint has retired from the peer -- the ones it stopped using -- and how many
  * of the peer's are stored and available. Diagnostics: a retire that was never sent looks exactly like a peer
  * that never asked. */

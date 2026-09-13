@@ -1181,6 +1181,25 @@ wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *conne
   return WT_OK;
 }
 
+wt_status_t wt_quic_connection_retire_peer_connection_id(wt_quic_connection_t *connection,
+                                                         uint64_t sequence, uint64_t now) {
+  int forgotten = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (wt_quic_connection_is_closed(connection) != 0) return WT_ERR_STATE;
+  /* RFC 9000 section 19.16 forbids a RETIRE_CONNECTION_ID from naming the Destination Connection ID of the
+   * packet that carries it, and the packet this frame rides is addressed by the ID in use -- so the ID in use is
+   * given up by ADOPTING another (`wt_quic_connection_use_new_connection_id`), which retires it on the way. */
+  if (connection->current_peer_sequence_set != 0 && connection->current_peer_sequence == sequence) {
+    return WT_ERR_STATE;
+  }
+  status = forget_peer_connection_id(connection, sequence, now, &forgotten);
+  if (status != WT_OK) return status;
+  /* Nothing was stored under that sequence, so there is nothing to retire and nothing to tell the peer. */
+  return forgotten != 0 ? WT_OK : WT_ERR_STATE;
+}
+
 uint64_t wt_quic_connection_peer_ids_retired(const wt_quic_connection_t *connection) {
   return connection != NULL ? connection->peer_ids_retired : 0U;
 }

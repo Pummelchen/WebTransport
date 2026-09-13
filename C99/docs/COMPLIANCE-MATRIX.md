@@ -56,4 +56,8 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 - **Connection ID changes during a handshake**: the tests use the SAME connection ID at both ends, which is what
   makes the Initial keys -- derived from it -- identical on both sides. A peer that replaces its connection ID
   during the handshake would not be tracked, and this is recorded as the transport gap it is (the tracker's
-  connection-ID item) rather than claimed as done.
+  connection-ID item) rather than claimed as done. What IS covered, since WT-171, is the change after the
+  handshake: `a-retired-connection-id-is-replaced` keeps a spare ID on both ends of a real pair, has the client
+  retire the server's, and asserts that the server issues the next sequence and that both connections stay up --
+  which is the half a session actually depends on, and the half where the two endpoints' bookkeeping has to
+  agree.

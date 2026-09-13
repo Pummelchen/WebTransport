@@ -19,7 +19,7 @@ foreach(app wt-client-c99 wt-server-c99 wt-conformance-c99)
                               ${app}/scenario_capsules.c ${app}/../support/capsule_stream.c
                               ${app}/scenario_control.c ${app}/scenario_headers.c
                               ${app}/scenario_isolation.c ${app}/scenario_matrix.c
-                              ${app}/scenario_protocol.c)
+                              ${app}/scenario_protocol.c ${app}/scenario_connection_ids.c)
     # The support headers, because the capsule stream is shared with the CLI tools rather than copied here.
     set(WT_APP_NEEDS_SUPPORT TRUE)
   endif()

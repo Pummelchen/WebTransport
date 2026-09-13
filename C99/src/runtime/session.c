@@ -4,6 +4,7 @@
 
 #include <string.h>
 
+#include "webtransport/crypto/crypto.h"
 #include "webtransport/quic/protection.h"
 
 /* The session's own frame handler: the handshake first, then whatever the caller installed. The order
@@ -19,6 +20,63 @@ static wt_status_t session_on_frame(void *context, wt_quic_space_t space,
   if (session->next_handler != NULL) {
     return session->next_handler(session->next_context, space, frame);
   }
+  return WT_OK;
+}
+
+/* WT-171: keep one spare connection ID issued, and replace it when the peer retires it.
+ *
+ * The work is done HERE rather than in `session_on_frame` for one reason: the frame handler is composed of layers
+ * (the handshake, then whatever the caller installed) and a replacement is not any of their business -- it is this
+ * session's own transport policy, driven by the peer's `active_connection_id_limit`. The retire still ARRIVES
+ * through the handler chain, which is what the layer above needs; what this adds is that somebody answers it. A
+ * retire read during the pump leaves `issued_count` one lower, and this call then sees room for exactly one spare
+ * -- so the replacement is issued in the SAME round that read the retire, and no counter is duplicated to notice
+ * it. That is also why there is nothing to reset: "one spare, if the peer allows one" is the whole state.
+ *
+ * The gate on 1-RTT keys is not decoration: a NEW_CONNECTION_ID lives in the Application space, and the peer's
+ * parameters arrive one message BEFORE a client has those keys, so a session that issued the spare as soon as the
+ * limit was known would ask for a packet it cannot protect and retry every round until it could. */
+static wt_status_t provide_spare_connection_id(wt_runtime_session_t *session, uint64_t now) {
+  wt_quic_connection_t *connection = &session->connection;
+  uint8_t id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  uint8_t token[16];
+  uint64_t allowed;
+  wt_status_t status;
+
+  if (session->spare_connection_id == 0) return WT_OK;
+  if (connection->local_connection_id_length == 0U) return WT_OK;
+  if (wt_quic_connection_is_closed(connection) != 0) return WT_OK;
+  if (!connection->peer_limits.set) return WT_OK;
+  if (!wt_runtime_session_keys_ready(session)) return WT_OK;
+
+  /* Section 5.1.1's arithmetic, which is the same one `wt_quic_connection_issue_connection_id` enforces: the
+   * peer's limit counts the handshake's ID, so one spare is what the default of two allows. Being at the allowed
+   * count already is the ordinary state after the first spare, and the reason this needs no flag of its own. */
+  allowed = connection->peer_limits.active_connection_id_limit;
+  if (allowed > 0U) allowed -= 1U;
+  if ((uint64_t)connection->issued_count >= allowed) return WT_OK;
+
+  status = wt_random_bytes(id, connection->local_connection_id_length);
+  if (status != WT_OK) return status;
+  status = wt_random_bytes(token, sizeof(token));
+  if (status != WT_OK) return status;
+
+  status = wt_quic_connection_issue_connection_id(connection, id, connection->local_connection_id_length, token,
+                                                  now);
+  if (status == WT_OK) {
+    session->spare_ids_issued++;
+    return WT_OK;
+  }
+  /* A peer that allows no spare, a table that is full, or state that has moved on: the session is still usable,
+   * so this is counted rather than returned. `provide` runs once per pump round, and the attempts stop the moment
+   * one succeeds. */
+  session->spare_id_refusals++;
+  return WT_OK;
+}
+
+wt_status_t wt_runtime_session_keep_spare_connection_id(wt_runtime_session_t *session) {
+  if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
+  session->spare_connection_id = 1;
   return WT_OK;
 }
 
@@ -236,6 +294,12 @@ wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now)
 
   /* BEFORE the flushes, because the packet just read may have carried them (see above). */
   status = apply_peer_parameters(session);
+  if (status != WT_OK) return status;
+
+  /* The spare connection ID, or the replacement for one the retire in the packet just read took away (WT-171).
+   * Here, after the parameters and before the flushes, because this is the first point in the round at which both
+   * facts a spare needs -- the peer's limit and the packet that may have retired one -- are known. */
+  status = provide_spare_connection_id(session, now);
   if (status != WT_OK) return status;
 
   /* RFC 9000 section 17.2.5.2: a Retry just read moved the destination connection ID, and the Initial keys are a

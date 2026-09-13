@@ -74,6 +74,12 @@ typedef struct wt_runtime_session {
   /* The layer that owns the frames the handshake does not, told about the ones that were LOST. */
   void (*lost_handler)(void *context, const wt_quic_tx_frame_t *frame);
   void *lost_context;
+  /* WT-171: whether this session keeps a spare connection ID of its own issued, and what it has done about it.
+   * `spare_ids_issued` counts the spares that went out -- one at the handshake, one per retire after that -- so
+   * "the peer retired one and it was replaced" is a number rather than an inference. */
+  int spare_connection_id;
+  unsigned spare_ids_issued;
+  unsigned spare_id_refusals;
 } wt_runtime_session_t;
 
 /* A RULE THE CALLER MUST KEEP, and the one that cost this phase several rounds: the connection-level
@@ -143,6 +149,27 @@ wt_status_t wt_runtime_session_set_lost_frame_handler(wt_runtime_session_t *sess
 wt_status_t wt_runtime_session_set_frame_handler(wt_runtime_session_t *session,
                                                  wt_runtime_frame_handler_fn handler,
                                                  void *context);
+
+/* Keep ONE spare connection ID issued for the peer, and replace it when the peer retires it (WT-171).
+ *
+ * RFC 9000 section 5.1.2 asks an endpoint to REPLACE a connection ID the peer retires -- the retire is a request
+ * for another one, not just a withdrawal -- and section 5.1.1 sizes the spare: the peer's
+ * `active_connection_id_limit` COUNTS the connection ID the handshake used, so a peer at the default of two
+ * allows exactly one. This is the policy that keeps that one out there: the session issues a spare as soon as it
+ * can protect a 1-RTT packet and the peer's limit is known, and issues another whenever a retire takes one away.
+ *
+ * Opt-in, and deliberately so: a library that started sending NEW_CONNECTION_ID frames to every peer would change
+ * every session's wire behaviour to serve a caller who may have its own connection-ID policy (a load balancer's
+ * routing prefix, or tokens derived from a secret it holds). The bytes here are `wt_random_bytes` -- unpredictable
+ * by construction, which is what section 5.1 and section 10.3.2 ask of an ID and its stateless reset token -- so a
+ * caller with no policy of its own gets a correct one by calling this once, and a caller with one keeps the seam
+ * `wt_runtime_session_set_frame_handler` gives it.
+ *
+ * Never fails because the peer allows no spare or this endpoint's table is full; those are counted in
+ * `spare_id_refusals` instead, because a peer that granted `active_connection_id_limit` of one is a peer this
+ * session can still talk to. WT_ERR_INVALID_ARGUMENT for a null session, and the randomness failure is returned:
+ * a session that cannot get randomness cannot proceed. */
+wt_status_t wt_runtime_session_keep_spare_connection_id(wt_runtime_session_t *session);
 
 /* Read what is there, drive the handshake and flush what is owed. Never blocks. Returns WT_OK when the
  * round completed, whatever it contained. */
