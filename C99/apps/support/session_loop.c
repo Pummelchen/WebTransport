@@ -162,6 +162,18 @@ static void connection_config(wt_quic_connection_config_t *config, wt_quic_role_
  * connection held Handshake and Application keys), and the insertion loop left the block in some paths twice. A
  * helper called before the clear is one place, one order, and a comment that says why the order matters (WT-135).
  */
+/* Whether this endpoint may SPEAK: the handshake is DONE and the peer's transport parameters are IN FORCE.
+ *
+ * Both halves are needed, and the measurement that showed it is this round's: breaking out on DONE alone made
+ * the client start its CONNECT before the pump that applies the peer's parameters had run, so opening a request
+ * stream was refused with WT_ERR_STATE (`"status":"state"`) while the session was already confirmed. The
+ * parameters arrive in the same flight as the Finished and are applied by the NEXT pump, so the loop has to wait
+ * for both (WT-142). */
+static int handshake_ready(const loop_t *loop) {
+  return wt_runtime_session_handshake_done(&loop->session) != 0 &&
+         loop->session.peer_parameters_applied != 0;
+}
+
 static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->first_receive_error = loop->session.first_receive_error;
   out->receive_errors = loop->session.receive_errors;
@@ -289,10 +301,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   deadline_rounds = WT_LOOP_ROUNDS_FOR(config->timeout_ms);
   if (deadline_rounds > WT_LOOP_ROUNDS) deadline_rounds = WT_LOOP_ROUNDS;
 
-  for (round = 0U; round < deadline_rounds && wt_runtime_session_established(&loop.session) == 0; round++) {
+  for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0; round++) {
     pump_once(&loop);
   }
-  if (wt_runtime_session_established(&loop.session) == 0) {
+  if (handshake_ready(&loop) == 0) {
     record_oracle(&loop, out);
     record_oracle(&loop, out);
   wt_runtime_session_clear(&loop.session);
@@ -461,10 +473,10 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &transport);
 
-  for (round = 0U; round < deadline_rounds && wt_runtime_session_established(&loop.session) == 0; round++) {
+  for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0; round++) {
     pump_once(&loop);
   }
-  if (wt_runtime_session_established(&loop.session) == 0) {
+  if (handshake_ready(&loop) == 0) {
     record_oracle(&loop, out);
     record_oracle(&loop, out);
   wt_runtime_session_clear(&loop.session);
