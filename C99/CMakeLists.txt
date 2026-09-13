@@ -80,6 +80,7 @@ set(WT_QUIC_SOURCES
   src/quic/packet.c
   src/quic/transport_parameters.c
   src/quic/connection_id.c
+  src/quic/retry_token.c
   src/quic/protection.c
 )
 set(WT_QUIC_RUNTIME_SOURCES

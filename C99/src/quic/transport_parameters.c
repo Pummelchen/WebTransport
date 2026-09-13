@@ -402,13 +402,25 @@ wt_status_t wt_quic_transport_parameters_add_bytes(
 wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *params, int is_server,
                                                const uint8_t *source_connection_id, size_t source_length,
                                                const uint8_t *original_destination_connection_id,
-                                               size_t original_length) {
+                                               size_t original_length, int retried,
+                                               const uint8_t *retry_source_connection_id,
+                                               size_t retry_source_length) {
   wt_status_t status;
 
   if (params == NULL || source_connection_id == NULL || source_length == 0U) return WT_ERR_INVALID_ARGUMENT;
   if (is_server && (original_destination_connection_id == NULL || original_length == 0U)) {
     /* A server that does not say which connection ID the client addressed it by is missing a parameter the RFC
      * requires of it, and the peer cannot tell that from a mis-routed packet. */
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  /* Both directions of section 7.3's rule are refused here rather than sent: a Retry the parameters do not name,
+   * and a name for a Retry that was never sent. The second is the one a caller reaches by accident -- passing a
+   * leftover value on a path where `retried` is false -- and a client that checks (this tree's does, since
+   * WT-166) answers it with TRANSPORT_PARAMETER_ERROR. */
+  if (retried != 0 && (!is_server || retry_source_connection_id == NULL || retry_source_length == 0U)) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  if (retried == 0 && retry_source_connection_id != NULL && retry_source_length != 0U) {
     return WT_ERR_INVALID_ARGUMENT;
   }
 
@@ -424,6 +436,11 @@ wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *p
   if (is_server) {
     status = wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID,
                                                     original_destination_connection_id, original_length);
+    if (status != WT_OK) return status;
+  }
+  if (retried != 0) {
+    status = wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID,
+                                                    retry_source_connection_id, retry_source_length);
     if (status != WT_OK) return status;
   }
 

@@ -29,7 +29,8 @@ static void test_build_sends_the_mandatory_connection_ids(void) {
 
   /* A client: its own Source Connection ID, and nothing about a destination it did not choose. */
   WT_EXPECT_OK("a client's parameters build",
-               wt_quic_transport_parameters_build(&params, 0, client_source, sizeof(client_source), NULL, 0U));
+               wt_quic_transport_parameters_build(&params, 0, client_source, sizeof(client_source), NULL, 0U,
+                                                  0, NULL, 0U));
   WT_EXPECT_OK("and encode", wt_quic_transport_parameters_encode(&w, &params));
   {
     wt_quic_transport_parameters_t read_back;
@@ -85,7 +86,7 @@ static void test_build_sends_the_mandatory_connection_ids(void) {
     wt_quic_error_t error = WT_QUIC_NO_ERROR;
     WT_EXPECT_OK("a server's parameters build",
                  wt_quic_transport_parameters_build(&params, 1, server_source, sizeof(server_source),
-                                                    client_source, sizeof(client_source)));
+                                                    client_source, sizeof(client_source), 0, NULL, 0U));
     WT_EXPECT_OK("and encode", wt_quic_transport_parameters_encode(&server_writer, &params));
     WT_EXPECT_OK("and decode again",
                  wt_quic_transport_parameters_decode(encoded_server, wt_writer_offset(&server_writer),
@@ -103,10 +104,61 @@ static void test_build_sends_the_mandatory_connection_ids(void) {
 
   /* A server that cannot say which connection ID it was addressed by has a caller bug, refused here rather than
    * sent as a parameter list a peer would close over. */
-  status = wt_quic_transport_parameters_build(&params, 1, server_source, sizeof(server_source), NULL, 0U);
+  status = wt_quic_transport_parameters_build(&params, 1, server_source, sizeof(server_source), NULL, 0U, 0,
+                                              NULL, 0U);
   WT_EXPECT_STATUS("a server without an original destination is refused", WT_ERR_INVALID_ARGUMENT, status);
-  status = wt_quic_transport_parameters_build(&params, 0, NULL, 0U, NULL, 0U);
+  status = wt_quic_transport_parameters_build(&params, 0, NULL, 0U, NULL, 0U, 0, NULL, 0U);
   WT_EXPECT_STATUS("and a list with no source connection ID is refused", WT_ERR_INVALID_ARGUMENT, status);
+}
+
+/* WT-168: the parameter a server sends ONLY when it sent a Retry (RFC 9000 section 7.3), and the two opposite
+ * mistakes the builder refuses instead of sending. Both directions are close errors a checking peer closes on:
+ * a server that retried and omits the parameter, and a server that did not retry and sends one anyway. */
+static void test_a_retry_is_named_only_when_one_was_sent(void) {
+  static const uint8_t client_source[] = {0x11U, 0x22U, 0x33U, 0x44U};
+  static const uint8_t server_source[] = {0xaaU, 0xbbU};
+  static const uint8_t retry_source[] = {0xccU, 0xddU, 0xeeU};
+  wt_quic_transport_parameters_t params;
+  uint8_t retried_encoded[256];
+  wt_writer_t retried_writer = wt_writer_init(retried_encoded, sizeof(retried_encoded));
+  wt_status_t status;
+
+  WT_EXPECT_OK("a server that retried builds",
+               wt_quic_transport_parameters_build(&params, 1, server_source, sizeof(server_source),
+                                                  client_source, sizeof(client_source), 1, retry_source,
+                                                  sizeof(retry_source)));
+  WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&retried_writer, &params));
+  {
+    wt_quic_transport_parameters_t read_back;
+    const uint8_t *value = NULL;
+    size_t value_length = 0U;
+    wt_quic_error_t error = WT_QUIC_NO_ERROR;
+    WT_EXPECT_OK("and decodes again",
+                 wt_quic_transport_parameters_decode(retried_encoded, wt_writer_offset(&retried_writer),
+                                                     &read_back, &error));
+    WT_EXPECT_OK("with retry_source_connection_id",
+                 wt_quic_transport_parameters_get(&read_back, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID, &value,
+                                                  &value_length));
+    WT_EXPECT_BYTES("set to the Retry's Source Connection ID", retry_source, value, sizeof(retry_source));
+    /* And the TWO parameters that were already there are untouched by the third. */
+    WT_EXPECT_OK("while original_destination_connection_id is still the client's",
+                 wt_quic_transport_parameters_get(&read_back,
+                                                  WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, &value,
+                                                  &value_length));
+    WT_EXPECT_BYTES("byte for byte", client_source, value, sizeof(client_source));
+  }
+
+  /* A Retry the parameters do not name. */
+  status = wt_quic_transport_parameters_build(&params, 1, server_source, sizeof(server_source), client_source,
+                                              sizeof(client_source), 1, NULL, 0U);
+  WT_EXPECT_STATUS("a Retry with no source connection ID is refused", WT_ERR_INVALID_ARGUMENT, status);
+  /* And a name for a Retry that was never sent. */
+  status = wt_quic_transport_parameters_build(&params, 1, server_source, sizeof(server_source), client_source,
+                                              sizeof(client_source), 0, retry_source, sizeof(retry_source));
+  WT_EXPECT_STATUS("a retry source without a Retry is refused too", WT_ERR_INVALID_ARGUMENT, status);
+  status = wt_quic_transport_parameters_build(&params, 0, client_source, sizeof(client_source), NULL, 0U, 1,
+                                              retry_source, sizeof(retry_source));
+  WT_EXPECT_STATUS("and a client cannot name one at all", WT_ERR_INVALID_ARGUMENT, status);
 }
 
 int main(void) {
@@ -610,5 +662,6 @@ int main(void) {
                 wt_quic_transport_parameter_name(0x4321U));
 
   test_build_sends_the_mandatory_connection_ids();
+  test_a_retry_is_named_only_when_one_was_sent();
   WT_TEST_MAIN_END("wt_quic_transport_parameters");
 }

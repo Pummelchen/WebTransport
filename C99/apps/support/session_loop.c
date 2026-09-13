@@ -206,11 +206,13 @@ static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_
  * server's (WT-151). */
 static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *source,
                                  size_t source_length, const uint8_t *original_destination,
-                                 size_t original_length) {
+                                 size_t original_length, int retried,
+                                 const uint8_t *retry_source, size_t retry_source_length) {
   wt_quic_transport_parameters_t params;
   wt_writer_t w = wt_writer_init(out, capacity);
   if (wt_quic_transport_parameters_build(&params, is_server, source, source_length, original_destination,
-                                         original_length) != WT_OK) {
+                                         original_length, retried, retry_source,
+                                         retry_source_length) != WT_OK) {
     return 0U;
   }
   if (wt_quic_transport_parameters_encode(&w, &params) != WT_OK) return 0U;
@@ -405,8 +407,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   memset(out, 0, sizeof(*out));
   memset(&loop, 0, sizeof(loop));
   loop.now = 1000U;
+  /* No Retry on this path (WT-168 is the round that will add one), so `retried` is 0 and the retry source is
+   * absent -- which the builder refuses to accept the other way round. */
   parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_connection_id,
-                                   sizeof(k_connection_id), NULL, 0U);
+                                   sizeof(k_connection_id), NULL, 0U, 0, NULL, 0U);
   if (parameters_len == 0U) return WT_ERR_LIMIT;
 
   {
@@ -683,7 +687,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
 
   parameters_len = build_parameters(parameters, sizeof(parameters), 1, k_connection_id,
                                    sizeof(k_connection_id), client_destination_id,
-                                   client_destination_id_length);
+                                   client_destination_id_length, 0, NULL, 0U);
   if (parameters_len == 0U) {
     wt_udp_close(&loop.socket);
     return WT_ERR_LIMIT;

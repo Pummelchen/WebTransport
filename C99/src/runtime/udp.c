@@ -17,6 +17,7 @@
  * written down in docs/PORTABILITY.md rather than pretended away. */
 #include "udp_platform.h"
 
+#include "webtransport/endian.h"
 #include "webtransport/time.h"
 
 /* How many bytes of an IPv4 address are meaningful, and of an IPv6 one. Named because the literal 4
@@ -66,6 +67,15 @@ int wt_udp_address_equal(const wt_udp_address_t *a, const wt_udp_address_t *b) {
   if (a->family != b->family || a->port != b->port || a->scope_id != b->scope_id) return 0;
   length = a->family == WT_UDP_IPV4 ? WT_UDP_IPV4_BYTES : WT_UDP_IPV6_BYTES;
   return memcmp(a->bytes, b->bytes, length) == 0;
+}
+
+size_t wt_udp_address_encode(const wt_udp_address_t *address, uint8_t *out, size_t capacity) {
+  if (address == NULL || out == NULL || capacity < WT_UDP_ADDRESS_ENCODED_LENGTH) return 0U;
+  out[0] = (uint8_t)address->family;
+  memcpy(out + 1U, address->bytes, 16U);
+  wt_store_be16(out + 17U, address->port);
+  wt_store_be32(out + 19U, address->scope_id);
+  return WT_UDP_ADDRESS_ENCODED_LENGTH;
 }
 
 wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {

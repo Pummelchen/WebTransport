@@ -158,6 +158,16 @@ size_t wt_udp_address_format(const wt_udp_address_t *address, char *out, size_t 
 /* Whether two addresses are the same address: family, bytes, scope and port. */
 int wt_udp_address_equal(const wt_udp_address_t *a, const wt_udp_address_t *b);
 
+/* The canonical BYTE form of an address: family, sixteen address bytes, port and scope id, all big endian where
+ * they are numbers, always the same length (`WT_UDP_ADDRESS_ENCODED_LENGTH`). It exists for the places that have
+ * to bind a value to "this peer" without keeping the struct: a Retry token hashes it (WT-168), and a comparison
+ * of two encodings is the same answer as `wt_udp_address_equal` while being something a hash can be taken of.
+ *
+ * Both IPv4 and IPv6 encode to the full sixteen bytes, so the family byte is what tells them apart -- an IPv4
+ * address that happened to look like a truncated IPv6 one cannot collide. */
+#define WT_UDP_ADDRESS_ENCODED_LENGTH 23U
+size_t wt_udp_address_encode(const wt_udp_address_t *address, uint8_t *out, size_t capacity);
+
 /* The loopback address of a family, port zero. */
 void wt_udp_address_loopback(wt_udp_family_t family, wt_udp_address_t *out);
 

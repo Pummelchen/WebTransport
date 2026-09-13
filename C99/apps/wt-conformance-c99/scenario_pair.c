@@ -103,11 +103,13 @@ static void init_side(scenario_side_t *side, wt_http3_role_t role) {
  * already lost (WT-145, WT-162), which is why this helper exists and is not duplicated. */
 static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *source,
                                  size_t source_length, const uint8_t *original_destination,
-                                 size_t original_length) {
+                                 size_t original_length, int retried,
+                                 const uint8_t *retry_source, size_t retry_source_length) {
   wt_quic_transport_parameters_t params;
   wt_writer_t w = wt_writer_init(out, capacity);
   if (wt_quic_transport_parameters_build(&params, is_server, source, source_length, original_destination,
-                                         original_length) != WT_OK) {
+                                         original_length, retried, retry_source,
+                                         retry_source_length) != WT_OK) {
     return 0U;
   }
   if (wt_quic_transport_parameters_encode(&w, &params) != WT_OK) return 0U;
@@ -171,10 +173,10 @@ wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail
    * a server sends that PLUS the Destination Connection ID the client's first Initial carried (RFC 9000 section
    * 7.3). One buffer for both was the shape that made the omission invisible. */
   parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_client_connection_id,
-                                    sizeof(k_client_connection_id), NULL, 0U);
+                                    sizeof(k_client_connection_id), NULL, 0U, 0, NULL, 0U);
   server_parameters_len = build_parameters(server_parameters, sizeof(server_parameters), 1,
                                            k_server_connection_id, sizeof(k_server_connection_id),
-                                           k_client_connection_id, sizeof(k_client_connection_id));
+                                           k_client_connection_id, sizeof(k_client_connection_id), 0, NULL, 0U);
   if (parameters_len == 0U) {
     scenario_detail_set(detail, detail_size, "the transport parameters did not encode");
     return WT_CLI_RESULT_FAILED;

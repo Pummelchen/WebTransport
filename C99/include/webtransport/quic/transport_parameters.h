@@ -194,11 +194,21 @@ wt_status_t wt_quic_transport_parameters_add_bytes(
  *
  * `is_server` is explicit rather than inferred from a NULL: a server that forgets its original destination ID
  * must be refused here, not treated as a client. The limits this library advertises are added too, so two
- * callers cannot drift apart about them either. */
+ * callers cannot drift apart about them either.
+ *
+ * `retry_source_connection_id` is the one parameter a server sends ONLY when it sent a Retry (RFC 9000 section
+ * 7.3), set to the Source Connection ID of the Retry packet -- the connection ID the client's next Initial was
+ * addressed to. `retried` says which case this is, because the two mistakes are opposite and both are close
+ * errors: a server that retried and omits the parameter is refused by a checking client, and a server that did
+ * not retry and sends one is refused just the same ("if a server sends a Retry packet, ... the server MUST also
+ * send the retry_source_connection_id transport parameter", and section 7.3 makes a present one without a Retry
+ * a TRANSPORT_PARAMETER_ERROR on the client). */
 wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *params, int is_server,
                                                const uint8_t *source_connection_id, size_t source_length,
                                                const uint8_t *original_destination_connection_id,
-                                               size_t original_length);
+                                               size_t original_length, int retried,
+                                               const uint8_t *retry_source_connection_id,
+                                               size_t retry_source_length);
 
 /* A short stable name for the identifiers above, or "unknown". Never NULL. */
 const char *wt_quic_transport_parameter_name(uint64_t id);
