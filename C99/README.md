@@ -219,8 +219,8 @@ What is here:
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
   `scripts/score-matrix.sh` rather than from memory: **24 of 24 draft-16 requirements in
-  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 5 of the plan's 9 completion
-  criteria are met, 2 partial and 2 not met.** The matrix coverage is 100% *of the matrix*, which is
+  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 6 of the plan's 9 completion
+  criteria are met, 2 partial and 1 not met.** The matrix coverage is 100% *of the matrix*, which is
   not the same as being done: the criteria that are not met are outside the matrix and outside this
   repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
   Windows CI legs need portability work before a job for them would be anything but red. The two
@@ -258,35 +258,12 @@ What is here:
   and the datagram's quarter-id round trip), and the two **real sessions** over IPv4 and IPv6. The
   reserved-SETTINGS scenario is what **found** a real spec violation in this tree's own parser, and
   the fix is in — see `IMPLEMENTATION_PLAN.md`. Registered with CTest.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): seventeen scenarios in
-  one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path is `404`
-  compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a server
-  without `WT_ENABLED` refuses the session, a repeated SETTINGS identifier is `H3_SETTINGS_ERROR`, a
-  capsule over the bound is excessive load, a peer stream past the bound is `WT_ERR_LIMIT` with **no**
-  error code because the bound is ours, an empty datagram is malformed rather than short, a QPACK
-  section needing a table that was never advertised is refused with a code, the session keeps the
-  FIRST close's code, and a drain stops new streams), the positive edge this project earned the hard
-  way (half a prefix decides nothing until it is whole), and the two **real sessions** over IPv4 and
-  IPv6. One scenario reports **`unsupported` with its measurement**: RFC 9114 §7.2.4.1 makes a
-  reserved SETTINGS identifier an `H3_SETTINGS_ERROR`, and this parser accepts one — recorded as
-  WT-137 rather than passed or failed. Registered with CTest, whose **skip** code carries the same
-  distinction the report does.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): twelve scenarios in one
-  machine-readable report. The three codec ones (varints across every form, a close capsule's round
-  trip, the draft-16 decision on an extended CONNECT) plus **six refusal scenarios** — a path this
-  server does not serve is a `404`, an extended CONNECT for another protocol is not a WebTransport
-  request, a server that never advertised `WT_ENABLED` refuses the session, a capsule value over the
-  bound is excessive load, a peer stream past the bound is `WT_ERR_LIMIT` with **no** error code
-  because the bound is ours, an empty datagram is malformed rather than short — plus the positive edge
-  this project earned the hard way (a prefix split across frames decides nothing until it is whole) and
-  the two **real sessions** over IPv4 and IPv6. Registered with CTest, so the whole report is checked
-  on every build.
 - **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
   stands up two endpoints in **one process** over loopback — a generated, pinned identity, a real
   TLS 1.3 handshake inside QUIC, an extended CONNECT accepted by the draft-16 layer, the response,
   an 11-byte message on a WebTransport stream and a message as a datagram — on **IPv4 and IPv6**,
-  and reports all five scenarios as `passed` in its machine-readable output
-  (`{"summary":{"total":5,"passed":5,"failed":0,"unsupported":0}}`, exit 0). IPv6 reports
+  and reports every scenario as passed in its machine-readable output
+  (`"summary"` with `"failed":0` and `"unsupported":0`, exit 0). IPv6 reports
   `unsupported` with its reason on a machine with no IPv6 loopback, because that is a fact about
   the machine rather than a failure of the code. The tool is run by CTest, so the plan's criterion
   is checked rather than demonstrated by hand.
