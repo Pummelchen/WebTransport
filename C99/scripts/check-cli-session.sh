@@ -58,6 +58,11 @@ grep -q '"established":true' "$work/client.json" || fail "the client was not est
 grep -q '"established":true' "$work/server.json" || fail "the server was not established"
 grep -q '"connectAccepted":true' "$work/client.json" || fail "the client saw no accepted CONNECT"
 grep -q '"responseStatus":200' "$work/client.json" || fail "the response was not a 200"
+# And WHY it became a session (WT-155). `responseOutcome` must be the decided value rather than its default:
+# 0 means "no response was decoded", and a report that says the session came up while its own outcome says
+# nothing arrived is the kind of field-appended-and-never-wired defect this check exists to catch.
+grep -q '"responseOutcome":1' "$work/client.json" || fail "the client did not report an accepted response"
+grep -q '"h3Error":0' "$work/client.json" || fail "the client reported an HTTP/3 error on a good response"
 # Each side received the other's four-byte message, which is the exchange the tools exist to make.
 grep -q '"receivedBytes":4' "$work/client.json" || fail "the client did not receive the message"
 grep -q '"receivedBytes":4' "$work/server.json" || fail "the server did not receive the message"

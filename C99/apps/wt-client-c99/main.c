@@ -147,12 +147,13 @@ int main(int argc, char **argv) {
     status = wt_loop_run_client(&loop, &result);
     if (options.json != 0) {
       printf("{\"role\":\"client\",\"status\":\"%s\",\"established\":%s,\"connectAccepted\":%s,"
-             "\"responseStatus\":%u,\"receivedBytes\":%llu,\"receivedDatagram\":%s,"
+             "\"responseStatus\":%u,\"responseOutcome\":%u,\"h3Error\":%llu,"
+             "\"receivedBytes\":%llu,\"receivedDatagram\":%s,"
              "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u,\"packetsSeen\":%u,"
              "\"lastReceive\":\"%s\",\"closeCodeSet\":%s,\"closeCode\":%llu,"
              "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
              "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,"
-             "\"closeCause\":\"%s\",\"closeSent\":%s,"
+             "\"closeCause\":\"%s\",\"closeSent\":%s,\"closeCauseFrame\":%llu,"
              "\"packetsDiscarded\":%llu,\"keys\":{\"initial\":%s,\"handshake\":%s,"
              "\"application\":%s},\"handshakeState\":\"%s\",\"resends\":%u,\"probes\":%u,"
              "\"probesWithData\":%u,\"requestStreamId\":%llu,"
@@ -166,6 +167,7 @@ int main(int argc, char **argv) {
              "\"acks\":{\"initial\":[%u,%llu],\"handshake\":[%u,%llu],\"application\":[%u,%llu]}}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
+             result.response_outcome, (unsigned long long)result.h3_error,
              (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
              wt_status_name(result.first_receive_error), result.receive_errors, result.packets_seen,
              wt_status_name(result.last_receive), result.close_code_set != 0 ? "true" : "false",
@@ -174,6 +176,7 @@ int main(int argc, char **argv) {
              result.close_kind, (unsigned long long)result.close_sent_error_code,
              (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
              result.close_was_sent != 0 ? "true" : "false",
+             (unsigned long long)result.close_cause_frame,
              (unsigned long long)result.packets_discarded, result.has_initial_keys != 0 ? "true" : "false",
              result.has_handshake_keys != 0 ? "true" : "false",
              result.has_application_keys != 0 ? "true" : "false",
@@ -191,9 +194,15 @@ int main(int argc, char **argv) {
              result.ack_largest_initial, result.acks_handshake, result.ack_largest_handshake,
              result.acks_application, result.ack_largest_application);
     } else {
-      printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
-             (unsigned)result.status, (unsigned long long)result.received_bytes,
+      printf("client: %s, response %u (outcome %u), received %llu byte(s)%s\n",
+             wt_loop_status_name(status), (unsigned)result.status, result.response_outcome,
+             (unsigned long long)result.received_bytes,
              result.received_datagram != 0 ? " as a datagram" : " on a stream");
+      /* The HTTP/3 error when the RESPONSE itself was refused: no status can express it, because the refusal
+       * happens before any status exists (WT-155). */
+      if (result.response_outcome == (unsigned)WT_LOOP_RESPONSE_REFUSED) {
+        printf("client: the response was refused by the HTTP/3 layer with error %llu\n", result.h3_error);
+      }
       /* The status above is the TOOL's ("timeout"); this is the layer's, and it is the difference between "the
        * peer never answered" and "the peer answered with something this endpoint refused". */
       if (result.receive_errors > 0U) {

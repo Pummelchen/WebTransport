@@ -500,8 +500,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   }
   if (handshake_ready(&loop) == 0) {
     record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
     return WT_ERR_TIMEOUT;
   }
@@ -526,8 +525,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
                                                        &loop.side.request_stream_id, &h3_error);
     if (status != WT_OK) {
       record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -537,8 +535,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   }
   if (loop.side.section_complete == 0) {
     record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
     return WT_ERR_TIMEOUT;
   }
@@ -547,13 +544,19 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
         &loop.side.endpoint, loop.side.request_stream_id, loop.side.section, loop.side.section_length,
         scratch, sizeof(scratch), &response, &h3_error);
     if (status != WT_OK) {
+      /* WHY the response did not become a session, which is the whole point of the field set (WT-155): before
+       * this, a peer that answered a field section this layer refused and a peer that answered nothing both
+       * produced `"status":"timeout"` from the tool. */
+      out->response_outcome = (unsigned)WT_LOOP_RESPONSE_REFUSED;
+      out->h3_error = (uint64_t)h3_error;
       record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
     out->connect_accepted = response.has_status != 0 && response.status >= 200U && response.status < 300U;
+    out->response_outcome = out->connect_accepted != 0 ? (unsigned)WT_LOOP_RESPONSE_ACCEPTED
+                                                       : (unsigned)WT_LOOP_RESPONSE_NOT_ACCEPTED;
     out->status = (uint32_t)response.status;
     /* The response establishes the session (section 3.1). The CONNECT stream was marked as a capsule stream by
      * `start_session`, and this response is the one HTTP/3 frame that mark was waiting for -- so the peer's
@@ -565,8 +568,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     wt_status_t status = send_message(&loop, &loop.transport, config);
     if (status != WT_OK) {
       record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -853,8 +855,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
   if (handshake_ready(&loop) == 0) {
     record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
     return WT_ERR_TIMEOUT;
   }
@@ -892,8 +893,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
   if (loop.side.section_complete == 0) {
     record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
     return WT_ERR_TIMEOUT;
   }
@@ -920,8 +920,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
         scratch, sizeof(scratch), &request, &h3_error);
     if (status != WT_OK) {
       record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -974,8 +973,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
       }
     } else {
       record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return WT_ERR_PROTOCOL;
     }
@@ -989,8 +987,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
                                                        loop.now);
     if (status != WT_OK) {
       record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }
@@ -1006,8 +1003,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     wt_status_t status = send_message(&loop, &loop.transport, config);
     if (status != WT_OK) {
       record_oracle(&loop, out);
-    record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
+      wt_runtime_session_clear(&loop.session);
       wt_udp_close(&loop.socket);
       return status;
     }

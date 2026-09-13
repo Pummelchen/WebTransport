@@ -39,6 +39,18 @@ typedef struct wt_loop_config {
   const uint8_t *pin; /* WT_SHA256_LEN bytes, or NULL for the loopback development bypass */
 } wt_loop_config_t;
 
+/* What the CLIENT decided about the response (WT-155). The server's report names why it refused a CONNECT --
+ * `requestOutcome` and `h3Error` -- and the other direction had nothing to say: a peer that answered 404 and a
+ * peer that answered a field section this layer refused both produced `"status":"timeout"`, because the tool
+ * returned before recording why. One number a JSON reader can switch on, and the HTTP/3 error beside it when the
+ * RESPONSE ITSELF was refused, which is the failure no status can express. */
+typedef enum wt_loop_response_outcome {
+  WT_LOOP_RESPONSE_NONE = 0,        /* no response was decoded */
+  WT_LOOP_RESPONSE_ACCEPTED = 1,    /* a 2xx response: the session is established */
+  WT_LOOP_RESPONSE_NOT_ACCEPTED = 2,/* a status that is not 2xx, which this client will not treat as a session */
+  WT_LOOP_RESPONSE_REFUSED = 3      /* the HTTP/3 layer refused the response; `h3_error` names the rule */
+} wt_loop_response_outcome_t;
+
 typedef struct wt_loop_result {
   int established;
   int connect_accepted;
@@ -78,6 +90,9 @@ typedef struct wt_loop_result {
    * client's CONNECT could only be diagnosed by reading the validator (WT-153). */
   char request_line[192];
   unsigned request_outcome;
+  /* The client's side of the same reporting (WT-155): what it decided about the response, and the HTTP/3 error
+   * when the response was refused. Both directions now answer "why did this session not come up". */
+  unsigned response_outcome;
   unsigned long long request_status;
   unsigned long long h3_error;
   unsigned close_kind;
