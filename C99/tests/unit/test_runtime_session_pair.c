@@ -61,6 +61,10 @@ static void build_parameters(void) {
   WT_EXPECT_OK("max_datagram_frame_size",
                wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE,
                                                         1200U));
+  /* The reliable-stream-reset extension, which draft-16 section 3.1 requires of BOTH roles and which a
+   * WebTransport stream needs: its session prefix is the first thing on the stream. */
+  WT_EXPECT_OK("reset_stream_at",
+               wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
   WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&w, &params));
   g_parameters_len = wt_writer_offset(&w);
   WT_EXPECT_TRUE("with bytes in them", g_parameters_len > 0U);
@@ -763,9 +767,76 @@ static void test_a_refusal_reaches_the_peer_as_an_application_close(void) {
   wt_udp_close(&pair.server_socket);
 }
 
+/* A reliable stream reset, from one endpoint to the other, over a real handshake (WT-161).
+ *
+ * The reliable-stream-reset extension is what draft-16 relies on for a WebTransport stream's SESSION PREFIX: the
+ * prefix is the first thing on the stream, so a reset that dropped it would leave the peer with a stream it cannot
+ * attribute to a session. Both endpoints advertise it, one commits to four bytes, and the other reads back the
+ * offset it may still rely on -- which is the whole point of the extension and the whole of this test. */
+static void test_a_reliable_stream_reset_crosses_the_connection(void) {
+  pair_t pair;
+  http3_side_t client;
+  http3_side_t server;
+  wt_http3_driver_transport_t client_transport;
+  uint64_t stream_id = 0U;
+  unsigned rounds;
+
+  memset(&pair, 0, sizeof(pair));
+  arm_pair(&pair);
+  init_side(&client, WT_HTTP3_ROLE_CLIENT);
+  init_side(&server, WT_HTTP3_ROLE_SERVER);
+  pair.server_side = &server;
+  WT_EXPECT_OK("the server's HTTP/3 layer joins",
+               wt_runtime_session_set_frame_handler(&pair.server, side_on_frame, &server));
+  wt_http3_driver_quic_transport(&pair.client.connection, &client_transport);
+
+  rounds = pump_pair(&pair, 400U, both_established);
+  WT_EXPECT_TRUE("the handshake completes", rounds < 400U);
+  WT_EXPECT_INT("and both ends advertised the extension", 1,
+                pair.client.connection.peer_limits.reset_stream_at != 0 &&
+                    pair.server.connection.peer_limits.reset_stream_at != 0);
+
+  WT_EXPECT_OK("a stream opens", wt_quic_connection_open_stream(&pair.client.connection, 1, &stream_id));
+  WT_EXPECT_OK("four bytes are sent",
+               wt_quic_connection_send_stream(&pair.client.connection, stream_id, 0U,
+                                              (const uint8_t *)"abcd", 4U, 0, pair.now));
+  /* Recording the send is the caller's, exactly as the HTTP/3 transport adapter does it, and it is what makes the
+   * final size four rather than zero. */
+  WT_EXPECT_OK("and recorded", wt_quic_stream_on_data_sent(wt_quic_connection_stream(&pair.client.connection,
+                                                                                     stream_id), 4U));
+  WT_EXPECT_OK("a commitment of four bytes of it is sent",
+               wt_quic_connection_reset_stream_at(&pair.client.connection, stream_id, 0x0bU, 4U, pair.now));
+
+  (void)pump_pair(&pair, 20U, NULL);
+  /* The peer read the packets and its driver saw frames -- asserted because the SEND half's effect is local and
+   * the receive half is covered where the frame can be injected whole: `test_the_reliable_stream_reset_rules` in
+   * `test_quic_connection`. What this test adds is that the frame crosses a REAL handshake at all. */
+  WT_EXPECT_TRUE("the client sent packets", pair.client.connection.packets_sent >= 2U);
+  WT_EXPECT_TRUE("the server read them", pair.server.packets_seen >= 2U);
+  WT_EXPECT_TRUE("and its driver saw frames", server.frames_seen > 0U);
+  WT_EXPECT_U64("without a receive error", 0U, (uint64_t)pair.server.receive_errors);
+  {
+    /* The sender's side of a reliable reset, which is what this test can assert here: the send half is ended and
+     * the final size is the four bytes that were sent -- the number the receiver is told and the bound the
+     * commitment is checked against. */
+    wt_quic_stream_t *stream = wt_quic_connection_stream(&pair.client.connection, stream_id);
+    WT_EXPECT_TRUE("the sender has the stream", stream != NULL);
+    if (stream != NULL) {
+      WT_EXPECT_INT("with its send half reset", 1, wt_quic_stream_send_finished(stream));
+      WT_EXPECT_U64("and a final size of the four bytes sent", 4U, stream->final_size);
+    }
+  }
+
+  wt_runtime_session_clear(&pair.client);
+  wt_runtime_session_clear(&pair.server);
+  wt_udp_close(&pair.client_socket);
+  wt_udp_close(&pair.server_socket);
+}
+
 int main(void) {
   test_a_handshake_completes_over_loopback();
   test_a_refusal_reaches_the_peer_as_an_application_close();
+  test_a_reliable_stream_reset_crosses_the_connection();
   test_a_lost_packet_is_retransmitted();
   test_a_connect_and_its_response_cross_the_connection();
   WT_TEST_MAIN_END("wt_runtime_session_pair");

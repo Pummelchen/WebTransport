@@ -454,6 +454,13 @@ wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, ui
  * WT_ERR_LIMIT when the stream number is beyond what the peer granted, WT_ERR_STATE before its parameters
  * have been parsed, WT_ERR_INVALID_ARGUMENT for a null payload with a length, WT_ERR_AGAIN when the
  * congestion window has no room. */
+/* Reset a stream while committing to deliver its first `reliable_size` bytes (the reliable-stream-reset
+ * extension). WT_ERR_STATE when the peer did not advertise the extension -- the frame may not be sent to a peer
+ * that cannot read it -- or when the stream cannot be reset by this endpoint; WT_ERR_INVALID_ARGUMENT when
+ * `reliable_size` is past the end of the stream, which the receiver would have to reject. */
+wt_status_t wt_quic_connection_reset_stream_at(wt_quic_connection_t *connection, uint64_t stream_id,
+                                               uint64_t error_code, uint64_t reliable_size, uint64_t now);
+
 wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uint64_t stream_id,
                                            uint64_t offset, const uint8_t *data, size_t length,
                                            int fin, uint64_t now);

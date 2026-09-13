@@ -193,6 +193,38 @@ wt_status_t wt_quic_stream_on_reset_received(wt_quic_stream_t *stream,
   return WT_OK;
 }
 
+wt_status_t wt_quic_stream_on_reset_at_received(wt_quic_stream_t *stream, uint64_t error_code,
+                                                uint64_t final_size, uint64_t reliable_size) {
+  wt_status_t status;
+
+  if (stream == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* The extension's own encoding rule, and the one a sender must never produce: a commitment beyond the end of
+   * the stream is not a smaller promise but a broken one. The connection turns WT_ERR_PROTOCOL into the codes the
+   * draft names, because which of them it is depends on this condition rather than on the status. */
+  if (reliable_size > final_size) return WT_ERR_PROTOCOL;
+  if (stream->peer_reset != 0 && stream->peer_reset_at == 0) {
+    /* A plain RESET_STREAM already ended this half with a reliable size of zero by definition. */
+    return WT_ERR_STATE;
+  }
+  status = check_final_size(stream, final_size);
+  if (status != WT_OK) return status;
+  if (stream->peer_reset_at != 0) {
+    /* The error code and the final size are fixed by the first reset of this stream, whatever form it took. */
+    if (stream->peer_error_code != error_code) return WT_ERR_PROTOCOL;
+    /* And a frame that RAISES the reliable size is ignored rather than applied: the peer may promise less than it
+     * promised before, never more. */
+    if (reliable_size >= stream->peer_reliable_size) return WT_OK;
+    stream->peer_reliable_size = reliable_size;
+    return WT_OK;
+  }
+  stream->peer_reset = 1;
+  stream->peer_reset_at = 1;
+  stream->peer_error_code = error_code;
+  stream->peer_reliable_size = reliable_size;
+  stream->recv_state = WT_QUIC_RECV_RESET_RECVD;
+  return WT_OK;
+}
+
 wt_status_t wt_quic_stream_on_stop_sending(wt_quic_stream_t *stream, uint64_t error_code) {
   if (stream == NULL) return WT_ERR_INVALID_ARGUMENT;
   (void)error_code;

@@ -1056,6 +1056,20 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
           return close_with(connection, WT_QUIC_FINAL_SIZE_ERROR, wire_type_of(frame->kind),
                             visit->now);
         }
+      } else if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM_AT && stream != NULL) {
+        /* The reliable-stream-reset extension. Which rule a refusal broke decides the code the peer is told, and
+         * the status alone cannot say: a commitment past the end of the stream is a FRAME_ENCODING_ERROR, while a
+         * changed error code or final size is a STREAM_STATE_ERROR (draft-ietf-quic-reliable-stream-reset). */
+        status = wt_quic_stream_on_reset_at_received(stream,
+                                                     frame->as.reset_stream_at.application_error_code,
+                                                     frame->as.reset_stream_at.final_size,
+                                                     frame->as.reset_stream_at.reliable_size);
+        if (status != WT_OK) {
+          uint64_t code = frame->as.reset_stream_at.reliable_size > frame->as.reset_stream_at.final_size
+                              ? WT_QUIC_FRAME_ENCODING_ERROR
+                              : WT_QUIC_STREAM_STATE_ERROR;
+          return close_with(connection, code, wire_type_of(frame->kind), visit->now);
+        }
       } else if (frame->kind == WT_QUIC_FRAME_KIND_STOP_SENDING && stream != NULL) {
         status = wt_quic_stream_on_stop_sending(stream,
                                                frame->as.stop_sending.application_error_code);
@@ -1553,6 +1567,45 @@ wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, ui
     stream->sent_stop_sending = 0;
     return status;
   }
+  return sent ? WT_OK : WT_ERR_STATE;
+}
+
+wt_status_t wt_quic_connection_reset_stream_at(wt_quic_connection_t *connection, uint64_t stream_id,
+                                               uint64_t error_code, uint64_t reliable_size, uint64_t now) {
+  wt_quic_stream_t *stream;
+  wt_quic_frame_t frame;
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (!connection->peer_limits.set) return WT_ERR_STATE;
+  /* The extension is negotiated by ONE parameter, and a frame that used it without the peer having advertised it
+   * would rely on something the peer never said. A plain RESET_STREAM is what a caller has instead; that is why
+   * this is a state error rather than a fallback to the frame the peer cannot read. */
+  if (connection->peer_limits.reset_stream_at == 0) return WT_ERR_STATE;
+  stream = wt_quic_stream_table_find(&connection->streams, stream_id);
+  if (stream == NULL) return WT_ERR_STATE;
+  if (wt_quic_stream_id_from_client(stream_id) !=
+          (connection->config.role == WT_QUIC_ROLE_CLIENT) &&
+      !wt_quic_stream_id_is_bidirectional(stream_id)) {
+    return WT_ERR_STATE;
+  }
+  /* A commitment past the end of the stream is one the receiver MUST reject, so a sender must not make it -- and
+   * the check comes BEFORE the reset for the same reason: a refused call that had already ended the send half
+   * would leave a stream reset by a frame that was never sent. The bound is the bytes sent so far, because that is
+   * what the final size becomes when this endpoint resets the stream. */
+  if (reliable_size > stream->send_offset) return WT_ERR_INVALID_ARGUMENT;
+  status = wt_quic_stream_on_reset_sent(stream, error_code);
+  if (status != WT_OK) return status;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_RESET_STREAM_AT);
+  frame.as.reset_stream_at.id = stream_id;
+  frame.as.reset_stream_at.application_error_code = error_code;
+  frame.as.reset_stream_at.final_size = stream->final_size;
+  frame.as.reset_stream_at.reliable_size = reliable_size;
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent,
+                          now);
+  if (status != WT_OK) return status;
   return sent ? WT_OK : WT_ERR_STATE;
 }
 

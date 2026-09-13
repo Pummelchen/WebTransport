@@ -130,6 +130,11 @@ typedef struct wt_quic_stream {
   int sent_stop_sending;
   int peer_reset;
   uint64_t peer_error_code;
+  /* The reliable-stream-reset extension: the offset the peer COMMITTED to delivering even though it reset the
+   * stream, and whether it said so at all. A RESET_STREAM_AT may lower this and must never raise it, so the
+   * lowest one seen is what the application may rely on (draft-ietf-quic-reliable-stream-reset). */
+  uint64_t peer_reliable_size;
+  int peer_reset_at;
 } wt_quic_stream_t;
 
 /* A stream that has been created but not yet used. `max_stream_data` is what this endpoint
@@ -160,6 +165,18 @@ wt_status_t wt_quic_stream_on_reset_sent(wt_quic_stream_t *stream, uint64_t erro
 wt_status_t wt_quic_stream_on_reset_received(wt_quic_stream_t *stream,
                                              uint64_t error_code,
                                              uint64_t final_size);
+/* A RESET_STREAM_AT was received (the reliable-stream-reset extension): the stream ends exactly as a RESET_STREAM
+ * ends it, and `reliable_size` bytes of it were committed to. Three of that extension's rules live here because
+ * they are facts about the stream rather than about the frame:
+ *
+ *   - a Reliable Size larger than the Final Size is a FRAME_ENCODING_ERROR, reported as WT_ERR_PROTOCOL with that
+ *     condition visible to the caller;
+ *   - a frame that RAISES the reliable size must be ignored, so this returns WT_OK having changed nothing;
+ *   - a changed application error code or final size is a STREAM_STATE_ERROR, reported the same way.
+ *
+ * WT_ERR_STATE means the stream was already reset by a plain RESET_STREAM, whose semantics cannot be revised. */
+wt_status_t wt_quic_stream_on_reset_at_received(wt_quic_stream_t *stream, uint64_t error_code,
+                                                uint64_t final_size, uint64_t reliable_size);
 /* A STOP_SENDING was received: the peer wants this endpoint to stop sending. */
 wt_status_t wt_quic_stream_on_stop_sending(wt_quic_stream_t *stream,
                                            uint64_t error_code);
