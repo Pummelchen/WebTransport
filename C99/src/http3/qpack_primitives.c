@@ -106,15 +106,38 @@ wt_status_t wt_qpack_string_decode(wt_cursor_t *c, const uint8_t **out_bytes, si
   return WT_OK;
 }
 
-wt_status_t wt_qpack_string_encode(wt_writer_t *w, const uint8_t *bytes, size_t length) {
+wt_status_t wt_qpack_string_encode_coded(wt_writer_t *w, const uint8_t *bytes, size_t length,
+                                        int huffman, uint8_t *scratch, size_t scratch_capacity) {
+  const uint8_t *wire = bytes;
+  size_t wire_length = length;
+
   if (w == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (bytes == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (scratch == NULL && scratch_capacity != 0U) return WT_ERR_INVALID_ARGUMENT;
   if ((uint64_t)length > WT_QPACK_INTEGER_MAX) return WT_ERR_INVALID_ARGUMENT;
 
-  /* H stays clear: this build writes strings as they are. The prefix flags are
-   * zero because the H bit is the only thing above the length's seven-bit
-   * prefix. */
-  if (wt_qpack_integer_encode(w, 7U, 0U, (uint64_t)length) != WT_OK) return WT_ERR_LIMIT;
-  if (length != 0U) wt_writer_bytes(w, bytes, length);
+  if (huffman) {
+    uint8_t *coded = scratch;
+    size_t coded_length = 0U;
+    size_t needed = 0U;
+    wt_status_t status = wt_qpack_huffman_encoded_size(bytes, length, &needed);
+
+    if (status != WT_OK) return status;
+    if (needed > scratch_capacity) return WT_ERR_LIMIT;
+    status = wt_qpack_huffman_encode(bytes, length, coded, scratch_capacity, &coded_length);
+    if (status != WT_OK) return status;
+    wire = coded;
+    wire_length = coded_length;
+  }
+
+  /* The H bit sits above the length's seven-bit prefix, so it is the only flag. */
+  if (wt_qpack_integer_encode(w, 7U, huffman ? 0x80U : 0x00U, (uint64_t)wire_length) != WT_OK) {
+    return WT_ERR_LIMIT;
+  }
+  if (wire_length != 0U) wt_writer_bytes(w, wire, wire_length);
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
+}
+
+wt_status_t wt_qpack_string_encode(wt_writer_t *w, const uint8_t *bytes, size_t length) {
+  return wt_qpack_string_encode_coded(w, bytes, length, 0, NULL, 0U);
 }

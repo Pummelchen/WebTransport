@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 54 unit test files and 78,668 checks, run by `ctest` and again under
+- 54 unit test files and 78,673 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -451,6 +451,12 @@ What is here:
   post-base one -- and decodes an inline Huffman name or value into the caller's scratch, because a resolved
   field has to be plain bytes. A reference the table cannot resolve is QPACK_DECOMPRESSION_FAILED; a scratch
   buffer too small is the caller's limit, not the peer's error, and the two are reported apart.
+- **Huffman strings on the way out** (Phase 6, eleventh part): `wt_qpack_string_encode_coded` writes a string
+  with the H bit set, coding it into the caller's scratch (the coded length has to be known before the
+  length byte that precedes it), and `wt_qpack_field_line_encode_coded` does the same for a line's name and
+  value. The plain `wt_qpack_field_line_encode` now REFUSES a line whose flags ask for coding rather than
+  writing it plainly: the flags are part of the representation, so a plain string with the H bit clear is a
+  different line.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

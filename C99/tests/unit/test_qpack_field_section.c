@@ -211,7 +211,41 @@ static void test_inline_and_huffman(void) {
   WT_EXPECT_BYTES("to its inline name", (const uint8_t *)"x-test", field.name, 6U);
   WT_EXPECT_BYTES("and inline value", (const uint8_t *)"value", field.value, 5U);
 
-  /* The same line with both halves Huffman-coded. The line is built BY HAND rather
+  /* The same line with both halves Huffman-coded, written by this build's coded
+   * encoder: the line it produces must decode to the same plain strings. */
+  w = wt_writer_init(bytes, sizeof(bytes));
+  {
+    wt_qpack_field_line_t line;
+    uint8_t line_scratch[64];
+
+    memset(&line, 0, sizeof(line));
+    line.kind = WT_QPACK_FIELD_LITERAL_LITERAL_NAME;
+    line.name_huffman = 1;
+    line.name = (const uint8_t *)"x-test";
+    line.name_length = 6U;
+    line.value_huffman = 1;
+    line.value = (const uint8_t *)"value";
+    line.value_length = 5U;
+    WT_EXPECT_OK("the coded line writes",
+                 wt_qpack_field_line_encode_coded(&w, &line, line_scratch, sizeof(line_scratch)));
+    /* The plain encoder refuses it: the flags are part of the representation, and a
+     * plain string with the H bit clear is a different line. */
+    {
+      uint8_t plain[32];
+      wt_writer_t plain_writer = wt_writer_init(plain, sizeof(plain));
+      WT_EXPECT_STATUS("while the plain encoder refuses it", WT_ERR_STATE,
+                       wt_qpack_field_line_encode(&plain_writer, &line));
+    }
+  }
+  c = wt_cursor_init(bytes, wt_writer_offset(&w));
+  WT_EXPECT_OK("and resolves",
+               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &field,
+                                           &error));
+  WT_EXPECT_BYTES("to the decoded name", (const uint8_t *)"x-test", field.name, 6U);
+  WT_EXPECT_BYTES("and the decoded value", (const uint8_t *)"value", field.value, 5U);
+
+  /* The hand-built variant below keeps its place as the check that the reader is not
+   * reading its own writer's dialect. The line is built BY HAND rather
    * than through `wt_qpack_field_line_encode`, because that encoder's string writer
    * only writes plain strings -- the H bit on the way out is a piece this build does
    * not have yet, and a test that used the encoder here would be testing a line the

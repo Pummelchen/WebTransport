@@ -77,7 +77,8 @@ wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *ou
   return WT_OK;
 }
 
-wt_status_t wt_qpack_field_line_encode(wt_writer_t *w, const wt_qpack_field_line_t *line) {
+wt_status_t wt_qpack_field_line_encode_coded(wt_writer_t *w, const wt_qpack_field_line_t *line,
+                                            uint8_t *scratch, size_t scratch_capacity) {
   if (w == NULL || line == NULL) return WT_ERR_INVALID_ARGUMENT;
 
   switch (line->kind) {
@@ -92,30 +93,68 @@ wt_status_t wt_qpack_field_line_encode(wt_writer_t *w, const wt_qpack_field_line
       if (line->kind == WT_QPACK_FIELD_LITERAL_NAME_REF_STATIC) flags |= 0x10U;
       if (line->never_indexed) flags |= 0x20U;
       if (wt_qpack_integer_encode(w, 4U, flags, line->index) != WT_OK) return WT_ERR_LIMIT;
-      return wt_qpack_string_encode(w, line->value, line->value_length);
+      return wt_qpack_string_encode_coded(w, line->value, line->value_length, line->value_huffman,
+                                          scratch, scratch_capacity);
     }
     case WT_QPACK_FIELD_LITERAL_LITERAL_NAME: {
       uint8_t flags = 0x20U;
+      const uint8_t *name_wire = line->name;
+      size_t name_wire_length = line->name_length;
+
       if (line->never_indexed) flags |= 0x10U;
-      if (line->name_huffman) flags |= 0x08U;
+      if (line->never_indexed != 0) flags |= 0x00U;
       if (line->name == NULL && line->name_length != 0U) return WT_ERR_INVALID_ARGUMENT;
-      if (wt_qpack_integer_encode(w, 3U, flags, (uint64_t)line->name_length) != WT_OK) {
+      if (line->name_huffman) {
+        size_t needed = 0U;
+        size_t coded_length = 0U;
+
+        /* The name is coded into the scratch first, and written into the writer
+         * before the value reuses that buffer: the writer copies what it is given,
+         * so the two strings never share live scratch. */
+        if (wt_qpack_huffman_encoded_size(line->name, line->name_length, &needed) != WT_OK) {
+          return WT_ERR_LIMIT;
+        }
+        if (needed > scratch_capacity) return WT_ERR_LIMIT;
+        if (wt_qpack_huffman_encode(line->name, line->name_length, scratch, scratch_capacity,
+                                    &coded_length) != WT_OK) {
+          return WT_ERR_LIMIT;
+        }
+        flags |= 0x08U;
+        if (wt_qpack_integer_encode(w, 3U, flags, (uint64_t)coded_length) != WT_OK) {
+          return WT_ERR_LIMIT;
+        }
+        if (coded_length != 0U) wt_writer_bytes(w, scratch, coded_length);
+        if (!wt_writer_ok(w)) return WT_ERR_LIMIT;
+        return wt_qpack_string_encode_coded(w, line->value, line->value_length,
+                                            line->value_huffman, scratch, scratch_capacity);
+      }
+      if (wt_qpack_integer_encode(w, 3U, flags, (uint64_t)name_wire_length) != WT_OK) {
         return WT_ERR_LIMIT;
       }
-      if (line->name_length != 0U) wt_writer_bytes(w, line->name, line->name_length);
+      if (name_wire_length != 0U) wt_writer_bytes(w, name_wire, name_wire_length);
       if (!wt_writer_ok(w)) return WT_ERR_LIMIT;
-      return wt_qpack_string_encode(w, line->value, line->value_length);
+      return wt_qpack_string_encode_coded(w, line->value, line->value_length, line->value_huffman,
+                                          scratch, scratch_capacity);
     }
     case WT_QPACK_FIELD_POST_BASE_INDEX:
       return wt_qpack_integer_encode(w, 4U, 0x10U, line->index);
     case WT_QPACK_FIELD_POST_BASE_NAME_REF: {
       uint8_t flags = line->never_indexed ? 0x08U : 0x00U;
       if (wt_qpack_integer_encode(w, 3U, flags, line->index) != WT_OK) return WT_ERR_LIMIT;
-      return wt_qpack_string_encode(w, line->value, line->value_length);
+      return wt_qpack_string_encode_coded(w, line->value, line->value_length, line->value_huffman,
+                                          scratch, scratch_capacity);
     }
   }
   /* Not reachable: the switch covers every kind the enum has. */
   return WT_ERR_INVALID_ARGUMENT;
+}
+
+wt_status_t wt_qpack_field_line_encode(wt_writer_t *w, const wt_qpack_field_line_t *line) {
+  /* No scratch, so the coded forms are the `_coded` variant's. A line that asks for
+   * one is refused HERE rather than written plainly: the flags are part of the
+   * representation, and a plain string with the H bit clear is a different line. */
+  if (line != NULL && (line->name_huffman || line->value_huffman)) return WT_ERR_STATE;
+  return wt_qpack_field_line_encode_coded(w, line, NULL, 0U);
 }
 
 wt_status_t wt_qpack_field_line_static_name(const wt_qpack_field_line_t *line, const char **out_name,

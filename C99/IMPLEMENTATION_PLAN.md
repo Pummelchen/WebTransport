@@ -1613,6 +1613,24 @@ build cannot yet WRITE a Huffman-coded string in a field line. The test builds t
 section 4.5.3's figure, which is honest -- a test that used the encoder for it would be testing a line the
 encoder cannot produce -- and the encoder-side Huffman string is recorded as remaining work.
 
+**Eleventh part done: Huffman strings on the way out.** The gap the last part recorded is closed:
+`wt_qpack_string_encode_coded` writes a string with the H bit set, coding it into the caller's scratch, and
+`wt_qpack_field_line_encode_coded` does the same for a line's inline name and value. The scratch is not
+optional because the coded length has to be known before the length byte that precedes it -- the two-pass
+writer's measuring pass exists for exactly this shape of problem, and a field line is written into a buffer
+whose size the caller chose, so the buffer comes from the caller too. The name is written into the writer
+before the value reuses the scratch, which is safe because the writer copies what it is given.
+
+The plain `wt_qpack_field_line_encode` now REFUSES a line whose flags ask for coding (WT_ERR_STATE) instead
+of writing it plainly. That is the correction to the last part's compromise: the flags are part of the
+representation, so a plain string with the H bit clear is a DIFFERENT line, and an encoder that silently
+wrote one would produce something the decoder reads as something else. The `_coded` variant honours the
+flags, and the two together mean this build can no longer write a line it would misread.
+
+The test now writes the coded line with this build's encoder AND keeps the hand-built variant from the last
+part: the first says the two sides agree, the second says the reader is not merely reading its own writer's
+dialect.
+
 Enforce table capacity and malformed reference handling.
 
 Completion criteria:

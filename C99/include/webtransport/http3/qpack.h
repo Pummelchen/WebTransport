@@ -91,6 +91,14 @@ wt_status_t wt_qpack_string_decode(wt_cursor_t *c, const uint8_t **out_bytes, si
  * so this is what every representation written by this build looks like. */
 wt_status_t wt_qpack_string_encode(wt_writer_t *w, const uint8_t *bytes, size_t length);
 
+/* The same string, Huffman-coded when `huffman` is set. The coded bytes have to be
+ * built before the length that precedes them is known, so the caller supplies the
+ * buffer; WT_ERR_LIMIT means it was too small, which is the caller's bound rather
+ * than anything about the peer. `wt_qpack_string_encode` is this with `huffman`
+ * clear. */
+wt_status_t wt_qpack_string_encode_coded(wt_writer_t *w, const uint8_t *bytes, size_t length,
+                                        int huffman, uint8_t *scratch, size_t scratch_capacity);
+
 /* Decode a Huffman-coded string (RFC 7541 appendix B, which RFC 9204 section
  * 4.1.2 adopts). The code comes from the RFC table generated into the source tree.
  *
@@ -164,9 +172,15 @@ typedef struct wt_qpack_field_line {
  * (section 8), because a field section that does not parse is not recoverable. */
 wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *out);
 
-/* Write one. Refuses a kind whose fields are not set, so the encoder cannot emit a
- * representation its own decoder would refuse. */
+/* Write one, writing only plain strings: a line whose flags ask for Huffman coding is
+ * REFUSED (WT_ERR_STATE) rather than written plainly, because the flags are part of
+ * the representation and a plain string with the H bit clear is a different one. */
 wt_status_t wt_qpack_field_line_encode(wt_writer_t *w, const wt_qpack_field_line_t *line);
+
+/* Write one with the line's own H bits honoured, Huffman-coding the strings into the
+ * caller's scratch as `wt_qpack_string_encode_coded` does. */
+wt_status_t wt_qpack_field_line_encode_coded(wt_writer_t *w, const wt_qpack_field_line_t *line,
+                                            uint8_t *scratch, size_t scratch_capacity);
 
 /* The name of a static-referencing line, from the static table or from the line
  * itself. WT_ERR_STATE for the kinds that need the dynamic table or a base. */
