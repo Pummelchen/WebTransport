@@ -129,13 +129,28 @@ test reported on the first run, with the reason only visible on stderr under a d
 by the script, and the `WINEPREFIX` is initialized with a bounded `wineboot -u` before any test runs, so a hang
 is attributable to a test rather than to first-use setup.
 
-What remains is the **FreeBSD** leg and a **real Windows runner**. The tree compiles for Windows (75 + 104
-sources, warnings-as-errors), links for Windows (PE32+ executables and a shared library, enforced in CI), and now
-executes for Windows under Wine; the FreeBSD surface is the Debian one by the inventory. A job that cannot pass
-is worse than an absent one, because it teaches people to ignore CI — so what is left is named rather than
-guessed at: Windows 11 needs OpenSSL there and a machine to execute the binaries on (Wine is the half a Linux
-host can do, and the two failures above still need a real runner to confirm), and FreeBSD needs a runner GitHub
-does not provide natively. Neither is a code change this tree can make and verify from here.
+**The tree also RUNS on FreeBSD.** A FreeBSD 15.1-RELEASE-p3 guest (`GENERIC` amd64) on this host, booted
+under QEMU with TCG because the host exposes no nested virtualisation, builds the tree with its base system's
+clang 19.1.7 plus `cmake` and `ninja` from packages, and then passes the whole suite: **96 of 96 CTest tests**,
+including the ten that spawn both CLI tools and exchange over a real socket in two processes.
+
+**Running there found one thing, and it is in the test harness rather than in the tree.** The first pass failed
+8 of 96 — every `wt_cli_*` process test — and the reason was in the failure output rather than in the protocol:
+`check-cli-session.sh: python3: not found`, followed by `a report is not valid JSON`. The sessions themselves
+had **worked**: the client reported `status=ok`, `established=true`, `responseStatus=200`, `receivedBytes=4`,
+and the server reported the same. Those scripts parse the tools' JSON reports with `python3`, which is **not in
+FreeBSD's base system**, so an absent interpreter read as a protocol failure. With `pkg install python3` the
+same ten tests pass and nothing else changes. That is a real dependency the scripts have and do not declare,
+and it is recorded as `WT-201` rather than papered over — a check that reports "the protocol is broken" when it
+means "this host has no python3" is the shape of failure this document exists to prevent.
+
+What remains is a **runner this project does not control**. The tree compiles for Windows (75 + 104 sources,
+warnings-as-errors), links for Windows (PE32+ executables and a shared library, enforced in CI), and now
+executes for Windows under Wine; and it builds and passes its whole suite on FreeBSD. What is missing is a CI
+*job* for each, because GitHub provides no FreeBSD runner and the Windows leg can only compile, link and (via
+Wine) run on a Linux runner. A job that cannot pass is worse than an absent one, because it teaches people to
+ignore CI — so the gap is named rather than guessed at, and the evidence that a Windows or FreeBSD runner would
+have something green to run is now in this document rather than in an inventory.
 
 ## The two symbols this document is checked for
 
