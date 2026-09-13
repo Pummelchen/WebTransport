@@ -47,6 +47,9 @@ typedef struct loop {
   wt_udp_address_t peer;
   wt_runtime_session_t session;
   loop_side_t side;
+  /* The transport the driver sends through, kept here because the lost-frame handler needs it: a report of a
+   * lost frame arrives long after the call that built the transport returned (WT-135). */
+  wt_http3_driver_transport_t transport;
   uint64_t now;
 } loop_t;
 
@@ -162,6 +165,23 @@ static void connection_config(wt_quic_connection_config_t *config, wt_quic_role_
  * connection held Handshake and Application keys), and the insertion loop left the block in some paths twice. A
  * helper called before the clear is one place, one order, and a comment that says why the order matters (WT-135).
  */
+/* A frame the connection reported LOST, answered by sending the request again.
+ *
+ * RFC 9002 section 6.2.4: a probe timeout must send new frames or retransmit unacknowledged data. The connection
+ * now reports the oldest outstanding frame to its owner (the runtime's lost-frame hook) and the HTTP/3 driver
+ * retains what it sent, so this is the place the two meet -- and the place a packet lost between the handshake
+ * and the response used to disappear for good (WT-135).
+ *
+ * Only the request stream is answered, and only when the driver has something retained: anything else is a frame
+ * this tool has no bytes for, and saying so is better than sending something wrong. */
+static void client_on_lost_frame(void *context, const wt_quic_tx_frame_t *frame) {
+  loop_t *loop = context;
+  if (loop == NULL || frame == NULL) return;
+  if (frame->is_crypto) return; /* the handshake retransmits its own */
+  if (frame->stream_id != loop->side.request_stream_id) return;
+  (void)wt_http3_driver_resend_request(&loop->side.driver, &loop->transport, loop->now);
+}
+
 /* Whether this endpoint may SPEAK: the handshake is DONE and the peer's transport parameters are IN FORCE.
  *
  * Both halves are needed, and the measurement that showed it is this round's: breaking out on DONE alone made
@@ -233,7 +253,6 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   uint64_t parameters_len;
   wt_quic_connection_config_t connection;
   wt_tls_client_config_t tls;
-  wt_http3_driver_transport_t transport;
   wt_http3_settings_t settings;
   wt_http3_message_t response;
   wt_http3_error_t h3_error = WT_HTTP3_NO_ERROR;
@@ -296,7 +315,8 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
   init_side(&loop.side, WT_HTTP3_ROLE_CLIENT);
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
-  wt_http3_driver_quic_transport(&loop.session.connection, &transport);
+  wt_http3_driver_quic_transport(&loop.session.connection, &loop.transport);
+  (void)wt_runtime_session_set_lost_frame_handler(&loop.session, client_on_lost_frame, &loop);
 
   deadline_rounds = WT_LOOP_ROUNDS_FOR(config->timeout_ms);
   if (deadline_rounds > WT_LOOP_ROUNDS) deadline_rounds = WT_LOOP_ROUNDS;
@@ -316,7 +336,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   wt_http3_settings_init(&settings);
   (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
   {
-    wt_status_t status = wt_http3_driver_start_session(&loop.side.driver, &transport, &settings,
+    wt_status_t status = wt_http3_driver_start_session(&loop.side.driver, &loop.transport, &settings,
                                                        config->authority, config->path, 0U, loop.now,
                                                        &loop.side.request_stream_id, &h3_error);
     if (status != WT_OK) {
@@ -353,7 +373,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   }
 
   {
-    wt_status_t status = send_message(&loop, &transport, config);
+    wt_status_t status = send_message(&loop, &loop.transport, config);
     if (status != WT_OK) {
       record_oracle(&loop, out);
     record_oracle(&loop, out);
@@ -382,7 +402,6 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   wt_quic_connection_config_t connection;
   wt_tls_server_config_t tls;
   wt_tls_server_identity_t identity;
-  wt_http3_driver_transport_t transport;
   wt_http3_message_t request;
   wt_webtransport_request_policy_t policy;
   wt_webtransport_session_request_t decision;
@@ -471,7 +490,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
   init_side(&loop.side, WT_HTTP3_ROLE_SERVER);
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
-  wt_http3_driver_quic_transport(&loop.session.connection, &transport);
+  wt_http3_driver_quic_transport(&loop.session.connection, &loop.transport);
 
   for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0; round++) {
     pump_once(&loop);
@@ -527,7 +546,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   out->status = 200U;
 
   {
-    wt_status_t status = wt_http3_driver_send_response(&loop.side.driver, &transport,
+    wt_status_t status = wt_http3_driver_send_response(&loop.side.driver, &loop.transport,
                                                        loop.side.request_stream_id, 200U, 0U, 0,
                                                        loop.now);
     if (status != WT_OK) {
@@ -546,7 +565,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     out->received_datagram = loop.side.data_was_datagram;
   }
   if (config->message != NULL) {
-    wt_status_t status = send_message(&loop, &transport, config);
+    wt_status_t status = send_message(&loop, &loop.transport, config);
     if (status != WT_OK) {
       record_oracle(&loop, out);
     record_oracle(&loop, out);
