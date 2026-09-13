@@ -53,6 +53,14 @@ typedef struct wt_loop_result {
    * status alone (WT-135). */
   unsigned packets_seen;
   wt_status_t last_receive;
+  /* WHICH rule refused, not just that something did. The connection records the code its own refusal names and
+   * the frame type it blames, and the code the PEER sent when it closed -- so a protocol error names the rule
+   * instead of sending the next round hunting for it in four candidate checks (WT-135). */
+  uint64_t close_code;
+  uint64_t close_frame_type;
+  int close_code_set;
+  uint64_t peer_error_code;
+  int peer_closed;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */

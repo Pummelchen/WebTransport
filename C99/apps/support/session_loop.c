@@ -279,6 +279,11 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->receive_errors = loop.session.receive_errors;
     out->packets_seen = loop.session.packets_seen;
     out->last_receive = loop.session.last_receive;
+    out->close_code = loop.session.connection.close_code;
+    out->close_frame_type = loop.session.connection.close_frame_type;
+    out->close_code_set = loop.session.connection.close_code_set;
+    out->peer_error_code = loop.session.connection.peer_error_code;
+    out->peer_closed = loop.session.connection.peer_closed;
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -287,6 +292,11 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->receive_errors = loop.session.receive_errors;
     out->packets_seen = loop.session.packets_seen;
     out->last_receive = loop.session.last_receive;
+    out->close_code = loop.session.connection.close_code;
+    out->close_frame_type = loop.session.connection.close_frame_type;
+    out->close_code_set = loop.session.connection.close_code_set;
+    out->peer_error_code = loop.session.connection.peer_error_code;
+    out->peer_closed = loop.session.connection.peer_closed;
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -295,6 +305,11 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->receive_errors = loop.session.receive_errors;
     out->packets_seen = loop.session.packets_seen;
     out->last_receive = loop.session.last_receive;
+    out->close_code = loop.session.connection.close_code;
+    out->close_frame_type = loop.session.connection.close_frame_type;
+    out->close_code_set = loop.session.connection.close_code_set;
+    out->peer_error_code = loop.session.connection.peer_error_code;
+    out->peer_closed = loop.session.connection.peer_closed;
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -303,6 +318,11 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->receive_errors = loop.session.receive_errors;
     out->packets_seen = loop.session.packets_seen;
     out->last_receive = loop.session.last_receive;
+    out->close_code = loop.session.connection.close_code;
+    out->close_frame_type = loop.session.connection.close_frame_type;
+    out->close_code_set = loop.session.connection.close_code_set;
+    out->peer_error_code = loop.session.connection.peer_error_code;
+    out->peer_closed = loop.session.connection.peer_closed;
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -311,6 +331,11 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->receive_errors = loop.session.receive_errors;
     out->packets_seen = loop.session.packets_seen;
     out->last_receive = loop.session.last_receive;
+    out->close_code = loop.session.connection.close_code;
+    out->close_frame_type = loop.session.connection.close_frame_type;
+    out->close_code_set = loop.session.connection.close_code_set;
+    out->peer_error_code = loop.session.connection.peer_error_code;
+    out->peer_closed = loop.session.connection.peer_closed;
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -319,6 +344,11 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->receive_errors = loop.session.receive_errors;
     out->packets_seen = loop.session.packets_seen;
     out->last_receive = loop.session.last_receive;
+    out->close_code = loop.session.connection.close_code;
+    out->close_frame_type = loop.session.connection.close_frame_type;
+    out->close_code_set = loop.session.connection.close_code_set;
+    out->peer_error_code = loop.session.connection.peer_error_code;
+    out->peer_closed = loop.session.connection.peer_closed;
     return WT_ERR_TIMEOUT;
   }
   out->established = 1;
