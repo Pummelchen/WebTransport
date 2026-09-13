@@ -4,6 +4,23 @@ All notable changes to this project will be documented here.
 
 The project uses semantic versioning.
 
+## [Unreleased]
+
+Fixed:
+
+- A connection the transport failed to establish is reported as `WebTransportNetworkRuntimeError.connectionEstablishmentFailed(role:domain:code:)` rather than as the framework's own error. `NetworkConnection.State.failed` was rethrown verbatim, so a caller saw a bare `POSIXErrorCode` — on a loaded runner `ENETDOWN` (50) and, in another run, `ENOTCONN` (57) — with nothing to say whether the endpoint was wrong or the local stack was momentarily unavailable. The case names the condition, keeps the framework's domain and code for diagnosis, and `isTransientEstablishmentFailure` answers whether a fresh connection can clear it. This is the error `listenerServesMoreSequentialSessionsThanTheDefaultCeiling` was failing on under Thread Sanitizer; that test now retries only the named transient condition, bounded, so a listener that has genuinely stopped accepting — issue #23, which presents as a timeout — still fails it (WT-185).
+- The conformance runner counts a scenario it could not attempt as `skipped` with its reason instead of as a failure. The two `Release` scenarios read the source tree, so outside a checkout the suite now reports `passed=38 failed=0 skipped=2` and exits `3` ("nothing failed, something was not attempted") rather than `passed=38 failed=2`, which read as a broken binary rather than an incomplete run. The human summary gained a `skipped=` count, `--json` gained a top-level `skipped` and a per-scenario `status`, and `--help` documents the exit statuses (WT-186).
+
+Added:
+
+- `WebTransportNetworkRuntimeError.connectionEstablishmentFailed(role:domain:code:)` and its `isTransientEstablishmentFailure` predicate. Retrying on that predicate must be bounded: it answers whether a fresh connection *could* clear the condition, and some of the codes it covers also describe a route or an address that will never come back.
+- `WebTransportCLIConformanceStatus` and `WebTransportCLIConformanceResult.status`. `result.passed` is still the question most callers ask, but it is now a read-only derived property (`status == .passed`) rather than a stored one, and it is false for a skipped scenario — so a caller that needs the third state reads `status`.
+- `WebTransportErrorSurface.publicDescription(for:)` now names `WebTransportNetworkRuntimeError` conditions instead of collapsing every one of them into "WebTransport operation failed". It deliberately omits the stream and connection numbers those cases carry, because that surface exists to keep transport identifiers out of user-visible text.
+
+Changed:
+
+- Adding a case to the public enum `WebTransportNetworkRuntimeError` means an embedder's exhaustive `switch` over it needs a branch for the new case, and `WebTransportCLIConformanceResult.passed` is no longer settable. The conformance tools gained exit status `3`; `0` and `1` keep their meanings.
+
 ## [1.3.8] - 2026-09-13
 
 A defect-fix release. There are no wire-format changes and nothing is added to or

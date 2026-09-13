@@ -192,7 +192,9 @@ Two of the forty conformance scenarios assert properties of the source tree -- t
 read `Package.swift` and `Swift/build-release-apple-silicon.sh` from the working
 directory -- so run them from a checkout; the other 38 exercise the transport and
 run anywhere. From a directory that holds only the assets the suite reports
-`passed=38 failed=2` (WT-186).
+`passed=38 failed=0 skipped=2` and exits **3**: nothing failed, but two scenarios
+could not be attempted, and the report says which and why rather than failing them
+(WT-186).
 
 Both builds are reproducible: `./Swift/build-release-apple-silicon.sh` performs
 two clean builds and compares normalized Mach-O hashes, so the published

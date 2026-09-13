@@ -33,6 +33,139 @@ func webTransportCLIProcessCoversHelpListInvalidArgumentsAndScenarioExitCodes() 
     }
 }
 
+// MARK: - Skipped Scenarios
+
+/// A scenario that needs the repository is skipped, not failed, when there is no checkout.
+///
+/// This is the shape the released binaries hit: run from a directory holding only the two
+/// downloaded assets, the two Release scenarios read `Package.swift` and
+/// `Swift/build-release-apple-silicon.sh` from the working directory. Before WT-186 the
+/// suite reported `passed=38 failed=2` for two scenarios it had not attempted at all,
+/// which reads as a broken binary rather than an incomplete run. It now reports them
+/// skipped with a reason, and the exit status separates the two cases.
+@Test
+func webTransportCLIProcessSkipsRepositoryScenariosOutsideACheckout() throws {
+    try WebTransportProcessSupport.withExclusiveProcessExecution {
+        guard try WebTransportProcessSupport.debugProductsAvailable() else {
+            return
+        }
+        let server = try WebTransportProcessSupport.productURL("WebTransportServer", configuration: "debug")
+        let logDirectory = try WebTransportProcessSupport.temporaryLogDirectory("skip-outside-checkout")
+        // A working directory that is not a checkout: neither candidate path resolves.
+        let emptyDirectory = logDirectory.appendingPathComponent("not-a-checkout", isDirectory: true)
+        try FileManager.default.createDirectory(at: emptyDirectory, withIntermediateDirectories: true)
+
+        let result = try WebTransportProcessSupport.run(
+            server,
+            [
+                "--scenario", "release-products,release-script-stale-spikes",
+                "--json",
+                "--log-dir", logDirectory.path,
+            ],
+            currentDirectory: emptyDirectory
+        )
+
+        // Nothing failed; something was not attempted. 3 is the skip status, and it is the
+        // whole point: before this a caller could not tell an incomplete run from a broken
+        // one, because both were 1.
+        #expect(result.exitCode == 3)
+
+        let payload = try WebTransportProcessSupport.parseJSONResult(result.stdout)
+        #expect(payload["passed"] as? Int == 0)
+        #expect(payload["failed"] as? Int == 0)
+        #expect(payload["skipped"] as? Int == 2)
+
+        let entries = payload["results"] as? [[String: Any]]
+        #expect(entries?.count == 2)
+        #expect(entries?.allSatisfy { ($0["status"] as? String) == "skipped" } == true)
+        // A skipped scenario is not a pass, even though it is not a failure either.
+        #expect(entries?.allSatisfy { ($0["passed"] as? Bool) == false } == true)
+        // The reason travels with the row, so a reader learns why the run was incomplete.
+        #expect(
+            entries?.allSatisfy {
+                (($0["detail"] as? String) ?? "").contains("requires a repository checkout")
+            } == true)
+    }
+}
+
+/// The same two scenarios still run for real when the working directory is a checkout.
+///
+/// The skip must not become a way for a repository scenario to quietly stop running where
+/// it can run — which is the failure mode that would make the skip worse than the bug.
+@Test
+func webTransportCLIProcessRunsRepositoryScenariosInsideACheckout() throws {
+    try WebTransportProcessSupport.withExclusiveProcessExecution {
+        guard try WebTransportProcessSupport.debugProductsAvailable() else {
+            return
+        }
+        let server = try WebTransportProcessSupport.productURL("WebTransportServer", configuration: "debug")
+        let logDirectory = try WebTransportProcessSupport.temporaryLogDirectory("skip-inside-checkout")
+
+        let result = try WebTransportProcessSupport.run(
+            server,
+            [
+                "--scenario", "release-products,release-script-stale-spikes",
+                "--json",
+                "--log-dir", logDirectory.path,
+            ]
+        )
+
+        #expect(result.exitCode == 0)
+        let payload = try WebTransportProcessSupport.parseJSONResult(result.stdout)
+        #expect(payload["passed"] as? Int == 2)
+        #expect(payload["failed"] as? Int == 0)
+        #expect(payload["skipped"] as? Int == 0)
+    }
+}
+
+/// The human report and the logs carry the skip too, and a skip writes no failure log.
+///
+/// A skipped scenario did not fail, so leaving a `-failure.log` behind would contradict the
+/// summary it sits beside.
+@Test
+func webTransportCLIProcessReportsSkipsInSummaryWithoutFailureLogs() throws {
+    try WebTransportProcessSupport.withExclusiveProcessExecution {
+        guard try WebTransportProcessSupport.debugProductsAvailable() else {
+            return
+        }
+        let server = try WebTransportProcessSupport.productURL("WebTransportServer", configuration: "debug")
+        let logDirectory = try WebTransportProcessSupport.temporaryLogDirectory("skip-summary")
+        let emptyDirectory = logDirectory.appendingPathComponent("not-a-checkout", isDirectory: true)
+        try FileManager.default.createDirectory(at: emptyDirectory, withIntermediateDirectories: true)
+
+        let result = try WebTransportProcessSupport.run(
+            server,
+            [
+                "--scenario", "release-products,release-script-stale-spikes",
+                "--verbose",
+                "--log-dir", logDirectory.path,
+            ],
+            currentDirectory: emptyDirectory
+        )
+
+        #expect(result.exitCode == 3)
+        #expect(result.stdout.contains("SKIP release-products"))
+        #expect(result.stdout.contains("SKIP release-script-stale-spikes"))
+        #expect(result.stdout.contains("failed=0"))
+        #expect(result.stdout.contains("skipped=2"))
+        // The names are still reported, so a caller comparing scenario names sees the run
+        // was incomplete rather than shorter.
+        #expect(
+            Set(WebTransportProcessSupport.scenarioResultNames(from: result.stdout))
+                == Set(["release-products", "release-script-stale-spikes"]))
+
+        let entries = try FileManager.default.contentsOfDirectory(atPath: logDirectory.path)
+        #expect(entries.contains { $0.hasSuffix("-failure.log") } == false)
+        let summary = entries.first { $0.hasSuffix("-summary.log") }
+        #expect(summary != nil)
+        if let summary {
+            let text = try String(contentsOfFile: logDirectory.appendingPathComponent(summary).path, encoding: .utf8)
+            #expect(text.contains("skipped=2"))
+            #expect(text.contains("SKIP release-products"))
+        }
+    }
+}
+
 // MARK: - Scenario Matrix Group Tests
 
 @Test
@@ -734,17 +867,28 @@ enum WebTransportProcessSupport {
         return value
     }
 
-    static func scenarioResultNames(from output: String) -> [String] {
+    /// The status tokens a conformance report prints, in the order they appear.
+    ///
+    /// `SKIP` is a third state that is neither a pass nor a failure: a scenario that could
+    /// not be attempted here is reported with its reason rather than as a failure (WT-186).
+    /// Recognising it is what keeps a skipped scenario from being silently dropped by the
+    /// tests that compare the reported names, which would otherwise under-report a run.
+    static func scenarioResultStatuses(from output: String) -> [(status: String, name: String)] {
         output.split(separator: "\n").compactMap { line in
             let columns = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
             guard columns.count >= 2 else {
                 return nil
             }
-            if columns[0] == "PASS" || columns[0] == "FAIL" {
-                return String(columns[1])
+            let token = String(columns[0])
+            guard token == "PASS" || token == "FAIL" || token == "SKIP" else {
+                return nil
             }
-            return nil
+            return (token, String(columns[1]))
         }
+    }
+
+    static func scenarioResultNames(from output: String) -> [String] {
+        scenarioResultStatuses(from: output).map(\.name)
     }
 
     static func temporaryLogDirectory(_ name: String) throws -> URL {
