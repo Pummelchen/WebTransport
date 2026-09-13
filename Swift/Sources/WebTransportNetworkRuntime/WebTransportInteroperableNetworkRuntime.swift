@@ -478,6 +478,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     private let connection: NetworkConnection<QUIC>
     private let inboundStreams: InteroperableQUICInboundStreamCollector
     private let inboundTask: Task<Void, Never>
+    /// The listener's concurrency slot for this session's connection, when a
+    /// listener accepted it. Released as soon as the session is closed or dropped;
+    /// see ``InteroperableQUICConnectionLease``.
+    private let lease: InteroperableQUICConnectionLease?
     private let manager: WebTransportNetworkSessionManagerState
     private let localControlStream: QUIC.Stream<QUICStream>
     private let connectStream: QUIC.Stream<QUICStream>
@@ -491,6 +495,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         connection: NetworkConnection<QUIC>,
         inboundStreams: InteroperableQUICInboundStreamCollector,
         inboundTask: Task<Void, Never>,
+        lease: InteroperableQUICConnectionLease? = nil,
         manager: WebTransportSessionManager,
         sessionID: WebTransportSessionID,
         selectedProtocol: String?,
@@ -506,6 +511,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         self.connection = connection
         self.inboundStreams = inboundStreams
         self.inboundTask = inboundTask
+        self.lease = lease
         let managerState = WebTransportNetworkSessionManagerState(manager: manager)
         self.manager = managerState
         self.sessionID = sessionID.rawValue
@@ -537,6 +543,9 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         InteroperableQUICDebug.log("session released")
         connectCapsuleTask.cancel()
         inboundTask.cancel()
+        // A session the application dropped without closing still has to hand its
+        // listener slot back, or the slot leaks for the lifetime of the process.
+        lease?.release()
     }
 
     public func openBidirectionalStream(
@@ -739,6 +748,13 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         reason: String = "",
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
     ) async throws {
+        // The session ends here whether or not the capsule reaches the peer, so the
+        // listener's slot goes back now rather than when the caller happens to drop
+        // this object: an application that keeps a closed session around must not
+        // hold the listener's connection budget down. Network.framework keeps the
+        // QUIC connection itself until the peer closes it or it idles out — the
+        // framework exposes no way to cancel a started `NetworkConnection`.
+        defer { lease?.release() }
         let capsule = try await manager.withManager { manager in
             try manager.makeCloseSessionCapsule(
                 sessionID: WebTransportSessionID(rawValue: self.sessionID),
@@ -767,6 +783,9 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
                 return false
             }
             if isClosed {
+                // The peer ended the session, so this connection is no longer the
+                // runtime's to serve even if the application still holds the object.
+                lease?.release()
                 return
             }
             do {
@@ -955,6 +974,17 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     private let protocols: [String]
     private let settingsValidation: HTTP3WebTransportSettingsValidation
 
+    /// Ceiling on connections this listener serves at one time.
+    ///
+    /// Enforced by the runtime, not by `NetworkListener.newConnectionLimit`:
+    /// measured on macOS 26.6.2, a listener built with a limit of 2 accepts exactly
+    /// two connections and never a third, however long ago the first two ended, so
+    /// that limit is a budget for the listener's whole life rather than a
+    /// concurrency cap. Passing `maxConcurrentConnections` through to it made a
+    /// listener stop accepting permanently once it had served that many sessions in
+    /// total (issue #23).
+    private let connectionBudget: InteroperableQUICConnectionBudget
+
     public convenience init(
         bindPort: UInt16,
         maxConcurrentConnections: Int = 16,
@@ -1019,6 +1049,9 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let transportLimits = try transportLimits.validated()
         self.admission = admission
         self.rateLimiter = ConnectionRateLimiter(policy: admission)
+        self.connectionBudget = InteroperableQUICConnectionBudget(
+            limit: max(1, admission.maxConcurrentConnections)
+        )
         self.transportLimits = transportLimits
         let resolvedIdentity = try ServerIdentityResolver.resolve(
             identity,
@@ -1043,8 +1076,10 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         )
         let parameters = localOnly ? baseParameters.localOnly(true) : baseParameters
 
+        // The listener runs without a `newConnectionLimit`, which would cap its
+        // whole life rather than its concurrency; `admitConnection()` applies the
+        // policy's ceiling instead.
         listener = try NetworkListener<QUIC>(using: parameters)
-            .newConnectionLimit(max(1, admission.maxConcurrentConnections))
         acceptedConnections = InteroperableQUICConnectionQueue()
         localEndpointStorage = Mutex(endpoint)
         self.authority = authority
@@ -1059,6 +1094,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let listener = self.listener
         let acceptedConnections = self.acceptedConnections
         let rateLimiter = self.rateLimiter
+        let connectionBudget = self.connectionBudget
         listenerTask = Task {
             do {
                 try await listener.run { connection in
@@ -1069,6 +1105,15 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                     // refusal costs nothing beyond the accept itself.
                     if let rateLimiter, !rateLimiter.allow() {
                         InteroperableQUICDebug.log("server refused connection: rate limit")
+                        return
+                    }
+                    // Refuse over-budget connections before the handshake is
+                    // driven. Returning from the accept handler without starting
+                    // the connection is what hands it back to Network.framework.
+                    guard let lease = connectionBudget.admit() else {
+                        InteroperableQUICDebug.log(
+                            "server refused connection: concurrency limit \(connectionBudget.limit)"
+                        )
                         return
                     }
                     InteroperableQUICDebug.log("server accepted connection")
@@ -1100,7 +1145,8 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                         InteroperableQUICAcceptedConnection(
                             connection: connection,
                             inboundStreams: inboundStreams,
-                            inboundTask: inboundTask
+                            inboundTask: inboundTask,
+                            lease: lease
                         )
                     )
                 }
@@ -1473,6 +1519,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             connection: connection,
             inboundStreams: inboundStreams,
             inboundTask: inboundTask,
+            lease: accepted.lease,
             manager: manager,
             sessionID: decision.session.id,
             selectedProtocol: decision.session.selectedProtocol,
@@ -1896,10 +1943,86 @@ private enum InteroperableQUICHelpers {
 /// completes, which happens while the connection is still sitting in the accept
 /// queue. Attaching it before `start()` and carrying it along is what keeps the
 /// peer's control stream from being delivered to nothing.
+/// The listener's concurrency budget.
+///
+/// Held apart from the listener so the accept handler can be built before the
+/// listener's own stored properties are initialized, and so releasing a slot does
+/// not reach back into the listener.
+private final class InteroperableQUICConnectionBudget: @unchecked Sendable {
+    let limit: Int
+    private let live = Mutex(0)
+
+    init(limit: Int) {
+        self.limit = limit
+    }
+
+    /// Take one slot in the budget, or `nil` when it is full.
+    func admit() -> InteroperableQUICConnectionLease? {
+        let admitted = live.withLock { live -> Bool in
+            guard live < limit else {
+                return false
+            }
+            live += 1
+            return true
+        }
+        guard admitted else {
+            return nil
+        }
+        return InteroperableQUICConnectionLease { [self] in
+            live.withLock { live in
+                live = max(0, live - 1)
+            }
+        }
+    }
+}
+
+/// One accepted connection's slot in a listener's concurrency budget.
+///
+/// Network.framework's `NetworkListener.newConnectionLimit` is a lifetime cap, not a
+/// concurrency cap: measured on macOS 26.6.2, a listener built with a limit of 2
+/// hands exactly two connections to its handler and never a third, even after both
+/// have ended, and a connection that ends does not return its slot. The runtime
+/// therefore runs its listeners without that limit and counts live connections
+/// itself. A lease is taken when a connection is admitted and released when the
+/// runtime is done with it.
+///
+/// The release is one-shot because a connection has several endings — clean close,
+/// peer close, refused accept, dropped queue entry, released session — and no path
+/// may return the same slot twice. Dropping the lease releases it, so a connection
+/// abandoned between admission and a session cannot strand a slot.
+private final class InteroperableQUICConnectionLease: @unchecked Sendable {
+    private let releaseSlot: @Sendable () -> Void
+    private let released = Mutex(false)
+
+    init(releaseSlot: @escaping @Sendable () -> Void) {
+        self.releaseSlot = releaseSlot
+    }
+
+    deinit {
+        release()
+    }
+
+    func release() {
+        let alreadyReleased = released.withLock { released -> Bool in
+            guard !released else {
+                return true
+            }
+            released = true
+            return false
+        }
+        guard !alreadyReleased else {
+            return
+        }
+        releaseSlot()
+    }
+}
+
 private struct InteroperableQUICAcceptedConnection: Sendable {
     let connection: NetworkConnection<QUIC>
     let inboundStreams: InteroperableQUICInboundStreamCollector
     let inboundTask: Task<Void, Never>
+    /// Held for as long as the connection is the runtime's to serve.
+    let lease: InteroperableQUICConnectionLease
 }
 
 private actor InteroperableQUICConnectionQueue {

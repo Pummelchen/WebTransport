@@ -6,6 +6,11 @@ The project uses semantic versioning.
 
 ## Unreleased
 
+Fixed:
+
+- A listener no longer stops accepting forever once it has served `maxConcurrentConnections` sessions. The value was passed to `NetworkListener.newConnectionLimit`, which on macOS 26 counts connections over the listener's whole life rather than at one time: measured with a minimal listener, a limit of 2 hands two connections to the handler and never a third, even after both have ended, and a connection that ends does not return its slot. A long-lived server therefore died permanently after `maxConcurrentConnections` total sessions — the default of 16 is low enough to be reached in normal operation — while every other transport it served kept working and each new WebTransport session timed out instead. The runtime now runs its listeners without that limit and counts in-flight connections itself: a connection is admitted only while fewer than the ceiling are being served, and the slot is returned when a session closes, when the peer closes it, when a session is released without being closed, and on every failed accept. Reported in issue #23.
+  Refusal behaves as before: a connection over the ceiling is dropped before its handshake is driven. Regression tests cover both halves — more sequential sessions than the ceiling are all accepted, and a connection that arrives while the ceiling is held by a live session is still refused.
+
 ## [1.3.6] - 2026-09-12
 
 A defect-fix release. There are no wire-format changes and nothing is removed from

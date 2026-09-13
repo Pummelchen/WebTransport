@@ -73,6 +73,14 @@ public struct WebTransportTransportLimits: Equatable, Sendable {
 public struct WebTransportAdmissionPolicy: Equatable, Sendable {
     /// Connections that may be in flight at once. Further connections are
     /// refused until one is served or times out.
+    ///
+    /// Counted by the runtime, which admits a connection only while fewer than
+    /// this many are being served and returns the slot when a session ends. It is
+    /// deliberately not handed to `NetworkListener.newConnectionLimit`: measured on
+    /// macOS 26.6.2 that limit is a budget for the listener's whole life — a
+    /// listener built with 2 accepts two connections and never a third, however
+    /// long ago the first two ended — so using it here made a long-lived server
+    /// stop accepting permanently after this many sessions in total (issue #23).
     public var maxConcurrentConnections: Int
 
     /// Ceiling on newly accepted connections per second, or nil for no limit.
