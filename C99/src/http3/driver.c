@@ -3,7 +3,10 @@
 #include "webtransport/http3/driver.h"
 
 #include "webtransport/cursor.h"
+#include <string.h>
+
 #include "webtransport/quic/stream.h"
+#include "webtransport/webtransport/session_request.h"
 #include "webtransport/quic/varint.h"
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint) {
@@ -575,6 +578,51 @@ wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
   if (status != WT_OK) return status;
   return transport->send_stream(transport->context, stream_id, driver->scratch,
                                 wt_writer_offset(&w), fin, now);
+}
+
+wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
+                                          const wt_http3_driver_transport_t *transport,
+                                          const wt_http3_settings_t *settings, const char *authority,
+                                          const char *path, uint64_t peer_max_entries, uint64_t now,
+                                          uint64_t *out_stream_id, wt_http3_error_t *out_error) {
+  wt_http3_message_t request;
+  uint64_t stream_id = 0U;
+  wt_status_t status;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (driver == NULL || driver->endpoint == NULL || transport == NULL || settings == NULL ||
+      authority == NULL || path == NULL || out_stream_id == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+
+  /* The endpoint's own streams first: a CONNECT cannot be interpreted by a peer that has not been told what
+   * this endpoint's SETTINGS say, and the QPACK streams are what any field section may reference. */
+  status = wt_http3_driver_start_own_streams(driver, transport, settings, now);
+  if (status != WT_OK) return status;
+
+  status = wt_http3_driver_open_request(driver, transport, now, &stream_id, out_error);
+  if (status != WT_OK) return status;
+
+  /* The extended CONNECT of draft-16 section 3.1, as the fields the request line needs: CONNECT with a
+   * :protocol, over https, for the authority and path the caller named. */
+  memset(&request, 0, sizeof(request));
+  request.type = WT_HTTP3_HEADER_REQUEST;
+  request.method = (const uint8_t *)"CONNECT";
+  request.method_length = 7U;
+  request.scheme = (const uint8_t *)"https";
+  request.scheme_length = 5U;
+  request.authority = (const uint8_t *)authority;
+  request.authority_length = strlen(authority);
+  request.path = (const uint8_t *)path;
+  request.path_length = strlen(path);
+  request.protocol = (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN;
+  request.protocol_length = strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN);
+
+  status = wt_http3_driver_send_message(driver, transport, stream_id, &request, peer_max_entries, 0,
+                                        now);
+  if (status != WT_OK) return status;
+  *out_stream_id = stream_id;
+  return WT_OK;
 }
 
 wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,

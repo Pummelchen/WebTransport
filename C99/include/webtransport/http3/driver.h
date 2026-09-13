@@ -235,6 +235,19 @@ wt_status_t wt_http3_driver_open_request(wt_http3_driver_t *driver,
                                          const wt_http3_driver_transport_t *transport, uint64_t now,
                                          uint64_t *out_stream_id, wt_http3_error_t *out_error);
 
+/* The whole client-side opening sequence in one call: start this endpoint's own streams (control and both
+ * QPACK streams), open a request stream, and send an extended CONNECT for `authority` and `path` on it.
+ *
+ * It exists because the sequence is fixed by the protocol and every WebTransport client performs it in the
+ * same order -- and because doing it by hand is where three separate bugs were found in this phase (a grant
+ * that did not match the advertised value, a stream opened on one machine and not the other, and a send whose
+ * offset was never recorded). A caller that wants a different order can still use the pieces. */
+wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
+                                          const wt_http3_driver_transport_t *transport,
+                                          const wt_http3_settings_t *settings, const char *authority,
+                                          const char *path, uint64_t peer_max_entries, uint64_t now,
+                                          uint64_t *out_stream_id, wt_http3_error_t *out_error);
+
 /* Send a request, a response or a trailer on a stream this endpoint owns, as a HEADERS frame.
  * `peer_max_entries` is the peer's advertised QPACK capacity, from its SETTINGS. */
 wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,

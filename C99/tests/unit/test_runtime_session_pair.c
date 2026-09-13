@@ -382,7 +382,6 @@ static void test_a_connect_crosses_a_real_connection(void) {
   http3_side_t server;
   wt_http3_driver_transport_t transport;
   wt_http3_settings_t settings;
-  wt_http3_message_t request;
   wt_http3_message_t decoded;
   wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
   wt_webtransport_request_policy_t policy;
@@ -465,31 +464,15 @@ static void test_a_connect_crosses_a_real_connection(void) {
   wt_http3_settings_init(&settings);
   WT_EXPECT_OK("the client advertises WebTransport",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
-  WT_EXPECT_OK("and opens its own streams",
-               wt_http3_driver_start_own_streams(&client.driver, &transport, &settings, pair.now));
 
-  /* The CONNECT: an extended request on a client-initiated bidirectional stream, which IS the session.
-   * The call opens it on the CONNECTION and registers it with the ENDPOINT, because those are two
-   * different machines and a caller that did one without the other would get a state error at the send. */
-  WT_EXPECT_OK("a request stream opens",
-               wt_http3_driver_open_request(&client.driver, &transport, pair.now, &request_stream_id,
-                                            &h3_error));
-  WT_EXPECT_U64("as the client's first bidirectional stream", 0U, request_stream_id);
-  memset(&request, 0, sizeof(request));
-  request.type = WT_HTTP3_HEADER_REQUEST;
-  request.method = (const uint8_t *)"CONNECT";
-  request.method_length = 7U;
-  request.scheme = (const uint8_t *)"https";
-  request.scheme_length = 5U;
-  request.authority = (const uint8_t *)"example.com";
-  request.authority_length = 11U;
-  request.path = (const uint8_t *)"/chat";
-  request.path_length = 5U;
-  request.protocol = (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN;
-  request.protocol_length = strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN);
-  WT_EXPECT_OK("and the CONNECT goes out",
-               wt_http3_driver_send_message(&client.driver, &transport, request_stream_id, &request,
-                                            0U, 0, pair.now));
+  /* The whole client opening sequence in ONE call -- control stream, both QPACK streams, a request stream and
+   * the extended CONNECT -- which is the same sequence the tools will run. It exists because doing it by hand
+   * is where three separate bugs were found in this phase: a grant that did not match the advertised value, a
+   * stream opened on one machine and not the other, and a send whose offset was never recorded. */
+  WT_EXPECT_OK("the client starts a session",
+               wt_http3_driver_start_session(&client.driver, &transport, &settings, "example.com",
+                                             "/chat", 0U, pair.now, &request_stream_id, &h3_error));
+  WT_EXPECT_U64("on its first bidirectional stream", 0U, request_stream_id);
 
   /* The CONNECT is on the wire. What happens to it on the FAR side is the next part and is NOT
    * asserted here, because it does not happen yet: the client sends, the server reads packets, and the

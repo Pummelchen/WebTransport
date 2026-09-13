@@ -2361,6 +2361,19 @@ granted. Reproducing that in isolation (set 8, open peer streams, read the grant
 carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
 saw STREAM frames, and it walked frames at all.
 
+### Phase 9's nineteenth part: the client's opening sequence in one call
+
+`wt_http3_driver_start_session` does what every WebTransport client does, in the order the protocol fixes: start
+this endpoint's own streams (control and both QPACK streams), open a request stream, and send the extended
+CONNECT for a given authority and path. The pair test uses it now and still reaches the same milestone, so the
+one-call version is proven against a real connection rather than merely written.
+
+It exists because doing the sequence by hand is where THREE separate bugs were found in this phase -- a grant
+that did not match the value the endpoint advertised (WT-110's root cause), a stream opened on one machine and
+not the other (WT-111), and a send whose offset was never recorded (WT-112). Each was a step in a sequence whose
+order and pairing the protocol fixes, which is the argument for one call that cannot get them out of step. A
+caller that wants a different order still has the pieces.
+
 ### Phase 9's eighteenth part: the CONNECT crosses a real connection
 
 **The milestone this phase was built for is reached**: `test_runtime_session_pair` drives the whole path --
