@@ -286,6 +286,11 @@ typedef struct wt_quic_connection {
   uint64_t current_peer_sequence;
   int current_peer_sequence_set;
   uint64_t peer_ids_retired;
+  /* How many RETIRE_CONNECTION_ID frames this endpoint has RECEIVED, which is not the same number: `issued_count`
+   * falls by one for each, but a session that answers a retire with a replacement needs to know that a NEW request
+   * arrived rather than that the state is still the one it already answered (WT-173). Counted here because the
+   * connection is what receives them. */
+  uint64_t retires_received;
   /* Set while a NEW_CONNECTION_ID is being handled whose retire_prior_to retired the ID this endpoint was
    * using: the replacement arrives in that same frame, so it is adopted once it has been stored. */
   int retire_current_after_store;
@@ -854,6 +859,9 @@ uint64_t wt_quic_connection_path_validation_failures(const wt_quic_connection_t 
  * retired), and when the connection is closed. */
 wt_status_t wt_quic_connection_retire_peer_connection_id(wt_quic_connection_t *connection,
                                                          uint64_t sequence, uint64_t now);
+
+/* How many RETIRE_CONNECTION_ID frames this endpoint has RECEIVED -- the peer asking for replacements. */
+uint64_t wt_quic_connection_retires_received(const wt_quic_connection_t *connection);
 
 /* How many connection IDs this endpoint has retired from the peer -- the ones it stopped using -- and how many
  * of the peer's are stored and available. Diagnostics: a retire that was never sent looks exactly like a peer

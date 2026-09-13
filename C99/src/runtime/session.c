@@ -61,10 +61,36 @@ static wt_status_t provide_spare_connection_id(wt_runtime_session_t *session, ui
   status = wt_random_bytes(token, sizeof(token));
   if (status != WT_OK) return status;
 
+  /* A peer that retires every ID this endpoint issues would otherwise get one replacement per round trip for the
+   * life of the connection, so replacements are RATE LIMITED (WT-173): the first is free -- a peer that retires a
+   * spare once is following section 5.1.2 -- and every one after it costs the interval. The refusal is counted
+   * separately from "the peer's limit allowed none", because they are different facts about the peer. */
+  if (session->spare_ids_issued > 0U) {
+    uint64_t retires = wt_quic_connection_retires_received(connection);
+    if (retires != session->spare_id_retires_seen) {
+      session->spare_id_retires_seen = retires;
+      session->spare_id_pending = 1U;
+    }
+    if (session->spare_id_pending == 0U) return WT_OK; /* no request outstanding: nothing to answer */
+    if (session->spare_ids_replaced > 0U && now < session->spare_id_next_allowed) {
+      if (session->spare_id_pending == 1U) {
+        session->spare_id_refusals++;
+        session->spare_ids_rate_limited++;
+        session->spare_id_pending = 2U;
+      }
+      return WT_OK;
+    }
+    session->spare_id_pending = 0U;
+  }
+
   status = wt_quic_connection_issue_connection_id(connection, id, connection->local_connection_id_length, token,
                                                   now);
   if (status == WT_OK) {
     session->spare_ids_issued++;
+    if (session->spare_ids_issued > 1U) {
+      session->spare_ids_replaced++;
+      session->spare_id_next_allowed = now + WT_RUNTIME_SPARE_ID_INTERVAL;
+    }
     return WT_OK;
   }
   /* A peer that allows no spare, a table that is full, or state that has moved on: the session is still usable,

@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 82 test programs and 82,293 checks, run by `ctest` and again under
+- 82 test programs and 82,350 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -723,6 +723,15 @@ What is here:
   carries it, so when the ID in use is one of the retired ones the replacement in that same frame is adopted
   first and the retires ride it. A test caught exactly that: the first version retired first and the peer refused
   the frame, which is what a test with a real peer is for.
+- **A retire flood cannot turn this endpoint into an amplifier** (WT-173): RFC 9000 section 5.1.2 makes a retire a
+  REQUEST for another ID, so a peer that retires every ID as it arrives would get a replacement per round trip for
+  the life of the connection -- each NEW_CONNECTION_ID a frame it pays nothing for.
+  `WT_RUNTIME_SPARE_ID_INTERVAL` bounds the replacements to one every four seconds (three times RFC 9002's initial
+  probe timeout), and the FIRST replacement is deliberately free, because a peer that retires a spare once is doing
+  exactly what the section recommends: a bound that refused it would break the flow the policy exists to serve. A
+  retire that arrives while the limit is in force stays PENDING and is answered when the interval passes, so a
+  peer is never left without a spare for ever; the refusal is counted once per REQUEST
+  (`spare_ids_rate_limited`), not once per pump round.
 - **A connection ID the peer retires is REPLACED** (WT-171): RFC 9000 section 5.1.2 makes a
   RETIRE_CONNECTION_ID a request -- "Sending a RETIRE_CONNECTION_ID frame ... requests that the peer replace it
   with a new connection ID" -- and section 5.1.1 sizes the spare, because the peer's

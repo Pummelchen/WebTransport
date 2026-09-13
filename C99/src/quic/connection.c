@@ -1242,6 +1242,10 @@ uint64_t wt_quic_connection_path_validation_failures(const wt_quic_connection_t 
   return connection != NULL ? connection->path_validation_failures : 0U;
 }
 
+uint64_t wt_quic_connection_retires_received(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->retires_received : 0U;
+}
+
 uint64_t wt_quic_connection_peer_ids_retired(const wt_quic_connection_t *connection) {
   return connection != NULL ? connection->peer_ids_retired : 0U;
 }
@@ -1408,6 +1412,7 @@ static wt_status_t handle_retire_connection_id(wt_quic_connection_t *connection,
   uint64_t sequence = frame->as.retire_connection_id.sequence;
   size_t i;
 
+  connection->retires_received++;
   if (sequence == visit->destination_sequence || sequence >= connection->next_issued_sequence) {
     return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, WT_QUIC_FRAME_RETIRE_CONNECTION_ID,
                       visit->now);

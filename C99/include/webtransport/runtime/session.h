@@ -80,6 +80,22 @@ typedef struct wt_runtime_session {
   int spare_connection_id;
   unsigned spare_ids_issued;
   unsigned spare_id_refusals;
+  /* How many of those refusals were the RATE LIMIT rather than the peer's own limit, so "this peer is retiring
+   * IDs faster than any migration would" is a number a caller can see (WT-173). */
+  unsigned spare_ids_rate_limited;
+  /* The number of replacements performed, and the earliest time the next one may be. The FIRST replacement is
+   * never limited: a peer that retires a spare once is following section 5.1.2's advice, and a bound that refused
+   * it would break the flow this policy exists to serve. */
+  unsigned spare_ids_replaced;
+  uint64_t spare_id_next_allowed;
+  /* The number of retires this session has already NOTICED, and whether the request they made is still
+   * outstanding: 0 none, 1 waiting for the interval, 2 waiting and already counted. A retire that arrives while
+   * the rate limit is in force stays PENDING rather than being dropped -- it is answered once the interval passes,
+   * so a peer that retires once and is refused is not left without a spare for ever -- and the refusal is counted
+   * once per REQUEST, not once per pump round (a counter that ran every round said thirty refusals for one
+   * retire). */
+  uint64_t spare_id_retires_seen;
+  unsigned spare_id_pending;
 } wt_runtime_session_t;
 
 /* A RULE THE CALLER MUST KEEP, and the one that cost this phase several rounds: the connection-level
@@ -165,6 +181,15 @@ wt_status_t wt_runtime_session_set_lost_frame_handler(wt_runtime_session_t *sess
 wt_status_t wt_runtime_session_set_frame_handler(wt_runtime_session_t *session,
                                                  wt_runtime_frame_handler_fn handler,
                                                  void *context);
+
+/* The shortest interval between two REPLACEMENTS of a retired spare, in the units of the clock the session's
+ * caller passes (microseconds): four seconds, which is three times RFC 9002 section 6.2.1's initial probe timeout.
+ * RFC 9000 section 5.1.2 makes a retire a REQUEST for another ID, and a peer that retires every ID as it arrives
+ * can make this endpoint issue one per round trip for the life of the connection -- each NEW_CONNECTION_ID is a
+ * frame the peer pays nothing for, which is the amplification this bound exists to refuse (WT-173). The first
+ * replacement is NOT limited: a peer that retires a spare once is doing what section 5.1.2 recommends, and a
+ * bound that refused it would break the very flow the policy serves. */
+#define WT_RUNTIME_SPARE_ID_INTERVAL 4000000U
 
 /* Keep ONE spare connection ID issued for the peer, and replace it when the peer retires it (WT-171).
  *
