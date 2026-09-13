@@ -633,6 +633,17 @@ What is here:
   two real loopback sockets on IPv4 and on IPv6 with Initial keys both ends derive from one connection
   ID, so a packet travels the whole path -- build, protect, send, receive, unprotect, walk, acknowledge,
   account -- without a handshake.
+- **The 1-RTT key update** (Phase 4, tenth part): RFC 9001 section 6's lifecycle, which the derivation alone
+  never was. `wt_quic_connection_initiate_key_update` moves the traffic secret forward, toggles the Key Phase
+  bit and refuses before the handshake is confirmed or before the previous update is acknowledged; a peer's
+  update is answered with this endpoint's send keys moved *before* the acknowledgement; the phase being retired
+  is retained for packets the network reordered; and `KEY_UPDATE_ERROR` closes the cases section 6.2 and 6.4
+  name. Two layers had to move for it. The packet layer is now two steps -- `wt_quic_packet_unprotect_header`
+  and `wt_quic_packet_open` -- because the Key Phase bit is INSIDE the header protection mask and the header
+  protection key is the one thing an update does not change (section 6.1); and the connection keeps the two
+  packet numbers section 6 reasons about, since the phase being retired and the phase arriving carry the SAME
+  bit (section 6.5). A packet whose tag does not verify is wiped by design, so a second attempt at one packet
+  reads a saved copy.
 - **The CRYPTO stream** (Phase 4, ninth part): `quic/crypto_stream.h` is the handshake bytes, which
   arrive by offset rather than in order. The receive half is a window with a bitmap of what has
   arrived, delivering only up to the first hole, so a ClientHello split across two packets reads
