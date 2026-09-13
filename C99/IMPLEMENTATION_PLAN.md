@@ -2261,6 +2261,27 @@ an error path that unwinds would otherwise double free, and a server with NO CER
 rather than at the first ClientHello, where the reason is much harder to see. The two-endpoint handshake over
 loopback is the next part, and it belongs beside the fixtures it needs.
 
+### Phase 9's fifteenth part: a real handshake between two sessions over loopback
+
+The session driver is now proven end to end: `test_runtime_session_pair` stands up two loopback UDP
+sockets and two runtime sessions, arms one as a client and one as a server, and pumps both until the TLS 1.3
+handshake inside QUIC Initial and Handshake packets is CONFIRMED on both sides with application keys
+installed. It uses the repository's trust fixtures -- a real leaf, a real CA and a real signature -- so the
+client validates the server rather than trusting it, which is the difference between testing the handshake and
+testing a bypass.
+
+Two details in the test are the ones that make it a test rather than a hang. The socket is WAITED on before
+each pump, because a non-blocking receive finds nothing until the packet has actually arrived and a loop that
+spun faster than the loopback interface would finish before the first Initial packet did; and both the round
+count and the wait are bounded, so a driver that never completes FAILS rather than hanging the suite. The first
+draft of the loop also had a break at round zero that skipped the handshake entirely -- the test said so
+immediately, which is the argument for a bounded loop with an assertion at the end rather than a while(true)
+with a timeout.
+
+The same connection ID is used at both ends, which is what makes the Initial keys -- derived from it -- the
+same on both sides. Replacing the peer's ID with the one the server chooses is connection ID management this
+runtime still needs, and it is recorded on the tracker rather than left implicit.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

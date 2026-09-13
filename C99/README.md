@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 74 unit test files and 79,805 checks, run by `ctest` and again under
+- 75 unit test files and 79,833 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -69,6 +69,13 @@ What is here:
   with stable field names, and the parser is a library function rather than argv walking
   inside each `main`, which is what lets all of this be a failing check rather than a
   manual attempt.
+- **Two sessions handshaking over loopback** (Phase 9): the runtime session driver is
+  proven end to end — two loopback UDP sockets, two sessions, and a full TLS 1.3 handshake
+  inside QUIC Initial and Handshake packets, authenticated with the repository's trust
+  fixtures (a real leaf, a real CA and a real signature, so the client validates the server
+  rather than trusting it). Both sides end confirmed with application keys installed. That
+  is the plan's "run local IPv4 and IPv6 packet sessions" at the library level; the tools'
+  own session loop is what remains before the CLI can claim it.
 - **A packet session driver** (Phase 9): `runtime/session.h` is the only place where the
   socket, the QUIC connection and the TLS handshake meet — the connection needs somewhere to
   send, the handshake needs a connection with Initial keys, and the socket needs a caller to

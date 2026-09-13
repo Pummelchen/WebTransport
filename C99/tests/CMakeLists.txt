@@ -62,6 +62,7 @@ set(WT_UNIT_TESTS
   test_api_endpoint
   test_cli_endpoint
   test_runtime_session
+  test_runtime_session_pair
   test_cli_options
   test_cli_report
   test_http3_driver
@@ -111,4 +112,8 @@ target_compile_definitions(test_tls13_server PRIVATE
 # And the handshake test runs a whole handshake over sockets, so it needs the same identity to
 # serve and the same CA to validate it.
 target_compile_definitions(test_quic_handshake PRIVATE
+  WT_TRUST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vectors/trust")
+# And the session pair test drives two of those handshakes through the runtime session driver, so it
+# needs the same identity and the same CA.
+target_compile_definitions(test_runtime_session_pair PRIVATE
   WT_TRUST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/vectors/trust")
