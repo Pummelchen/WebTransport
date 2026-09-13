@@ -405,8 +405,14 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
         return WT_OK;
       }
       if (wt_quic_stream_id_is_bidirectional(stream_id)) {
-        /* A peer-initiated bidirectional stream is a request stream: the session's own stream
-         * once its extended CONNECT is accepted. */
+        /* A bidirectional stream is a request stream -- and there are TWO ways this layer meets one. If the
+         * endpoint already tracks it, this endpoint OPENED it and what arrives is the RESPONSE, which is the
+         * other direction of the same exchange (RFC 9114 section 4.1 gives each direction its own HEADERS).
+         * If it does not, the peer initiated it and it becomes a request stream now.
+         *
+         * Getting this wrong is what stopped the response from arriving: routing a tracked stream through
+         * `on_request_stream` again is refused as a duplicate, and the refusal ABORTED the frame routing, so
+         * the response was never reported to the caller at all. */
         wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
         if (wt_http3_endpoint_request_state(driver->endpoint, stream_id, &state) != WT_OK) {
           status = wt_http3_endpoint_on_request_stream(driver->endpoint, stream_id, &error);

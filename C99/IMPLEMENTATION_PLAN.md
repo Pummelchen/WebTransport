@@ -2361,6 +2361,31 @@ granted. Reproducing that in isolation (set 8, open peer streams, read the grant
 carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
 saw STREAM frames, and it walked frames at all.
 
+### Phase 9's twenty-third part: the response path's routing bug, and a test file that needs a lighter hand
+
+The response could not be reported at all, and the reason is a real library bug now fixed: routing a
+bidirectional stream's frames went through `wt_http3_endpoint_on_request_stream` unconditionally, which for a
+stream this endpoint OPENED is a duplicate and is refused -- and the refusal ABORTED the frame routing, so the
+peer's response was never handed to the caller. The driver now asks whether the endpoint already tracks the
+stream: if it does, this endpoint opened it and what arrives is the RESPONSE, which is the other direction of
+the same exchange (RFC 9114 section 4.1 gives each direction its own HEADERS frames); if it does not, the peer
+initiated it and it becomes a request stream. The two directions of one exchange are two cases, and treating
+them as one was the bug.
+
+Two measurements from the round stand and are recorded: the server's connection DOES hold the request stream
+after the pumps (so WT-115's "no stream to answer on" was block placement in the test, not the library), and
+the server DOES accept and send the response on it. What remains is the response's arrival at the client's sink,
+whose next probe is written down: the client's own `stream_frames_seen` and `frames_delivered` after the
+response pumps, and whether its connection stayed open.
+
+**A process note this phase has earned.** This test file has been edited by scripted find-and-replace seven
+times, and the last round's edits landed blocks in the wrong place twice -- the response block before the pumps
+that deliver the CONNECT, and then a deletion that cut into the milestone assertions. One wrong placement cost a
+round of library diagnosis; the deletion cost the file's integrity and was reverted with `git checkout`. The
+rule that follows is concrete: **a test whose structure matters should be edited by hand or rewritten whole, not
+nibbled by anchors** -- and when an edit removes a region, the region's boundaries belong in the same edit as
+its replacement, verified by a build before anything else is concluded.
+
 ### Phase 9's twenty-second part: the contradiction was my own instrumentation
 
 WT-115's "a contradiction the test has to explain about itself" was correct about the last word and wrong
