@@ -158,7 +158,8 @@ int main(int argc, char **argv) {
              "\"probesWithData\":%u,\"requestStreamId\":%llu,"
              "\"streamsOpened\":{\"bidi\":%u,\"uni\":%u},"
              "\"sent\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},"
-             "\"transcriptTypes\":\"%s\"}\n",
+             "\"transcriptTypes\":\"%s\","
+             "\"acks\":{\"initial\":[%u,%llu],\"handshake\":[%u,%llu],\"application\":[%u,%llu]}}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
              (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
@@ -173,7 +174,9 @@ int main(int argc, char **argv) {
              result.probes, result.probes_with_data,
              (unsigned long long)result.request_stream_id, result.streams_opened_bidi,
              result.streams_opened_uni, result.sent_initial, result.sent_handshake,
-             result.sent_application, wt_client_transcript_types(&result));
+             result.sent_application, wt_client_transcript_types(&result), result.acks_initial,
+             result.ack_largest_initial, result.acks_handshake, result.ack_largest_handshake,
+             result.acks_application, result.ack_largest_application);
     } else {
       printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.status, (unsigned long long)result.received_bytes,

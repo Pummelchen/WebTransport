@@ -219,6 +219,12 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
                            loop->session.connection.probes_sent[WT_QUIC_SPACE_HANDSHAKE] +
                            loop->session.connection.probes_sent[WT_QUIC_SPACE_APPLICATION]);
   out->probes_with_data = (unsigned)loop->session.connection.probes_with_data;
+  out->acks_initial = (unsigned)loop->session.connection.acks_sent[WT_QUIC_SPACE_INITIAL];
+  out->acks_handshake = (unsigned)loop->session.connection.acks_sent[WT_QUIC_SPACE_HANDSHAKE];
+  out->acks_application = (unsigned)loop->session.connection.acks_sent[WT_QUIC_SPACE_APPLICATION];
+  out->ack_largest_initial = loop->session.connection.ack_largest[WT_QUIC_SPACE_INITIAL];
+  out->ack_largest_handshake = loop->session.connection.ack_largest[WT_QUIC_SPACE_HANDSHAKE];
+  out->ack_largest_application = loop->session.connection.ack_largest[WT_QUIC_SPACE_APPLICATION];
   out->sent_initial = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_INITIAL];
   out->sent_handshake = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_HANDSHAKE];
   out->sent_application = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_APPLICATION];

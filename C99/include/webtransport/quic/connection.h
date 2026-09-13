@@ -285,6 +285,11 @@ typedef struct wt_quic_connection {
    * never finished its handshake and one whose Finished the peer cannot read, and the peer's log looks identical
    * either way (WT-135). */
   uint64_t packets_sent_by_space[WT_QUIC_SPACE_COUNT];
+  /* ACK frames SENT, by space, and the largest packet number each named. "Is an acknowledgement going out, and
+   * does it name a packet the peer actually sent" is what the peer's "Scheduled CRYPTO data for retransmission"
+   * is asking from its side (WT-135). */
+  uint64_t acks_sent[WT_QUIC_SPACE_COUNT];
+  uint64_t ack_largest[WT_QUIC_SPACE_COUNT];
 
   /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is

@@ -1657,7 +1657,13 @@ static wt_status_t flush_space(wt_quic_connection_t *connection, wt_quic_space_t
 
   status = send_one_frame(connection, space, &frame, 0, 0, 0, 0U, 0U, 0U, &sent, now);
   if (status != WT_OK) return status;
-  if (sent) wt_quic_ack_sent(&space_state->received);
+  if (sent) {
+    wt_quic_ack_sent(&space_state->received);
+    if (space < WT_QUIC_SPACE_COUNT) {
+      connection->acks_sent[space]++;
+      connection->ack_largest[space] = frame.as.ack.largest;
+    }
+  }
   return WT_OK;
 }
 

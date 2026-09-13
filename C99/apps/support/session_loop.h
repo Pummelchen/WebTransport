@@ -89,6 +89,13 @@ typedef struct wt_loop_result {
    * RFC 8446's (ClientHello, ServerHello, EncryptedExtensions, Certificate, CertificateVerify, Finished) and
    * nothing else -- a transcript that hashed something extra is invisible to a pair of the same code and fatal
    * to a peer that hashes the RFC's list (WT-135). `transcript_types_length` is how many are recorded. */
+  /* ACK frames sent per space and the largest packet number each named: initial, handshake, application. */
+  unsigned acks_initial;
+  unsigned acks_handshake;
+  unsigned acks_application;
+  unsigned long long ack_largest_initial;
+  unsigned long long ack_largest_handshake;
+  unsigned long long ack_largest_application;
   uint8_t transcript_types[16];
   size_t transcript_types_length;
   /* The stream id the driver opened for the request, and how many streams this endpoint opened in each class:
