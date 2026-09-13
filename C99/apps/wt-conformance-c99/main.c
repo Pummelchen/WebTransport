@@ -17,6 +17,7 @@
 #include "scenario_session.h"
 #include "scenario_refusals.h"
 #include "scenario_control.h"
+#include "scenario_headers.h"
 #include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/capsule.h"
@@ -195,6 +196,10 @@ int main(int argc, char **argv) {
      * They mirror the Swift suite's control and shutdown groups, and they too need no sockets: what is being
      * asserted is the code the peer would be sent. */
     wt_scenario_control_run(&report);
+
+    /* The headers and QPACK scenarios: the positive field-section side, where a broken encoder would
+     * otherwise only show up as a session that did not decode. */
+    wt_scenario_headers_run(&report);
 
     /* The two session scenarios: two endpoints in ONE process over loopback, with a generated and pinned
      * identity, running the whole exchange -- handshake, CONNECT, response, a stream message and a datagram.
