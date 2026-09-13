@@ -27,7 +27,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
 The Swift conformance matrix passes in full. The C99 implementation is **Phases 0
-to 3 complete, with Phase 4 in progress**: it builds with CMake as a static and shared
+to 4 complete, with Phase 5 next**: it builds with CMake as a static and shared
 library with three CLI tools, carries a tested core (checked arithmetic, byte cursors,
 a two-pass writer, a bounded buffer, an allocator interface, a monotonic clock), a tested
 QUIC wire core and crypto layer (varints, frames, packets, transport parameters,
@@ -39,11 +39,12 @@ number spaces with ACK generation, loss detection and probe timeouts, NewReno co
 control, stream state machines and flow control, QUIC DATAGRAM, the close paths, and the
 packet build/read seam. It installs as a CMake package with a consumer test. The
 cryptographic and packet-protection tests are driven by RFC 9001 appendix A's and RFC
-8448's own vectors, extracted from the RFC text rather than transcribed. The IPv4/IPv6 UDP
-runtime that completes Phase 4 is under way -- the UDP socket layer and the connection runtime exist,
-and two connections complete a whole TLS 1.3 handshake and exchange protected, acknowledged packets
-over IPv4 and IPv6 loopback in the tests -- and no WebTransport protocol is implemented -- HTTP/3, QPACK and the draft-16 session layer come after it -- so its
-draft-16 score is still 0%. See
+8448's own vectors, extracted from the RFC text rather than transcribed. Phase 4 is complete: the UDP
+socket layer and the connection runtime carry a whole TLS 1.3 handshake and protected,
+acknowledged packets over both IPv4 and IPv6 loopback, its loss, probe-timeout and close-path
+suites pass, and every suite runs again under AddressSanitizer and UndefinedBehaviorSanitizer,
+on macOS and Linux in CI. No WebTransport protocol is implemented yet -- HTTP/3, QPACK and the
+draft-16 session layer come next -- so its draft-16 score is still 0%. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).
 

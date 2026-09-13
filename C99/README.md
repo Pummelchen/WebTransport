@@ -8,12 +8,18 @@ scaffolding.
 
 ## Current Status
 
-**Phases 0, 1 and 2 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are
-complete, and Phase 3 is under way: its key schedule, transcript, handshake message
-codecs (Hellos and certificates), X25519 key agreement, peer authentication and both halves of
-the handshake are done, and Phase 4 has its packet number space, loss detection, congestion control, the stream machines,
-DATAGRAM and the close paths.**
-The rest of Phase 3, and Phases 4 to 14, are not started.
+**Phases 0 to 4 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are complete, and
+Phase 5 (HTTP/3) is next.** Phase 3 finishes the TLS 1.3 handshake end to end, and Phase 4
+is the QUIC connection runtime: packet number spaces with ACK generation, loss detection
+and probe timeouts, NewReno congestion control, the stream state machines and flow
+control, QUIC DATAGRAM, the close paths, connection IDs (issued, retired and received),
+the packet build/read seam, and the IPv4/IPv6 UDP runtime, with two connections completing
+a whole handshake and exchanging protected, acknowledged packets over IPv6 and IPv4
+loopback in the tests. Phase 4's completion criteria are met: those loopback tests pass on
+macOS and Linux in CI, the loss, probe-timeout and close-path suites pass, and every suite
+runs again under AddressSanitizer and UndefinedBehaviorSanitizer.
+Phases 5 to 14 are not started: no WebTransport protocol is implemented yet, so the
+draft-16 score is 0%.
 
 What is here:
 
