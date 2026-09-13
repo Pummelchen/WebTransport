@@ -224,8 +224,10 @@ What is here:
   not the same as being done: the criteria that are not met are outside the matrix and outside this
   repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
   Windows CI legs need portability work before a job for them would be anything but red. The two
-  partial criteria are conformance scenario breadth (thirty-nine scenarios, two of them end-to-end
-  sessions over real sockets, against the Swift tools' 40-scenario suite) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
+  partial criteria are conformance scenario breadth (forty scenarios, two of them end-to-end sessions
+  over real sockets, against the Swift tools' 40-scenario suite -- the counts now match while the sets do
+  not: its connect and malformed-flow matrices and its two release checks have no counterpart here) and
+  those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
   sessions, sanitizers and static checks are clean, the public API is documented, nothing
   placeholder-shaped is exposed as production, and the matrix itself exists and is checked.
 
@@ -242,8 +244,8 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **thirty-nine scenarios,
-  all passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **forty scenarios, all
+  passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
   `H3_SETTINGS_ERROR`, a **reserved** one is the same error, a QPACK section needing a table that was
@@ -265,7 +267,11 @@ What is here:
   the classifier's session and length, all in one table), **two interop matrices** in that table shape
   (eleven stream cases and eight datagram cases, the latter covering both directions, the two malformed
   forms a whole-unit datagram has, the unknown session with no owner, and the send-side payload bound
-  re-derived from its definition), and the two **real sessions** over IPv4 and IPv6. The
+  re-derived from its definition), **three interop matrices** (stream, datagram, and GOAWAY/close/drain --
+  the last with ten cases: a GOAWAY gating the streams at or above its identifier, a drain in either
+  direction stopping new streams without ending the session, a repeated drain, the first close's code, a
+  capsule after the end refused, and both capsules round-tripped), and the two **real sessions** over
+  IPv4 and IPv6. The
   reserved-SETTINGS scenario is what **found** a real spec violation in this tree's own parser, and
   the fix is in — see `IMPLEMENTATION_PLAN.md`. Registered with CTest.
 - **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
