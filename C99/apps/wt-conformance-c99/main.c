@@ -18,6 +18,7 @@
 #include "scenario_refusals.h"
 #include "scenario_control.h"
 #include "scenario_headers.h"
+#include "scenario_isolation.h"
 #include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/capsule.h"
@@ -200,6 +201,10 @@ int main(int argc, char **argv) {
     /* The headers and QPACK scenarios: the positive field-section side, where a broken encoder would
      * otherwise only show up as a session that did not decode. */
     wt_scenario_headers_run(&report);
+
+    /* Two sessions in one connection, and a datagram that belongs to neither: the isolation a
+     * single-session scenario cannot see. */
+    wt_scenario_isolation_run(&report);
 
     /* The two session scenarios: two endpoints in ONE process over loopback, with a generated and pinned
      * identity, running the whole exchange -- handshake, CONNECT, response, a stream message and a datagram.
