@@ -1,0 +1,76 @@
+#!/bin/sh
+# Run the C99 client against a third-party peer, both in containers on ONE Docker network (WT-135).
+#
+# The host-to-container direction works and the reply path does not: Docker Desktop forwards inbound UDP and the
+# container's answers do not return to a host-initiated flow. `check-windows-build.sh`'s sibling in spirit, this
+# puts both ends where the network is symmetric, which is also how a Linux CI job would do it.
+#
+# Usage:  scripts/run-container-interop.sh [peer ...]
+#         (no arguments runs every peer this repository knows how to start)
+#
+# Peers come from the Swift tree's `interop-docker` contexts, because they are the same containers the Swift
+# interop matrix uses and there is no reason to write a second one:
+#
+#   pywebtransport  python:3.12-slim + pywebtransport + aioquic   stream datagram
+#   quinn           Rust, quinn + h3                              stream datagram
+#   quiche          Rust, quiche (stream only upstream)           stream
+set -eu
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+repo="$(cd "$root/.." && pwd)"
+swift_interop="$repo/Swift/interop-docker"
+
+if ! docker info >/dev/null 2>&1; then
+  echo "container interop: unsupported -- Docker is not available"
+  exit 0
+fi
+
+peers="${*:-pywebtransport quinn quiche}"
+network="wt-interop-net"
+client_image="wt-interop-c99-client"
+timeout_ms="${WT_CONTAINER_INTEROP_TIMEOUT_MS:-8000}"
+
+cleanup() {
+  for peer in $peers; do
+    docker rm -f "wt-interop-$peer" >/dev/null 2>&1 || true
+  done
+  docker rm -f wt-interop-client >/dev/null 2>&1 || true
+  docker network rm "$network" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+docker network create "$network" >/dev/null 2>&1 || true
+
+# The client image is built from this tree, so a change to the client is a rebuild rather than a surprise.
+docker build -q -t "$client_image" -f "$root/tests/interop/client/Dockerfile" "$root" >/dev/null
+
+for peer in $peers; do
+  case "$peer" in
+    pywebtransport) port=54001 ;;
+    quinn) port=54002 ;;
+    quiche) port=54003 ;;
+    *) echo "container interop: unknown peer $peer"; exit 2 ;;
+  esac
+  context="$swift_interop/$peer"
+  if [ ! -d "$context" ]; then
+    echo "container interop: $peer: no build context at $context"
+    continue
+  fi
+  echo "== $peer"
+  docker build -q -t "wt-interop-$peer" "$context" >/dev/null
+  docker rm -f "wt-interop-$peer" >/dev/null 2>&1 || true
+  docker run -d --name "wt-interop-$peer" --network "$network" -e "PORT=$port" "wt-interop-$peer" >/dev/null
+  sleep 3
+  # The client JOINS THE PEER'S NETWORK NAMESPACE rather than sitting beside it: `--trust local-development`
+  # refuses to bypass certificate verification for a non-loopback address -- which is the right policy, and it
+  # said so the first time this ran ("the development bypass is refused for a non-loopback address"). Sharing the
+  # namespace makes the peer 127.0.0.1, so the bypass is allowed, no NAT is involved in either direction, and the
+  # address on the command line is the loopback one a developer would use anyway.
+  docker run --rm --network "container:wt-interop-$peer" "$client_image" \
+    --connect "127.0.0.1:$port" --trust local-development --exchange stream --timeout-ms "$timeout_ms" || true
+  echo "-- $peer said:"
+  docker logs "wt-interop-$peer" 2>&1 | tail -6
+  docker rm -f "wt-interop-$peer" >/dev/null 2>&1 || true
+done
+
+echo "container interop: done (the client tool's own output above is the result)"
