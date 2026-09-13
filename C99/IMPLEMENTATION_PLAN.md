@@ -1423,6 +1423,20 @@ Five tests, and the first version of one of them was wrong in a way worth record
 client may receive MAX_PUSH_ID. The rule is the opposite, and the check that failed was the test's, not the
 code's -- which is the useful direction for that mistake to point.
 
+**Seventh part done: HTTP/3's message header rules.** `include/webtransport/http3/headers.h` validates a
+decoded field section as a request or a response. QPACK's job ends at the fields; what makes them an HTTP/3
+request is section 4.1 to 4.4's rules, and they are all about ORDER and TYPE rather than content: a
+pseudo-header after a regular field, a pseudo-header twice, a pseudo-header the message type does not define,
+a request without :method/:scheme/:path, CONNECT without :authority, an uppercase name, a connection-specific
+field, or `te` with anything but `trailers` are each H3_MESSAGE_ERROR. The validator therefore consumes one
+field at a time and has a `finish` for what the section did NOT carry, because an absent pseudo-header cannot
+be noticed until the last field has gone by.
+
+The check worth its own test is CONNECT: it is the one method whose required set changes shape, and a
+validator that enforced :scheme and :path unconditionally would reject every extended CONNECT -- which is
+exactly the request a WebTransport session begins with (draft-ietf-webtrans-http3 section 3.1). That
+connection is why this part is HTTP/3's side of the line rather than QPACK's.
+
 Enforce request/control stream constraints.
 - Reject duplicate SETTINGS and malformed stream ordering.
 

@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 56 unit test files and 78,763 checks, run by `ctest` and again under
+- 57 unit test files and 78,815 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -467,6 +467,11 @@ What is here:
   unacknowledged section might reference -- `wt_qpack_encoder_state_evictable_below` is the SMALLEST required
   insert count among them, and a section that references nothing holds nothing back. Section
   acknowledgements, stream cancellations and the decoder's insert count increments are what move it.
+- **HTTP/3 message header rules** (Phase 5, seventh part): `http3/headers.h` validates a decoded field section
+  as a request or a response -- pseudo-headers first and at most once, only the ones the message type defines,
+  :method/:scheme/:path required except for CONNECT (which requires :authority), lowercase names, the
+  connection-specific fields forbidden and `te` only for `trailers`. Every breach is H3_MESSAGE_ERROR, and the
+  validator consumes fields one at a time because the rules are about ORDER.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
