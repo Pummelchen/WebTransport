@@ -13,6 +13,7 @@
 #include "webtransport/http3/settings.h"
 #include "webtransport/quic/packet.h"
 #include "webtransport/quic/transport_parameters.h"
+#include "webtransport/runtime/server_retry.h"
 #include "webtransport/runtime/session.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
@@ -596,6 +597,23 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   size_t client_destination_id_length = 0U;
   const uint8_t *client_source_id = NULL;
   size_t client_source_id_length = 0U;
+  /* How much of the first Initial the peek actually read, which is what the Retry module may look at: the buffer
+   * is larger than the header, and handing it a length it does not have would be reading a datagram that is not
+   * there. */
+  size_t initial_available = 0U;
+  /* The connection ID this server uses, and the two identities a Retry adds: the ID the Retry chose (which
+   * becomes this server's own) and the original destination connection ID the token carried back. The buffers are
+   * here rather than inside the retry block because the values outlive it, and they are copies rather than views
+   * because the Retry object holds the ID it drew. */
+  const uint8_t *local_connection_id = k_connection_id;
+  size_t local_connection_id_length = sizeof(k_connection_id);
+  uint8_t original_destination_buffer[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  const uint8_t *original_destination_id = NULL;
+  size_t original_destination_id_length = 0U;
+  uint8_t retry_source_buffer[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  const uint8_t *retry_source_id = NULL;
+  size_t retry_source_id_length = 0U;
+  int retried = 0;
   loop_t loop;
   uint8_t parameters[256];
   uint64_t parameters_len;
@@ -673,6 +691,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
           client_destination_id_length = destination_length;
           client_source_id = source;
           client_source_id_length = source_length;
+          initial_available = available;
           arrived = 1;
           break;
         }
@@ -685,15 +704,99 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     }
   }
 
-  parameters_len = build_parameters(parameters, sizeof(parameters), 1, k_connection_id,
-                                   sizeof(k_connection_id), client_destination_id,
-                                   client_destination_id_length, 0, NULL, 0U);
+  /* WT-168: validate the client's address with a Retry before this server has done any work for it. What follows
+   * is one round trip and NOTHING kept about the client: the token carries what the connection will need, and the
+   * Source Connection ID the Retry chose is the ID every later packet is addressed to (RFC 9000 section 17.2.5),
+   * so it is the ID this connection is configured with -- one value in four places, which is why it is copied into
+   * a local buffer rather than referred to through the Retry object. */
+  if (config->retry != 0) {
+    uint8_t retry_datagram[WT_RUNTIME_SERVER_RETRY_MAX];
+    wt_runtime_server_retry_t retry;
+    size_t retry_length = 0U;
+    size_t issued_length = 0U;
+    const uint8_t *issued;
+    int sent = 0;
+    unsigned waited;
+
+    if (wt_runtime_server_retry_arm(&retry, sizeof(k_connection_id), 10000000U) != WT_OK) {
+      wt_udp_close(&loop.socket);
+      return WT_ERR_UNSUPPORTED;
+    }
+    if (wt_runtime_server_retry_build(&retry, initial_header, initial_available, &loop.peer, loop.now,
+                                      retry_datagram, sizeof(retry_datagram), &retry_length,
+                                      &sent) != WT_OK ||
+        sent == 0) {
+      /* `sent == 0` means the first datagram was not an Initial without a token, which cannot be true here: the
+       * peek above only accepted one that named both connection IDs. Reporting a state error rather than
+       * pretending to retry is the honest answer for a listener that somehow got here. */
+      wt_udp_close(&loop.socket);
+      return WT_ERR_STATE;
+    }
+    if (wt_udp_send(&loop.socket, &loop.peer, retry_datagram, retry_length) != WT_OK) {
+      wt_udp_close(&loop.socket);
+      return WT_ERR_IO;
+    }
+    issued = wt_runtime_server_retry_source_id(&retry, &issued_length);
+    if (issued == NULL || issued_length > sizeof(retry_source_buffer)) {
+      wt_udp_close(&loop.socket);
+      return WT_ERR_STATE;
+    }
+    memcpy(retry_source_buffer, issued, issued_length);
+    retry_source_id = retry_source_buffer;
+    retry_source_id_length = issued_length;
+    local_connection_id = retry_source_buffer;
+    local_connection_id_length = issued_length;
+    retried = 1;
+
+    /* And the client's second Initial, which carries the token and is addressed to the Retry's Source Connection
+     * ID. The buffer is large enough for a whole header INCLUDING the token, which is the one thing the first
+     * peek's 64 bytes could not have held. */
+    sent = 0;
+    for (waited = 0U; waited < (unsigned)WT_LOOP_PEEK_ROUNDS_FOR(config->timeout_ms); waited++) {
+      static uint8_t answered[512];
+      size_t datagram_length = 0U;
+      size_t available = 0U;
+      wt_udp_address_t candidate;
+      if (wt_udp_peek(&loop.socket, answered, sizeof(answered), &datagram_length, &available, &candidate) ==
+          WT_OK) {
+        int accepted = 0;
+        (void)candidate;
+        if (wt_runtime_server_retry_accept(&retry, answered, available, &loop.peer, loop.now,
+                                           original_destination_buffer, sizeof(original_destination_buffer),
+                                           &original_destination_id_length, &accepted) == WT_OK &&
+            accepted != 0) {
+          original_destination_id = original_destination_buffer;
+          sent = 1;
+          /* The answering Initial is LEFT IN THE QUEUE: the connection is armed next and must read it as its first
+           * packet, which is why this loop peeks rather than receives. */
+          break;
+        }
+        /* A peek does not consume, and the Initial the listener peeked BEFORE the Retry -- and any retransmission
+         * of it -- is still in the queue: without this the loop reads the same stale datagram until it times out,
+         * which is exactly what the first version of this flow did while the client's answer waited behind it. */
+        (void)wt_udp_receive(&loop.socket, answered, sizeof(answered), &datagram_length, &candidate);
+      }
+      (void)wt_udp_wait(&loop.socket, WT_LOOP_WAIT_MICROS * 10U);
+    }
+    if (sent == 0) {
+      /* No answer to the Retry: the client had its chance and the address stays unvalidated. Silence is the
+       * right answer for a listener that will not spend state on an address nobody has proved. */
+      wt_udp_close(&loop.socket);
+      return WT_ERR_TIMEOUT;
+    }
+  }
+
+  parameters_len = build_parameters(parameters, sizeof(parameters), 1, local_connection_id,
+                                   local_connection_id_length,
+                                   retried != 0 ? original_destination_id : client_destination_id,
+                                   retried != 0 ? original_destination_id_length : client_destination_id_length,
+                                   retried, retry_source_id, retry_source_id_length);
   if (parameters_len == 0U) {
     wt_udp_close(&loop.socket);
     return WT_ERR_LIMIT;
   }
 
-  connection_config(&connection, WT_QUIC_ROLE_SERVER, k_connection_id, sizeof(k_connection_id));
+  connection_config(&connection, WT_QUIC_ROLE_SERVER, local_connection_id, local_connection_id_length);
   /* Its own Source Connection ID is the one it chose; the client's is the one it answers. */
   connection.peer_connection_id = client_source_id;
   connection.peer_connection_id_length = client_source_id_length;
@@ -706,12 +809,20 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   tls.transport_parameters_len = (size_t)parameters_len;
 
   {
-    /* The Initial secret is derived from the Destination Connection ID of the client's FIRST Initial (RFC 9001
-     * section 5.2), which is the one the peek above read -- not this server's own ID, which is what it was. */
-    wt_status_t status = wt_runtime_session_start_server(&loop.session, &loop.socket, &loop.peer,
-                                                         client_destination_id,
-                                                         client_destination_id_length,
-                                                         &connection, &tls, loop.now);
+    /* The Initial secret is derived from the Destination Connection ID of the client's LAST Initial (RFC 9001
+     * section 5.2), which is the one the peek above read -- not this server's own ID, which is what it was. A
+     * server that retried has TWO IDs in play and starts through the form that takes both, because the one the
+     * client's FIRST Initial carried is what the transport parameters must name (WT-168). */
+    wt_status_t status =
+        retried != 0
+            ? wt_runtime_session_start_server_retried(&loop.session, &loop.socket, &loop.peer,
+                                                      local_connection_id, local_connection_id_length,
+                                                      original_destination_id,
+                                                      original_destination_id_length, &connection, &tls,
+                                                      loop.now)
+            : wt_runtime_session_start_server(&loop.session, &loop.socket, &loop.peer,
+                                              client_destination_id, client_destination_id_length,
+                                              &connection, &tls, loop.now);
     wt_udp_address_t bound;
     if (status != WT_OK) {
       wt_udp_close(&loop.socket);

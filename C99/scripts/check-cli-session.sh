@@ -17,6 +17,10 @@ port="${3:-45417}"
 mode="${4:-stream}"
 host="${5:-127.0.0.1}"
 conformance="${6:-}"
+# A seventh argument makes the SERVER validate the client's address with a Retry before serving it (WT-168): the
+# client tool has to answer the Retry and adopt the connection ID it named, which is a code path no other case
+# here reaches.
+retry="${7:-}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -29,7 +33,7 @@ if [ "${host#\[}" != "$host" ] && [ -n "$conformance" ]; then
   fi
 fi
 
-"$server" --listen "$host:$port" --message pong --exchange "$mode" --timeout-ms 10000 --json \
+"$server" --listen "$host:$port" --message pong --exchange "$mode" --timeout-ms 10000 --json ${retry:+--retry} \
   >"$work/server.json" 2>&1 &
 server_pid=$!
 
@@ -86,4 +90,11 @@ grep -q '"closeKind":0,"closeSentErrorCode":0,"closeSentFrameType":0,"closeCause
   || fail "the client claims a close it did not send"
 grep -q '"closeKind":0,"closeSentErrorCode":0,"closeSentFrameType":0,"closeCause":"ok","closeSent":false' "$work/server.json" \
   || fail "the server claims a close it did not send"
-echo "cli session ($mode): client and server exchanged a WebTransport session over $host:$port"
+if [ -n "$retry" ]; then
+  # The server's report says the flag was in force, and the client's says the session completed anyway: a Retry
+  # that the client ignored would leave no session at all, which the assertions above already refuse.
+  grep -q '"retry":true' "$work/server.json" || fail "the server did not report the Retry policy"
+  echo "cli session ($mode): the client's address was validated with a Retry before the session over $host:$port"
+else
+  echo "cli session ($mode): client and server exchanged a WebTransport session over $host:$port"
+fi

@@ -106,6 +106,8 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
       options->json = 1;
     } else if (is_flag(argument, "--settings-validation")) {
       options->settings_validation = 1;
+    } else if (is_flag(argument, "--retry")) {
+      options->retry = 1;
     } else if (is_flag(argument, "--transport") || is_flag(argument, "--trust") ||
                is_flag(argument, "--origin") || is_flag(argument, "--protocol") ||
                is_flag(argument, "--exchange") || is_flag(argument, "--message") ||
@@ -198,6 +200,13 @@ wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **o
     if (out_error != NULL) *out_error = "a zero timeout would wait forever";
     return WT_ERR_INVALID_ARGUMENT;
   }
+  /* A Retry is something a SERVER does to a client. A client that asked for one would be asking to be
+   * validated, which is not a thing it can request: refusing it here is cheaper than a session that ignores the
+   * flag, and a flag that is silently ignored is a report nobody can trust. */
+  if (options->retry != 0 && options->mode != WT_CLI_MODE_LISTEN) {
+    if (out_error != NULL) *out_error = "--retry is a listener's option: it validates a client's address";
+    return WT_ERR_INVALID_ARGUMENT;
+  }
   /* The development bypass is tied to a loopback name in the API as well, but a tool that
    * accepts it for any address would be offering something the library will refuse later;
    * saying so here is the cheap place to say it. */
@@ -239,8 +248,9 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
   } else {
     fprintf(stream, "\"%s\"", options->protocol);
   }
-  fprintf(stream, ",\"settingsValidation\":%s,\"exchange\":\"%s\",\"timeoutMs\":%llu",
+  fprintf(stream, ",\"settingsValidation\":%s%s,\"exchange\":\"%s\",\"timeoutMs\":%llu",
           options->settings_validation != 0 ? "true" : "false",
+          options->retry != 0 ? ",\"retry\":true" : "",
           wt_cli_exchange_name(options->exchange), (unsigned long long)options->timeout_ms);
   fprintf(stream, ",\"scenario\":%s,\"json\":%s}\n", options->scenario_all != 0 ? "\"all\"" : "null",
           options->json != 0 ? "true" : "false");

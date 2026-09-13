@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 81 test programs and 82,122 checks, run by `ctest` and again under
+- 82 test programs and 82,167 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -601,7 +601,21 @@ What is here:
   an ACK is replaced rather than repeated, a CONNECTION_CLOSE is section 10's business, a DATAGRAM is never
   retransmitted at all (RFC 9221 section 5.2), a PATH_RESPONSE is sent once while a PATH_CHALLENGE must carry
   a fresh payload, and CRYPTO and STREAM bytes are answered by the layers that own them.
-- **Retry tokens** (WT-168, and the server-side Retry is still open): RFC 9000 section 8.1.2 lets a server answer
+- **A server can send a Retry, and serve the client that answers it** (WT-168): RFC 9000 section 8.1.2 lets a
+  server answer a client's first Initial with a Retry, which proves the client's address before the server has
+  spent any state on it -- the only defence section 21.3 accepts, and the reason quiche's server retries.
+  `runtime/server_retry.h` is the flow: `build` reads a peeked Initial and writes the Retry (a token from
+  `quic/retry_token.h`, a fresh Source Connection ID, and an integrity tag over the ORIGINAL destination
+  connection ID, so only a server that saw the first Initial could have written it), and `accept` checks the
+  token a client echoes against the address the packet actually came from, handing back the original destination
+  connection ID the token carried. Between the two calls the server keeps NOTHING about the client, which is what
+  makes it address validation rather than a state allocation. Two rules make it more than plumbing:
+  `wt_runtime_session_start_server_retried` separates the two connection IDs a retried server has (the Initial
+  keys come from the Retry's Source Connection ID, while the parameters must name the ID the client chose FIRST),
+  and the answering Initial is left IN the socket queue for the connection to read -- so the wait loop peeks,
+  checks, and CONSUMES only the datagrams that are not the answer. `wt-server-c99 --retry` turns it on, CTest's
+  `wt_cli_session_retry` runs a whole session through it, and `pywebtransport`'s client completes one too.
+- **Retry tokens** (WT-168): RFC 9000 section 8.1.2 lets a server answer
   a client's first Initial with a Retry, which proves the client's address before the server has spent any state
   on it -- the only defence section 21.3 accepts. Statelessness makes the token's integrity the server's own
   business, and section 8.1.4 names the construction this implements: a format byte, the server's timestamp, the
@@ -614,7 +628,7 @@ What is here:
   mistakes are `WT_ERR_INVALID_ARGUMENT`. `wt_quic_transport_parameters_build` now also takes the
   `retry_source_connection_id` a server sends only when it retried, refusing BOTH mistakes -- a Retry the
   parameters do not name, and a name for a Retry that was never sent (section 7.3 makes each a close on the
-  peer's side). What is not built yet is the server flow that sends the Retry and validates the echo.
+  peer's side).
 - **Congestion control** (Phase 4, third part): `quic/congestion.h` is RFC 9002 section 7's NewReno
   -- the initial window with its 14720-byte bound, slow start, congestion avoidance's fractional
   increment, the recovery epoch that makes a burst of losses cost one halving, the two-datagram

@@ -123,6 +123,7 @@ list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 # ships.
 set(WT_RUNTIME_SOURCES
   src/runtime/session.c
+  src/runtime/server_retry.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 

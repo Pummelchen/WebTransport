@@ -127,6 +127,9 @@ int main(int argc, char **argv) {
     loop.path = "/";
     loop.timeout_ms = options.timeout_ms;
     loop.datagram = options.exchange == WT_CLI_EXCHANGE_DATAGRAM;
+    /* WT-168: validate this client's address before serving it. Opt-in, because it costs the client a round trip
+     * and is a statement about how exposed a listener is rather than something the protocol requires. */
+    loop.retry = options.retry;
     loop.message = options.message;
     /* An identity generated in memory for a local session: the client reaches it by pinning its fingerprint,
      * which this prints so the other side can be told what to expect. */

@@ -65,6 +65,7 @@ set(WT_UNIT_TESTS
   test_runtime_session
   test_tls_self_signed
   test_runtime_session_pair
+  test_runtime_server_retry
   test_cli_options
   test_cli_report
   test_http3_driver

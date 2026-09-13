@@ -73,11 +73,17 @@ for peer in $peers; do
   # the server gone. The listener's own peek loop is the wait, so the server gets a longer window and the peer
   # starts after a short pause that only has to cover `docker run`.
   server_timeout_ms=$((timeout_ms * 4))
+  # WT_SERVER_RETRY makes the server validate the peer's address with a Retry before serving it (WT-168). The
+  # peers here answer a Retry only if they implement RFC 9000 section 8.1.2, which is exactly what this proves.
+  retry_flag=""
+  if [ -n "${WT_SERVER_RETRY:-}" ]; then
+    retry_flag="--retry"
+  fi
   docker run -d --name wt-server-under-test --network "$network" \
     -e "WT_HTTP3_SECTION_LOG=${WT_SERVER_SECTION_LOG:-/dev/null}" \
     --entrypoint /build/apps/wt-server-c99 "$server_image" \
     --listen "0.0.0.0:$port" --origin localhost --message "$message" --exchange stream \
-    --timeout-ms "$server_timeout_ms" --json >/dev/null
+    --timeout-ms "$server_timeout_ms" --json $retry_flag >/dev/null
   sleep 2
   # The peer joins the SERVER's namespace: the server is then 127.0.0.1 for the client, which is what the
   # self-signed identity and the development trust path expect, and no NAT is involved in either direction.

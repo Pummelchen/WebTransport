@@ -59,6 +59,9 @@ typedef struct wt_cli_options {
   const char *origin;
   const char *protocol;
   int settings_validation;
+  /* SERVER only: answer a client's first Initial with a Retry before serving it (WT-168). A client asking for it
+   * is refused by `wt_cli_options_check`, because a client cannot make its server validate it. */
+  int retry;
   wt_cli_exchange_t exchange;
   const char *message;
   uint64_t timeout_ms;

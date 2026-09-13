@@ -167,6 +167,18 @@ wt_status_t wt_quic_long_header_connection_ids(const uint8_t *data, size_t lengt
                                                const uint8_t **out_source,
                                                size_t *out_source_length);
 
+/* Read an Initial packet's address validation token WITHOUT decoding the packet, from a datagram that may be
+ * TRUNCATED after the header.
+ *
+ * A listener that peeked only the front of a 1200-byte Initial needs exactly this: whether the client is already
+ * answering a Retry is the Token Length field and the token, and the full decoder cannot answer it because it
+ * wants the payload and the Length field that covers it. `out_token` is NULL and the length zero when the token
+ * field is empty, which is the case a server answers with a Retry (WT-168). WT_ERR_TRUNCATED when the buffer ends
+ * before the token does, so a caller can never mistake a partial read for an absent token -- the two mean opposite
+ * things here. */
+wt_status_t wt_quic_initial_token(const uint8_t *data, size_t length, const uint8_t **out_token,
+                                  size_t *out_token_length);
+
 /* Parse a long header. `c` is left past the whole packet, so a caller that wants
  * to walk a coalesced datagram can call this repeatedly.
  *

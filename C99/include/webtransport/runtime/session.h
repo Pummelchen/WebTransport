@@ -132,6 +132,22 @@ wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
                                             const wt_quic_connection_config_t *connection_config,
                                             const wt_tls_server_config_t *tls_config, uint64_t now);
 
+/* Start a server that RETRIED this client (WT-168), where the two connection IDs a server answers to are no
+ * longer the same one.
+ *
+ * `initial_connection_id` is the Destination Connection ID of the Initial being answered -- the Retry's Source
+ * Connection ID, which is what the client addresses and what the Initial keys derive from (RFC 9001 section 5.2).
+ * `original_destination_connection_id` is the connection ID the client's FIRST Initial carried, which the token
+ * brought back and which this server must name in its `original_destination_connection_id` transport parameter
+ * (RFC 9000 section 7.3) for the client to accept it. `wt_runtime_session_start_server` is the one-ID form, for a
+ * server that answered the first Initial directly. */
+wt_status_t wt_runtime_session_start_server_retried(
+    wt_runtime_session_t *session, const wt_udp_socket_t *socket, const wt_udp_address_t *peer,
+    const uint8_t *initial_connection_id, size_t initial_connection_id_length,
+    const uint8_t *original_destination_connection_id, size_t original_destination_connection_id_length,
+    const wt_quic_connection_config_t *connection_config, const wt_tls_server_config_t *tls_config,
+    uint64_t now);
+
 /* A LOST frame, reported to the layer that sent it.
  *
  * `wt_quic_connection_set_handlers` takes a received-frame handler AND a lost-frame one; the runtime installs

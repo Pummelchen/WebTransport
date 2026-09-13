@@ -75,6 +75,12 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   add_test(NAME wt_cli_session_datagram
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45419 datagram)
+  # The same exchange with the SERVER validating the client's address first (WT-168): the client has to accept the
+  # Retry, adopt the connection ID it named, echo the token, and start a session on it. Every one of those is a
+  # step the no-Retry path does not take, so this is the case that keeps the flow working.
+  add_test(NAME wt_cli_session_retry
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
+            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45423 stream "127.0.0.1" "" retry)
   # The process CONTRACT: exit statuses, refused command lines and the JSON report, checked without a peer.
   # And the same session over IPv6, where the machine has it: 77 is CTest's SKIP_RETURN_CODE, which the script
   # returns when the conformance tool reports that this machine has no IPv6 loopback -- a fact about the machine

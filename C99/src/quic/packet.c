@@ -94,6 +94,47 @@ static wt_status_t wt_quic_read_connection_id(
  * for this. It is deliberately strict about what it has READ and uninterested in everything it has not: the
  * Length field, the token and the payload are the receive path's business, and requiring them here is what made
  * a 1200-byte Initial undecodable from a 64-byte peek. */
+wt_status_t wt_quic_initial_token(const uint8_t *data, size_t length, const uint8_t **out_token,
+                                  size_t *out_token_length) {
+  wt_cursor_t c;
+  uint8_t first;
+  uint64_t token_length = 0U;
+  const uint8_t *token = NULL;
+
+  if (data == NULL || out_token == NULL || out_token_length == NULL) return WT_ERR_INVALID_ARGUMENT;
+  *out_token = NULL;
+  *out_token_length = 0U;
+  if (length == 0U) return WT_ERR_TRUNCATED;
+  first = data[0];
+  if ((first & WT_QUIC_LONG_HEADER_BIT) == 0U || (first & WT_QUIC_FIXED_BIT) == 0U) {
+    return WT_ERR_PROTOCOL;
+  }
+  if ((wt_quic_packet_type_t)((first & 0x30U) >> 4) != WT_QUIC_PACKET_INITIAL) return WT_ERR_PROTOCOL;
+
+  c = wt_cursor_init(data, length);
+  (void)wt_cursor_u8(&c);
+  if (wt_cursor_bytes(&c, WT_BE32_SIZE) == NULL) return WT_ERR_TRUNCATED;
+  /* The reader writes through both of its outputs, so it is given somewhere to write: skipping a connection ID is
+   * not what it is for, and passing NULL here would be a null dereference rather than a skip. */
+  {
+    const uint8_t *skipped = NULL;
+    size_t skipped_length = 0U;
+    if (wt_quic_read_connection_id(&c, &skipped, &skipped_length, NULL) != WT_OK) return WT_ERR_TRUNCATED;
+    if (wt_quic_read_connection_id(&c, &skipped, &skipped_length, NULL) != WT_OK) return WT_ERR_TRUNCATED;
+  }
+  /* The Token Length field and the token itself: a caller that peeked only the front of a 1200-byte Initial gets
+   * TRUNCATED here rather than a view of bytes that are not in its buffer. The bound is the cursor's own offset,
+   * which is how far into the caller's buffer the header has been read. */
+  if (wt_quic_varint_decode(&c, &token_length) != WT_OK) return WT_ERR_TRUNCATED;
+  if (token_length == 0U) return WT_OK;
+  if (c.offset > length || token_length > (uint64_t)(length - c.offset)) return WT_ERR_TRUNCATED;
+  token = wt_cursor_bytes(&c, (size_t)token_length);
+  if (token == NULL) return WT_ERR_TRUNCATED;
+  *out_token = token;
+  *out_token_length = (size_t)token_length;
+  return WT_OK;
+}
+
 wt_status_t wt_quic_long_header_connection_ids(const uint8_t *data, size_t length,
                                                const uint8_t **out_destination,
                                                size_t *out_destination_length,

@@ -29,6 +29,10 @@ typedef struct wt_loop_config {
   const char *path;
   uint64_t timeout_ms;
   int datagram;  /* 0: a WebTransport stream carries the message; 1: a datagram */
+  /* SERVER only: validate the client's address with a Retry before starting a session on it (RFC 9000 section
+   * 8.1.2, WT-168). Off by default, because a Retry costs the client a round trip and is a policy about a
+   * listener's exposure rather than something a protocol requires. */
+  int retry;
   const char *message;
   /* The server's identity, and the pin the client checks it against. Exactly one of the two is used per side. */
   const wt_tls_self_signed_t *identity;

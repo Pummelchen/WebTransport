@@ -174,18 +174,24 @@ wt_status_t wt_runtime_session_start_client(wt_runtime_session_t *session,
   return WT_OK;
 }
 
-wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
-                                            const wt_udp_socket_t *socket,
-                                            const wt_udp_address_t *peer,
-                                            const uint8_t *initial_connection_id,
-                                            size_t initial_connection_id_length,
-                                            const wt_quic_connection_config_t *connection_config,
-                                            const wt_tls_server_config_t *tls_config, uint64_t now) {
+/* The one body both server starts share. `initial_connection_id` is the Destination Connection ID of the
+ * client's Initial that this server is answering -- which is what the Initial keys derive from (RFC 9001
+ * section 5.2) -- and `original_destination_connection_id` is the one the client's FIRST Initial carried, which
+ * is what this server has to name in its transport parameters (RFC 9000 section 7.3) and what it must answer to
+ * until the client has adopted its own Source Connection ID. A server that did not retry has one ID for both and
+ * calls `wt_runtime_session_start_server`; a server that DID retry has two, and calls
+ * `wt_runtime_session_start_server_retried` (WT-168). */
+static wt_status_t start_server_with_ids(wt_runtime_session_t *session, const wt_udp_socket_t *socket,
+                                        const wt_udp_address_t *peer, const uint8_t *initial_connection_id,
+                                        size_t initial_connection_id_length,
+                                        const uint8_t *original_destination_connection_id,
+                                        size_t original_destination_connection_id_length,
+                                        const wt_quic_connection_config_t *connection_config,
+                                        const wt_tls_server_config_t *tls_config) {
   wt_status_t status;
 
-  (void)now;
   if (session == NULL || socket == NULL || peer == NULL || initial_connection_id == NULL ||
-      connection_config == NULL || tls_config == NULL) {
+      original_destination_connection_id == NULL || connection_config == NULL || tls_config == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
   memset(session, 0, sizeof(*session));
@@ -197,12 +203,8 @@ wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
   if (status != WT_OK) return status;
   status = wt_quic_connection_attach(&session->connection, socket, peer);
   if (status != WT_OK) return status;
-  /* What the client chose as its first destination, which is what the Initial keys come from AND what this
-   * server must answer to until the client has its own Source Connection ID (RFC 9000 section 7.2). A client
-   * chooses it arbitrarily, so a server that does not accept it refuses every client that does not happen to
-   * pick the server's own ID (WT-151). */
-  status = wt_quic_connection_set_original_destination_id(&session->connection, initial_connection_id,
-                                                         initial_connection_id_length);
+  status = wt_quic_connection_set_original_destination_id(
+      &session->connection, original_destination_connection_id, original_destination_connection_id_length);
   if (status != WT_OK) return status;
   status = install_initial_keys(session, initial_connection_id, initial_connection_id_length, 1);
   if (status != WT_OK) return status;
@@ -215,6 +217,38 @@ wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
   }
   session->started = 1;
   return WT_OK;
+}
+
+wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
+                                            const wt_udp_socket_t *socket,
+                                            const wt_udp_address_t *peer,
+                                            const uint8_t *initial_connection_id,
+                                            size_t initial_connection_id_length,
+                                            const wt_quic_connection_config_t *connection_config,
+                                            const wt_tls_server_config_t *tls_config, uint64_t now) {
+  (void)now;
+  /* One ID for both rules: a server that did not retry is addressed by the ID the client chose, and the Initial
+   * keys come from that same ID. */
+  return start_server_with_ids(session, socket, peer, initial_connection_id, initial_connection_id_length,
+                              initial_connection_id, initial_connection_id_length, connection_config,
+                              tls_config);
+}
+
+wt_status_t wt_runtime_session_start_server_retried(
+    wt_runtime_session_t *session, const wt_udp_socket_t *socket, const wt_udp_address_t *peer,
+    const uint8_t *initial_connection_id, size_t initial_connection_id_length,
+    const uint8_t *original_destination_connection_id, size_t original_destination_connection_id_length,
+    const wt_quic_connection_config_t *connection_config, const wt_tls_server_config_t *tls_config,
+    uint64_t now) {
+  (void)now;
+  /* Two, because a Retry separates them: the client's answering Initial is addressed to the Retry's Source
+   * Connection ID (so that is what the Initial keys derive from), while the destination it chose BEFORE the
+   * Retry is what the transport parameters must name and what the client compares. Passing one value for both --
+   * which is what `wt_runtime_session_start_server` does -- is how a server that retried would name the wrong
+   * original destination and be refused. */
+  return start_server_with_ids(session, socket, peer, initial_connection_id, initial_connection_id_length,
+                              original_destination_connection_id, original_destination_connection_id_length,
+                              connection_config, tls_config);
 }
 
 wt_status_t wt_runtime_session_advertise(wt_runtime_session_t *session, uint64_t initial_max_data,
