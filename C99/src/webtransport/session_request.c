@@ -67,3 +67,61 @@ wt_status_t wt_webtransport_session_request_validate(
   out->path_length = message->path_length;
   return WT_OK;
 }
+
+wt_status_t wt_webtransport_session_request_negotiate(wt_webtransport_session_request_t *decision,
+                                                      const wt_webtransport_protocol_list_t *offered,
+                                                      const wt_webtransport_protocol_list_t *supported,
+                                                      int require_selection) {
+  wt_webtransport_protocol_token_t selected;
+  wt_status_t status;
+
+  if (decision == NULL || offered == NULL || supported == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* Both lists come from the wire or from a configuration, so both are validated here: a caller that decoded
+   * a field section and forgot to check it must not be able to negotiate with nonsense. */
+  status = wt_webtransport_protocol_validate(offered);
+  if (status != WT_OK) return status;
+  status = wt_webtransport_protocol_validate(supported);
+  if (status != WT_OK) return status;
+
+  /* A request this server has already refused is not negotiated with: its answer is the refusal, and changing
+   * it here would give the caller two different answers to send. */
+  if (decision->outcome != WT_WEBTRANSPORT_REQUEST_ACCEPT) return WT_OK;
+
+  if (wt_webtransport_protocol_select(offered, supported, &selected) != 0) {
+    decision->selected_protocol = selected.bytes;
+    decision->selected_protocol_length = selected.length;
+    return WT_OK;
+  }
+
+  if (require_selection) {
+    decision->outcome = WT_WEBTRANSPORT_REQUEST_REJECT;
+    decision->status = WT_WEBTRANSPORT_REJECT_PROTOCOL_REQUIRED;
+    decision->selected_protocol = NULL;
+    decision->selected_protocol_length = 0U;
+  }
+  return WT_OK;
+}
+
+wt_status_t wt_webtransport_session_response_selected_protocol(
+    const uint8_t *value, size_t length, const wt_webtransport_protocol_list_t *offered,
+    wt_webtransport_protocol_token_t *out) {
+  wt_webtransport_protocol_token_t selected;
+  size_t index;
+  wt_status_t status;
+
+  if (offered == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  status = wt_webtransport_protocol_decode_item(value, length, &selected);
+  if (status != WT_OK) return status;
+  for (index = 0U; index < offered->count; index++) {
+    if (offered->tokens[index].length == selected.length &&
+        memcmp(offered->tokens[index].bytes, selected.bytes, selected.length) == 0) {
+      *out = selected;
+      return WT_OK;
+    }
+  }
+  /* The server named a sub-protocol this client never offered. Accepting it would leave the two ends speaking
+   * different protocols, which is the failure the negotiation exists to prevent. */
+  out->bytes = NULL;
+  out->length = 0U;
+  return WT_ERR_PROTOCOL;
+}

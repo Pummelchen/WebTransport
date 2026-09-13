@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 #include "webtransport/http3/message.h"
+#include "webtransport/webtransport/protocol.h"
 #include "webtransport/status.h"
 
 #ifdef __cplusplus
@@ -50,6 +51,8 @@ extern "C" {
 #define WT_WEBTRANSPORT_REJECT_NOT_FOUND ((uint32_t)404)
 /* And when the request is WebTransport but this server did not advertise it. */
 #define WT_WEBTRANSPORT_REJECT_NOT_IMPLEMENTED ((uint32_t)501)
+/* And when a sub-protocol was REQUIRED and the two lists do not meet (section 3.2). */
+#define WT_WEBTRANSPORT_REJECT_PROTOCOL_REQUIRED ((uint32_t)400)
 
 typedef enum wt_webtransport_request_outcome {
   /* A WebTransport request this server accepts. */
@@ -80,7 +83,34 @@ typedef struct wt_webtransport_session_request {
   size_t path_length;
   /* The answer to send when the outcome is a rejection. */
   uint32_t status;
+  /* The sub-protocol selected from the request's list, as a view into the caller's bytes (section 3.2).
+   * Absent -- NULL with length zero -- when nothing was offered, nothing matched, or none was required. */
+  const uint8_t *selected_protocol;
+  size_t selected_protocol_length;
 } wt_webtransport_session_request_t;
+
+/* The sub-protocol decision, which needs the request's `wt-protocol` field and therefore a parsed list
+ * rather than the pseudo-headers `validate` sees (section 3.2).
+ *
+ * `offered` is what the request carried and `supported` is this server's configuration; both are lists of
+ * tokens, and the answer is the FIRST token offered that is supported, so a client and a server compute the
+ * same choice from the same two lists. A rejection the caller already decided is left alone: a request this
+ * server will not serve is not negotiated with.
+ *
+ * When nothing can be selected and `require_selection` is set, the decision becomes a rejection with
+ * WT_WEBTRANSPORT_REJECT_PROTOCOL_REQUIRED -- the draft's own "requirements not met" answer -- rather than a
+ * session that quietly speaks no sub-protocol while the client believes one was chosen. */
+wt_status_t wt_webtransport_session_request_negotiate(wt_webtransport_session_request_t *decision,
+                                                      const wt_webtransport_protocol_list_t *offered,
+                                                      const wt_webtransport_protocol_list_t *supported,
+                                                      int require_selection);
+
+/* The client's side of the same conversation: the response's `wt-protocol` value, which must name a token
+ * THIS CLIENT offered. A value that names anything else is WT_ERR_PROTOCOL, because accepting it would leave
+ * the two ends speaking different sub-protocols. */
+wt_status_t wt_webtransport_session_response_selected_protocol(
+    const uint8_t *value, size_t length, const wt_webtransport_protocol_list_t *offered,
+    wt_webtransport_protocol_token_t *out);
 
 /* Decide what a decoded request is. `message` must have come from
  * `wt_http3_message_decode` with WT_HTTP3_HEADER_REQUEST. */

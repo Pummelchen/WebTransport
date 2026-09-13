@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "webtransport/webtransport/protocol.h"
+#include "webtransport/webtransport/session_request.h"
 
 static wt_status_t decode_str(const char *value, wt_webtransport_protocol_token_t *out) {
   return wt_webtransport_protocol_decode_item((const uint8_t *)value, strlen(value), out);
@@ -287,6 +288,161 @@ static void test_required_selection(void) {
                 wt_webtransport_protocol_select(&requested, &supported, &selected));
 }
 
+static void test_list_from_strings(void) {
+  static const char *const configured[] = {"chat.v1", "chat.v2"};
+  static const char *const broken[] = {"chat v1"};
+  static const char *const empty[] = {""};
+  wt_webtransport_protocol_list_t list;
+
+  WT_EXPECT_OK("a configured list builds", wt_webtransport_protocol_list_from_strings(&list, configured, 2U));
+  WT_EXPECT_U64("with its count", 2U, (uint64_t)list.count);
+  WT_EXPECT_BYTES("and its first token", (const uint8_t *)"chat.v1", list.tokens[0].bytes, 7U);
+  WT_EXPECT_OK("an empty configuration builds", wt_webtransport_protocol_list_from_strings(&list, NULL, 0U));
+  WT_EXPECT_U64("as an empty list", 0U, (uint64_t)list.count);
+
+  /* A misconfigured endpoint finds out HERE rather than by sending a field its peer refuses. */
+  WT_EXPECT_STATUS("a token with a space is refused at configuration time", WT_ERR_PROTOCOL,
+                   wt_webtransport_protocol_list_from_strings(&list, broken, 1U));
+  WT_EXPECT_STATUS("an empty token is refused too", WT_ERR_PROTOCOL,
+                   wt_webtransport_protocol_list_from_strings(&list, empty, 1U));
+}
+
+static void test_field_writer(void) {
+  uint8_t section[64];
+  wt_writer_t w = wt_writer_init(section, sizeof(section));
+  wt_webtransport_protocol_token_t token;
+  wt_qpack_field_line_t line;
+  wt_cursor_t c;
+
+  token.bytes = (const uint8_t *)"chat.v2";
+  token.length = 7U;
+  WT_EXPECT_OK("the field line writes", wt_webtransport_protocol_write_field(&w, &token));
+  WT_EXPECT_STATUS("a token that could not be a token is refused",
+                   WT_ERR_PROTOCOL,
+                   (token.bytes = (const uint8_t *)"a,b",
+                    wt_webtransport_protocol_write_field(&w, &token)));
+
+  token.bytes = (const uint8_t *)"chat.v2";
+  token.length = 7U;
+  c = wt_cursor_init(section, wt_writer_offset(&w));
+  memset(&line, 0, sizeof(line));
+  WT_EXPECT_OK("and reads back as a field line", wt_qpack_field_line_decode(&c, &line));
+  {
+    const char *name = NULL;
+    size_t name_length = 0U;
+    WT_EXPECT_OK("whose name is the negotiated header",
+                 wt_qpack_field_line_static_name(&line, &name, &name_length));
+    WT_EXPECT_BYTES("which is wt-protocol", (const uint8_t *)"wt-protocol", (const uint8_t *)name, 11U);
+  }
+  /* The VALUE is the Structured Fields string, not the bare token: a peer that read the bare form would be
+   * reading a different kind of item. */
+  WT_EXPECT_BYTES("and whose value is the quoted item", (const uint8_t *)"\"chat.v2\"", line.value, 9U);
+}
+
+static void test_negotiation(void) {
+  static const char *const offered_strings[] = {"chat.v1", "chat.v2"};
+  static const char *const supported_strings[] = {"chat.v2", "chat.v1"};
+  static const char *const other_strings[] = {"chat.v9"};
+  wt_webtransport_protocol_list_t offered;
+  wt_webtransport_protocol_list_t supported;
+  wt_webtransport_protocol_list_t other;
+  wt_webtransport_session_request_t decision;
+
+  WT_EXPECT_OK("the offered list builds", wt_webtransport_protocol_list_from_strings(&offered,
+                                                                                    offered_strings, 2U));
+  WT_EXPECT_OK("and the supported one", wt_webtransport_protocol_list_from_strings(&supported,
+                                                                                  supported_strings, 2U));
+  WT_EXPECT_OK("and a disjoint one", wt_webtransport_protocol_list_from_strings(&other, other_strings, 1U));
+
+  memset(&decision, 0, sizeof(decision));
+  decision.outcome = WT_WEBTRANSPORT_REQUEST_ACCEPT;
+  WT_EXPECT_OK("an acceptable request negotiates", wt_webtransport_session_request_negotiate(&decision,
+                                                                                            &offered,
+                                                                                            &supported, 1));
+  WT_EXPECT_INT("and is still accepted", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)decision.outcome);
+  WT_EXPECT_U64("with the client's first choice selected", 7U, (uint64_t)decision.selected_protocol_length);
+  WT_EXPECT_BYTES("which is chat.v1", (const uint8_t *)"chat.v1", decision.selected_protocol, 7U);
+
+  memset(&decision, 0, sizeof(decision));
+  decision.outcome = WT_WEBTRANSPORT_REQUEST_ACCEPT;
+  WT_EXPECT_OK("a required protocol with no overlap negotiates", wt_webtransport_session_request_negotiate(
+                                                                    &decision, &offered, &other, 1));
+  WT_EXPECT_INT("into a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)decision.outcome);
+  WT_EXPECT_U64("with the draft's requirements-not-met status", 400U, (uint64_t)decision.status);
+  WT_EXPECT_TRUE("and no selected token", decision.selected_protocol == NULL);
+
+  memset(&decision, 0, sizeof(decision));
+  decision.outcome = WT_WEBTRANSPORT_REQUEST_ACCEPT;
+  WT_EXPECT_OK("an optional protocol with no overlap still negotiates",
+               wt_webtransport_session_request_negotiate(&decision, &offered, &other, 0));
+  WT_EXPECT_INT("and stays accepted", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)decision.outcome);
+  WT_EXPECT_TRUE("with nothing selected", decision.selected_protocol == NULL);
+
+  /* A refusal the caller already decided is not negotiated with: its answer is the refusal. */
+  memset(&decision, 0, sizeof(decision));
+  decision.outcome = WT_WEBTRANSPORT_REQUEST_REJECT;
+  decision.status = WT_WEBTRANSPORT_REJECT_NOT_FOUND;
+  WT_EXPECT_OK("an already-refused request is left alone",
+               wt_webtransport_session_request_negotiate(&decision, &offered, &other, 1));
+  WT_EXPECT_INT("still refused for its own reason", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)decision.outcome);
+  WT_EXPECT_U64("with its own status", 404U, (uint64_t)decision.status);
+  WT_EXPECT_TRUE("and no selected token", decision.selected_protocol == NULL);
+
+  /* A list that could not have come from a well-formed field is refused here rather than selected from. */
+  {
+    wt_webtransport_protocol_list_t repeated;
+    memset(&repeated, 0, sizeof(repeated));
+    repeated.tokens[0].bytes = (const uint8_t *)"chat.v1";
+    repeated.tokens[0].length = 7U;
+    repeated.tokens[1] = repeated.tokens[0];
+    repeated.count = 2U;
+    memset(&decision, 0, sizeof(decision));
+    decision.outcome = WT_WEBTRANSPORT_REQUEST_ACCEPT;
+    WT_EXPECT_STATUS("a repeated offer is a protocol error", WT_ERR_PROTOCOL,
+                     wt_webtransport_session_request_negotiate(&decision, &repeated, &supported, 1));
+  }
+}
+
+static void test_response_selection(void) {
+  static const char *const offered_strings[] = {"chat.v1", "chat.v2"};
+  wt_webtransport_protocol_list_t offered;
+  wt_webtransport_protocol_token_t selected;
+  uint8_t value[64];
+  wt_writer_t w = wt_writer_init(value, sizeof(value));
+  wt_webtransport_protocol_token_t token;
+
+  WT_EXPECT_OK("the offered list builds", wt_webtransport_protocol_list_from_strings(&offered,
+                                                                                    offered_strings, 2U));
+  token.bytes = (const uint8_t *)"chat.v2";
+  token.length = 7U;
+  WT_EXPECT_OK("the response writes its item", wt_webtransport_protocol_encode_item(&w, &token));
+
+  WT_EXPECT_OK("a selection the client offered is accepted",
+               wt_webtransport_session_response_selected_protocol(value, wt_writer_offset(&w), &offered,
+                                                                  &selected));
+  WT_EXPECT_BYTES("and comes back whole", (const uint8_t *)"chat.v2", selected.bytes, 7U);
+
+  /* The failure the negotiation exists to prevent: a server naming something the client never offered. */
+  {
+    uint8_t other[64];
+    wt_writer_t other_writer = wt_writer_init(other, sizeof(other));
+    wt_webtransport_protocol_token_t unoffered;
+    unoffered.bytes = (const uint8_t *)"chat.v9";
+    unoffered.length = 7U;
+    WT_EXPECT_OK("an unoffered item writes", wt_webtransport_protocol_encode_item(&other_writer, &unoffered));
+    selected.bytes = (const uint8_t *)"stale";
+    selected.length = 5U;
+    WT_EXPECT_STATUS("an unoffered selection is refused", WT_ERR_PROTOCOL,
+                     wt_webtransport_session_response_selected_protocol(other, wt_writer_offset(&other_writer),
+                                                                        &offered, &selected));
+    WT_EXPECT_TRUE("and the output is cleared", selected.bytes == NULL && selected.length == 0U);
+  }
+
+  WT_EXPECT_STATUS("a malformed value is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_session_response_selected_protocol((const uint8_t *)"chat.v2", 7U, &offered,
+                                                                      &selected));
+}
+
 int main(void) {
   test_token_rules();
   test_item_round_trip();
@@ -296,5 +452,9 @@ int main(void) {
   test_list_bounds_and_repeats();
   test_selection();
   test_required_selection();
+  test_list_from_strings();
+  test_field_writer();
+  test_negotiation();
+  test_response_selection();
   WT_TEST_MAIN_END("wt_webtransport_protocol");
 }

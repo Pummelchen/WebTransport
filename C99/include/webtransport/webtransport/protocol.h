@@ -78,6 +78,19 @@ wt_status_t wt_webtransport_protocol_encode_list(wt_writer_t *w, const wt_webtra
 wt_status_t wt_webtransport_protocol_decode_list(const uint8_t *value, size_t length,
                                                  wt_webtransport_protocol_list_t *out);
 
+/* A list built from this endpoint's own configuration, which is a list of NUL-terminated strings rather than
+ * views: this is the bridge between a server's configuration and the wire. An invalid token is
+ * WT_ERR_PROTOCOL and a count past the table is WT_ERR_LIMIT, so a misconfigured endpoint finds out here
+ * rather than by sending a field its peer refuses. */
+wt_status_t wt_webtransport_protocol_list_from_strings(wt_webtransport_protocol_list_t *out,
+                                                       const char *const *protocols, size_t count);
+
+/* The whole field LINE -- the name `wt-protocol` and the value as a Structured Fields string -- for a caller
+ * that is building a response and has to append it to a field section it already wrote. The value is the
+ * quoted form, so this is not the same call as `encode_item`. */
+wt_status_t wt_webtransport_protocol_write_field(wt_writer_t *w,
+                                                 const wt_webtransport_protocol_token_t *token);
+
 /* The token both endpoints must compute the same answer for: the first of `requested` that `supported`
  * carries. Returns 1 and writes `out` when one was selected, 0 when the two lists do not overlap -- in which
  * case `out` is cleared, so a caller cannot read a stale token as a selection. */
