@@ -1292,7 +1292,27 @@ Port Swift HTTP/3 behavior.
 
 Tasks:
 
-- Implement HTTP/3 frame codec.
+- **First part done: the HTTP/3 frame codec and the stream type prefixes.** `include/webtransport/http3/frame.h`
+is RFC 9114's frame: a varint type, a varint length and that many bytes of payload, with the registered
+types of section 11.2.1, the error codes of section 8.1, the stream types of section 6.2.1, and the
+section 7.2.8 test for the frame types HTTP/2 reserved (`0x1f * N + 0x21`).
+
+Three decisions are worth stating because later parts depend on them. First, the codec interprets nothing:
+a SETTINGS identifier, a GOAWAY identifier and a frame's right to appear on a stream are the stream layer's
+rules, and keeping them out means one place decides whether a frame is *well formed* and one place decides
+whether it is *allowed*. Second, a frame whose declared length is not in the buffer is a frame error rather
+than a request to wait, because HTTP/3 has no partial frame -- the stream layer assembles a frame's bytes
+before handing them over -- and a length that does not fit `size_t` is refused rather than narrowed. Third, a
+failed decode leaves the caller's cursor exactly where it was, so a caller can report which frame failed
+instead of only that something did. An unknown frame type decodes like any other: a codec that refused one
+would refuse whatever a later revision defines, and section 7.2.8's reserved range is exposed as a predicate
+for the layer that owns the rule.
+
+Six tests cover the registered types and an unknown one round tripping, a frame with no payload, prefix
+decoding leaving the following frame intact, the truncated cases, the encode refusals, and the stream type
+prefix including a stream whose type is not there.
+
+Implement HTTP/3 frame codec.
 - Implement SETTINGS.
 - Implement control stream lifecycle.
 - Implement request stream lifecycle.

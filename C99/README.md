@@ -9,7 +9,7 @@ scaffolding.
 ## Current Status
 
 **Phases 0 to 4 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are complete, and
-Phase 5 (HTTP/3) is next.** Phase 3 finishes the TLS 1.3 handshake end to end, and Phase 4
+Phase 5 (HTTP/3) has started: its frame codec and stream type prefixes are in.** Phase 3 finishes the TLS 1.3 handshake end to end, and Phase 4
 is the QUIC connection runtime: packet number spaces with ACK generation, loss detection
 and probe timeouts, NewReno congestion control, the stream state machines and flow
 control, QUIC DATAGRAM, the close paths, connection IDs (issued, retired and received),
@@ -18,8 +18,8 @@ a whole handshake and exchanging protected, acknowledged packets over IPv6 and I
 loopback in the tests. Phase 4's completion criteria are met: those loopback tests pass on
 macOS and Linux in CI, the loss, probe-timeout and close-path suites pass, and every suite
 runs again under AddressSanitizer and UndefinedBehaviorSanitizer.
-Phases 5 to 14 are not started: no WebTransport protocol is implemented yet, so the
-draft-16 score is 0%.
+The rest of Phase 5, and Phases 6 to 14, are not started: no WebTransport protocol is
+implemented yet, so the draft-16 score is 0%.
 
 What is here:
 
@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 76,278 checks, run by `ctest` and again under
+- 39 unit test files and 76,388 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -354,6 +354,13 @@ What is here:
   actually addressed rather than to sequence 0. A packet addressed to a retired ID is discarded, and
   `wt_quic_connection_issue_connection_id` now refuses an ID whose length is not this endpoint's own,
   because a short header carries no length and such an ID could never be received.
+- **The HTTP/3 frame codec** (Phase 5, first part): `http3/frame.h` is RFC 9114's varint type, varint
+  length and payload, with the registered frame types, the section 8.1 error codes, the stream type
+  prefixes of section 6.2.1 and the section 7.2.8 test for the frame types HTTP/2 reserved. It is a codec
+  and nothing more -- what a SETTINGS identifier or a GOAWAY identifier means belongs to the stream layer
+  -- so a length that does not fit `size_t` or does not fit the bytes present is refused as a frame error,
+  a refusal leaves the caller's cursor where it was so the caller can name the frame that failed, and an
+  unknown frame type is a frame like any other rather than an error the codec invents.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

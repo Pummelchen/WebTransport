@@ -115,6 +115,15 @@ list(APPEND WT_CORE_SOURCES ${WT_QUIC_RUNTIME_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_TLS_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 
+# The HTTP/3 core. One list with the rest rather than a separate target, for the
+# same reason the QUIC wire core is: a consumer links the library as a unit, and a
+# test must not be able to link a different build of HTTP/3 than the one that
+# ships.
+set(WT_HTTP3_SOURCES
+  src/http3/frame.c
+)
+list(APPEND WT_CORE_SOURCES ${WT_HTTP3_SOURCES})
+
 set(WT_PUBLIC_HEADERS
   include/webtransport/status.h
   include/webtransport/checked.h
@@ -144,6 +153,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/quic/connection.h
   include/webtransport/quic/crypto_stream.h
   include/webtransport/quic/handshake.h
+  include/webtransport/http3/frame.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
   include/webtransport/tls/extension.h
