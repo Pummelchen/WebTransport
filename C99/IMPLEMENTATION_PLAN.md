@@ -1071,6 +1071,18 @@ here, whose "a limit before the seed is a state error" is no longer true once th
 earlier. Both blocks now test the rule that matters (a limit may only rise) rather than the state they
 used to start in.
 
+**Twenty-seventh part done: the receive limits are raised as the data arrives.** RFC 9000 section 4.1 asks a
+receiver to extend a limit as it consumes, so that a sender is never blocked by accounting it cannot see.
+The connection now does that for both levels: when the connection's received total reaches the limit it
+granted, it sends a MAX_DATA frame for the next window and moves the limit; and when a stream's highest
+offset reaches that stream's limit, it sends MAX_STREAM_DATA for the next window. This runtime hands each
+frame's bytes to the caller's handler immediately -- it does not buffer -- so ARRIVAL IS CONSUMPTION, and
+that is why the extension follows the account rather than a separate read call.
+
+`tests/unit/test_quic_connection.c` checks it end to end: a peer sends exactly the four bytes the endpoint
+granted, the endpoint raises its own limit past four, and the PEER reads the MAX_DATA frame the connection
+sent by itself and moves what it may send to match.
+
 Implement the production network state machine.
 
 Tasks:

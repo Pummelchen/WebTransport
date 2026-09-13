@@ -1083,6 +1083,76 @@ static void test_reset_and_stop(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 section 4.1: a receiver extends its limit as the data arrives. The check is end to end --
+ * the connection's own limit rises AND the peer reads the MAX_DATA frame that tells it. */
+static void test_limit_extension(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 99000000U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x80U + i);
+  WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("client reads the server's grants too",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  /* The server must be able to SEND a grant as well as read the data that makes it necessary. */
+  WT_EXPECT_OK("server writes", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("two streams granted",
+               wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
+  WT_EXPECT_OK("and exactly four bytes of connection room",
+               wt_quic_connection_set_max_data(&pair.server, 4U));
+  WT_EXPECT_U64("which reads back", 4U, wt_quic_connection_max_data(&pair.server));
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
+  frame.as.stream.id = 0U;
+  frame.as.stream.offset = 0U;
+  frame.as.stream.data = (const uint8_t *)"\x01\x02\x03\x04";
+  frame.as.stream.length = 4U;
+  frame.as.stream.has_length = 1;
+  {
+    uint8_t payload[128];
+    uint8_t datagram[256];
+    wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+    size_t len;
+    size_t datagram_len = 0U;
+    wt_quic_packet_build_t build;
+
+    WT_EXPECT_OK("the frame encodes", wt_quic_frame_encode(&w, &frame));
+    len = wt_writer_offset(&w);
+    memset(&build, 0, sizeof(build));
+    build.short_header = 1;
+    build.version = WT_QUIC_VERSION_1;
+    build.destination_connection_id = k_dcid;
+    build.destination_connection_id_len = sizeof(k_dcid);
+    build.packet_number = 0U;
+    build.packet_number_length = 1U;
+    build.payload = payload;
+    build.payload_len = len;
+    build.keys = &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION];
+    WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+    WT_EXPECT_OK("and is sent", wt_udp_send(&pair.client_socket, &pair.server_address, datagram, datagram_len));
+  }
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("the server accepts it", 0, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_TRUE("and raises its own limit past what it had granted",
+                 wt_quic_connection_max_data(&pair.server) > 4U);
+
+  /* And the peer learns the new limit from the frame the connection sent by itself. */
+  now += 1000U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_TRUE("while the client learns the new limit",
+                 wt_quic_connection_peer_limits(&pair.client)->initial_max_data > 4U);
+
+  wt_quic_packet_keys_clear(&keys);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1100,5 +1170,6 @@ int main(void) {
   test_open_stream();
   test_peer_opens_stream();
   test_reset_and_stop();
+  test_limit_extension();
   WT_TEST_MAIN_END("wt_quic_connection");
 }

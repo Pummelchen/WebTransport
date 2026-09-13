@@ -813,6 +813,33 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
           }
           return close_with(connection, code, wire_type_of(frame->kind), visit->now);
         }
+        /* RFC 9000 section 4.1: a receiver extends its limit as the data arrives, so a sender is never
+         * blocked by accounting it cannot see. This runtime hands each frame's bytes to the caller's
+         * handler immediately, so ARRIVAL IS CONSUMPTION and the extension follows the account. */
+        if (wt_quic_flow_should_extend(&connection->flow)) {
+          wt_quic_frame_t grant = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_DATA);
+          uint64_t next = wt_quic_flow_next_max_data(&connection->flow);
+          int granted = 0;
+          grant.as.max_data.maximum = next;
+          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U,
+                                  &granted, visit->now);
+          if (status == WT_OK && granted) {
+            wt_quic_flow_on_max_data_sent(&connection->flow, next);
+            connection->local_max_data = next;
+          }
+        }
+        if (wt_quic_stream_should_extend(stream)) {
+          wt_quic_frame_t grant = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_STREAM_DATA);
+          uint64_t next = wt_quic_stream_next_max_stream_data(stream);
+          int granted = 0;
+          grant.as.max_stream_data.id = frame->as.stream.id;
+          grant.as.max_stream_data.maximum = next;
+          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U,
+                                  &granted, visit->now);
+          if (status == WT_OK && granted) {
+            wt_quic_stream_on_max_stream_data_sent(stream, next);
+          }
+        }
       } else if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA && stream != NULL) {
         status = wt_quic_stream_on_max_stream_data(stream, frame->as.max_stream_data.maximum);
         if (status != WT_OK) {
