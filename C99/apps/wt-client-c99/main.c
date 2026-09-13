@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "webtransport/cli/endpoint.h"
 #include "webtransport/cli/options.h"
 #include "webtransport/version.h"
 
@@ -53,6 +54,26 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (options.json != 0) wt_cli_options_write_json(&options, stdout);
+
+  /* A client parses its target and does not bind: its local port is the system's business, and
+   * binding one would stop two clients on one machine from reaching one server. */
+  {
+    wt_cli_endpoint_t endpoint;
+    if (wt_cli_endpoint_open(&endpoint, options.address, 0) != WT_OK) {
+      if (options.json != 0) {
+        printf("{\"error\":\"endpoint\"}\n");
+      } else {
+        fprintf(stderr, "wt: cannot parse %s\n", options.address);
+      }
+      return 2;
+    }
+    if (options.json != 0) {
+      wt_cli_endpoint_write_json(&endpoint, options.address, stdout);
+    } else {
+      printf("target: %s %s\n", wt_cli_family_name(endpoint.address.family), options.address);
+    }
+    wt_cli_endpoint_close(&endpoint);
+  }
 
   int i;
   for (i = 1; i < argc; i++) {

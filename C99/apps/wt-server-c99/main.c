@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "webtransport/cli/endpoint.h"
 #include "webtransport/cli/options.h"
 #include "webtransport/version.h"
 
@@ -53,6 +54,30 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (options.json != 0) wt_cli_options_write_json(&options, stdout);
+
+  /* The socket half of the plan's "run local IPv4 and IPv6 packet sessions": the address decides
+   * the family, a listener binds, and the port actually bound is reported because a listener asked
+   * for port 0 has one the caller cannot know otherwise. */
+  {
+    wt_cli_endpoint_t endpoint;
+    wt_status_t opened = wt_cli_endpoint_open(&endpoint, options.address,
+                                              options.mode == WT_CLI_MODE_LISTEN ? 1 : 0);
+    if (opened != WT_OK) {
+      if (options.json != 0) {
+        printf("{\"error\":\"endpoint\"}\n");
+      } else {
+        fprintf(stderr, "wt: cannot open %s\n", options.address);
+      }
+      return 2;
+    }
+    if (options.json != 0) {
+      wt_cli_endpoint_write_json(&endpoint, options.address, stdout);
+    } else {
+      printf("endpoint: %s %s, port %u\n", wt_cli_family_name(endpoint.address.family),
+             options.address, (unsigned)endpoint.bound_port);
+    }
+    wt_cli_endpoint_close(&endpoint);
+  }
 
   int i;
   for (i = 1; i < argc; i++) {
