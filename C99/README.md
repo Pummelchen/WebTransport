@@ -242,6 +242,18 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **seventeen scenarios, all
+  passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
+  is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
+  server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
+  `H3_SETTINGS_ERROR`, a **reserved** one is the same error, a QPACK section needing a table that was
+  never advertised is refused with a code, the session keeps the **first** close's code, a drain stops
+  new streams, a capsule over the bound is excessive load, a peer stream past the bound is
+  `WT_ERR_LIMIT` with **no** error code because the bound is ours, and an empty datagram is malformed
+  rather than short), the positive edge this project earned the hard way (half a prefix decides nothing
+  until it is whole), and the two **real sessions** over IPv4 and IPv6. The reserved-SETTINGS scenario
+  is what **found** a real spec violation in this tree's own parser, and the fix is in — see
+  `IMPLEMENTATION_PLAN.md`. Registered with CTest.
 - **The conformance tool's scenarios, positive and negative** (Phase 9-10): seventeen scenarios in
   one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path is `404`
   compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a server

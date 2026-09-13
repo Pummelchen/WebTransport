@@ -16,14 +16,17 @@ int wt_http3_setting_is_reserved_http2(uint64_t identifier) {
    * They are values a peer might send from an HTTP/2 implementation, and the
    * section makes receipt of one H3_SETTINGS_ERROR rather than something to
    * ignore, precisely because ignoring them would silently change behaviour. */
+  /* (The HTTP/2 identifiers above; the RESERVED ones are `wt_http3_setting_is_exerciser` below.) */
   return identifier == (uint64_t)0x02 || identifier == (uint64_t)0x03 ||
          identifier == (uint64_t)0x04 || identifier == (uint64_t)0x05;
 }
 
 int wt_http3_setting_is_exerciser(uint64_t identifier) {
-  /* RFC 9114 section 7.2.4.1: 0x1f * N + 0x21, reserved to exercise the rule
-   * that unknown identifiers are ignored. Same arithmetic as section 7.2.8's
-   * reserved frame types; the consequence is the opposite one. */
+  /* RFC 9114 section 7.2.4.1: the identifiers 0x1f * N + 0x21 are RESERVED, and a receiver MUST treat one as a
+   * connection error of type H3_SETTINGS_ERROR. This comment used to say they were "reserved to exercise the
+   * rule that unknown identifiers are ignored", which is the opposite of the section, and nothing checked the
+   * rule until a conformance scenario asserted the code (WT-137). Same arithmetic as section 7.2.8's reserved
+   * frame types; the consequence is the opposite one. */
   if (identifier < (uint64_t)0x21) return 0;
   return ((identifier - (uint64_t)0x21) % (uint64_t)0x1f) == 0U;
 }
@@ -34,7 +37,12 @@ wt_status_t wt_http3_settings_set(wt_http3_settings_t *settings, uint64_t identi
 
   if (settings == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (identifier > WT_QUIC_VARINT_MAX || value > WT_QUIC_VARINT_MAX) return WT_ERR_INVALID_ARGUMENT;
-  if (wt_http3_setting_is_reserved_http2(identifier)) return WT_ERR_INVALID_ARGUMENT;
+  /* The same rule as the parser's: the HTTP/2 identifiers this version has no equivalent for and the RESERVED
+   * ones are values a peer must never send, so refusing them at the SETTER keeps the encoder from producing a
+   * frame the parser would refuse. */
+  if (wt_http3_setting_is_reserved_http2(identifier) || wt_http3_setting_is_exerciser(identifier)) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
   /* RFC 9220 section 3: ENABLE_CONNECT_PROTOCOL is a boolean, and any other
    * value MUST be treated as H3_SETTINGS_ERROR. Refusing it at the setter keeps
    * the encoder from producing a frame the parser would refuse. */
@@ -94,7 +102,10 @@ wt_status_t wt_http3_settings_parse(const uint8_t *payload, size_t length,
       if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
       return WT_ERR_TRUNCATED;
     }
-    if (wt_http3_setting_is_reserved_http2(identifier)) {
+    if (wt_http3_setting_is_reserved_http2(identifier) || wt_http3_setting_is_exerciser(identifier)) {
+      /* The HTTP/2 identifiers this version has no equivalent for, and the RESERVED ones: both are
+       * H3_SETTINGS_ERROR rather than something to ignore. The reserved set was missing here, and a conformance
+       * scenario is what found it (WT-137). */
       if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
       return WT_ERR_PROTOCOL;
     }

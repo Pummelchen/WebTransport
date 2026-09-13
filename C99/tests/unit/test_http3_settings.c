@@ -47,17 +47,19 @@ static void test_round_trip_is_ordered(void) {
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_QPACK_MAX_TABLE_CAPACITY, 4096U));
   WT_EXPECT_OK("connect protocol is enabled",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U));
-  WT_EXPECT_OK("and the exerciser is included",
-               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_EXERCISER, 0U));
+  /* An unknown identifier that is NOT reserved: what a future setting looks like, and what a round trip must
+   * use. The reserved one (0x21) is refused below, which is the rule this fixture used to hide. */
+  WT_EXPECT_OK("and an unknown setting is included",
+               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_UNKNOWN, 0U));
   WT_EXPECT_OK("the payload encodes",
                wt_http3_settings_encode_payload(&w, &settings));
 
-  /* The wire bytes, by hand: 0x01 then 0x06 then 0x08 then 0x21 in ascending
+  /* The wire bytes, by hand: 0x01 then 0x06 then 0x08 then 0x22 in ascending
    * identifier order, whatever order they were set in, with 4096 and 16384 in
    * the two-byte varint form. */
   {
     static const uint8_t expected[12] = {0x01U, 0x50U, 0x00U, 0x06U, 0x80U, 0x00U,
-                                         0x40U, 0x00U, 0x08U, 0x01U, 0x21U, 0x00U};
+                                         0x40U, 0x00U, 0x08U, 0x01U, 0x22U, 0x00U};
     WT_EXPECT_U64("as one pair per setting", (uint64_t)sizeof(expected),
                   (uint64_t)wt_writer_offset(&w));
     WT_EXPECT_BYTES("in ascending identifier order", expected, payload, sizeof(expected));
@@ -75,9 +77,25 @@ static void test_round_trip_is_ordered(void) {
   WT_EXPECT_U64("connect protocol enabled",
                 wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, &present),
                 1U);
-  WT_EXPECT_U64("and the exerciser stored like any other unknown setting",
-                wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_EXERCISER, &present), 0U);
+  WT_EXPECT_U64("and the unknown setting stored like any other",
+                wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_UNKNOWN, &present), 0U);
   WT_EXPECT_INT("which is present", 1, present);
+
+  /* And the RESERVED identifier is refused, at the setter and at the parser: RFC 9114 section 7.2.4.1 makes
+   * receipt of one a connection error of type H3_SETTINGS_ERROR, which is the rule a conformance scenario found
+   * missing (WT-137). */
+  {
+    static const uint8_t reserved_payload[2] = {0x21U, 0x00U};
+    wt_http3_settings_t reserved_settings;
+    wt_http3_error_t reserved_error = WT_HTTP3_NO_ERROR;
+    WT_EXPECT_STATUS("a reserved identifier is refused when set",
+                     WT_ERR_INVALID_ARGUMENT,
+                     wt_http3_settings_set(&settings, WT_HTTP3_SETTING_EXERCISER, 0U));
+    WT_EXPECT_STATUS("and refused when parsed", WT_ERR_PROTOCOL,
+                     wt_http3_settings_parse(reserved_payload, sizeof(reserved_payload), &reserved_settings,
+                                             &reserved_error));
+    WT_EXPECT_U64("with the settings error code", WT_HTTP3_SETTINGS_ERROR, (uint64_t)reserved_error);
+  }
   WT_EXPECT_U64("a setting that was never sent is absent",
                 wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_H3_DATAGRAM, &present), 0U);
   WT_EXPECT_INT("and reports itself absent", 0, present);

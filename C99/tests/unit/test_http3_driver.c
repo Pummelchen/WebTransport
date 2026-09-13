@@ -296,7 +296,9 @@ static void test_starting_our_own_streams(void) {
     wt_http3_driver_init(&other_driver, &other);
     wt_http3_settings_init(&big);
     for (i = 0U; i < 8U; i++) {
-      (void)wt_http3_settings_set(&big, 0x21U + (uint64_t)i * 0x1fU, 1U);
+      /* LEGAL unknown identifiers, NOT the reserved family (0x21 + k*0x1f): the setter refuses those now, which is
+       * the rule WT-137 restored, and a fixture that used them made this payload too small to overflow. */
+      (void)wt_http3_settings_set(&big, 0x23U + (uint64_t)i * 2U, 1U);
     }
     w = wt_writer_init(wire, sizeof(wire));
     WT_EXPECT_STATUS("a settings payload that does not fit is limited", WT_ERR_LIMIT,

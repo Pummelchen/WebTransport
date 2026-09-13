@@ -101,25 +101,9 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     wt_http3_error_t settings_error = WT_HTTP3_NO_ERROR;
     wt_status_t status = wt_http3_settings_parse(reserved, sizeof(reserved), &settings, &settings_error);
     {
-      /* The detail names what happened rather than asserting only that it did not: a scenario that says "failed"
-       * without the numbers costs the next reader the same investigation this one cost. */
-      char detail[WT_CLI_SCENARIO_DETAIL_MAX];
-      if (status == WT_ERR_PROTOCOL && settings_error == WT_HTTP3_SETTINGS_ERROR) {
-        add(report, "settings-reserved-identifier", 1,
-            "a reserved SETTINGS identifier is H3_SETTINGS_ERROR rather than something to ignore");
-      } else {
-        /* MEASURED AND NOT YET FIXED (WT-137): RFC 9114 section 7.2.4.1 makes a reserved identifier
-         * (0x1f * N + 0x21) a connection error of type H3_SETTINGS_ERROR, and this parser ACCEPTS one. The
-         * scenario reports `unsupported` with that measurement rather than `failed`, because the tool's own
-         * contract distinguishes "not attempted/not implemented" from "the code is wrong" -- and the fix is one
-         * focused pass over the parser, its fixture (which used a reserved identifier as its example of a legal
-         * unknown one) and this scenario. */
-        (void)snprintf(detail, sizeof(detail),
-                       "WT-137: a reserved identifier (0x1f*N+0x21) is accepted (status %d, code %llu) where RFC "
-                       "9114 section 7.2.4.1 requires H3_SETTINGS_ERROR",
-                       (int)status, (unsigned long long)settings_error);
-        (void)wt_cli_report_add(report, "settings-reserved-identifier", WT_CLI_RESULT_UNSUPPORTED, detail);
-      }
+      add(report, "settings-reserved-identifier",
+          status == WT_ERR_PROTOCOL && settings_error == WT_HTTP3_SETTINGS_ERROR,
+          "a reserved SETTINGS identifier (0x1f*N+0x21) is H3_SETTINGS_ERROR rather than something to ignore");
     }
   }
 

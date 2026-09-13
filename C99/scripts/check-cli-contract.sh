@@ -79,9 +79,15 @@ set -e
   || fail "the conformance tool must exit 0 or 3 (got $conformance_status)" "$work/err"
 grep -q '"summary":{"total":17' "$work/out" || fail "the conformance summary must count seventeen scenarios" "$work/out"
 grep -q '"failed":0' "$work/out" || fail "and no scenario may fail" "$work/out"
-# `unsupported` is allowed and must be REPORTED with its reason: one scenario records a measured spec gap
-# (WT-137) and IPv6 records itself where the machine has no IPv6 loopback. A run that claimed them as passes
-# would be the lie this report's design exists to prevent.
-grep -q '"result":"unsupported","detail":"' "$work/out" || fail "an unsupported scenario must carry its reason" "$work/out"
+# `unsupported` is allowed -- IPv6 reports itself where the machine has no IPv6 loopback -- and IF a scenario is
+# unsupported it must carry a NON-EMPTY reason. The check is conditional because a run with no unsupported
+# scenarios is the healthy case: an unconditional grep here failed the moment WT-137 was fixed and the last
+# unsupported entry disappeared.
+if grep -q '"unsupported":[1-9]' "$work/out"; then
+  grep -q '"result":"unsupported","detail":"' "$work/out" \
+    || fail "an unsupported scenario must carry its reason" "$work/out"
+  grep -q '"result":"unsupported","detail":""' "$work/out" \
+    && fail "and the reason must not be empty" "$work/out"
+fi
 
 echo "cli contract: exit statuses, refusals and the JSON report all hold"

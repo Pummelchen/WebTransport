@@ -2994,6 +2994,29 @@ Completion criteria:
 - Release artifacts are reproducible.
 - Public docs match actual behavior.
 
+### WT-137 fixed: the reserved settings rule, in one focused pass
+
+The bug the previous round's scenario found is fixed, in the single pass its own note prescribed, over the four
+places that had to move together:
+
+1. **the parser** (`wt_http3_settings_parse`) refuses a reserved identifier (`wt_http3_setting_is_exerciser`,
+   `0x1f * N + 0x21`) with `H3_SETTINGS_ERROR`, which is what RFC 9114 section 7.2.4.1 requires;
+2. **the setter** refuses it too (`WT_ERR_INVALID_ARGUMENT`), for the reason the HTTP/2 set is already refused
+   there: refusing at the setter keeps the encoder from producing a frame the parser would refuse;
+3. **the predicate's comment** no longer claims the opposite of the section;
+4. **the fixtures** -- and this is the part worth remembering. TWO test fixtures used a reserved identifier as
+   their example of a legal unknown setting: `test_http3_settings`'s round-trip payload and
+   `test_http3_driver`'s oversized-settings payload (which built its size from `0x21 + i * 0x1f`, the reserved
+   family itself). The header now names `WT_HTTP3_SETTING_UNKNOWN` (0x22) as "an identifier this version does not
+   know and that is NOT reserved -- the shape a future setting has", and both fixtures use it. **A fixture that
+   uses a reserved value as its example of a legal one is a bug that hides a bug**, which is why the suite failed
+   the instant the parser was corrected.
+
+The conformance report is now **17 scenarios, 0 failed, 0 unsupported**, and the CLI contract script's
+"unsupported must carry a reason" check became conditional: it failed the moment the last unsupported entry
+disappeared, which is the healthy case -- a check that assumes a known gap exists is a check that breaks when the
+gap closes.
+
 ### WT-137: a conformance scenario found a real spec violation in our own parser
 
 Four more scenarios were added -- a repeated SETTINGS identifier, a reserved one, a QPACK section that needs a
