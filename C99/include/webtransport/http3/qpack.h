@@ -353,6 +353,34 @@ wt_status_t wt_qpack_header_prefix_decode(wt_cursor_t *c, uint64_t max_entries,
                                           wt_qpack_header_prefix_t *out,
                                           wt_qpack_error_t *out_error);
 
+/* The resolved field a caller reads after decoding one line: a name and a value, as
+ * views into the tables the field section was decoded against, or into the caller's
+ * scratch buffer when an inline (possibly Huffman-coded) string had to be decoded.
+ * Nothing here is owned by this module. */
+typedef struct wt_qpack_resolved_field {
+  const uint8_t *name;
+  size_t name_length;
+  const uint8_t *value;
+  size_t value_length;
+} wt_qpack_resolved_field_t;
+
+/* Decode the next field line of a field section and resolve it against the static
+ * table, the dynamic table and the section's prefix.
+ *
+ * The index arithmetic is where QPACK's dynamic references live: a dynamic index is
+ * relative to the Base, so an absolute index is `base - index - 1`, and a post-base
+ * index counts UP from the Base (`base + index`). A reference to an entry the table
+ * has evicted, or one past the end of what exists, is QPACK_DECOMPRESSION_FAILED --
+ * the code section 4.5.1 gives a decoder that cannot resolve the section it was
+ * sent. `scratch` holds the decoded inline strings; WT_ERR_LIMIT means it was too
+ * small, which is the caller's bound rather than the peer's error.
+ *
+ * WT_ERR_CLOSED from the cursor's end is the ordinary "the section is finished". */
+wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_prefix_t *prefix,
+                                        const wt_qpack_dynamic_table_t *table, uint8_t *scratch,
+                                        size_t scratch_capacity, wt_qpack_resolved_field_t *out,
+                                        wt_qpack_error_t *out_error);
+
 #ifdef __cplusplus
 }
 #endif

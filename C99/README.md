@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 53 unit test files and 78,616 checks, run by `ctest` and again under
+- 54 unit test files and 78,668 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -445,6 +445,12 @@ What is here:
   inside the window the decoder knows, the Base is a signed delta from it, and both of the section's error
   exits are enforced. `wt_qpack_max_entries` derives the window from the capacity, which is why the prefix
   cannot be read without knowing what this endpoint advertised.
+- **The field section decoder** (Phase 6, tenth part): `qpack_field_section.c` resolves one line at a time
+  against the static table, the dynamic table and the section's prefix -- the index arithmetic is where
+  QPACK's dynamic references live, `Base - Index - 1` for a dynamic reference and `Base + Index` for a
+  post-base one -- and decodes an inline Huffman name or value into the caller's scratch, because a resolved
+  field has to be plain bytes. A reference the table cannot resolve is QPACK_DECOMPRESSION_FAILED; a scratch
+  buffer too small is the caller's limit, not the peer's error, and the two are reported apart.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

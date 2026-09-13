@@ -1594,7 +1594,26 @@ was below its required count. The round trip would have hidden it had the flag c
 sides would have agreed on the wrong bit.
 
 Implement Base and post-Base dynamic references.
-- Enforce table capacity and malformed reference handling.
+- **Tenth part done: the field section decoder.** `src/http3/qpack_field_section.c` resolves one line at a
+time against the static table, the dynamic table and the section's prefix, which is where QPACK's pieces
+meet. The index arithmetic is the part worth testing hardest, because it is the only place the two
+directions of a relative index live -- `Base - Index - 1` for a dynamic reference and `Base + Index` for a
+post-base one -- and a sign error there resolves to a DIFFERENT but perfectly valid entry, which nothing
+later in the exchange can detect. The tests therefore assert the two directions with neighbouring indices
+(0 and 1 at the same Base) rather than a single index that would pass either way.
+
+An inline name or value may be Huffman-coded, so the resolved field is built into the caller's scratch: a
+resolved field must be plain bytes, and this is the layer that knows it. Two kinds of failure are kept
+apart deliberately -- a reference the tables cannot resolve is QPACK_DECOMPRESSION_FAILED, while a scratch
+buffer the caller did not make large enough is WT_ERR_LIMIT with no error code, because it says nothing
+about the peer.
+
+One gap is now explicit rather than implied: `wt_qpack_string_encode` writes only plain strings, so this
+build cannot yet WRITE a Huffman-coded string in a field line. The test builds that line by hand from
+section 4.5.3's figure, which is honest -- a test that used the encoder for it would be testing a line the
+encoder cannot produce -- and the encoder-side Huffman string is recorded as remaining work.
+
+Enforce table capacity and malformed reference handling.
 
 Completion criteria:
 
