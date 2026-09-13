@@ -1221,6 +1221,20 @@ from that packet's hex rather than from the sentence beside it. The test then re
 tag to equal the RFC's, the RFC's packet to verify, and a changed byte or a different original connection
 ID to be refused. `check-vectors.sh` runs the extractor's `--check` alongside the others.
 
+**Thirty-eighth part done: a frame the decoder refuses closes the connection.** WT-83 asked for the test
+the encoder cannot produce -- a NEW_CONNECTION_ID whose `retire_prior_to` is above its own sequence, which
+RFC 9000 section 19.15 makes a FRAME_ENCODING_ERROR and which this library refuses to encode -- written by
+hand into a packet. Writing it found a defect one layer up: the decoder reported the code, but the
+connection returned the error status to its caller instead of closing, so a peer that sent an undecodable
+frame was never told and the connection stayed open, with the failure visible only to whoever called
+`wt_quic_connection_receive`. Section 12.4 makes such a frame a connection error, so `process_packet` now
+closes with the code the frame's own rule named -- or FRAME_ENCODING_ERROR when the failure came back from
+the cursor helpers as a truncation, which section 12.4 defines the same way. A status raised by the frame
+visitor is left alone, because those paths have already closed the connection with the code they chose.
+
+The test asserts what the RFC requires rather than what the code did: the connection closes with
+FRAME_ENCODING_ERROR for the hand-written frame.
+
 Implement the production network state machine.
 
 Tasks:

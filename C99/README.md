@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 76,186 checks, run by `ctest` and again under
+- 38 unit test files and 76,209 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -331,6 +331,14 @@ What is here:
   was computed consistently, which a wrong constant would also satisfy. Now the RFC's own tag is the
   expectation, and the same packet with one changed byte, or with another original connection ID, is
   refused.
+- **A frame the decoder refuses closes the connection** (Phase 4, thirty-eighth part): RFC 9000 section
+  12.4 makes an undecodable frame a connection error, and the decoder reports the code -- but the error
+  was returned to the caller instead of being sent, so a peer that sent a malformed frame was never told
+  and the connection stayed open with the failure visible only to whoever called
+  `wt_quic_connection_receive`. A decode failure now closes the connection with the code the frame's own
+  rule names, or FRAME_ENCODING_ERROR for a truncated frame. Found by the test WT-83 asked for: a
+  hand-written NEW_CONNECTION_ID whose `retire_prior_to` is above its sequence, which the encoder cannot
+  produce because this library refuses to encode what it would refuse to decode.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

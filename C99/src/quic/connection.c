@@ -1032,7 +1032,26 @@ static wt_status_t process_packet(wt_quic_connection_t *connection, wt_quic_spac
   visit.saw_close = 0;
 
   status = wt_quic_frames_decode(payload, payload_length, visit_frame, &visit, &error);
-  if (status != WT_OK) return status;
+  if (status != WT_OK) {
+    /* RFC 9000 section 12.4: a frame that cannot be decoded is a connection error, and the per-frame
+     * rules name the code -- the decoder reports it in `error` where the failure is one of those, and a
+     * truncated frame (also a FRAME_ENCODING_ERROR by the same section) comes back as WT_ERR_TRUNCATED
+     * from the cursor helpers without a code. Closing here is what TELLS the peer: returning the status
+     * instead left the connection open, the peer uninformed, and the failure visible only to whoever
+     * called `wt_quic_connection_receive` (WT-83). A status from the visitor is left alone, because the
+     * paths that raise one have already closed the connection with the code they chose. */
+    if (!wt_quic_connection_is_closed(connection) &&
+        (status == WT_ERR_PROTOCOL || status == WT_ERR_TRUNCATED)) {
+      uint64_t code = error == WT_QUIC_NO_ERROR ? (uint64_t)WT_QUIC_FRAME_ENCODING_ERROR
+                                                : (uint64_t)error;
+      (void)close_with(connection, code, 0U, now);
+    }
+    if (wt_quic_connection_is_closed(connection)) {
+      if (out_ack_eliciting != NULL) *out_ack_eliciting = visit.ack_eliciting;
+      return WT_OK;
+    }
+    return status;
+  }
   if (out_ack_eliciting != NULL) *out_ack_eliciting = visit.ack_eliciting;
   return WT_OK;
 }

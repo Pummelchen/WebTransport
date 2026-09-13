@@ -917,17 +917,15 @@ static void test_open_stream(void) {
  * it, bounded by the count this endpoint granted; more than that is STREAM_LIMIT_ERROR, and a frame for
  * one of this endpoint's own numbers that was never opened is STREAM_STATE_ERROR. MAX_STREAM_DATA then
  * raises one stream's send allowance. */
-static void send_frame_to(const connection_pair_t *pair, const wt_quic_frame_t *frame,
-                          const wt_quic_packet_keys_t *keys, uint64_t packet_number, uint64_t now) {
-  uint8_t payload[128];
+/* Send a short-header application packet carrying exactly these bytes. A frame the ENCODER refuses to
+ * produce -- because it would refuse to decode it -- can only be tested this way. */
+static void send_raw_payload_to(const connection_pair_t *pair, const uint8_t *payload,
+                                size_t payload_length, const wt_quic_packet_keys_t *keys,
+                                uint64_t packet_number) {
   uint8_t datagram[256];
-  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
-  size_t len;
   size_t datagram_len = 0U;
   wt_quic_packet_build_t build;
 
-  WT_EXPECT_OK("the frame encodes", wt_quic_frame_encode(&w, frame));
-  len = wt_writer_offset(&w);
   memset(&build, 0, sizeof(build));
   build.short_header = 1;
   build.version = WT_QUIC_VERSION_1;
@@ -936,12 +934,21 @@ static void send_frame_to(const connection_pair_t *pair, const wt_quic_frame_t *
   build.packet_number = packet_number;
   build.packet_number_length = 1U;
   build.payload = payload;
-  build.payload_len = len;
+  build.payload_len = payload_length;
   build.keys = keys;
   WT_EXPECT_OK("the packet builds",
                wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
   WT_EXPECT_OK("and is sent",
                wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
+}
+
+static void send_frame_to(const connection_pair_t *pair, const wt_quic_frame_t *frame,
+                          const wt_quic_packet_keys_t *keys, uint64_t packet_number, uint64_t now) {
+  uint8_t payload[128];
+  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+
+  WT_EXPECT_OK("the frame encodes", wt_quic_frame_encode(&w, frame));
+  send_raw_payload_to(pair, payload, wt_writer_offset(&w), keys, packet_number);
   (void)now;
 }
 
@@ -1700,6 +1707,44 @@ static void test_short_initial_datagram_is_discarded(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 section 19.15: a NEW_CONNECTION_ID whose `retire_prior_to` is above its own sequence is a
+ * FRAME_ENCODING_ERROR, because it would retire the connection ID the frame itself introduces. The
+ * decoder checks it, and this is the test the frame ENCODER cannot produce: this library refuses to
+ * encode what it would refuse to decode, so the bytes are written by hand (WT-83). */
+static void test_new_connection_id_retire_prior_to_is_refused(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  uint8_t payload[32];
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 111000000U;
+  size_t len = 0U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x60U + i);
+  WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the server reads",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+
+  payload[len++] = 0x18U; /* NEW_CONNECTION_ID */
+  payload[len++] = 0x00U; /* sequence */
+  payload[len++] = 0x01U; /* retire_prior_to: above the sequence, which is the error */
+  payload[len++] = 0x04U; /* connection ID length */
+  payload[len++] = 0x01U;
+  payload[len++] = 0x02U;
+  payload[len++] = 0x03U;
+  payload[len++] = 0x04U;
+  for (i = 0U; i < 16U; i++) payload[len++] = 0xaaU; /* stateless reset token */
+
+  send_raw_payload_to(&pair, payload, len, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("the server closes the connection", 1, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a frame encoding error", (uint64_t)WT_QUIC_FRAME_ENCODING_ERROR,
+                pair.server.close.error_code);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1727,5 +1772,6 @@ int main(void) {
   test_peer_connection_ids();
   test_retire_connection_id();
   test_retire_handshake_connection_id();
+  test_new_connection_id_retire_prior_to_is_refused();
   WT_TEST_MAIN_END("wt_quic_connection");
 }
