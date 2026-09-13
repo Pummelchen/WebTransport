@@ -661,6 +661,18 @@ static void test_a_lost_packet_is_retransmitted(void) {
    * probe timeout never fired for the application space at all. Written in the direction that is true today, for
    * the same reason as the assertion below: the suite stays green, the reproduction stays in the tree, and the
    * lines flip when the loss path works (WT-135). */
+  /* THE THIRD MEASUREMENT, and it eliminates the second candidate outright: NO packet is declared lost in ANY
+   * space. So the loss is not "declared with nothing to name" -- the loss detector never runs, which leaves the
+   * timer arithmetic (or the arming of the loss module) as the thing to read next. The counters are in the
+   * connection, so this is a fact the tree keeps rather than a print in a test (WT-135). */
+  WT_EXPECT_U64("no packet is declared lost in the initial space", 0U,
+                (uint64_t)pair.client.connection.packets_declared_lost[WT_QUIC_SPACE_INITIAL]);
+  WT_EXPECT_U64("nor the handshake space", 0U,
+                (uint64_t)pair.client.connection.packets_declared_lost[WT_QUIC_SPACE_HANDSHAKE]);
+  WT_EXPECT_TRUE("nor the application space, where the dropped CONNECT is (WT-135)",
+                 pair.client.connection.packets_declared_lost[WT_QUIC_SPACE_APPLICATION] == 0U);
+  WT_EXPECT_U64("and nothing was lost with a missing descriptor", 0U,
+                (uint64_t)pair.client.connection.lost_without_descriptor);
   WT_EXPECT_TRUE("the lost stream frame is NOT reported yet: the application space never armed its probe (WT-135)",
                  lost.non_crypto == 0U);
   WT_EXPECT_TRUE("the exchange did NOT complete, because nothing resends it yet (WT-135)",

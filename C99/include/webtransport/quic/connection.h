@@ -271,6 +271,12 @@ typedef struct wt_quic_connection {
   /* Whether the handshake is confirmed, which RFC 9002 section 5.3 requires before an acknowledgement
    * delay is subtracted from a round trip sample. */
   int handshake_confirmed;
+  /* Packets DECLARED lost, by packet-number space, and how many of those could not name a retransmission
+   * descriptor. Two counters, because "the loss was never declared" and "the loss had nothing to name" are the
+   * two ways a lost frame goes unreported -- and reading the code had already failed to tell them apart (WT-135). */
+  uint64_t packets_declared_lost[WT_QUIC_SPACE_COUNT];
+  uint64_t lost_without_descriptor;
+
   /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is
    * how "do not send" and "have not sent yet" are told apart. */

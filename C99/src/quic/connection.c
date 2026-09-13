@@ -236,6 +236,13 @@ static void on_lost(void *context, const wt_quic_sent_packet_t *packet) {
   wt_quic_connection_t *connection = context;
   uint64_t tag = packet->tag;
 
+  if (packet->packet_number_space < (uint8_t)WT_QUIC_SPACE_COUNT) {
+    connection->packets_declared_lost[packet->packet_number_space]++;
+  }
+  if (tag >= (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX || !connection->frames[tag].in_use) {
+    connection->lost_without_descriptor++;
+    return;
+  }
   if (tag < (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX && connection->frames[tag].in_use) {
     const wt_quic_tx_frame_t descriptor = connection->frames[tag];
     connection->frames[tag].in_use = 0;
