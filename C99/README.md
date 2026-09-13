@@ -614,6 +614,17 @@ What is here:
   kept pumping until `--timeout-ms` after the transport was already closed, reporting `timeout` for a refusal that
   had already arrived; every wait now stops when the connection closes and names what happened
   (`protocol`, or `closed` for a peer that ended it).
+- **Static analysis, run over every source** (WT-176): the Definition of Done's "sanitizers and static checks are
+  clean" criterion was carried by warnings-as-errors, and the plan's Phase 13 asks for static analysis by name.
+  `scripts/check-static-analysis.sh` runs the **Clang Static Analyzer** (`clang --analyze`) over all **92 sources**
+  of the library and the tools, replaying each file's own command from `compile_commands.json` so the include
+  paths, defines and C standard are the ones the code is really compiled with. It is symbolic execution, not a
+  warning flag: it finds the use-after-free, the null dereference on a branch no test takes, the value read
+  uninitialised on one path. It found a **dead store in `wt_sha256_init`** (the storage view was taken, then
+  wiped by the `memset`, then taken again -- the analyzer called the first assignment what it was), and the tree
+  is clean at 92/92 after the fix. A machine without clang reports `unsupported` with its reason, like the
+  Windows checks do for a missing cross-compiler; where clang is present a finding fails the build.
+  `check-static-analysis.sh` is registered in CI beside the matrix and portability checks.
 - **Parser fuzzing, and a fuzz run that always happens** (WT-175): the plan asks for fuzzing of the QUIC varints,
   QUIC frames, transport parameters, HTTP/3 frames, QPACK, capsules and WebTransport stream prefixes, and the
   malformed-input corpora in the unit suites are what prove the cases somebody thought of. `tests/fuzz/` is the

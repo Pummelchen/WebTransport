@@ -133,13 +133,17 @@ wt_status_t wt_crypto_init(void) {
 wt_status_t wt_sha256_init(wt_sha256_ctx_t *ctx) {
   wt_openssl_sha256_ctx_t *impl;
   if (ctx == NULL) return WT_ERR_INVALID_ARGUMENT;
-  impl = (wt_openssl_sha256_ctx_t *)(void *)ctx->storage;
   /* A context that was already initialised and not finalised would leak its
    * EVP_MD_CTX: the pointer to it is in the caller's array and there is no way to
    * know whether it is still a pointer. The marker is therefore cleared first, so
    * that re-initialising a live context leaks predictably rather than freeing a
    * pointer twice, and it is set last, so that a failure below leaves the context
-   * unmistakably dead. */
+   * unmistakably dead.
+   *
+   * The view is taken AFTER the clear, which is the only place it can be taken: the
+   * memset wipes the storage the pointer points into. This was written as an
+   * assignment before the clear as well, which the Clang Static Analyzer reported as
+   * a dead store -- the value was overwritten without ever being read (WT-176). */
   memset(ctx, 0, sizeof(*ctx));
   impl = (wt_openssl_sha256_ctx_t *)(void *)ctx->storage;
   impl->ctx = EVP_MD_CTX_new();
