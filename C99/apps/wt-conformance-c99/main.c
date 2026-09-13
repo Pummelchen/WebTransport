@@ -213,6 +213,7 @@ int main(int argc, char **argv) {
     wt_scenario_goaway_close_drain_matrix(&report);
     wt_scenario_connect_matrix(&report);
     wt_scenario_malformed_flow_matrix(&report);
+    wt_scenario_flow_control_matrix(&report);
 
     /* The two session scenarios: two endpoints in ONE process over loopback, with a generated and pinned
      * identity, running the whole exchange -- handshake, CONNECT, response, a stream message and a datagram.

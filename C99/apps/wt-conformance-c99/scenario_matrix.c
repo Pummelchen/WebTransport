@@ -847,3 +847,138 @@ void wt_scenario_malformed_flow_matrix(wt_cli_report_t *report) {
 
   report_matrix(report, "interop-malformed-flow-matrix", "malformed and flow-control cases", rows, count);
 }
+
+void wt_scenario_flow_control_matrix(wt_cli_report_t *report) {
+  matrix_row_t rows[WT_MATRIX_MAX_CASES];
+  unsigned count = 0U;
+
+  /* The connection-level limits a peer grants must STRICTLY increase. The first capsule establishes the limit
+   * -- there is no default -- and a repeat is refused along with a decrease, because a repeat is what a peer
+   * sends when it is confused about what it already granted. */
+  {
+    wt_webtransport_flow_limits_t limits;
+    uint64_t error = 0U;
+    int ok;
+    wt_webtransport_flow_limits_init(&limits);
+    ok = wt_webtransport_flow_on_max_data(&limits, 100U, &error) == WT_OK && limits.max_data_set == 1 &&
+         limits.max_data == 100U;
+    rows[count].name = "the first MAX_DATA capsule establishes the limit";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_flow_limits_t limits;
+    uint64_t error = 0U;
+    int ok;
+    wt_webtransport_flow_limits_init(&limits);
+    (void)wt_webtransport_flow_on_max_data(&limits, 100U, &error);
+    error = 0U;
+    ok = wt_webtransport_flow_on_max_data(&limits, 100U, &error) != WT_OK &&
+         error == WT_WEBTRANSPORT_FLOW_CONTROL_ERROR && limits.max_data == 100U;
+    rows[count].name = "a repeated MAX_DATA is refused as WT_FLOW_CONTROL_ERROR";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_flow_limits_t limits;
+    uint64_t error = 0U;
+    int ok;
+    wt_webtransport_flow_limits_init(&limits);
+    (void)wt_webtransport_flow_on_max_data(&limits, 100U, &error);
+    error = 0U;
+    ok = wt_webtransport_flow_on_max_data(&limits, 40U, &error) != WT_OK &&
+         error == WT_WEBTRANSPORT_FLOW_CONTROL_ERROR && limits.max_data == 100U;
+    rows[count].name = "a decreased MAX_DATA is refused and does not move the limit";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_flow_limits_t limits;
+    uint64_t error = 0U;
+    int ok;
+    wt_webtransport_flow_limits_init(&limits);
+    (void)wt_webtransport_flow_on_max_data(&limits, 100U, &error);
+    error = 0U;
+    ok = wt_webtransport_flow_on_max_data(&limits, 400U, &error) == WT_OK && limits.max_data == 400U;
+    rows[count].name = "an increased MAX_DATA is accepted";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The stream-count limits follow the same rule, and the two directions are counted separately: a limit on
+   * bidirectional streams says nothing about unidirectional ones. */
+  {
+    wt_webtransport_flow_limits_t limits;
+    uint64_t error = 0U;
+    int ok;
+    wt_webtransport_flow_limits_init(&limits);
+    ok = wt_webtransport_flow_on_max_streams(&limits, 1, 2U, &error) == WT_OK &&
+         limits.max_streams_bidi == 2U && limits.max_streams_bidi_set == 1;
+    error = 0U;
+    ok = ok && wt_webtransport_flow_on_max_streams(&limits, 1, 2U, &error) != WT_OK &&
+         error == WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
+    error = 0U;
+    ok = ok && wt_webtransport_flow_on_max_streams(&limits, 1, 5U, &error) == WT_OK &&
+         wt_webtransport_flow_on_max_streams(&limits, 0, 1U, &error) == WT_OK &&
+         limits.max_streams_bidi == 5U && limits.max_streams_uni == 1U;
+    rows[count].name = "stream limits strictly increase, and each direction is its own";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* An explicit zero is a LIMIT and not an absence: a peer that grants nothing means nothing, and a session
+   * that read zero as "unlimited" would send data the peer never allowed. */
+  {
+    wt_session_config_t config = wt_session_config_default();
+    wt_session_t *session = NULL;
+    wt_session_flow_state_t state;
+    int ok;
+    config.authority = "example.com";
+    config.path = "/zero";
+    config.session_id = 12U;
+    ok = wt_session_create(&config, NULL, &session) == WT_OK && session != NULL;
+    ok = ok && wt_session_flow_configure(session, 1, 0U, 0U, 0U) == WT_OK;
+    state = wt_session_flow_snapshot(session);
+    ok = ok && state.enabled == 1 && state.max_data_state == WT_SESSION_LIMIT_ZERO &&
+         wt_session_flow_data_allowance(session) == 0U &&
+         wt_session_flow_record_data(session, 1U) != WT_OK;
+    rows[count].name = "an explicit zero limit allows nothing rather than everything";
+    rows[count].held = ok;
+    if (session != NULL) wt_session_destroy(session, NULL);
+    count++;
+  }
+
+  /* And the state is per session: one session's disabled flow control does not loosen another's limit. */
+  {
+    wt_session_config_t first_config = wt_session_config_default();
+    wt_session_config_t second_config = wt_session_config_default();
+    wt_session_t *first = NULL;
+    wt_session_t *second = NULL;
+    int ok;
+    first_config.authority = "example.com";
+    first_config.path = "/first";
+    first_config.session_id = 0U;
+    second_config.authority = "example.com";
+    second_config.path = "/second";
+    second_config.session_id = 4U;
+    ok = wt_session_create(&first_config, NULL, &first) == WT_OK && first != NULL &&
+         wt_session_create(&second_config, NULL, &second) == WT_OK && second != NULL;
+    ok = ok && wt_session_flow_configure(first, 0, 0U, 0U, 0U) == WT_OK &&
+         wt_session_flow_configure(second, 1, 2U, 0U, 0U) == WT_OK;
+    /* A refused record does not spend anything: the allowance it was measured against is still there, which
+     * is what makes the refusal a refusal rather than a partial send. */
+    ok = ok && wt_session_flow_record_data(first, 1000U) == WT_OK &&
+         wt_session_flow_record_data(second, 1000U) != WT_OK &&
+         wt_session_flow_data_allowance(first) == UINT64_MAX &&
+         wt_session_flow_data_allowance(second) == 2U &&
+         wt_session_flow_record_data(second, 2U) == WT_OK &&
+         wt_session_flow_data_allowance(second) == 0U;
+    rows[count].name = "one session's flow state does not loosen another's";
+    rows[count].held = ok;
+    if (first != NULL) wt_session_destroy(first, NULL);
+    if (second != NULL) wt_session_destroy(second, NULL);
+    count++;
+  }
+
+  report_matrix(report, "flow-control-matrix", "flow-control cases", rows, count);
+}
