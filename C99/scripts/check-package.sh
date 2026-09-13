@@ -76,4 +76,54 @@ run "building the consumer" "$log_dir/build-consumer.log" \
 run "running the consumer" "$log_dir/run-consumer.log" \
   "$consumer_dir/consumer"
 
+# The products a release artifact carries.
+#
+# The Swift conformance suite asks this question of its package manifest ("release-products": production CLI
+# products present, spikes not). The C99 mirror is the INSTALL TREE, because that is what a release artifact
+# is here: install with the tools on and assert the product list, and assert that nothing which exists to test
+# the library rather than to be run by a user came along with it.
+#
+# Tests are configured but only the tool targets are built, which is exact in both directions: the test
+# targets EXIST (so "no test binary is installed" is a statement about the install rules rather than about a
+# build that never had any), and the install step has everything it is asked to install.
+tools_build="$build_dir/tools"
+tools_prefix="$tools_build/prefix"
+run "configuring the library with the tools" "$log_dir/configure-tools.log" \
+  cmake -S "$c99_root" -B "$tools_build" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$tools_prefix" \
+    -DWEBTRANSPORT_C99_BUILD_APPS=ON \
+    -DWEBTRANSPORT_C99_BUILD_TESTS=ON
+run "building the tools" "$log_dir/build-tools.log" \
+  cmake --build "$tools_build" --target wt-client-c99 wt-server-c99 wt-conformance-c99 \
+    webtransport_static webtransport_shared
+run "installing the tools" "$log_dir/install-tools.log" \
+  cmake --install "$tools_build"
+
+missing=""
+for product in wt-client-c99 wt-server-c99 wt-conformance-c99; do
+  if [ ! -x "$tools_prefix/bin/$product" ]; then
+    missing="$missing $product"
+  fi
+done
+if [ -n "$missing" ]; then
+  echo "webtransport-c99: the install tree is missing these tools:$missing" >&2
+  find "$tools_prefix" -type f | sort >&2
+  exit 1
+fi
+
+unwanted=$(find "$tools_prefix" \( -name 'test_*' -o -name '*spike*' -o -name '*sample*' \) -print)
+if [ -n "$unwanted" ]; then
+  echo "webtransport-c99: the install tree carries something that is not a product:" >&2
+  echo "$unwanted" >&2
+  exit 1
+fi
+
+if [ ! -f "$tools_prefix/include/webtransport/webtransport.h" ]; then
+  echo "webtransport-c99: installing the tools lost the public headers" >&2
+  find "$tools_prefix" -type f | sort >&2
+  exit 1
+fi
+
 echo "webtransport-c99: the installed package builds a consumer"
+echo "webtransport-c99: the install tree carries the three tools and nothing that tests them"

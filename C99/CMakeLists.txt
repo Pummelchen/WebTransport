@@ -391,3 +391,16 @@ install(FILES
   "${CMAKE_CURRENT_BINARY_DIR}/webtransport_c99ConfigVersion.cmake"
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/webtransport_c99
 )
+
+# The three TOOLS are products: a release artifact carries programs a user runs, and until this rule existed the
+# install tree carried the libraries alone -- the tools were products of the BUILD and not of the PACKAGE, which
+# is the difference the Swift suite's `release-products` scenario asks about. Its mirror in this tree is
+# `scripts/check-package.sh`, which installs with the tools on and asserts the product list.
+#
+# What is deliberately NOT installed is the rest of the tree: `wt-api-sample` exists to keep the documented
+# public API compiling and is not a tool, and no test binary is a product at all. A package is a claim about
+# what a user may run, so the rule names the three targets rather than installing a bin/ directory wholesale.
+if(WEBTRANSPORT_C99_BUILD_APPS)
+  install(TARGETS wt-client-c99 wt-server-c99 wt-conformance-c99
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
