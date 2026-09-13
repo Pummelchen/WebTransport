@@ -97,3 +97,55 @@ wt_status_t wt_webtransport_session_write_close(wt_webtransport_session_t *sessi
   if (status != WT_OK) return status;
   return wt_webtransport_session_on_close(session, 1, error_code);
 }
+
+wt_status_t wt_webtransport_session_on_capsule_bytes(wt_webtransport_session_t *session,
+                                                     wt_cursor_t *cursor, size_t max_capsule_bytes,
+                                                     wt_webtransport_capsule_fn observe, void *context,
+                                                     wt_http3_error_t *out_error) {
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (session == NULL || cursor == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  for (;;) {
+    wt_webtransport_capsule_t capsule;
+    /* Walked in a COPY, so that a capsule which has not fully arrived leaves the caller's cursor on its first
+     * byte. The decoder consumes the header before it can know whether the value is here, so committing the
+     * cursor only on success is what makes "come back with more bytes" work. */
+    wt_cursor_t ahead = *cursor;
+    size_t remaining = wt_cursor_remaining(cursor);
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    wt_status_t status;
+
+    if (remaining == 0U) return WT_OK;
+    status = wt_webtransport_capsule_decode(&ahead, max_capsule_bytes, &capsule, &error);
+    if (status == WT_ERR_TRUNCATED) return WT_ERR_TRUNCATED;
+    if (status != WT_OK) {
+      if (out_error != NULL) *out_error = error;
+      return status;
+    }
+
+    if (capsule.type == WT_CAPSULE_DRAIN_SESSION) {
+      /* The peer is going away: no new streams, and the ones in flight may finish (section 5.2). */
+      status = wt_webtransport_session_on_drain(session, 0);
+      error = WT_HTTP3_NO_ERROR;
+    } else if (capsule.type == WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION) {
+      uint32_t code = 0U;
+      const uint8_t *reason = NULL;
+      size_t reason_length = 0U;
+
+      status = wt_webtransport_close_session_parse(&capsule, &code, &reason, &reason_length, &error);
+      if (status == WT_OK) status = wt_webtransport_session_on_close(session, 0, code);
+    } else if (observe != NULL) {
+      error = WT_HTTP3_NO_ERROR;
+      status = observe(context, &capsule, &error);
+    } else {
+      status = WT_OK;
+    }
+    if (status != WT_OK) {
+      if (out_error != NULL) *out_error = error;
+      return status;
+    }
+    /* Committed only now: every complete capsule in the buffer has been applied, and the next iteration is the
+     * one that may find a partial one. */
+    *cursor = ahead;
+  }
+}

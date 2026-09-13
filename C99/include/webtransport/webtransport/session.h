@@ -26,6 +26,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "webtransport/cursor.h"
 #include "webtransport/http3/frame.h"
 #include "webtransport/status.h"
 #include "webtransport/webtransport/capsule.h"
@@ -78,6 +79,34 @@ wt_status_t wt_webtransport_session_on_close(wt_webtransport_session_t *session,
 /* The CONNECT stream ended without a close capsule: the session is over, with no
  * application code to report (section 4.4). */
 wt_status_t wt_webtransport_session_on_stream_end(wt_webtransport_session_t *session);
+
+/* A capsule this layer does not apply, handed over so the caller can. It is called for every capsule that is not
+ * the session's own -- the flow-control grants and the blocked signals, whose meaning depends on a stream table
+ * and a flow account this lifecycle machine does not have -- and it may set `out_error` to the HTTP/3 code of its
+ * refusal, which the walker passes on. */
+typedef wt_status_t (*wt_webtransport_capsule_fn)(void *context, const wt_webtransport_capsule_t *capsule,
+                                                  wt_http3_error_t *out_error);
+
+/* Walk the capsules a peer sent on the CONNECT stream, applying the ones this layer owns.
+ *
+ * A session's control messages arrive on the CONNECT stream as capsules once that stream's one HEADERS frame has
+ * passed (draft-16 section 5), and they arrive in whatever pieces the connection delivered: the caller keeps the
+ * bytes -- a bound belongs to whoever owns the memory -- and this walks as many COMPLETE capsules as the cursor
+ * holds. The drain and close capsules are applied here, because they ARE the state machine; everything else is
+ * handed to `observe`, or dropped when it is NULL, which RFC 9297 section 2 makes legal for a capsule a receiver
+ * does not understand (a caller that keeps no flow account cannot be lied to about one).
+ *
+ * WT_ERR_TRUNCATED means the bytes left in the cursor are the start of a capsule that has not fully arrived: it is
+ * a WAIT, and the cursor has NOT moved past that capsule, so the caller appends the next delivery to the same
+ * bytes. `max_capsule_bytes` is what the CALLER will buffer for one capsule -- the bound belongs to whoever owns
+ * the memory -- so a peer's length beyond it is WT_ERR_LIMIT with H3_EXCESSIVE_LOAD rather than a wait that could
+ * never end, and a capsule that merely has not arrived is the wait it is. A capsule that is malformed is
+ * WT_ERR_PROTOCOL with `out_error` saying which rule; the decoder's own contract, passed through rather than
+ * restated. */
+wt_status_t wt_webtransport_session_on_capsule_bytes(wt_webtransport_session_t *session,
+                                                     wt_cursor_t *cursor, size_t max_capsule_bytes,
+                                                     wt_webtransport_capsule_fn observe, void *context,
+                                                     wt_http3_error_t *out_error);
 
 /* Whether a new stream may be started for this session: not while establishing, and not
  * after a drain or a close in either direction. */
