@@ -3108,6 +3108,146 @@ static void test_a_second_update_without_an_answer_is_refused(void) {
   close_pair(&pair);
 }
 
+/* RFC 9001 section 6.6's usage limits (WT-169).
+ *
+ * The limits exist so that a key is never used for more packets than the AEAD's security proof allows, and they
+ * are unreachable in a test that sends hundreds of packets: AES-GCM's confidentiality limit is 2^23 ENCRYPTIONS
+ * and its integrity limit is 2^52 INVALID packets. They are fields on the connection rather than constants --
+ * appendix B allows higher ones for endpoints that bound their packet sizes -- which is also what lets these
+ * tests drive them down far enough to see the policy, rather than trusting it by reading it.
+ */
+static void test_the_confidentiality_limit_rotates_the_keys(void) {
+  connection_pair_t pair;
+  wt_quic_frame_t ping = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+  uint64_t now = 100000000U;
+  unsigned i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  arm_application(&pair, 0xa0U);
+
+  /* The suite's own limits, before a test touches them: AES-128-GCM is 2^23 encrypted and 2^52 invalid. */
+  WT_EXPECT_U64("AES-GCM's confidentiality limit is the section's 2^23",
+                (uint64_t)UINT64_C(1) << 23,
+                wt_quic_connection_aead_confidentiality_limit(&pair.client));
+  WT_EXPECT_U64("and its integrity limit is 2^52", (uint64_t)UINT64_C(1) << 52,
+                wt_quic_connection_aead_integrity_limit(&pair.client));
+
+  /* Down to two encrypted packets, which is the smallest number that can show both the count and the rotation. */
+  pair.client.aead_confidentiality_limit = 2U;
+  WT_EXPECT_U64("nothing encrypted yet", 0U,
+                wt_quic_connection_aead_encrypted(&pair.client, WT_QUIC_SPACE_APPLICATION));
+
+  for (i = 0U; i < 2U; i++) {
+    WT_EXPECT_OK("a packet is protected",
+                 wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1,
+                                               now + i * 1000U));
+    WT_EXPECT_U64("and counted against the key", i + 1U,
+                  wt_quic_connection_aead_encrypted(&pair.client, WT_QUIC_SPACE_APPLICATION));
+    WT_EXPECT_U64("with the phase unchanged", 0U, (uint64_t)wt_quic_connection_key_phase(&pair.client));
+    WT_EXPECT_OK("and flushed", wt_quic_connection_flush(&pair.client, now + i * 1000U));
+  }
+
+  /* The third packet is where the limit bites: section 6.6 requires an update BEFORE exceeding it, so the keys
+   * rotate rather than the packet being refused. */
+  WT_EXPECT_OK("the packet at the limit is sent by ROTATING the keys",
+               wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1,
+                                             now + 3000U));
+  WT_EXPECT_U64("which the connection counts", 1U,
+                wt_quic_connection_key_updates_initiated(&pair.client));
+  WT_EXPECT_U64("with the phase bit moved", 1U, (uint64_t)wt_quic_connection_key_phase(&pair.client));
+  WT_EXPECT_U64("and the new key set's count started", 1U,
+                wt_quic_connection_aead_encrypted(&pair.client, WT_QUIC_SPACE_APPLICATION));
+  WT_EXPECT_INT("and nothing closed", 0, wt_quic_connection_is_closed(&pair.client));
+
+  close_pair(&pair);
+}
+
+/* The other half of section 6.6: "If a key update is not possible or integrity limits are reached, the endpoint
+ * MUST stop using the connection"; and it RECOMMENDS the close that this does. */
+static void test_a_limit_with_no_update_possible_closes(void) {
+  connection_pair_t pair;
+  wt_quic_frame_t ping = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+  uint64_t now = 101000000U;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  arm_application(&pair, 0xb0U);
+
+  /* An update that has been sent and not yet acknowledged is one that cannot be initiated again (section 6.1),
+   * so a connection in that state that reaches its limit has nowhere to go. */
+  WT_EXPECT_OK("one packet goes out",
+               wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1, now));
+  WT_EXPECT_OK("and is flushed", wt_quic_connection_flush(&pair.client, now));
+  WT_EXPECT_OK("the client updates", wt_quic_connection_initiate_key_update(&pair.client, now + 1000U));
+  pair.client.aead_confidentiality_limit = 0U;
+  WT_EXPECT_INT("and no FURTHER update is possible while that one is unconfirmed", 0,
+                wt_quic_connection_key_update_allowed(&pair.client));
+  WT_EXPECT_STATUS("so the next packet closes the connection instead of exceeding the limit", WT_OK,
+                   wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1,
+                                                 now + 1000U));
+  WT_EXPECT_INT("the connection is closed", 1, wt_quic_connection_is_closed(&pair.client));
+  WT_EXPECT_U64("with AEAD_LIMIT_REACHED", (uint64_t)WT_QUIC_AEAD_LIMIT_REACHED,
+                pair.client.close.error_code);
+
+  close_pair(&pair);
+}
+
+/* And the integrity limit, which counts something different: received packets that FAIL authentication, over the
+ * lifetime of the connection and across every key it has used. */
+static void test_the_integrity_limit_closes_the_connection(void) {
+  connection_pair_t pair;
+  uint8_t packet[64];
+  uint8_t saved[64];
+  size_t packet_len;
+  uint64_t now = 102000000U;
+  unsigned i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  arm_application(&pair, 0xc0U);
+  pair.server.aead_integrity_limit = 2U;
+
+  /* A well-formed packet whose tag is wrong, which is what a forgery attempt looks like to a receiver. Built
+   * once and corrupted per attempt, because the first two failures wipe it (that is the point of the wipe). */
+  packet_len = build_application_packet(&pair.server.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, 0, saved,
+                                        sizeof(saved), 4U);
+  for (i = 0U; i < 3U; i++) {
+    memcpy(packet, saved, packet_len);
+    packet[packet_len - 1U] ^= (uint8_t)(0x01U + i);
+    deliver_to_peer(&pair, 1, packet, packet_len, now + i * 1000U);
+    WT_EXPECT_U64("the forgery attempt is counted", i + 1U, wt_quic_connection_aead_failed(&pair.server));
+  }
+  WT_EXPECT_INT("and the third closes the connection", 1, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with AEAD_LIMIT_REACHED", (uint64_t)WT_QUIC_AEAD_LIMIT_REACHED,
+                pair.server.close.error_code);
+
+  close_pair(&pair);
+}
+
+/* ChaCha20-Poly1305's confidentiality limit is "greater than the number of possible packets (2^62) and so can be
+ * disregarded", while its integrity limit is 2^36 -- the two suites are not interchangeable numbers. */
+static void test_the_limits_follow_the_suite(void) {
+  wt_quic_connection_config_t config;
+  wt_quic_connection_t connection;
+  static const uint8_t k_id[4] = {1U, 2U, 3U, 4U};
+
+  memset(&config, 0, sizeof(config));
+  config.role = WT_QUIC_ROLE_CLIENT;
+  config.version = WT_QUIC_VERSION_1;
+  config.local_connection_id = k_id;
+  config.local_connection_id_length = sizeof(k_id);
+  config.peer_connection_id = k_id;
+  config.peer_connection_id_length = sizeof(k_id);
+  config.aead = WT_AEAD_CHACHA20_POLY1305;
+  config.max_ack_delay = 25000U;
+  config.local_max_ack_delay = 25000U;
+  config.idle_timeout = 30000000U;
+  config.max_datagram_size = WT_QUIC_MAX_PACKET;
+  WT_EXPECT_OK("a ChaCha20-Poly1305 connection initialises", wt_quic_connection_init(&connection, &config));
+  WT_EXPECT_U64("whose confidentiality limit is above the packet number space", UINT64_MAX,
+                wt_quic_connection_aead_confidentiality_limit(&connection));
+  WT_EXPECT_U64("and whose integrity limit is the section's 2^36", (uint64_t)UINT64_C(1) << 36,
+                wt_quic_connection_aead_integrity_limit(&connection));
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -3135,6 +3275,10 @@ int main(void) {
   test_a_reordered_packet_with_no_reference_is_read();
   test_a_reordered_packet_is_read_with_the_retained_keys();
   test_a_second_update_without_an_answer_is_refused();
+  test_the_confidentiality_limit_rotates_the_keys();
+  test_a_limit_with_no_update_possible_closes();
+  test_the_integrity_limit_closes_the_connection();
+  test_the_limits_follow_the_suite();
 
   test_open_stream();
   test_peer_opens_stream();

@@ -397,6 +397,21 @@ typedef struct wt_quic_connection {
   uint64_t key_updates_responded;
   uint64_t key_update_errors;
 
+  /* RFC 9001 section 6.6's usage limits, which are what a key update exists to stay inside. `aead_encrypted`
+   * counts the packets protected with the CURRENT key set of each space -- section 6.6: "Endpoints MUST count the
+   * number of encrypted packets for each set of keys" -- and `aead_failed` counts the received packets that
+   * failed authentication over the LIFETIME of the connection and across ALL keys, because that is the number the
+   * integrity limit bounds: an attacker's forgery attempts, not a per-key quantity.
+   *
+   * The limits are derived from the suite in `wt_quic_connection_init` (AES-GCM and ChaCha20-Poly1305 have very
+   * different ones) and are fields rather than constants so that a caller which bounds its packet sizes can use
+   * the higher limits appendix B allows -- and so that a test can drive the thresholds down far enough to reach
+   * them, which no test could do with 2^23 packets. */
+  uint64_t aead_encrypted[WT_QUIC_SPACE_COUNT];
+  uint64_t aead_failed;
+  uint64_t aead_confidentiality_limit;
+  uint64_t aead_integrity_limit;
+
   /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is
    * how "do not send" and "have not sent yet" are told apart. */
@@ -722,6 +737,19 @@ wt_status_t wt_quic_connection_initiate_key_update(wt_quic_connection_t *connect
 /* Whether an update may be initiated now, which is the two conditions above and nothing else. A caller that
  * updates on a counter asks this first. */
 int wt_quic_connection_key_update_allowed(const wt_quic_connection_t *connection);
+
+/* RFC 9001 section 6.6's counters and limits. `aead_encrypted` is per packet-number space and is reset for the
+ * Application space by a key update, because it counts packets per KEY SET; `aead_failed` is the connection's,
+ * because the integrity limit bounds forgery attempts across every key it has used.
+ *
+ * The limits come from the AEAD the connection was configured with: 2^23 encrypted packets and 2^52 invalid ones
+ * for AES-GCM, ChaCha20-Poly1305's confidentiality limit is above the packet number space itself and so is
+ * effectively unlimited while its integrity limit is 2^36 (section 6.6 and appendix B.1). A caller that bounds
+ * packet sizes may raise them, which appendix B permits; the connection enforces whatever they hold. */
+uint64_t wt_quic_connection_aead_encrypted(const wt_quic_connection_t *connection, wt_quic_space_t space);
+uint64_t wt_quic_connection_aead_failed(const wt_quic_connection_t *connection);
+uint64_t wt_quic_connection_aead_confidentiality_limit(const wt_quic_connection_t *connection);
+uint64_t wt_quic_connection_aead_integrity_limit(const wt_quic_connection_t *connection);
 
 /* The phase bit this endpoint protects its packets with: the header's Key Phase, which a peer reads to know
  * which keys to use. */

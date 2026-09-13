@@ -39,6 +39,12 @@
  * is the peer's to choose. */
 #define WT_QUIC_CONNECTION_REASON_MAX 64U
 
+/* Defined further down and used above: `close_with` by the send path's AEAD-limit refusal, and
+ * `aead_limits_for` by `wt_quic_connection_init`, which is where the suite is known. */
+static wt_status_t close_with(wt_quic_connection_t *connection, uint64_t error_code, uint64_t frame_type,
+                              uint64_t now);
+static void aead_limits_for(wt_aead_t aead, uint64_t *out_confidentiality, uint64_t *out_integrity);
+
 const char *wt_quic_space_name(wt_quic_space_t space) {
   switch (space) {
     case WT_QUIC_SPACE_INITIAL:
@@ -383,6 +389,19 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
    * more than either form needs. */
   if (payload_length > sizeof(packet) - 128U) return WT_ERR_LIMIT;
 
+  /* RFC 9001 section 6.6: an endpoint MUST initiate a key update before sending more protected packets than the
+   * confidentiality limit permits, and MUST stop using the connection when an update is not possible. The check
+   * is BEFORE the packet is protected, so the limit is never exceeded -- and for the Application space an update
+   * is attempted first, because that is what the section asks for rather than closing. */
+  if (connection->aead_encrypted[space] >= connection->aead_confidentiality_limit) {
+    if (space == WT_QUIC_SPACE_APPLICATION && wt_quic_connection_key_update_allowed(connection) != 0) {
+      wt_status_t updated_keys = wt_quic_connection_initiate_key_update(connection, now);
+      if (updated_keys != WT_OK) return updated_keys;
+    } else {
+      return close_with(connection, WT_QUIC_AEAD_LIMIT_REACHED, 0U, now);
+    }
+  }
+
   /* Room to remember the packet, because a packet that is not remembered is never retransmitted.
    * Declaring what is already lost by the time threshold is the way to make room, and if that is not
    * enough the packet is not sent: the caller tries again, and nothing has been put on the wire. */
@@ -490,6 +509,9 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
     return WT_ERR_LIMIT;
   }
 
+  /* Counted once the AEAD has been applied: the limit bounds ENCRYPTIONS with one key, which is what the retry
+   * loop above may have attempted more than once for padding (WT-169). */
+  connection->aead_encrypted[space]++;
   if (space == WT_QUIC_SPACE_APPLICATION) {
     if (connection->key_phase_first_pn_set == 0) {
       /* The FIRST packet of this phase, which is the number section 6.1's test compares an acknowledgement
@@ -1367,6 +1389,10 @@ wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
   /* Sequence 0 belongs to the connection ID the handshake used (RFC 9000 section 5.1.1), so the first ID
    * this endpoint announces to the peer is sequence 1. */
   connection->next_issued_sequence = 1U;
+  /* RFC 9001 section 6.6: the usage limits belong to the suite, and the connection is the only place that
+   * knows which one it was configured with. */
+  aead_limits_for(connection->config.aead, &connection->aead_confidentiality_limit,
+                  &connection->aead_integrity_limit);
   return WT_OK;
 }
 
@@ -2070,6 +2096,32 @@ static wt_status_t on_retry_packet(wt_quic_connection_t *connection, const uint8
  * arriving carry the SAME bit (section 6.5).
  */
 
+/* RFC 9001 section 6.6's limits for the two suites this tree has. The numbers are the section's own, not
+ * guesses: 2^23 encrypted packets and 2^52 invalid ones for AES-GCM, and for ChaCha20-Poly1305 an integrity
+ * limit of 2^36 with a confidentiality limit "greater than the number of possible packets (2^62)" -- which the
+ * packet number space itself makes unreachable, so it is expressed as unlimited rather than as a number nobody
+ * can derive from this code.
+ *
+ * Appendix B allows HIGHER confidentiality limits for endpoints that bound their packet sizes -- 2^28 for
+ * packets no larger than 2^11 bytes -- which is why these are fields on the connection rather than constants:
+ * a caller that knows its own bound may raise them, and the enforcement is whatever they hold. */
+static void aead_limits_for(wt_aead_t aead, uint64_t *out_confidentiality, uint64_t *out_integrity) {
+  switch (aead) {
+    case WT_AEAD_AES_128_GCM:
+      *out_confidentiality = UINT64_C(1) << 23;
+      *out_integrity = UINT64_C(1) << 52;
+      return;
+    case WT_AEAD_CHACHA20_POLY1305:
+      *out_confidentiality = UINT64_MAX;
+      *out_integrity = UINT64_C(1) << 36;
+      return;
+  }
+  /* No other suite exists in this tree, and a connection cannot be configured with one -- but a value is
+   * better than whatever the caller's stack held. */
+  *out_confidentiality = UINT64_C(1) << 23;
+  *out_integrity = UINT64_C(1) << 52;
+}
+
 /* The next phase's keys carry the CURRENT header protection key: section 6.1 makes header protection the one
  * thing a key update does not change, which is also what lets the receive path unprotect a header of any phase
  * with the keys it already holds. */
@@ -2161,6 +2213,8 @@ wt_status_t wt_quic_connection_initiate_key_update(wt_quic_connection_t *connect
   connection->key_phase_in_first_pn_set = 0;
   connection->key_update_awaiting_confirmation = 1;
   connection->key_updates_initiated++;
+  /* A new key set: section 6.6 counts packets per key, so the Application space's count starts again. */
+  connection->aead_encrypted[WT_QUIC_SPACE_APPLICATION] = 0U;
   return WT_OK;
 }
 
@@ -2199,6 +2253,8 @@ static wt_status_t key_update_respond(wt_quic_connection_t *connection, uint64_t
   connection->key_update_awaiting_confirmation = 1;
   connection->next_keys_out_ready = 0;
   connection->key_updates_responded++;
+  /* The send keys moved, so the count of packets protected with them starts again (section 6.6). */
+  connection->aead_encrypted[WT_QUIC_SPACE_APPLICATION] = 0U;
   return WT_OK;
 }
 
@@ -2414,7 +2470,17 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
     if (status == WT_ERR_AUTHENTICATION) {
       /* RFC 9001 section 5.3: a packet that does not authenticate is discarded. So is the rest of the
        * datagram, because the next coalesced packet's position is only known from a header this one did
-       * not authenticate. */
+       * not authenticate.
+       *
+       * And section 6.6 counts them: "endpoints MUST count the number of received packets that fail
+       * authentication during the lifetime of a connection... If the total... exceeds the integrity limit for
+       * the selected AEAD, the endpoint MUST immediately close the connection with a connection error of type
+       * AEAD_LIMIT_REACHED and not process any more packets." A QUIC endpoint ignores unauthenticated packets
+       * rather than closing on the first, which is exactly why the count exists (WT-169). */
+      connection->aead_failed++;
+      if (connection->aead_failed > connection->aead_integrity_limit) {
+        return close_with(connection, WT_QUIC_AEAD_LIMIT_REACHED, 0U, now);
+      }
       connection->packets_discarded++;
       return WT_OK;
     }
@@ -2742,4 +2808,21 @@ uint64_t wt_quic_connection_key_updates_responded(const wt_quic_connection_t *co
 
 uint64_t wt_quic_connection_key_update_errors(const wt_quic_connection_t *connection) {
   return connection != NULL ? connection->key_update_errors : 0U;
+}
+
+uint64_t wt_quic_connection_aead_encrypted(const wt_quic_connection_t *connection, wt_quic_space_t space) {
+  if (connection == NULL || space >= WT_QUIC_SPACE_COUNT) return 0U;
+  return connection->aead_encrypted[space];
+}
+
+uint64_t wt_quic_connection_aead_failed(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->aead_failed : 0U;
+}
+
+uint64_t wt_quic_connection_aead_confidentiality_limit(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->aead_confidentiality_limit : 0U;
+}
+
+uint64_t wt_quic_connection_aead_integrity_limit(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->aead_integrity_limit : 0U;
 }
