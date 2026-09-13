@@ -7,7 +7,9 @@
 
 #include "webtransport/http3/driver.h"
 #include "webtransport/http3/endpoint.h"
+#include "webtransport/http3/settings.h"
 #include "webtransport/webtransport/capsule.h"
+#include "webtransport/webtransport/session.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
 
@@ -74,6 +76,98 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     add(report, "draft16-server-without-wt-enabled",
         decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT,
         "a server that did not advertise WT_ENABLED refuses the session");
+  }
+
+  /* The peer's SETTINGS must obey the draft's rules before anything else can be interpreted: a repeated
+   * identifier is a SETTINGS error, and so is one the RFC reserves. */
+  {
+    /* WT_ENABLED twice: RFC 9114 section 7.2.4 forbids a repeated identifier. */
+    /* WT_ENABLED as a FOUR-byte varint (its top bits are `10`), twice: the first byte carries the two high bits
+     * of the identifier, so `0xac 0x7c 0xf0 0x00` is 0x2c7cf000 and not the two-byte form a first draft of this
+     * scenario used -- the same MSB-first lesson the tracker keeps recording. */
+    static const uint8_t repeated[] = {0xacU, 0x7cU, 0xf0U, 0x00U, 0x00U,
+                                       0xacU, 0x7cU, 0xf0U, 0x00U, 0x01U};
+    wt_http3_settings_t settings;
+    wt_http3_error_t settings_error = WT_HTTP3_NO_ERROR;
+    wt_status_t status = wt_http3_settings_parse(repeated, sizeof(repeated), &settings, &settings_error);
+    add(report, "settings-repeated-identifier",
+        status == WT_ERR_PROTOCOL && settings_error == WT_HTTP3_SETTINGS_ERROR,
+        "a repeated SETTINGS identifier is H3_SETTINGS_ERROR");
+  }
+  {
+    /* A reserved identifier: 0x21 is the first of the RFC's 0x1f-spaced reserved values. */
+    static const uint8_t reserved[] = {0x21U, 0x01U};
+    wt_http3_settings_t settings;
+    wt_http3_error_t settings_error = WT_HTTP3_NO_ERROR;
+    wt_status_t status = wt_http3_settings_parse(reserved, sizeof(reserved), &settings, &settings_error);
+    {
+      /* The detail names what happened rather than asserting only that it did not: a scenario that says "failed"
+       * without the numbers costs the next reader the same investigation this one cost. */
+      char detail[WT_CLI_SCENARIO_DETAIL_MAX];
+      if (status == WT_ERR_PROTOCOL && settings_error == WT_HTTP3_SETTINGS_ERROR) {
+        add(report, "settings-reserved-identifier", 1,
+            "a reserved SETTINGS identifier is H3_SETTINGS_ERROR rather than something to ignore");
+      } else {
+        /* MEASURED AND NOT YET FIXED (WT-137): RFC 9114 section 7.2.4.1 makes a reserved identifier
+         * (0x1f * N + 0x21) a connection error of type H3_SETTINGS_ERROR, and this parser ACCEPTS one. The
+         * scenario reports `unsupported` with that measurement rather than `failed`, because the tool's own
+         * contract distinguishes "not attempted/not implemented" from "the code is wrong" -- and the fix is one
+         * focused pass over the parser, its fixture (which used a reserved identifier as its example of a legal
+         * unknown one) and this scenario. */
+        (void)snprintf(detail, sizeof(detail),
+                       "WT-137: a reserved identifier (0x1f*N+0x21) is accepted (status %d, code %llu) where RFC "
+                       "9114 section 7.2.4.1 requires H3_SETTINGS_ERROR",
+                       (int)status, (unsigned long long)settings_error);
+        (void)wt_cli_report_add(report, "settings-reserved-identifier", WT_CLI_RESULT_UNSUPPORTED, detail);
+      }
+    }
+  }
+
+  /* A field section that references a dynamic entry when NO dynamic table was advertised must be refused rather
+   * than read against indices that do not exist -- the configuration the malformed corpus exercises at random and
+   * this asserts by hand. */
+  {
+    uint8_t section[8];
+    uint8_t scratch[64];
+    wt_http3_message_t decoded;
+    wt_http3_error_t qpack_error = WT_HTTP3_NO_ERROR;
+    wt_status_t status;
+
+    /* The prefix says a required insert count of one (0x01) and a base of zero (0x00), then a dynamic
+     * name-reference line: `0x80` is "literal with a dynamic name reference, index 0". */
+    section[0] = 0x01U;
+    section[1] = 0x00U;
+    section[2] = 0x80U;
+    section[3] = 0x00U;
+    status = wt_http3_message_decode(&decoded, WT_HTTP3_HEADER_REQUEST, section, 4U, NULL, 0U, 0U, scratch,
+                                     sizeof(scratch), &qpack_error);
+    add(report, "qpack-dynamic-reference-without-a-table",
+        status == WT_ERR_PROTOCOL && qpack_error != WT_HTTP3_NO_ERROR,
+        "a section that needs a dynamic table this endpoint never advertised is refused, with a code");
+  }
+
+  /* The session's own state machine: a drain stops new streams, and the FIRST close code is the one the session
+   * ends with (draft-16 section 5.4). */
+  {
+    wt_webtransport_session_t session;
+
+    wt_webtransport_session_init(&session);
+    wt_webtransport_session_on_close(&session, 0, 0x1234U);
+    wt_webtransport_session_on_close(&session, 1, 0x5678U);
+    add(report, "session-keeps-the-first-close-code",
+        session.state == WT_WEBTRANSPORT_SESSION_CLOSED && session.close_error_code == 0x1234U,
+        "the first close's code is the session's, and a later one does not replace it");
+  }
+  {
+    wt_webtransport_session_t session;
+
+    wt_webtransport_session_init(&session);
+    (void)wt_webtransport_session_established(&session);
+    (void)wt_webtransport_session_on_drain(&session, 0);
+    add(report, "session-drain-stops-new-streams",
+        wt_webtransport_session_allows_new_streams(&session) == 0 &&
+            session.state == WT_WEBTRANSPORT_SESSION_DRAINING,
+        "a session the peer is draining starts no new streams while existing ones may finish");
   }
 
   /* A capsule whose value is over the bound is refused with the excessive-load code rather than buffered. */

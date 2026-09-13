@@ -242,6 +242,19 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): seventeen scenarios in
+  one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path is `404`
+  compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a server
+  without `WT_ENABLED` refuses the session, a repeated SETTINGS identifier is `H3_SETTINGS_ERROR`, a
+  capsule over the bound is excessive load, a peer stream past the bound is `WT_ERR_LIMIT` with **no**
+  error code because the bound is ours, an empty datagram is malformed rather than short, a QPACK
+  section needing a table that was never advertised is refused with a code, the session keeps the
+  FIRST close's code, and a drain stops new streams), the positive edge this project earned the hard
+  way (half a prefix decides nothing until it is whole), and the two **real sessions** over IPv4 and
+  IPv6. One scenario reports **`unsupported` with its measurement**: RFC 9114 §7.2.4.1 makes a
+  reserved SETTINGS identifier an `H3_SETTINGS_ERROR`, and this parser accepts one — recorded as
+  WT-137 rather than passed or failed. Registered with CTest, whose **skip** code carries the same
+  distinction the report does.
 - **The conformance tool's scenarios, positive and negative** (Phase 9-10): twelve scenarios in one
   machine-readable report. The three codec ones (varints across every form, a close capsule's round
   trip, the draft-16 decision on an extended CONNECT) plus **six refusal scenarios** — a path this

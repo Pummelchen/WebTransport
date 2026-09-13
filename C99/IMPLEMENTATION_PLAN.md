@@ -2994,6 +2994,32 @@ Completion criteria:
 - Release artifacts are reproducible.
 - Public docs match actual behavior.
 
+### WT-137: a conformance scenario found a real spec violation in our own parser
+
+Four more scenarios were added -- a repeated SETTINGS identifier, a reserved one, a QPACK section that needs a
+dynamic table this endpoint never advertised, and two session-state rules (the first close's code wins, and a
+drain stops new streams). Three pass. **The fourth found a real bug:**
+
+> RFC 9114 section 7.2.4.1 makes the RESERVED settings identifiers (`0x1f * N + 0x21`) a connection error of type
+> `H3_SETTINGS_ERROR`. This parser ACCEPTS one -- status 0, code 256 -- and the predicate that knows the rule
+> (`wt_http3_setting_is_exerciser`) is called from nowhere in the parse path. Its own comment even said the
+> reserved identifiers were "reserved to exercise the rule that unknown identifiers are ignored", which is the
+> opposite of what the section says.
+
+That is what a conformance suite is FOR, and it is worth noting where the scenario came from: the tool's own
+`--settings-validation` flag names this rule, and the scenario is the first thing in this project that has ever
+checked it.
+
+The fix is reverted for now and the scenario reports **`unsupported` WITH THE MEASUREMENT** rather than `failed`,
+because the report's contract distinguishes "the code is wrong" from "this was not attempted" and the tool's exit
+status carries the same distinction (3). The fix is one focused pass over three places that must move together --
+the parser, `test_http3_settings` (whose round-trip fixture uses a reserved identifier as its example of a LEGAL
+unknown setting, which is why the suite failed the moment the parser was corrected) and this scenario -- which is
+the rule this phase has now learned three times: a change that reaches several call sites is made in one pass.
+
+The CTest registration also had to learn the distinction: `wt_conformance_scenarios` sets `SKIP_RETURN_CODE 3`,
+and the CLI contract script accepts exit 0 or 3 while still refusing a run with a FAILED scenario.
+
 ### WT-133, second half: the refusal scenarios, seven of them
 
 The Swift conformance suites are half NEGATIVE -- a request for the wrong path, a CONNECT for another protocol, a

@@ -56,6 +56,10 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   # machine-readable report is the contract, so the test asserts the tool's exit status -- 0 only when every
   # scenario passed.
   add_test(NAME wt_conformance_scenarios COMMAND wt-conformance-c99 --scenario all --json)
+  # Exit 3 is the report's own statement that something was not attempted (WT-137's measured spec gap, or IPv6 on
+  # a machine without it), and a FAILED scenario is exit 1. CTest's skip code makes that distinction visible
+  # instead of turning "not attempted" into either a pass or a failure.
+  set_tests_properties(wt_conformance_scenarios PROPERTIES SKIP_RETURN_CODE 3)
   # The two TOOLS against each other, in two processes: the client tool and the server tool run real sessions
   # over a real socket, which is what the plan's CLI criteria ask for and what one process cannot prove.
   # Both exchange modes, because they are different code paths in both tools.

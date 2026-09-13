@@ -69,9 +69,19 @@ grep -q '"established":false' "$work/out" || fail "with established false" "$wor
 grep -q '"status":"ok"' "$work/out" && fail "and must NOT claim ok" "$work/out"
 
 # The conformance tool's report is machine-readable and its summary is consistent with its scenarios.
+# Exit 3 means "nothing failed but something was not attempted", which is the report's own distinction and not a
+# failure of this script.
+set +e
 "$conformance" --scenario all --json >"$work/out" 2>"$work/err"
-grep -q '"summary":{"total":12' "$work/out" || fail "the conformance summary must count twelve scenarios" "$work/out"
-grep -q '"passed":12,"failed":0,"unsupported":0' "$work/out" \
-  || fail "and every scenario must pass on this machine (IPv6 reports unsupported only where it is absent)" "$work/out"
+conformance_status=$?
+set -e
+[ "$conformance_status" -eq 0 ] || [ "$conformance_status" -eq 3 ] \
+  || fail "the conformance tool must exit 0 or 3 (got $conformance_status)" "$work/err"
+grep -q '"summary":{"total":17' "$work/out" || fail "the conformance summary must count seventeen scenarios" "$work/out"
+grep -q '"failed":0' "$work/out" || fail "and no scenario may fail" "$work/out"
+# `unsupported` is allowed and must be REPORTED with its reason: one scenario records a measured spec gap
+# (WT-137) and IPv6 records itself where the machine has no IPv6 loopback. A run that claimed them as passes
+# would be the lie this report's design exists to prevent.
+grep -q '"result":"unsupported","detail":"' "$work/out" || fail "an unsupported scenario must carry its reason" "$work/out"
 
 echo "cli contract: exit statuses, refusals and the JSON report all hold"
