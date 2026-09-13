@@ -20,7 +20,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.3.6](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.6) |
+| Latest release | [1.3.7](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.7) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -65,6 +65,18 @@ long-header validity, HKDF output length, transport-parameter values, and the
 curve parameters now throws a catchable error instead of terminating the process. See
 the [changelog](CHANGELOG.md) for the full list.
 
+1.3.7 fixes a listener that stopped accepting for the rest of its life once it had
+served `maxConcurrentConnections` sessions in total. The ceiling was handed to
+Network.framework's `newConnectionLimit`, which counts connections over the
+listener's whole life rather than at one time — measured with a minimal listener, a
+limit of 2 accepts two connections and never a third, however long ago the first two
+ended. The default of 16 is low enough to reach in normal operation, and the failure
+was silent: the process stayed healthy, every other transport it served kept working,
+and only new WebTransport sessions timed out. The runtime now counts in-flight
+connections itself and returns each slot when a session ends, and a connection over
+the ceiling is still refused before its handshake is driven. Reported in issue #23;
+see the [changelog](CHANGELOG.md) for the full list.
+
 One change is deliberately not backwards compatible: the built-in development
 certificate is now **refused on any non-loopback bind address**. A server that
 previously bound `0.0.0.0` with default settings now fails at startup with an
@@ -92,7 +104,7 @@ before adopting this in production.
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.3.6"
+    exact: "1.3.7"
 )
 ```
 
@@ -152,7 +164,7 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 
 ## Prebuilt binaries
 
-The [1.3.6 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.6)
+The [1.3.7 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.7)
 ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
 binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
 later. They are ad-hoc signed rather than Developer ID signed, and are not

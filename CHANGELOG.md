@@ -4,7 +4,11 @@ All notable changes to this project will be documented here.
 
 The project uses semantic versioning.
 
-## Unreleased
+## [1.3.7] - 2026-09-13
+
+A defect-fix release. There are no wire-format changes and nothing is added to or
+removed from the public API; the release restores behaviour the documentation already
+promised. It follows the report in issue #23 and was reproduced before it was changed.
 
 Fixed:
 
