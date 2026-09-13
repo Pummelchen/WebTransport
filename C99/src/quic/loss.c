@@ -208,3 +208,28 @@ uint64_t wt_quic_loss_ack_eliciting_in_flight(const wt_quic_loss_t *loss) {
 size_t wt_quic_loss_count(const wt_quic_loss_t *loss) {
   return (loss == NULL) ? 0U : loss->count;
 }
+
+size_t wt_quic_loss_discard_space(wt_quic_loss_t *loss, uint8_t packet_number_space,
+                                  wt_quic_lost_fn visit, void *context) {
+  size_t discarded = 0U;
+  size_t at = 0U;
+
+  if (loss == NULL) return 0U;
+  while (at < loss->count) {
+    if (loss->sent[at].packet_number_space != packet_number_space) {
+      at++;
+      continue;
+    }
+    /* Told BEFORE it is removed, because the descriptor it names is about to become unreachable and the
+     * caller is the only one who can re-offer what the packet carried. */
+    if (visit != NULL) visit(context, &loss->sent[at]);
+    remove_packet(loss, at);
+    discarded++;
+  }
+  if (discarded > 0U) {
+    /* The timer was armed for a packet that may be gone; the next detection recomputes it, and a stale
+     * deadline would fire a probe for a space this endpoint has already thrown away. */
+    loss->loss_time = 0U;
+  }
+  return discarded;
+}

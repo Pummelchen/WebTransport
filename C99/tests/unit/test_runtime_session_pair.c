@@ -32,15 +32,21 @@
 
 static const uint8_t k_connection_id[8] = {0x0fU, 0x1eU, 0x2dU, 0x3cU, 0x4bU, 0x5aU, 0x69U, 0x78U};
 
-/* The parameters BOTH ends advertise, built with the codec rather than written by hand. The unidirectional
+/* The parameters each end advertises, built with the codec rather than written by hand. The unidirectional
  * counts matter because HTTP/3 opens three unidirectional streams before it sends anything, and the limits
- * matter because the LOCAL grants must match them (see `grant_receive_room`). */
-static uint8_t g_parameters[256];
-static size_t g_parameters_len;
+ * matter because the LOCAL grants must match them (see `grant_receive_room`).
+ *
+ * ONE LIST FOR BOTH ENDS cannot express RFC 9000 section 7.3: each endpoint names the Source Connection ID IT
+ * used, and only a server names the destination the client's first Initial carried -- a parameter a client MUST
+ * NOT send. The client checks the server's now (WT-166), so the roles get their own bytes. */
+static uint8_t g_client_parameters[256];
+static size_t g_client_parameters_len;
+static uint8_t g_server_parameters[256];
+static size_t g_server_parameters_len;
 
-static void build_parameters(void) {
+static void build_parameters(uint8_t *out, size_t capacity, int is_server) {
   wt_quic_transport_parameters_t params;
-  wt_writer_t w = wt_writer_init(g_parameters, sizeof(g_parameters));
+  wt_writer_t w = wt_writer_init(out, capacity);
 
   wt_quic_transport_parameters_init(&params);
   WT_EXPECT_OK("initial_max_data", wt_quic_transport_parameters_add_integer(
@@ -72,9 +78,27 @@ static void build_parameters(void) {
    * WebTransport stream needs: its session prefix is the first thing on the stream. */
   WT_EXPECT_OK("reset_stream_at",
                wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
+  /* RFC 9000 section 7.3: both roles name the Source Connection ID they use, and the server also names the
+   * Destination Connection ID the client's first Initial carried. This pair uses one connection ID for
+   * everything, so both values are the same bytes -- which is the point: the NAMES differ per role even when the
+   * values do not. */
+  WT_EXPECT_OK("initial_source_connection_id",
+               wt_quic_transport_parameters_add_bytes(&params,
+                                                      WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                                      k_connection_id, sizeof(k_connection_id)));
+  if (is_server != 0) {
+    WT_EXPECT_OK("original_destination_connection_id",
+                 wt_quic_transport_parameters_add_bytes(
+                     &params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, k_connection_id,
+                     sizeof(k_connection_id)));
+  }
   WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&w, &params));
-  g_parameters_len = wt_writer_offset(&w);
-  WT_EXPECT_TRUE("with bytes in them", g_parameters_len > 0U);
+  if (is_server != 0) {
+    g_server_parameters_len = wt_writer_offset(&w);
+  } else {
+    g_client_parameters_len = wt_writer_offset(&w);
+  }
+  WT_EXPECT_TRUE("with bytes in them", wt_writer_offset(&w) > 0U);
 }
 
 /* ---- the trust fixtures: a real leaf, a real CA and a real signature ------------------------- */
@@ -198,7 +222,10 @@ static void arm_pair_to(pair_t *pair, const wt_udp_address_t *client_peer,
   static const char *const alpn_h3[] = {"h3"};
 
   WT_EXPECT_TRUE("the trust fixtures load", load_fixtures(&pair->fixtures));
-  WT_EXPECT_TRUE("the parameters are built", (build_parameters(), g_parameters_len > 0U));
+  build_parameters(g_client_parameters, sizeof(g_client_parameters), 0);
+  build_parameters(g_server_parameters, sizeof(g_server_parameters), 1);
+  WT_EXPECT_TRUE("the parameters are built",
+                 g_client_parameters_len > 0U && g_server_parameters_len > 0U);
   memset(&client_tls, 0, sizeof(client_tls));
   memset(&server_tls, 0, sizeof(server_tls));
   memset(&pair->client, 0, sizeof(pair->client));
@@ -214,8 +241,8 @@ static void arm_pair_to(pair_t *pair, const wt_udp_address_t *client_peer,
   client_tls.alpn = alpn_h3;
   client_tls.alpn_count = 1U;
   client_tls.require_transport_parameters = 1;
-  client_tls.transport_parameters = g_parameters;
-  client_tls.transport_parameters_len = g_parameters_len;
+  client_tls.transport_parameters = g_client_parameters;
+  client_tls.transport_parameters_len = g_client_parameters_len;
   client_tls.trust.mode = WT_TLS_TRUST_STORE;
   client_tls.trust.ca_bundle = pair->fixtures.ca_bundle;
   client_tls.trust.ca_bundle_len = pair->fixtures.ca_bundle_len;
@@ -231,8 +258,8 @@ static void arm_pair_to(pair_t *pair, const wt_udp_address_t *client_peer,
   server_tls.identity = &pair->server_identity;
   server_tls.alpn = "h3";
   server_tls.require_transport_parameters = 1;
-  server_tls.transport_parameters = g_parameters;
-  server_tls.transport_parameters_len = g_parameters_len;
+  server_tls.transport_parameters = g_server_parameters;
+  server_tls.transport_parameters_len = g_server_parameters_len;
 
   WT_EXPECT_OK("the server arms",
                wt_runtime_session_start_server(&pair->server, &pair->server_socket,

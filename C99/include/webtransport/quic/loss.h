@@ -122,6 +122,20 @@ wt_status_t wt_quic_loss_detect(wt_quic_loss_t *loss, uint8_t packet_number_spac
 uint64_t wt_quic_loss_time(const wt_quic_loss_t *loss, uint8_t packet_number_space,
                            const wt_quic_rtt_t *rtt, uint64_t largest_acked);
 
+/* Forget every packet in one space, reporting each through `visit` BEFORE it goes.
+ *
+ * RFC 9000 section 17.2.5.3 is what needs this: a Retry invalidates everything a client sent in the
+ * Initial space, because those packets were protected with keys the server has thrown away and can never
+ * be acknowledged. Leaving them in the list would hold the congestion window against bytes that will
+ * never arrive, and a client that instead reset the packet number would violate the section's MUST NOT.
+ * The caller's descriptor comes back through `visit`, which is what lets it re-offer what those packets
+ * carried -- the same cryptographic handshake message, as the section requires.
+ *
+ * The packet numbers are untouched (they live in the packet number space, not here) and so is
+ * `pto_count`; only the accounting for these bytes changes. Returns the number of packets forgotten. */
+size_t wt_quic_loss_discard_space(wt_quic_loss_t *loss, uint8_t packet_number_space,
+                                  wt_quic_lost_fn visit, void *context);
+
 /* The probe timeout: the earliest send time among ack-eliciting packets in flight, plus the probe
  * timeout from the estimator doubled `pto_count` times (RFC 9002 sections 6.2.1 and 6.2.2).
  * WT_ERR_STATE when nothing ack-eliciting is in flight, which is when there is nothing to probe

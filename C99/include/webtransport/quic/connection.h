@@ -51,6 +51,12 @@ typedef enum wt_quic_role {
   WT_QUIC_ROLE_SERVER = 1
 } wt_quic_role_t;
 
+/* The longest Retry token this endpoint will carry. RFC 9000 section 17.2.5 lets a server choose the token's
+ * length, and section 8.1.4 suggests it is a small integrity-protected structure (quiche's is 44 bytes), so this
+ * is generous by an order of magnitude; a token beyond it is discarded rather than obeyed, because a bound this
+ * endpoint does not enforce is a buffer a peer sizes. */
+#define WT_QUIC_MAX_RETRY_TOKEN 256U
+
 /* The packet number spaces of RFC 9000 section 12.3. 0-RTT and 1-RTT share the Application space, so
  * there are three and not four. */
 typedef enum wt_quic_space {
@@ -326,6 +332,32 @@ typedef struct wt_quic_connection {
    * declared lost, and nothing acknowledged is a peer that is not reading this endpoint at all, and that is a
    * different defect from a peer that reads and does not answer (WT-145). */
   uint64_t packets_acked[WT_QUIC_SPACE_COUNT];
+
+  /* The Retry this client accepted, if any (RFC 9000 section 17.2.5). A Retry is a whole address-validation
+   * exchange in three fields: the token every later Initial must carry, the server's Source Connection ID, which
+   * replaces the destination of every packet this endpoint sends, and the fact that it happened at all -- which
+   * the transport parameters are then checked against, because the section makes a missing or mismatched
+   * `retry_source_connection_id` a connection error and a present one without a Retry an error too.
+   *
+   * `retry_pending_keys` is the one piece the connection cannot do itself: the Initial keys are derived from the
+   * DESTINATION connection ID, so the endpoint that owns the keys (the runtime session) has to derive them again
+   * from the new one before anything else goes out. Until it does, this flag says so. */
+  uint8_t retry_token[WT_QUIC_MAX_RETRY_TOKEN];
+  size_t retry_token_length;
+  uint8_t retry_source_connection_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  size_t retry_source_connection_id_length;
+  int retry_accepted;
+  int retry_pending_keys;
+  /* Whether a packet from the server has been RECEIVED AND PROCESSED, which section 17.2.5.2 makes the moment every
+   * later Retry must be discarded. */
+  int server_packet_received;
+  /* Packets discarded because they were Retries this endpoint must ignore: a second one, one with a bad integrity
+   * tag, one with no token, one that names this endpoint's own destination ID, one that arrived after the server
+   * had already spoken, and every Retry a server receives (which MUST discard them). Counted separately from
+   * `packets_discarded` because "the peer retried us and we could not answer" is a different diagnosis from "a
+   * packet arrived for another connection" (WT-166). */
+  uint64_t retries_discarded;
+  uint64_t retry_accepted_count;
 
   /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is
@@ -624,6 +656,26 @@ void wt_quic_connection_refuse_application(wt_quic_connection_t *connection, uin
  * for a client, which has no such ID. */
 wt_status_t wt_quic_connection_set_original_destination_id(wt_quic_connection_t *connection,
                                                            const uint8_t *id, size_t length);
+
+/* Whether a Retry has been accepted and the Initial keys have NOT yet been derived from the connection ID it
+ * chose. RFC 9000 section 17.2.5.2 makes the keys a function of that destination connection ID (RFC 9001 section
+ * 5.2), so the endpoint that owns the keys has to derive them again -- and until it does, every Initial this
+ * connection sends is protected with keys the server has thrown away.
+ *
+ * The sequence the runtime session follows is: pump the socket, and if this answers true, derive the Initial keys
+ * again from `connection->peer_connection_id` and call `wt_quic_connection_retry_keys_installed`. */
+int wt_quic_connection_retry_pending_keys(const wt_quic_connection_t *connection);
+
+/* The Initial keys now match the accepted Retry's connection ID. Clears the flag above; without a Retry it does
+ * nothing, because there is nothing pending. */
+void wt_quic_connection_retry_keys_installed(wt_quic_connection_t *connection);
+
+/* The Retry this connection accepted: its token and the Source Connection ID it named, for a caller that has to
+ * derive keys from the latter or say what happened. WT_ERR_STATE when no Retry was accepted. The token is a view
+ * into the connection, which owns it. */
+wt_status_t wt_quic_connection_retry(const wt_quic_connection_t *connection, const uint8_t **out_token,
+                                     size_t *out_token_length, const uint8_t **out_source_connection_id,
+                                     size_t *out_source_connection_id_length);
 
 /* The status of the handler whose refusal closed this connection, or WT_OK when no handler refused -- a close
  * this endpoint chose deliberately, or one the peer sent, has no cause here. A tool asks because a session that

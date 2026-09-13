@@ -90,6 +90,23 @@ static uint64_t parameter_or(const wt_quic_transport_parameters_t *params, uint6
   return value;
 }
 
+  /* Adopt a connection ID the peer chose as the destination of everything this endpoint sends. RFC 9000 section
+ * 7.2 makes it the server's Source Connection ID after the handshake, and section 17.2.5.1 makes it the Retry's
+ * Source Connection ID before it -- two moments, one rule, and one place that writes it, because the send path
+ * reads the config and four fields have to agree that they moved. */
+static void adopt_peer_connection_id(wt_quic_connection_t *connection, const uint8_t *id, size_t length) {
+  if (connection == NULL || id == NULL) return;
+  if (length > (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) return;
+  if (length == connection->peer_connection_id_length &&
+      (length == 0U || memcmp(connection->peer_connection_id, id, length) == 0)) {
+    return;
+  }
+  if (length > 0U) memcpy(connection->peer_connection_id, id, length);
+  connection->peer_connection_id_length = length;
+  connection->config.peer_connection_id = connection->peer_connection_id;
+  connection->config.peer_connection_id_length = length;
+}
+
 wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connection,
                                                    const uint8_t *data, size_t length) {
   wt_quic_transport_parameters_t params;
@@ -142,7 +159,7 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   connection->peer_limits = limits;
   connection->flow.peer_max_data = limits.initial_max_data;
 
-  /* RFC 9000 section 7.2: after the ServerHello, a client addresses every packet to the SOURCE CONNECTION ID the
+/* RFC 9000 section 7.2: after the ServerHello, a client addresses every packet to the SOURCE CONNECTION ID the
    * server chose, and a server addresses a client the same way.
    *
    * NOTHING DID THAT HERE, and it cost this tree a third-party interop: the destination connection ID was written
@@ -161,13 +178,45 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
                                          &peer_source_length) == WT_OK &&
         peer_source != NULL && peer_source_length > 0U &&
         peer_source_length <= (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
-      if (peer_source_length != connection->peer_connection_id_length ||
-          memcmp(connection->peer_connection_id, peer_source, peer_source_length) != 0) {
-        memcpy(connection->peer_connection_id, peer_source, peer_source_length);
-        connection->peer_connection_id_length = peer_source_length;
-        connection->config.peer_connection_id = connection->peer_connection_id;
-        connection->config.peer_connection_id_length = peer_source_length;
+      adopt_peer_connection_id(connection, peer_source, peer_source_length);
+    }
+  }
+
+  /* RFC 9000 section 7.3's client half, which is the other side of the Retry exchange. The server names the
+   * destination connection ID this client's first Initial carried and, if it retried, the Source Connection ID that
+   * Retry sent; both must match, and the section is explicit that ABSENCE counts -- a missing
+   * original_destination_connection_id is an error, and a retry_source_connection_id present when no Retry was
+   * received is one too. Without this a client would accept a connection whose connection IDs an attacker who
+   * injected packets could have influenced, which is the attack the parameters exist to close. */
+  if (connection->config.role == WT_QUIC_ROLE_CLIENT) {
+    const uint8_t *value = NULL;
+    size_t value_length = 0U;
+    int present = wt_quic_transport_parameters_get(&params,
+                                                   WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, &value,
+                                                   &value_length) == WT_OK;
+
+    /* The check needs something to check AGAINST: an endpoint only has an original destination connection ID
+     * when it chose one, and the runtime session records it for every client it starts. A bare connection object
+     * that was never told (which only a caller bypassing the runtime can build) has nothing to compare, and
+     * inventing a requirement it cannot satisfy would make conformant parameters impossible. */
+    if (connection->original_destination_id_length != 0U &&
+        (present == 0 || value_length != connection->original_destination_id_length ||
+         (value_length != 0U &&
+          memcmp(value, connection->original_destination_id, value_length) != 0))) {
+      return WT_ERR_PROTOCOL;
+    }
+    value = NULL;
+    value_length = 0U;
+    present = wt_quic_transport_parameters_get(&params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID, &value,
+                                               &value_length) == WT_OK;
+    if (connection->retry_accepted != 0) {
+      if (present == 0 || value_length != connection->retry_source_connection_id_length ||
+          (value_length != 0U &&
+           memcmp(value, connection->retry_source_connection_id, value_length) != 0)) {
+        return WT_ERR_PROTOCOL;
       }
+    } else if (present != 0) {
+      return WT_ERR_PROTOCOL;
     }
   }
   return WT_OK;
@@ -370,6 +419,17 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
      * unconditionally would discover only when it first sent a 1-RTT packet. */
     build.source_connection_id = connection->config.local_connection_id;
     build.source_connection_id_len = connection->config.local_connection_id_length;
+    /* RFC 9000 section 17.2.5.3: once a Retry has been accepted, EVERY Initial carries its token. */
+    if (space == WT_QUIC_SPACE_INITIAL && connection->retry_accepted != 0) {
+      build.token = connection->retry_token;
+      build.token_len = connection->retry_token_length;
+    }
+  }
+  if (space == WT_QUIC_SPACE_INITIAL && connection->retry_pending_keys != 0) {
+    /* The keys no longer match the connection ID a Retry named, and a packet protected with the old ones is
+     * indistinguishable from a client that ignored the Retry. The runtime session derives them again on the pump
+     * that read the Retry, and WT_ERR_AGAIN is what tells the flush to try later rather than to fail. */
+    return WT_ERR_AGAIN;
   }
   build.packet_number = packet_number;
   build.packet_number_length = packet_number_length;
@@ -1883,6 +1943,98 @@ wt_status_t wt_quic_connection_flush(wt_quic_connection_t *connection, uint64_t 
   return WT_OK;
 }
 
+/* Discard a Retry, counting it. Every discard below is a rule from RFC 9000 section 17.2.5.2, and each is counted
+ * because "the peer retried us and we could not answer" is otherwise a silence that looks exactly like a peer that
+ * never spoke. */
+static void discard_retry(wt_quic_connection_t *connection) {
+  connection->retries_discarded++;
+  connection->packets_discarded++;
+}
+
+/* RFC 9000 section 17.2.5's Retry: answered rather than read, because accepting one changes the destination
+ * connection ID of every later packet and the keys that protect the Initial ones.
+ *
+ * The order of the checks is the order the section states them, and the integrity tag comes FIRST among the ones
+ * that cost work: it is the only check that tells a Retry the server sent from one an attacker injected, and
+ * acting on an injected Retry is the whole attack the tag exists to prevent. */
+static wt_status_t on_retry_packet(wt_quic_connection_t *connection, const uint8_t *packet, size_t length,
+                                   uint64_t now) {
+  wt_quic_retry_packet_t retry;
+  wt_quic_error_t error = WT_QUIC_NO_ERROR;
+
+  (void)now;
+  /* "A server MUST discard a Retry packet", and a client accepts at most ONE per connection attempt: after it has
+   * processed an Initial or a Retry from the server, later Retries are discarded too. */
+  if (connection->config.role != WT_QUIC_ROLE_CLIENT || connection->retry_accepted != 0 ||
+      connection->server_packet_received != 0) {
+    discard_retry(connection);
+    return WT_OK;
+  }
+  if (wt_quic_retry_packet_decode(packet, length, &retry, &error) != WT_OK) {
+    discard_retry(connection);
+    return WT_OK;
+  }
+  /* A Retry for another version says nothing about this connection, and section 6.3 makes a packet of the wrong
+   * version ordinary. */
+  if (retry.version != connection->config.version) {
+    discard_retry(connection);
+    return WT_OK;
+  }
+  /* "A client MUST discard a Retry packet with a zero-length Retry Token field." */
+  if (retry.token_len == 0U) {
+    discard_retry(connection);
+    return WT_OK;
+  }
+  /* "The value MUST NOT be equal to the Destination Connection ID field of the packet sent by the client": that is
+   * this endpoint's original destination connection ID, and it is also what the tag is computed over. */
+  if (retry.source_connection_id_len == 0U ||
+      (retry.source_connection_id_len == connection->original_destination_id_length &&
+       connection->original_destination_id_length != 0U &&
+       memcmp(retry.source_connection_id, connection->original_destination_id,
+              connection->original_destination_id_length) == 0)) {
+    discard_retry(connection);
+    return WT_OK;
+  }
+  /* "Clients MUST discard Retry packets that have a Retry Integrity Tag that cannot be validated" (RFC 9001
+   * section 5.8): the tag covers this endpoint's ORIGINAL destination connection ID, which only an endpoint that
+   * saw the first Initial can compute. */
+  if (wt_quic_retry_integrity_verify(connection->original_destination_id,
+                                     connection->original_destination_id_length, packet,
+                                     length) != WT_OK) {
+    discard_retry(connection);
+    return WT_OK;
+  }
+  /* A token beyond this endpoint's bound is discarded rather than truncated: echoing a prefix of a peer's token is
+   * echoing a different token, and this bound is a hundred times what an integrity-protected token needs. */
+  if (retry.token_len > sizeof(connection->retry_token)) {
+    discard_retry(connection);
+    return WT_OK;
+  }
+
+  /* Accepted. The token goes in every later Initial (section 17.2.5.3) and the Retry's Source Connection ID is the
+   * destination of every later packet (section 17.2.5.1). The packet NUMBERS are deliberately untouched: "A client
+   * MUST NOT reset the packet number for any packet number space after processing a Retry packet." */
+  memcpy(connection->retry_token, retry.token, retry.token_len);
+  connection->retry_token_length = retry.token_len;
+  memcpy(connection->retry_source_connection_id, retry.source_connection_id,
+         retry.source_connection_id_len);
+  connection->retry_source_connection_id_length = retry.source_connection_id_len;
+  adopt_peer_connection_id(connection, retry.source_connection_id, retry.source_connection_id_len);
+  connection->retry_accepted = 1;
+  connection->retry_accepted_count++;
+  /* The Initial keys are derived from the destination connection ID, so they are now the WRONG keys and only the
+   * runtime session can derive the right ones. Until it does, nothing at Initial level may go out. */
+  connection->retry_pending_keys = 1;
+
+  /* Everything already sent in the Initial space is unreachable: the server threw those keys away when it sent the
+   * Retry, so those packets can never be acknowledged and holding them in flight would hold the congestion window
+   * against bytes that will never arrive. The descriptors come back through `on_lost`, which is what makes the
+   * handshake re-offer the SAME cryptographic handshake message -- section 17.2.5.3 requires exactly that
+   * message, and the retransmit path is the one that re-sends bytes it still holds. */
+  (void)wt_quic_loss_discard_space(&connection->loss, (uint8_t)WT_QUIC_SPACE_INITIAL, on_lost, connection);
+  return WT_OK;
+}
+
 wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_t now) {
   uint8_t datagram[WT_UDP_MAX_DATAGRAM];
   wt_udp_address_t from;
@@ -1955,12 +2107,16 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
           space = WT_QUIC_SPACE_INITIAL;
         } else if (type_bits == (uint32_t)WT_QUIC_PACKET_HANDSHAKE) {
           space = WT_QUIC_SPACE_HANDSHAKE;
+        } else if (type_bits == (uint32_t)WT_QUIC_PACKET_RETRY) {
+          /* RFC 9000 section 17.2.5: a Retry is not READ -- it is answered, and answering it changes the
+           * destination connection ID and the Initial keys. It occupies the whole datagram, so the loop ends
+           * here either way. */
+          return on_retry_packet(connection, datagram + offset, datagram_length - offset, now);
         } else {
           /* 0-RTT shares the Application packet number space but not its keys, and this runtime has one
            * key set per space: reading a 0-RTT packet with the 1-RTT keys would report an
-           * authentication failure for a packet that is correctly protected. A Retry is not read here
-           * either. Both are discarded by name rather than through a confusing failure (WT-71 records
-           * the 0-RTT keys). */
+           * authentication failure for a packet that is correctly protected. It is discarded by name rather
+           * than through a confusing failure (WT-71 records the 0-RTT keys). */
           connection->packets_discarded++;
           return WT_OK;
         }
@@ -2018,6 +2174,11 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
                               now, destination_sequence);
     }
     if (status != WT_OK) return status;
+    /* RFC 9000 section 17.2.5.2: after the client has received and PROCESSED a packet from the server, every later
+     * Retry is discarded. This is the moment that becomes true. */
+    if (space == WT_QUIC_SPACE_INITIAL && connection->config.role == WT_QUIC_ROLE_CLIENT) {
+      connection->server_packet_received = 1;
+    }
 
     /* RFC 9001 section 4.9.1: the Initial keys are discarded when the first Handshake packet is
      * successfully processed. Both ends can derive them from a connection ID either can see, so keeping
@@ -2277,4 +2438,27 @@ void wt_quic_connection_clear(wt_quic_connection_t *connection) {
   }
   connection->has_peer = 0;
   connection->socket.fd = WT_UDP_INVALID_FD;
+}
+
+int wt_quic_connection_retry_pending_keys(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->retry_pending_keys : 0;
+}
+
+void wt_quic_connection_retry_keys_installed(wt_quic_connection_t *connection) {
+  if (connection == NULL) return;
+  connection->retry_pending_keys = 0;
+}
+
+wt_status_t wt_quic_connection_retry(const wt_quic_connection_t *connection, const uint8_t **out_token,
+                                     size_t *out_token_length, const uint8_t **out_source_connection_id,
+                                     size_t *out_source_connection_id_length) {
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (connection->retry_accepted == 0) return WT_ERR_STATE;
+  if (out_token != NULL) *out_token = connection->retry_token;
+  if (out_token_length != NULL) *out_token_length = connection->retry_token_length;
+  if (out_source_connection_id != NULL) *out_source_connection_id = connection->retry_source_connection_id;
+  if (out_source_connection_id_length != NULL) {
+    *out_source_connection_id_length = connection->retry_source_connection_id_length;
+  }
+  return WT_OK;
 }

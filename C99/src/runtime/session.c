@@ -93,6 +93,13 @@ wt_status_t wt_runtime_session_start_client(wt_runtime_session_t *session,
   if (status != WT_OK) return status;
   status = wt_quic_connection_attach(&session->connection, socket, peer);
   if (status != WT_OK) return status;
+  /* What this client chose as the destination of its first Initial. Three rules need it and the client never
+   * recorded it: RFC 9000 section 7.3 has the server echo it back and the client CHECK it, and RFC 9001 section
+   * 5.8 computes a Retry's integrity tag over it -- so an endpoint that does not keep it can validate neither.
+   * Nothing noticed because no peer in this tree's tests ever retried or echoed it (WT-166). */
+  status = wt_quic_connection_set_original_destination_id(&session->connection, initial_connection_id,
+                                                          initial_connection_id_length);
+  if (status != WT_OK) return status;
   status = install_initial_keys(session, initial_connection_id, initial_connection_id_length, 0);
   if (status != WT_OK) return status;
 
@@ -230,6 +237,22 @@ wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now)
   /* BEFORE the flushes, because the packet just read may have carried them (see above). */
   status = apply_peer_parameters(session);
   if (status != WT_OK) return status;
+
+  /* RFC 9000 section 17.2.5.2: a Retry just read moved the destination connection ID, and the Initial keys are a
+   * function of it (RFC 9001 section 5.2) -- so they are derived again HERE, before either flush. A flush before
+   * this would protect the new Initial with the keys the server threw away when it sent the Retry, which the peer
+   * discards exactly as it discards a client that never answered (WT-166). The connection refuses to send at
+   * Initial level until this clears the flag, so the two cannot get out of order. */
+  if (wt_quic_connection_retry_pending_keys(&session->connection) != 0) {
+    const uint8_t *retry_source = NULL;
+    size_t retry_source_length = 0U;
+
+    status = wt_quic_connection_retry(&session->connection, NULL, NULL, &retry_source, &retry_source_length);
+    if (status != WT_OK) return status;
+    status = install_initial_keys(session, retry_source, retry_source_length, 0);
+    if (status != WT_OK) return status;
+    wt_quic_connection_retry_keys_installed(&session->connection);
+  }
 
   status = wt_quic_handshake_flush(&session->handshake, now);
   if (status != WT_OK && status != WT_ERR_AGAIN) return status;

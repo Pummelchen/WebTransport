@@ -454,11 +454,19 @@ void wt_quic_handshake_on_lost(void *context, const wt_quic_tx_frame_t *frame) {
    * why the size is a named bound rather than "as many as arrive". */
 }
 
-/* The room one CRYPTO frame has in a packet of this connection's size. */
+/* The room one CRYPTO frame has in a packet of this connection's size. A Retry's token is part of every Initial
+ * after one (RFC 9000 section 17.2.5.3), so it comes off the room here: section 17.2.5.3 notes that including the
+ * token "reduces the available space for the cryptographic handshake message, which might result in the client
+ * needing to send multiple Initial packets", and a range that ignored it would be a CRYPTO frame the 1200-byte
+ * padding then cannot fit (WT-166). */
 static size_t crypto_range_max(const wt_quic_connection_t *connection) {
   size_t datagram = connection->config.max_datagram_size;
-  if (datagram <= WT_QUIC_HANDSHAKE_PACKET_RESERVE) return 1U;
-  return datagram - WT_QUIC_HANDSHAKE_PACKET_RESERVE;
+  size_t reserved = WT_QUIC_HANDSHAKE_PACKET_RESERVE;
+  if (connection->retry_accepted != 0 && connection->retry_token_length < reserved) {
+    reserved += connection->retry_token_length;
+  }
+  if (datagram <= reserved) return 1U;
+  return datagram - reserved;
 }
 
 wt_status_t wt_quic_handshake_flush(wt_quic_handshake_t *handshake, uint64_t now) {
