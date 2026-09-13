@@ -1132,6 +1132,18 @@ task rather than satisfied with a hand-written constant. What the test does chec
 exists for: the same inputs give the same tag, a verification accepts it, and a changed byte OR a
 different original destination connection ID is refused, the second being the attack it defends against.
 
+**Thirty-second part done: issuing connection IDs.** `wt_quic_connection_issue_connection_id` sends RFC 9000
+section 19.15's NEW_CONNECTION_ID and keeps what it issued, bounded twice over: by `WT_QUIC_CONNECTION_IDS_MAX`
+in this endpoint, because a NEW_CONNECTION_ID is peer-visible state an endpoint should not grow on its own
+instructions, and by the peer's `active_connection_id_limit` LESS the ID the handshake used -- section 5.1.1
+counts that one among what the peer will store, so the default grant of two leaves exactly one spare. The
+stateless reset token is taken from the caller rather than invented: section 10.3 requires it to be
+unguessable, which means derived from a secret this layer does not hold.
+
+The duplicate check comes before the limit check, and the test caught that: a caller that hands the same ID
+twice has made a mistake whether or not there is room, and "you already issued that" is a different answer
+from "the peer will not store another".
+
 Implement the production network state machine.
 
 Tasks:

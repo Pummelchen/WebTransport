@@ -992,6 +992,76 @@ wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_
  * and the tag. Being generous here costs a few bytes of payload and never a packet that does not fit. */
 #define WT_QUIC_DATAGRAM_PACKET_OVERHEAD 64U
 
+wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connection,
+                                                   const uint8_t *id, size_t length,
+                                                   const uint8_t reset_token[16], uint64_t now) {
+  wt_quic_frame_t frame;
+  size_t slot = WT_QUIC_CONNECTION_IDS_MAX;
+  size_t i;
+  uint64_t allowed;
+  int sent = 0;
+  wt_status_t status;
+
+  if (connection == NULL || id == NULL || reset_token == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (length == 0U || length > WT_QUIC_MAX_CONNECTION_ID_LENGTH) return WT_ERR_INVALID_ARGUMENT;
+  if (!connection->peer_limits.set) return WT_ERR_STATE;
+
+  /* A caller that hands the same ID twice has made a mistake whether or not there is room, so the
+   * duplicate is reported before the limit: the two are different answers and the first is the one that
+   * describes what the caller did. */
+  for (i = 0U; i < WT_QUIC_CONNECTION_IDS_MAX; i++) {
+    if (connection->issued_ids[i].in_use) {
+      if (connection->issued_ids[i].length == length &&
+          memcmp(connection->issued_ids[i].id, id, length) == 0) {
+        /* The same ID twice is a new sequence number for an ID the peer already has, which is not what a
+         * caller means and would waste the peer's storage. */
+        return WT_ERR_STATE;
+      }
+      continue;
+    }
+    if (slot == WT_QUIC_CONNECTION_IDS_MAX) slot = i;
+  }
+  if (slot == WT_QUIC_CONNECTION_IDS_MAX) return WT_ERR_LIMIT;
+
+  /* RFC 9000 section 5.1.1: the peer's limit counts the connection ID the handshake used, so this
+   * endpoint may have one fewer than the limit outstanding. A peer that granted the minimum (two, the
+   * default) therefore allows exactly one spare. */
+  allowed = connection->peer_limits.active_connection_id_limit;
+  if (allowed > 0U) allowed -= 1U;
+  if ((uint64_t)connection->issued_count >= allowed) return WT_ERR_LIMIT;
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID);
+  frame.as.new_connection_id.sequence = (uint64_t)connection->issued_count;
+  frame.as.new_connection_id.retire_prior_to = 0U;
+  frame.as.new_connection_id.connection_id = id;
+  frame.as.new_connection_id.connection_id_length = length;
+  frame.as.new_connection_id.stateless_reset_token = reset_token;
+  status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, 0, 0, 0U, 0U, 0U, &sent,
+                          now);
+  if (status != WT_OK) return status;
+  if (!sent) return WT_ERR_STATE;
+
+  connection->issued_ids[slot].in_use = 1;
+  connection->issued_ids[slot].sequence = frame.as.new_connection_id.sequence;
+  memcpy(connection->issued_ids[slot].id, id, length);
+  connection->issued_ids[slot].length = length;
+  memcpy(connection->issued_ids[slot].reset_token, reset_token, 16U);
+  connection->issued_count++;
+  return WT_OK;
+}
+
+const wt_quic_issued_connection_id_t *wt_quic_connection_issued_id(
+    const wt_quic_connection_t *connection, uint64_t sequence) {
+  size_t i;
+  if (connection == NULL) return NULL;
+  for (i = 0U; i < WT_QUIC_CONNECTION_IDS_MAX; i++) {
+    if (connection->issued_ids[i].in_use && connection->issued_ids[i].sequence == sequence) {
+      return &connection->issued_ids[i];
+    }
+  }
+  return NULL;
+}
+
 wt_status_t wt_quic_connection_set_max_data(wt_quic_connection_t *connection, uint64_t maximum) {
   if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (connection->local_max_data_set && maximum < connection->local_max_data) return WT_ERR_LIMIT;

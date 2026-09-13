@@ -151,6 +151,19 @@ typedef wt_status_t (*wt_quic_frame_handler_fn)(void *context, wt_quic_space_t s
  * an acknowledgement has nothing to send again. */
 typedef void (*wt_quic_frame_lost_fn)(void *context, const wt_quic_tx_frame_t *frame);
 
+/* How many connection IDs this endpoint may have outstanding, beyond the one the handshake used: the
+ * peer's `active_connection_id_limit`, less the initial one, because RFC 9000 section 5.1.1 counts that
+ * ID among what the peer will store. */
+#define WT_QUIC_CONNECTION_IDS_MAX 8U
+
+typedef struct wt_quic_issued_connection_id {
+  int in_use;
+  uint64_t sequence;
+  uint8_t id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  size_t length;
+  uint8_t reset_token[16];
+} wt_quic_issued_connection_id_t;
+
 typedef struct wt_quic_connection {
   wt_quic_connection_config_t config;
 
@@ -181,6 +194,10 @@ typedef struct wt_quic_connection {
   /* The connection-level limit this endpoint grants the peer, and whether it has been seeded. */
   uint64_t local_max_data;
   int local_max_data_set;
+  /* The connection IDs this endpoint has issued, bounded: a NEW_CONNECTION_ID is peer-visible state and
+   * an endpoint that issued them without a bound would be growing on its own instructions. */
+  wt_quic_issued_connection_id_t issued_ids[WT_QUIC_CONNECTION_IDS_MAX];
+  size_t issued_count;
   /* The streams this connection has, bounded by the table. */
   wt_quic_stream_table_t streams;
   /* The CONNECTION-level flow control, both directions: what this endpoint has granted and received,
@@ -344,6 +361,24 @@ wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, ui
 wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uint64_t stream_id,
                                            uint64_t offset, const uint8_t *data, size_t length,
                                            int fin, uint64_t now);
+
+/* Issue a connection ID this endpoint is willing to answer to, and tell the peer with a NEW_CONNECTION_ID
+ * (RFC 9000 section 19.15). `reset_token` is the stateless reset token that goes with it: it must be
+ * unguessable and it is the caller's to derive from a secret this layer does not hold (RFC 9000 section
+ * 10.3), so it is taken rather than invented.
+ *
+ * Refuses a connection ID longer than twenty bytes or shorter than one (section 17.2), a sequence number
+ * already used -- RFC 9000 section 19.15 makes a repeat a PROTOCOL_VIOLATION, and this layer reports it as
+ * a caller error before anything is sent -- a null reset token, and one more ID than the peer's
+ * `active_connection_id_limit` allows, because a peer that cannot store it is a peer that will close the
+ * connection. WT_ERR_LIMIT when this endpoint's own bounded table of issued IDs is full. */
+wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connection,
+                                                   const uint8_t *id, size_t length,
+                                                   const uint8_t reset_token[16], uint64_t now);
+
+/* The connection ID issued with this sequence number, or NULL. */
+const wt_quic_issued_connection_id_t *wt_quic_connection_issued_id(
+    const wt_quic_connection_t *connection, uint64_t sequence);
 
 /* Send one MAX_DATA frame (RFC 9000 section 19.9): the connection-level flow control limit this
  * endpoint grants the peer, counted in bytes of stream data received in total.

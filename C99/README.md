@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,985 checks, run by `ctest` and again under
+- 38 unit test files and 76,014 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -295,6 +295,10 @@ What is here:
   `ODCID Length || ODCID || Retry packet`, with the version's own key and nonce, so a client can tell a
   Retry the server sent from an injected one before any handshake. Its value is not asserted yet -- RFC
   9001 A.4's Retry packet still has to be extracted, and vectors here are extracted, never transcribed.
+- **Issuing connection IDs** (Phase 4, thirty-second part): `wt_quic_connection_issue_connection_id` sends
+  NEW_CONNECTION_ID (RFC 9000 section 19.15) and keeps what it issued, bounded by both its own table and
+  the peer's `active_connection_id_limit` less the handshake's ID (section 5.1.1), with the stateless reset
+  token taken from the caller because section 10.3 requires it to be unguessable.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

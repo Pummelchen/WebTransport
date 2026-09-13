@@ -1352,6 +1352,65 @@ static void test_stop_sending_send(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 sections 5.1.1 and 19.15: an endpoint issues connection IDs bounded by what the peer said it
+ * will store, and the peer's limit counts the ID the handshake used. */
+static void test_issue_connection_id(void) {
+  connection_pair_t pair;
+  uint8_t payload[64];
+  wt_quic_transport_parameters_t params;
+  static const uint8_t first_id[4] = {0x11U, 0x22U, 0x33U, 0x44U};
+  static const uint8_t second_id[4] = {0x55U, 0x66U, 0x77U, 0x88U};
+  uint8_t token[16];
+  uint64_t now = 103000000U;
+
+  memset(token, 0x5a, sizeof(token));
+  open_pair(WT_UDP_IPV4, &pair);
+  {
+    wt_quic_packet_keys_t keys;
+    uint8_t secret[WT_SHA256_LEN];
+    size_t i;
+    for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0xe0U + i);
+    WT_EXPECT_OK("application keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+    WT_EXPECT_OK("client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  }
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("a limit of two connection IDs",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 2U));
+  {
+    wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
+    WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
+    WT_EXPECT_OK("and is parsed",
+                 wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+  }
+
+  WT_EXPECT_STATUS("an empty connection ID is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_connection_issue_connection_id(&pair.client, first_id, 0U, token, now));
+  WT_EXPECT_STATUS("and a null token is", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_connection_issue_connection_id(&pair.client, first_id, sizeof(first_id),
+                                                          NULL, now));
+  WT_EXPECT_OK("one is issued",
+               wt_quic_connection_issue_connection_id(&pair.client, first_id, sizeof(first_id), token,
+                                                      now));
+  {
+    const wt_quic_issued_connection_id_t *issued = wt_quic_connection_issued_id(&pair.client, 0U);
+    WT_EXPECT_TRUE("and remembered by sequence", issued != NULL);
+    if (issued != NULL) {
+      WT_EXPECT_U64("with its length", (uint64_t)sizeof(first_id), (uint64_t)issued->length);
+      WT_EXPECT_BYTES("and its bytes", first_id, issued->id, sizeof(first_id));
+    }
+  }
+  WT_EXPECT_STATUS("the same ID again is a caller error", WT_ERR_STATE,
+                   wt_quic_connection_issue_connection_id(&pair.client, first_id, sizeof(first_id),
+                                                          token, now));
+  /* The limit counts the handshake's ID, so a grant of two leaves room for ONE spare. */
+  WT_EXPECT_STATUS("a second is beyond what the peer will store", WT_ERR_LIMIT,
+                   wt_quic_connection_issue_connection_id(&pair.client, second_id, sizeof(second_id),
+                                                          token, now));
+  WT_EXPECT_TRUE("and a sequence that was never issued is not found",
+                 wt_quic_connection_issued_id(&pair.client, 7U) == NULL);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1373,5 +1432,6 @@ int main(void) {
   test_reset_stream_send();
   test_stream_retransmit_descriptor();
   test_stop_sending_send();
+  test_issue_connection_id();
   WT_TEST_MAIN_END("wt_quic_connection");
 }
