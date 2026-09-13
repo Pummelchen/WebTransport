@@ -7,6 +7,7 @@
 
 #include "webtransport/cursor.h"
 #include "webtransport/http3/driver.h"
+#include "webtransport/http3/endpoint.h"
 #include "webtransport/http3/goaway.h"
 #include "webtransport/http3/role.h"
 #include "webtransport/webtransport/framing.h"
@@ -16,6 +17,7 @@
 
 #include "webtransport/quic/datagram.h"
 #include "webtransport/webtransport/capsule.h"
+#include "webtransport/webtransport/session_request.h"
 #include "webtransport/webtransport/session.h"
 #include "webtransport/quic/varint.h"
 
@@ -522,4 +524,155 @@ void wt_scenario_goaway_close_drain_matrix(wt_cli_report_t *report) {
   }
 
   report_matrix(report, "interop-goaway-close-drain-matrix", "goaway, close and drain cases", rows, count);
+}
+
+/* A decoded extended CONNECT, so a policy case varies ONE field. */
+static void build_connect(wt_http3_message_t *message, const char *path) {
+  memset(message, 0, sizeof(*message));
+  message->type = WT_HTTP3_HEADER_REQUEST;
+  message->method = (const uint8_t *)"CONNECT";
+  message->method_length = 7U;
+  message->scheme = (const uint8_t *)"https";
+  message->scheme_length = 5U;
+  message->authority = (const uint8_t *)"example.com";
+  message->authority_length = 11U;
+  message->path = (const uint8_t *)path;
+  message->path_length = strlen(path);
+  message->protocol = (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN;
+  message->protocol_length = strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN);
+}
+
+void wt_scenario_connect_matrix(wt_cli_report_t *report) {
+  matrix_row_t rows[WT_MATRIX_MAX_CASES];
+  unsigned count = 0U;
+  wt_webtransport_request_policy_t policy;
+  wt_http3_message_t message;
+  wt_webtransport_session_request_t decision;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  policy.authority = "example.com";
+  policy.path = "/chat";
+  policy.wt_enabled = 1;
+
+  /* The policy the server applies, one field at a time: what it serves, and what it was told it may serve. */
+  {
+    build_connect(&message, "/chat");
+    error = WT_HTTP3_NO_ERROR;
+    int ok = wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
+             decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT;
+    rows[count].name = "a CONNECT for the authority and path this server serves is accepted";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    build_connect(&message, "/other");
+    error = WT_HTTP3_NO_ERROR;
+    int ok = wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
+             decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT && decision.status == 404U;
+    rows[count].name = "another path is a 404, compared exactly";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    build_connect(&message, "/chat");
+    message.protocol = (const uint8_t *)"websocket";
+    message.protocol_length = 9U;
+    error = WT_HTTP3_NO_ERROR;
+    /* NOT_WEBTRANSPORT rather than REJECT: a CONNECT for somebody else's protocol is not a WebTransport
+     * request this server turned down, it is not one at all -- and the two answers differ, because the first
+     * is answered like any other request and the second is the draft's own refusal. */
+    int ok = wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
+             decision.outcome == WT_WEBTRANSPORT_REQUEST_NOT_WEBTRANSPORT;
+    rows[count].name = "another protocol token is not a WebTransport request at all";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_request_policy_t disabled = policy;
+    uint8_t section[128];
+    uint8_t scratch[128];
+    wt_writer_t w = wt_writer_init(section, sizeof(section));
+    disabled.wt_enabled = 0;
+    build_connect(&message, "/chat");
+    error = WT_HTTP3_NO_ERROR;
+    int ok = wt_http3_message_encode(&w, &message, 0U, &error) == WT_OK &&
+             wt_webtransport_session_request_validate(&message, &disabled, &decision, &error) == WT_OK &&
+             decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT;
+    (void)scratch;
+    rows[count].name = "a server that never advertised WT_ENABLED refuses the session";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The request-stream ordering machine, which is where "DATA before HEADERS" is decided: section 4.1 makes
+   * the first frame the request, so a DATA frame before it is H3_FRAME_UNEXPECTED. */
+  {
+    wt_http3_endpoint_t endpoint;
+    error = WT_HTTP3_NO_ERROR;
+    wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+    int ok = wt_http3_endpoint_on_request_stream(&endpoint, 0U, &error) == WT_OK;
+    error = WT_HTTP3_NO_ERROR;
+    ok = ok && wt_http3_endpoint_on_request_frame(&endpoint, 0U, WT_HTTP3_FRAME_DATA, &error) != WT_OK &&
+         error == WT_HTTP3_FRAME_UNEXPECTED;
+    rows[count].name = "DATA before HEADERS on a request stream is H3_FRAME_UNEXPECTED";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    uint8_t section[128];
+    uint8_t scratch[128];
+    wt_writer_t w = wt_writer_init(section, sizeof(section));
+    wt_http3_endpoint_t endpoint;
+    wt_http3_message_t decoded;
+    error = WT_HTTP3_NO_ERROR;
+    build_connect(&message, "/chat");
+    wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+    int ok = wt_http3_message_encode(&w, &message, 0U, &error) == WT_OK &&
+             wt_http3_endpoint_on_request_stream(&endpoint, 4U, &error) == WT_OK &&
+             wt_http3_endpoint_on_request_headers(&endpoint, 4U, section, wt_writer_offset(&w), scratch,
+                                                  sizeof(scratch), &decoded, &error) == WT_OK;
+    error = WT_HTTP3_NO_ERROR;
+    ok = ok && wt_http3_endpoint_on_request_frame(&endpoint, 4U, WT_HTTP3_FRAME_DATA, &error) == WT_OK;
+    {
+      wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
+      ok = ok && wt_http3_endpoint_request_state(&endpoint, 4U, &state) == WT_OK &&
+           state == WT_HTTP3_REQUEST_BODY;
+    }
+    rows[count].name = "HEADERS first, then DATA, leaves the request in its body";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_http3_endpoint_t endpoint;
+    error = WT_HTTP3_NO_ERROR;
+    wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+    int ok = wt_http3_endpoint_on_request_stream(&endpoint, 0U, &error) == WT_OK;
+    error = WT_HTTP3_NO_ERROR;
+    ok = ok && wt_http3_endpoint_on_request_end(&endpoint, 0U, &error) != WT_OK &&
+         error == WT_HTTP3_REQUEST_INCOMPLETE;
+    rows[count].name = "ending a request before its HEADERS is H3_REQUEST_INCOMPLETE";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_http3_endpoint_t endpoint;
+    error = WT_HTTP3_NO_ERROR;
+    wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+    int ok = wt_http3_endpoint_on_request_frame(&endpoint, 12U, WT_HTTP3_FRAME_DATA, &error) != WT_OK;
+    rows[count].name = "a frame on a request stream this endpoint never tracked is refused";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_http3_endpoint_t endpoint;
+    error = WT_HTTP3_NO_ERROR;
+    wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_CLIENT);
+    int ok = wt_http3_endpoint_on_request_stream(&endpoint, 0U, &error) != WT_OK &&
+             error == WT_HTTP3_STREAM_CREATION_ERROR;
+    rows[count].name = "a client receiving a request stream is H3_STREAM_CREATION_ERROR";
+    rows[count].held = ok;
+    count++;
+  }
+
+  report_matrix(report, "interop-connect-matrix", "CONNECT interop cases", rows, count);
 }
