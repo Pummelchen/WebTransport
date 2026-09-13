@@ -2020,9 +2020,13 @@ wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint
         oldest = i;
       }
     }
-    if (oldest < connection->loss.count && connection->lost_handler != NULL) {
-      connection->lost_handler(connection->lost_context,
-                               &connection->frames[connection->loss.sent[oldest].tag]);
+    if (probe_space < WT_QUIC_SPACE_COUNT) connection->probes_sent[probe_space]++;
+    if (oldest < connection->loss.count) {
+      connection->probes_with_data++;
+      if (connection->lost_handler != NULL) {
+        connection->lost_handler(connection->lost_context,
+                                 &connection->frames[connection->loss.sent[oldest].tag]);
+      }
     }
     wt_quic_loss_on_pto(&connection->loss);
     return flush_space(connection, probe_space, 1, 0, now);

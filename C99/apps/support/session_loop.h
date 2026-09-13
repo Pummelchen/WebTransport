@@ -78,6 +78,9 @@ typedef struct wt_loop_result {
   const char *handshake_state;
   /* How many lost-frame reports were answered by resending the request (WT-135). */
   unsigned resends;
+  /* Probe timeouts that fired, summed over the spaces, and how many carried an outstanding frame. */
+  unsigned probes;
+  unsigned probes_with_data;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */

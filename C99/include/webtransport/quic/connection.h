@@ -276,6 +276,11 @@ typedef struct wt_quic_connection {
    * two ways a lost frame goes unreported -- and reading the code had already failed to tell them apart (WT-135). */
   uint64_t packets_declared_lost[WT_QUIC_SPACE_COUNT];
   uint64_t lost_without_descriptor;
+  /* Probe timeouts that fired, by space, and how many of them had an outstanding frame to report. A probe is not
+   * a loss, so the counters above cannot say whether the timer ran at all -- and "no probe" and "probe with
+   * nothing to report" are different defects (WT-135). */
+  uint64_t probes_sent[WT_QUIC_SPACE_COUNT];
+  uint64_t probes_with_data;
 
   /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is

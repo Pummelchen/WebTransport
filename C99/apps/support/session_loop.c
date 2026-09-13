@@ -215,6 +215,10 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->has_application_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
   out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop->session.handshake));
   out->resends = loop->resends;
+  out->probes = (unsigned)(loop->session.connection.probes_sent[WT_QUIC_SPACE_INITIAL] +
+                           loop->session.connection.probes_sent[WT_QUIC_SPACE_HANDSHAKE] +
+                           loop->session.connection.probes_sent[WT_QUIC_SPACE_APPLICATION]);
+  out->probes_with_data = (unsigned)loop->session.connection.probes_with_data;
 }
 
 static void pump_once(loop_t *loop) {
