@@ -2150,6 +2150,17 @@ wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, ui
   return sent ? WT_OK : WT_ERR_STATE;
 }
 
+wt_status_t wt_quic_connection_stream_send_offset(const wt_quic_connection_t *connection,
+                                                  uint64_t stream_id, uint64_t *out_offset) {
+  const wt_quic_stream_t *stream;
+
+  if (connection == NULL || out_offset == NULL) return WT_ERR_INVALID_ARGUMENT;
+  stream = wt_quic_stream_table_find_const(&connection->streams, stream_id);
+  if (stream == NULL) return WT_ERR_STATE;
+  *out_offset = stream->send_offset;
+  return WT_OK;
+}
+
 wt_status_t wt_quic_connection_reset_stream_at(wt_quic_connection_t *connection, uint64_t stream_id,
                                                uint64_t error_code, uint64_t reliable_size, uint64_t now) {
   wt_quic_stream_t *stream;

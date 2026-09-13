@@ -52,6 +52,17 @@ extern "C" {
  * follows. */
 #define WT_HTTP3_DRIVER_DATA_STREAMS_MAX 32U
 
+/* One remembered WebTransport data stream. The PREFIX LENGTH is how many bytes of THIS endpoint's prefix are on
+ * that stream -- the draft's header that associates it with the session -- and it is 0 for a stream the peer
+ * opened, whose prefix is on the peer's own direction. It is here because draft-ietf-webtrans-http3-16 section 4.4
+ * requires a reset of a WebTransport stream to commit to at least that many bytes (a Reliable Size), so that the
+ * association survives the reset, and a driver that forgot which streams it had written a prefix on could not
+ * state it (WT-182). */
+typedef struct wt_http3_driver_data_stream {
+  uint64_t stream_id;
+  uint64_t prefix_length;
+} wt_http3_driver_data_stream_t;
+
 /* How many WebTransport CONNECT streams this driver may remember at once. A CONNECT stream is marked when its
  * session is known -- by the client when it sends the CONNECT, by the server when it accepts one -- so that the
  * bytes after its single HEADERS frame are the SESSION's capsules rather than HTTP/3 frames (draft-16 section 5).
@@ -152,7 +163,7 @@ typedef struct wt_http3_driver {
    * session's payload. Reading the payload as a prefix again closed a connection (WT-135); forgetting the prefix
    * and parsing the payload as HTTP/3 frames did it too, and only a peer that sends the prefix in one STREAM
    * frame and its message in the next could show that -- this tree's own client sends both together (WT-156). */
-  uint64_t data_stream_ids[WT_HTTP3_DRIVER_DATA_STREAMS_MAX];
+  wt_http3_driver_data_stream_t data_streams[WT_HTTP3_DRIVER_DATA_STREAMS_MAX];
   size_t data_stream_count;
   /* The WebTransport CONNECT streams whose capsules have begun, by ID, and the ones whose single HEADERS frame is
    * still to come. Draft-16 section 5 puts the session's control messages -- drain, close and the flow-control
@@ -170,12 +181,41 @@ typedef struct wt_http3_driver {
    * WT-159). */
   wt_http3_error_t last_error;
   wt_quic_connection_t *connection;
+  /* Whether the session's streams have been ended (section 6). Set by `wt_http3_driver_end_session_streams`, and
+   * read by the send paths that must refuse a new data stream or datagram afterwards. */
+  int session_ended;
 } wt_http3_driver_t;
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint);
 
 /* Say which session this endpoint serves, so a WebTransport stream's prefix can be checked against it. */
 void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_id);
+
+/* END THE SESSION'S DATA STREAMS: draft-ietf-webtrans-http3-16 section 6's reset, for every WebTransport stream
+ * this driver remembers.
+ *
+ * "Upon learning that the session has been terminated, the endpoint MUST reset the send side and abort reading on
+ * the receive side of all unidirectional and bidirectional streams associated with the session ... using the
+ * WT_SESSION_GONE error code; it MUST NOT send any new datagrams or open any new streams." The session object
+ * records that a session ended; the DRIVER is what knows which streams belonged to it, so the reset happens here
+ * and the two halves meet in one call.
+ *
+ * What it does, per remembered stream: a RESET_STREAM_AT carrying `WT_WEBTRANSPORT_ERROR_SESSION_GONE`, with the
+ * Reliable Size set to this endpoint's prefix capped by the bytes actually sent (section 4.4's rule, and the
+ * reason the table above remembers the prefix length), and a STOP_SENDING with the same code for a stream this
+ * endpoint can still receive on. The streams are then FORGOTTEN, so a second call does nothing, and the driver
+ * refuses a new data stream or datagram (WT_ERR_STATE) from here on: both are the section's MUST NOT.
+ *
+ * WT_ERR_STATE when no connection is bound (`wt_http3_driver_bind_connection`), because a reset is a frame.
+ * `out_streams_ended` reports how many streams were reset, which a caller logs or asserts; a stream the connection
+ * refuses (one it no longer has, or a reliable reset the peer did not negotiate) is skipped and counted in the
+ * same number only if it was reset -- the return is the first refusal, and WT_OK says every one of them went. */
+wt_status_t wt_http3_driver_end_session_streams(wt_http3_driver_t *driver, uint64_t now,
+                                                size_t *out_streams_ended);
+
+/* Whether the session's streams have been ended, so a caller can tell "the session is over" from "it never
+ * started" without reading the count. */
+int wt_http3_driver_session_ended(const wt_http3_driver_t *driver);
 
 /* One unidirectional stream's bytes, as a connection reported them.
  *

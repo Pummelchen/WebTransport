@@ -118,6 +118,21 @@ static void init_side(loop_side_t *side, wt_http3_role_t role) {
   side->sink.on_datagram = side_on_datagram;
 }
 
+/* The session's streams, ended when the session is (draft-16 section 6).
+ *
+ * The capsule stream -- shared with the conformance tool -- owns the session object and knows when it closes; the
+ * DRIVER owns the data streams; this is where the two meet, one call, and the driver's own flag makes it
+ * idempotent so every close path can call it without bookkeeping. Nothing is sent into a session that is over
+ * afterwards, which is the section's other MUST. */
+static void end_session_streams_if_closed(loop_side_t *side) {
+  size_t ended = 0U;
+
+  if (side == NULL || side->connection == NULL) return;
+  if (wt_http3_driver_session_ended(&side->driver) != 0) return;
+  if (side->capsules.session.state != WT_WEBTRANSPORT_SESSION_CLOSED) return;
+  (void)wt_http3_driver_end_session_streams(&side->driver, side->now_for_close, &ended);
+}
+
 static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint64_t type,
                                          const uint8_t *payload, size_t length, int last) {
   loop_side_t *side = context;
@@ -163,6 +178,9 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
 
     status = wt_capsule_stream_on_bytes(&side->capsules, data, length, fin, wt_capsule_stream_apply_flow,
                                         &side->capsules, &error);
+    /* A close capsule in either direction, or the CONNECT stream ending, is the session's end: section 6's reset
+     * of its streams follows here, and it is idempotent, so every path below can reach it. */
+    end_session_streams_if_closed(side);
     if (status != WT_OK) {
       /* A refusal the peer has to be told about, in whichever error space it belongs to. The status is still
        * returned, because a hint is not a close: the QUIC layer closes when the handler that refused says so. */

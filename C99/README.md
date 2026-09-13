@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 83 test programs and 91,248 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
+- 83 test programs and 91,312 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -250,7 +250,7 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **30 of 30 draft-16 requirements in
+  `scripts/score-matrix.sh` rather than from memory: **31 of 31 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 7 of the plan's 9 completion
   criteria are met, with 2 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
   which is not the same as being done. The two partial criteria are outside the matrix: the FreeBSD
@@ -631,6 +631,21 @@ What is here:
   dropped and counted) and drained when the ID becomes known, with the ones naming this session delivered and the
   rest dropped rather than refused, because they were never an error at the time they arrived. A datagram that
   arrives once the ID IS known and names another session is refused, which is what the hostile act measures.
+- **A terminated session resets its streams** (WT-182): draft-16 section 6's MUST -- "Upon learning that the session
+  has been terminated, the endpoint MUST reset the send side and abort reading on the receive side of all
+  unidirectional and bidirectional streams associated with the session ... using the `WT_SESSION_GONE` error code;
+  it MUST NOT send any new datagrams or open any new streams." The session object records that a session ended and
+  the DRIVER is what knows which streams belonged to it, so `wt_http3_driver_end_session_streams` is where the two
+  meet: per remembered stream a `RESET_STREAM_AT` carrying `WT_SESSION_GONE` with the Reliable Size set to this
+  endpoint's prefix capped by the bytes actually sent (section 4.4's rule, which is why the driver remembers each
+  prefix's length), a `STOP_SENDING` with the same code for a side this endpoint can still read, and the streams
+  forgotten so a second call is a no-op. A stream whose SEND half is already finished is SKIPPED rather than
+  treated as a failure -- there is nothing left to abort, and the peer learns the session is gone from the streams
+  that were open -- and the driver refuses a new data stream or datagram (the section's MUST NOT) from then on.
+  `wt_quic_connection_stream_send_offset` is the accessor that makes the Reliable Size computable at all: a
+  commitment past what was sent is a `FRAME_ENCODING_ERROR` at the peer. The CLI calls it from the one place that
+  knows the session closed. What is still absent is section 4.6's other half -- a stream that arrives before its
+  session is known is refused rather than parked and bounded (WT-180).
 - **The draft's error codes, and the mapping §4.4 requires** (WT-181): two error spaces, and the difference is a
   MUST. A WebTransport **application** error is a 32-bit integer the application chose, and section 4.4 requires it
   to be remapped into the `WT_APPLICATION_ERROR` range 0x52e4a40fa8db..0x52e5ac983162 -- **skipping** the

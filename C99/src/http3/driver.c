@@ -5,6 +5,8 @@
 
 #include "webtransport/http3/driver.h"
 
+#include "webtransport/webtransport/error.h"
+
 #include "webtransport/cursor.h"
 #include <string.h>
 
@@ -33,10 +35,13 @@ void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoi
 }
 
 /* Remember a stream whose prefix is settled: this endpoint opened it, or the peer did and the prefix said
- * WebTransport. One table, one rule -- the bytes after the prefix are the session's. */
-static wt_status_t remember_data_stream(wt_http3_driver_t *driver, uint64_t stream_id) {
+ * WebTransport. One table, one rule -- the bytes after the prefix are the session's. `our_prefix_length` is what
+ * THIS endpoint wrote on that stream (0 for one the peer opened), kept for the reset section 4.4 requires. */
+static wt_status_t remember_data_stream(wt_http3_driver_t *driver, uint64_t stream_id,
+                                        uint64_t our_prefix_length) {
   if (driver->data_stream_count >= WT_HTTP3_DRIVER_DATA_STREAMS_MAX) return WT_ERR_LIMIT;
-  driver->data_stream_ids[driver->data_stream_count] = stream_id;
+  driver->data_streams[driver->data_stream_count].stream_id = stream_id;
+  driver->data_streams[driver->data_stream_count].prefix_length = our_prefix_length;
   driver->data_stream_count++;
   return WT_OK;
 }
@@ -606,7 +611,9 @@ static wt_status_t route_quic_frame(wt_http3_driver_t *driver, wt_quic_space_t s
              * its message in separate STREAM frames -- which is what aioquic does, and what this tree's own
              * client never did, so the omission was invisible (WT-156). */
             {
-              wt_status_t remembered = remember_data_stream(driver, stream_id);
+              /* The prefix that was just classified is the PEER's: this endpoint has written nothing on this
+               * stream, so what a later reset may commit to is zero bytes. */
+              wt_status_t remembered = remember_data_stream(driver, stream_id, 0U);
               if (remembered != WT_OK) return remembered;
             }
             if (sink != NULL && sink->on_stream_data != NULL) {
@@ -817,6 +824,7 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
   uint8_t framed[WT_HTTP3_DRIVER_PREFIX_MAX + WT_HTTP3_DRIVER_SCRATCH];
   wt_writer_t w = wt_writer_init(framed, sizeof(framed));
   uint64_t stream_id = 0U;
+  size_t prefix_length = 0U;
   wt_status_t status;
 
   if (driver == NULL || driver->endpoint == NULL || transport == NULL ||
@@ -828,11 +836,17 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
   /* The session must be known before a stream names it: a prefix that names no session is one the peer has to
    * refuse, which is a worse outcome than saying so here. */
   if (driver->session_id_set == 0) return WT_ERR_STATE;
+  /* Section 6: an endpoint that has learned its session is over "MUST NOT send any new datagrams or open any new
+   * streams", so a data stream after that point is refused by name rather than sent into a session nobody has. */
+  if (driver->session_ended != 0) return WT_ERR_STATE;
   if (driver->data_stream_count >= WT_HTTP3_DRIVER_DATA_STREAMS_MAX) return WT_ERR_LIMIT;
 
   if (wt_webtransport_stream_prefix_write(&w, unidirectional, driver->session_id) != WT_OK) {
     return WT_ERR_LIMIT;
   }
+  /* Where the prefix ended, taken HERE rather than recomputed: it is the offset before the payload is written,
+   * and it is what a later reset of this stream has to commit to (section 4.4). */
+  prefix_length = wt_writer_offset(&w);
   wt_writer_bytes(&w, data, length);
   if (!wt_writer_ok(&w)) return WT_ERR_LIMIT;
 
@@ -849,11 +863,94 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
   if (status != WT_OK) return status;
 
   /* Remembered only once the bytes are away: an owner that has not sent anything yet would make the receive
-   * path treat the stream as this endpoint's data stream while the peer has no reason to know it exists. */
-  status = remember_data_stream(driver, stream_id);
+   * path treat the stream as this endpoint's data stream while the peer has no reason to know it exists. The
+   * prefix length recorded is the one THIS endpoint wrote, which is what a reset has to commit to. */
+  status = remember_data_stream(driver, stream_id, (uint64_t)prefix_length);
   if (status != WT_OK) return status;
   if (out_stream_id != NULL) *out_stream_id = stream_id;
   return WT_OK;
+}
+
+wt_status_t wt_http3_driver_end_session_streams(wt_http3_driver_t *driver, uint64_t now,
+                                                size_t *out_streams_ended) {
+  size_t index;
+  size_t ended = 0U;
+  wt_status_t first_refusal = WT_OK;
+
+  if (out_streams_ended != NULL) *out_streams_ended = 0U;
+  if (driver == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* A reset is a frame, so this needs the connection a refusal would be stated to as well (WT-158, WT-159): the
+   * driver is where the code is known and the connection is where the frame goes. */
+  if (driver->connection == NULL) return WT_ERR_STATE;
+
+  /* The session is over from here on, whatever happens below: section 6's "MUST NOT send any new datagrams or
+   * open any new streams" is about the session's state, not about how many resets succeeded. */
+  driver->session_ended = 1;
+
+  for (index = 0U; index < driver->data_stream_count; index++) {
+    uint64_t stream_id = driver->data_streams[index].stream_id;
+    uint64_t send_offset = 0U;
+    uint64_t reliable_size;
+    int skip_reset = 0;
+    wt_status_t status;
+
+    /* Section 4.4: a reset of a WebTransport stream commits to at least the prefix that associates it, and a
+     * commitment past what has been sent is a FRAME_ENCODING_ERROR at the peer -- so the commitment is the prefix
+     * capped by the bytes actually sent. A stream the peer opened has no prefix of ours (0), and one this endpoint
+     * wrote a prefix on has sent at least those bytes. */
+    reliable_size = driver->data_streams[index].prefix_length;
+    if (wt_quic_connection_stream_send_offset(driver->connection, stream_id, &send_offset) == WT_OK &&
+        reliable_size > send_offset) {
+      reliable_size = send_offset;
+    }
+
+    /* A stream whose SEND half is already finished -- or already reset -- has nothing for section 6 to abort, and
+     * the stream machine refuses a second reset with WT_ERR_STATE. Skipping it is not a refusal: a stream this
+     * endpoint ended cleanly is ended, and the peer learns the session is gone from the streams that were still
+     * open (and from this endpoint's own close). Its RECEIVE half is still aborted below, which is the half the
+     * section speaks about separately. */
+    {
+      const wt_quic_stream_t *stream = wt_quic_connection_stream(driver->connection, stream_id);
+      if (stream != NULL && (stream->send_state == WT_QUIC_SEND_DATA_SENT ||
+                             stream->send_state == WT_QUIC_SEND_DATA_RECVD ||
+                             stream->send_state == WT_QUIC_SEND_RESET_SENT ||
+                             stream->send_state == WT_QUIC_SEND_RESET_RECVD)) {
+        skip_reset = 1;
+      }
+    }
+
+    status = skip_reset != 0 ? WT_OK : wt_quic_connection_reset_stream_at(
+                                            driver->connection, stream_id,
+                                            WT_WEBTRANSPORT_ERROR_SESSION_GONE, reliable_size, now);
+    if (status == WT_OK) {
+      if (skip_reset == 0) ended++;
+    } else if (first_refusal == WT_OK) {
+      /* A stream the connection no longer has, one this endpoint may not reset, or a peer that did not negotiate
+       * the reliable reset: the first refusal is reported and the rest of the streams are still attempted, because
+       * one stream that cannot be reset does not excuse the others. */
+      first_refusal = status;
+    }
+
+    /* And the receive side: "abort reading on the receive side". A STOP_SENDING the connection refuses (a stream
+     * this endpoint cannot receive on, or one already ended) is not an error of this call. */
+    if (wt_quic_stream_id_is_bidirectional(stream_id) != 0 ||
+        wt_quic_stream_id_from_client(stream_id) !=
+            (driver->connection->config.role == WT_QUIC_ROLE_CLIENT)) {
+      (void)wt_quic_connection_stop_sending(driver->connection, stream_id,
+                                            WT_WEBTRANSPORT_ERROR_SESSION_GONE, now);
+    }
+
+    /* Forgotten, so that a second call is a no-op rather than a second reset of a stream that is already gone. */
+    driver->data_streams[index].stream_id = 0U;
+    driver->data_streams[index].prefix_length = 0U;
+  }
+  driver->data_stream_count = 0U;
+  if (out_streams_ended != NULL) *out_streams_ended = ended;
+  return first_refusal;
+}
+
+int wt_http3_driver_session_ended(const wt_http3_driver_t *driver) {
+  return driver != NULL ? driver->session_ended : 0;
 }
 
 wt_http3_error_t wt_http3_driver_last_error(const wt_http3_driver_t *driver) {
@@ -866,7 +963,7 @@ int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t str
 
   if (driver == NULL) return 0;
   for (index = 0U; index < driver->data_stream_count; index++) {
-    if (driver->data_stream_ids[index] == stream_id) return 1;
+    if (driver->data_streams[index].stream_id == stream_id) return 1;
   }
   return 0;
 }
@@ -1048,5 +1145,7 @@ wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,
     return WT_ERR_INVALID_ARGUMENT;
   }
   if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  /* Section 6's other MUST NOT: a datagram is not sent into a session that is over. */
+  if (driver->session_ended != 0) return WT_ERR_STATE;
   return transport->send_datagram(transport->context, data, length);
 }

@@ -639,6 +639,19 @@ wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connect
 const wt_quic_issued_connection_id_t *wt_quic_connection_issued_id(
     const wt_quic_connection_t *connection, uint64_t sequence);
 
+/* How many bytes this endpoint has SENT on a stream: the stream's send offset, which is what a reliable reset's
+ * Reliable Size is bounded by.
+ *
+ * Draft-ietf-quic-reliable-stream-reset makes a Reliable Size larger than the Final Size a FRAME_ENCODING_ERROR at
+ * the receiver -- and the final size of a stream this endpoint resets is the bytes it sent -- so a caller that
+ * wants to commit to a prefix (which is what draft-ietf-webtrans-http3-16 section 4.4 requires when a WebTransport
+ * stream is reset) has to know how much of it went out. The connection knows; this is how it says so.
+ *
+ * WT_ERR_STATE when the stream is not in this connection's table, which is not an error about the caller's number
+ * but about a stream that was never opened or received here. */
+wt_status_t wt_quic_connection_stream_send_offset(const wt_quic_connection_t *connection,
+                                                  uint64_t stream_id, uint64_t *out_offset);
+
 /* Send one MAX_DATA frame (RFC 9000 section 19.9): the connection-level flow control limit this
  * endpoint grants the peer, counted in bytes of stream data received in total.
  *
