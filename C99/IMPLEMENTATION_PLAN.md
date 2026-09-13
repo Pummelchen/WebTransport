@@ -1852,7 +1852,7 @@ does not re-enter itself, so the sequence a recording callback sees is a faithfu
 "nobody asked for this" into a connection error, because blaming the peer for this endpoint's configuration is
 the failure mode that makes an API unusable from a program that only wants streams. The one thing it does
 refuse is a bound this endpoint published: a stream table sized by `max_streams` and a datagram bound
-`sized by` `max_datagram_bytes`, both refused with the H3 excessive-load code and never grown for a peer.
+sized by `max_datagram_bytes`, both refused with the H3 excessive-load code and never grown for a peer.
 
 Peer streams live in a fixed table (`WT_SESSION_STREAM_MAX` slots) rather than a dynamic one, and a stream or
 datagram that names a DIFFERENT session is refused with HTTP/3's identifier error rather than delivered to the
