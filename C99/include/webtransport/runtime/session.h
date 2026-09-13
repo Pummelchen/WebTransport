@@ -58,6 +58,15 @@ typedef struct wt_runtime_session {
    * them; a connection whose limits were never applied refuses the streams HTTP/3 must open before it can
    * send anything, and the refusal looks like a state error rather than a missing step. */
   int peer_parameters_applied;
+  /* What the last flush SAID. A pump that discarded it could not tell "nothing to send" from "refused to
+   * send", and this session spent three rounds unable to see the difference -- so the status is kept and
+   * reported rather than swallowed. */
+  wt_status_t last_flush;
+  wt_status_t last_receive;
+  /* Receives that failed for a reason that is NEITHER "nothing there" nor success: a packet that arrived
+   * and was refused, which a pump that only counts successes cannot see. */
+  unsigned receive_errors;
+  wt_status_t first_receive_error;
   /* The layer behind the handshake, if one was installed: a function pointer and its context, because
    * the only thing that varies between "no next layer yet" and the HTTP/3 driver is which function. */
   wt_status_t (*next_handler)(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);

@@ -160,13 +160,20 @@ wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now)
   }
 
   received = wt_quic_connection_receive(&session->connection, now);
-  if (received == WT_OK) session->packets_seen++;
+  session->last_receive = received;
+  if (received == WT_OK) {
+    session->packets_seen++;
+  } else if (received != WT_ERR_AGAIN) {
+    if (session->receive_errors == 0U) session->first_receive_error = received;
+    session->receive_errors++;
+  }
 
   status = wt_quic_handshake_flush(&session->handshake, now);
   if (status != WT_OK && status != WT_ERR_AGAIN) return status;
   if (status == WT_OK) session->flushes++;
 
   status = wt_quic_connection_flush(&session->connection, now);
+  session->last_flush = status;
   if (status != WT_OK && status != WT_ERR_AGAIN) return status;
 
   status = wt_quic_connection_on_timeout(&session->connection, now);

@@ -479,13 +479,24 @@ static void test_a_connect_crosses_a_real_connection(void) {
    * means the connection consumes STREAM frames into its own stream state and the inbound path has to
    * come from there rather than from the frame handler. That is recorded as WT-110 on the tracker with
    * this evidence, and the test asserts only what is true today: the bytes went out. */
-  /* MEASURED, and the one number that separates the two halves: across the pump rounds after the CONNECT,
-   * the client's `connection.packets_sent` does NOT move (it stays at 9 while the frame was accepted and the
-   * stream recorded it), and the packets the server reads in that time are its own retransmissions. So the
-   * CONNECT is written, recorded -- and never leaves. `wt_quic_connection_flush` is where that is decided,
-   * and the pump SWALLOWS its WT_ERR_AGAIN, which is the first thing the next round should stop doing.
-   * WT-110 carries this; the test asserts only what is true today. */
+  /* MEASURED, and this round CORRECTED the previous reading of the same number. `packets_sent` was 9
+   * BEFORE the measurement window and 9 after it, which the last round read as "the packet never leaves".
+   * It had already been incremented by the send itself: the CONNECT packet WAS sent. The measurements that
+   * hold are: the server reads packets, refuses none (a receive that is neither success nor "nothing there"
+   * is counted and is zero), the flush reports OK on both sides, and application keys are installed in both
+   * directions -- and still no stream is created and no frame reaches the handler.
+   *
+   * So the next counter belongs inside the connection's FRAME WALK (ensure_peer_stream and
+   * deliver_to_handler), not in the session. WT-110 carries the corrected sequence. */
   rounds = pump_pair(&pair, 60U, NULL);
+  /* The pump's own instrumentation, asserted rather than printed: both sides read packets, neither side
+   * refused one (a receive that is neither success nor "nothing there" is counted), and the flush reported
+   * OK -- so "the packet was refused somewhere on the way in" is now ruled out by measurement rather than
+   * by reading. What is left is the server's frame WALK, which is where the next counter belongs. */
+  WT_EXPECT_U64("the server refused no packet", 0U, (uint64_t)pair.server.receive_errors);
+  WT_EXPECT_U64("and neither did the client", 0U, (uint64_t)pair.client.receive_errors);
+  WT_EXPECT_STATUS("the client's flush succeeded", WT_OK, pair.client.last_flush);
+  WT_EXPECT_STATUS("the server's flush succeeded", WT_OK, pair.server.last_flush);
   /* The stream RECORDS what it sent: the connection writes the frame and leaves the offset to whoever
    * asked for the send, so a transport adapter that did not record it would send every later frame at the
    * same offset -- and this assertion is what caught exactly that. */

@@ -2331,10 +2331,20 @@ NOT move -- it stays at 9 -- while the frame was accepted and the stream recorde
 reads in that time are the SERVER's own retransmissions. So the CONNECT is written, recorded, and never leaves:
 `wt_quic_connection_flush` is where that is decided.
 
-That also exposes a weakness in the pump this phase wrote: it SWALLOWS `WT_ERR_AGAIN` from the connection flush,
-so a refusal has been invisible for three rounds. The next round should stop swallowing it -- keep the status,
-report it, and assert on it -- because a pump that cannot tell "nothing to send" from "refused to send" is the
-same class of mistake as a conformance report that cannot tell "passed" from "not attempted" (WT-106).
+That also exposed a weakness in the pump this phase wrote: it SWALLOWED `WT_ERR_AGAIN` from the connection
+flush, so a refusal had been invisible for three rounds. The pump keeps the status now (`last_flush`,
+`last_receive`, and a count of receives that are neither success nor "nothing there"), and the test ASSERTS on
+all three -- a pump that cannot tell "nothing to send" from "refused to send" is the same class of mistake as a
+conformance report that cannot tell "passed" from "not attempted" (WT-106).
+
+**And keeping the status corrected the previous round's headline.** With the instrumentation in place the
+measurements are: both sides read packets, NEITHER refuses any, both flushes report OK, and application keys
+are installed in both directions -- while still no stream is created on the server and no frame reaches its
+handler. `packets_sent` was 9 BEFORE the measurement window and 9 after it, which the previous round read as
+"the packet never leaves"; it had already been incremented by the send itself, so the CONNECT packet WAS sent.
+The window was the wrong one, not the conclusion about the whole path. The next counter therefore belongs inside
+the connection's FRAME WALK (`ensure_peer_stream`, `deliver_to_handler`), which is the one place left that no
+measurement has looked at, and WT-110 carries the corrected sequence.
 
 The test asserts only what is true today (the CONNECT goes out, the client records and tracks its request
 stream), and WT-110 carries the measurement and the next step.
