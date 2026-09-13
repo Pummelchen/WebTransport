@@ -18,6 +18,8 @@
 #include "webtransport/webtransport/session_request.h"
 #include "webtransport/writer.h"
 
+#include "capsule_stream.h"
+
 #define WT_LOOP_ROUNDS 20000U
 #define WT_LOOP_WAIT_MICROS 2000U
 
@@ -45,6 +47,10 @@ typedef struct loop_side {
   size_t data_bytes;
   int data_was_datagram;
   uint32_t status;
+  /* The session and the peer's flow-control account, fed by the capsules on the CONNECT stream (WT-164). The
+   * walking and the byte-keeping are `apps/support/capsule_stream.c`, shared with the conformance tool so that
+   * "the session's capsules" means one thing in both. */
+  wt_capsule_stream_t capsules;
 } loop_side_t;
 
 typedef struct loop {
@@ -74,6 +80,7 @@ static void init_side(loop_side_t *side, wt_http3_role_t role) {
   memset(side, 0, sizeof(*side));
   wt_http3_endpoint_init(&side->endpoint, role);
   wt_http3_driver_init(&side->driver, &side->endpoint);
+  wt_capsule_stream_init(&side->capsules);
   side->sink.context = side;
   side->sink.on_frame_payload = side_on_frame_payload;
   side->sink.on_stream_data = side_on_stream_data;
@@ -116,8 +123,13 @@ static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint
 static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
                                        size_t length, int fin) {
   loop_side_t *side = context;
-  (void)stream_id;
-  (void)fin;
+
+  /* The CONNECT stream is the session's, not a data stream's: its bytes after the one HEADERS frame are capsules
+   * (draft-16 section 5), and the driver routes them here rather than framing them (WT-164). */
+  if (stream_id == side->request_stream_id) {
+    return wt_capsule_stream_on_bytes(&side->capsules, data, length, fin, wt_capsule_stream_apply_flow,
+                                      &side->capsules.peer_limits);
+  }
   if (side->data_bytes + length <= sizeof(side->data)) {
     if (length > 0U) memcpy(side->data + side->data_bytes, data, length);
     side->data_bytes += length;
@@ -303,6 +315,14 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->request_stream_id = loop->side.request_stream_id;
   out->streams_opened_bidi = (unsigned)loop->session.connection.streams.opened_by_us_bidi;
   out->streams_opened_uni = (unsigned)loop->session.connection.streams.opened_by_us_uni;
+  /* Straight from the state the capsules moved, rather than from a counter of its own: a grant that was applied IS
+   * the flow account, and a session the peer ended IS a close received with the code the first close carried. */
+  out->peer_max_data_set = loop->side.capsules.peer_limits.max_data_set;
+  out->peer_max_data = loop->side.capsules.peer_limits.max_data;
+  out->peer_drained = loop->side.capsules.session.drain_received;
+  out->peer_close_code_set = loop->side.capsules.session.close_received != 0 &&
+                             loop->side.capsules.session.close_error_set != 0;
+  out->peer_close_code = loop->side.capsules.session.close_error_code;
 }
 
 static void pump_once(loop_t *loop) {
@@ -494,6 +514,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     }
     out->connect_accepted = response.has_status != 0 && response.status >= 200U && response.status < 300U;
     out->status = (uint32_t)response.status;
+    /* The response establishes the session (section 3.1). The CONNECT stream was marked as a capsule stream by
+     * `start_session`, and this response is the one HTTP/3 frame that mark was waiting for -- so the peer's
+     * capsules are walked from here on (WT-164). */
+    if (out->connect_accepted != 0) wt_capsule_stream_established(&loop.side.capsules);
   }
 
   {
@@ -781,7 +805,15 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     out->request_status = (uint64_t)decision.status;
     out->h3_error = (uint64_t)h3_error;
     if (validated == WT_OK && decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT) {
-      /* The decision is kept and the exchange continues below. */
+      /* The decision is kept and the exchange continues below. The request stream becomes a CAPSULE stream here,
+       * which is the earliest moment this endpoint can know it is one: the request's HEADERS frame has just been
+       * read, so the peer's capsules begin after it (WT-164). */
+      if (wt_http3_driver_mark_capsule_stream(&loop.side.driver, loop.side.request_stream_id, 0) != WT_OK) {
+        record_oracle(&loop, out);
+        wt_runtime_session_clear(&loop.session);
+        wt_udp_close(&loop.socket);
+        return WT_ERR_LIMIT;
+      }
     } else {
       record_oracle(&loop, out);
     record_oracle(&loop, out);

@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "capsule_stream.h"
 #include "webtransport/cli/report.h"
 #include "webtransport/http3/driver.h"
 #include "webtransport/runtime/session.h"
@@ -44,6 +45,10 @@ typedef struct scenario_side {
   uint8_t datagram[256];
   size_t datagram_bytes;
   unsigned datagrams;
+  /* The session and the peer's flow-control account, fed by the capsules on the CONNECT stream (WT-164): the
+   * walking is `apps/support/capsule_stream.c`, shared with both CLI tools so that the scenario is asserting the
+   * same code path a tool runs rather than a second copy of it. */
+  wt_capsule_stream_t capsules;
 } scenario_side_t;
 
 typedef struct scenario_pair {

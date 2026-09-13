@@ -158,13 +158,18 @@ int main(int argc, char **argv) {
        * script validates the report as JSON now, which is what a caller parsing it does (WT-144). */
       printf("\",\"request\":\"%s\",\"requestOutcome\":%u,\"requestStatus\":%llu,\"h3Error\":%llu,"
              "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,\"closeCause\":\"%s\","
-             "\"closeSent\":%s,\"closeCauseFrame\":%llu}\n",
+             "\"closeSent\":%s,\"closeCauseFrame\":%llu,"
+             "\"peerMaxDataSet\":%s,\"peerMaxData\":%llu,\"peerDrained\":%s,"
+             "\"peerSessionClosed\":%s,\"peerSessionCloseCode\":%u}\n",
              result.request_line, result.request_outcome, (unsigned long long)result.request_status,
              (unsigned long long)result.h3_error,
              result.close_kind, (unsigned long long)result.close_sent_error_code,
              (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
              result.close_was_sent != 0 ? "true" : "false",
-             (unsigned long long)result.close_cause_frame);
+             (unsigned long long)result.close_cause_frame,
+             result.peer_max_data_set != 0 ? "true" : "false",
+             (unsigned long long)result.peer_max_data, result.peer_drained != 0 ? "true" : "false",
+             result.peer_close_code_set != 0 ? "true" : "false", result.peer_close_code);
     } else {
       printf("server: %s on port %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.bound_port, (unsigned long long)result.received_bytes,
@@ -182,6 +187,18 @@ int main(int argc, char **argv) {
         }
       } else if (result.close_kind != 0U) {
         printf("server: the connection was closed silently (the idle timeout; no CONNECTION_CLOSE was sent)\n");
+      }
+      /* What the peer said on the CONNECT stream: the session's own flow control and its close, neither of which
+       * a connection-level report can show (WT-164). */
+      if (result.peer_max_data_set != 0) {
+        printf("server: the peer granted MAX_DATA %llu over the session\n",
+               (unsigned long long)result.peer_max_data);
+      }
+      if (result.peer_drained != 0) {
+        printf("server: the peer sent a drain, so no new streams\n");
+      }
+      if (result.peer_close_code_set != 0) {
+        printf("server: the peer closed the SESSION with application code 0x%x\n", result.peer_close_code);
       }
     }
     return status == WT_OK ? 0 : 1;

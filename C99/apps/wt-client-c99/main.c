@@ -160,6 +160,8 @@ int main(int argc, char **argv) {
              "\"sent\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},"
              "\"acked\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},\"inFlight\":%u,"
              "\"transcriptTypes\":\"%s\","
+             "\"peerMaxDataSet\":%s,\"peerMaxData\":%llu,\"peerDrained\":%s,"
+             "\"peerSessionClosed\":%s,\"peerSessionCloseCode\":%u,"
              "\"acks\":{\"initial\":[%u,%llu],\"handshake\":[%u,%llu],\"application\":[%u,%llu]}}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
@@ -180,6 +182,9 @@ int main(int argc, char **argv) {
              result.streams_opened_uni, result.sent_initial, result.sent_handshake,
              result.sent_application, result.acked_initial, result.acked_handshake,
              result.acked_application, result.in_flight, wt_client_transcript_types(&result),
+             result.peer_max_data_set != 0 ? "true" : "false",
+             (unsigned long long)result.peer_max_data, result.peer_drained != 0 ? "true" : "false",
+             result.peer_close_code_set != 0 ? "true" : "false", result.peer_close_code,
              result.acks_initial,
              result.ack_largest_initial, result.acks_handshake, result.ack_largest_handshake,
              result.acks_application, result.ack_largest_application);
@@ -207,6 +212,18 @@ int main(int argc, char **argv) {
         if (result.peer_closed != 0) {
           printf("client: the peer closed with code 0x%llx\n", (unsigned long long)result.peer_error_code);
         }
+      }
+      /* What the peer said on the CONNECT stream, which a transport-level report cannot show: a session close
+       * leaves the connection open, so a peer that ended the session looks like a peer that is simply quiet. */
+      if (result.peer_max_data_set != 0) {
+        printf("client: the peer granted MAX_DATA %llu over the session\n",
+               (unsigned long long)result.peer_max_data);
+      }
+      if (result.peer_drained != 0) {
+        printf("client: the peer sent a drain, so no new streams\n");
+      }
+      if (result.peer_close_code_set != 0) {
+        printf("client: the peer closed the SESSION with application code 0x%x\n", result.peer_close_code);
       }
       /* Printed whatever the status is, and THAT is the point: this endpoint's own close is a fact about the run,
        * and a tool that stayed silent about it printed "ok" for a session it had ended itself (WT-144). The code

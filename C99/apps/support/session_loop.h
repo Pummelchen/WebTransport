@@ -136,6 +136,17 @@ typedef struct wt_loop_result {
   uint64_t request_stream_id;
   unsigned streams_opened_bidi;
   unsigned streams_opened_uni;
+  /* What the peer's CONNECT-stream CAPSULES carried (draft-16 section 5). The session's flow control arrives
+   * there, and before WT-164 this endpoint parsed those bytes as HTTP/3 frames: a flow-control grant's type is an
+   * unknown frame type, so its length was read as a frame length and the grant was dropped without a word. These
+   * fields are the fact that says it was not dropped -- `peer_max_data` is the send limit the peer granted, and
+   * `peer_close_code` is the application code it ended the session with, which a transport-level report cannot
+   * show because a session close leaves the connection open. */
+  int peer_max_data_set;
+  uint64_t peer_max_data;
+  int peer_drained;
+  int peer_close_code_set;
+  uint32_t peer_close_code;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */

@@ -16,6 +16,7 @@
 
 #include "scenario_session.h"
 #include "scenario_refusals.h"
+#include "scenario_capsules.h"
 #include "scenario_refusal_wire.h"
 #include "scenario_control.h"
 #include "scenario_headers.h"
@@ -230,6 +231,10 @@ int main(int argc, char **argv) {
      * told. One family is enough here: what is under test is the refusal path, and the pair's IPv6 path is
      * already exercised above. */
     wt_scenario_refusal_wire_run(&report);
+
+    /* And the session's OWN capsules over the same pair: a flow-control grant, a drain and a close, which draft-16
+     * section 5 carries on the CONNECT stream (WT-164). */
+    wt_scenario_capsules_run(&report);
 
     {
       static char ipv4_detail[WT_CLI_SCENARIO_DETAIL_MAX];

@@ -42,8 +42,13 @@ static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint
 static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
                                        size_t length, int fin) {
   scenario_side_t *side = context;
-  (void)stream_id;
-  (void)fin;
+
+  /* The CONNECT stream is the session's: its bytes after the one HEADERS frame are capsules, which the driver
+   * routes here rather than framing (WT-164). A scenario that sends one asserts what this applied. */
+  if (stream_id == side->request_stream_id) {
+    return wt_capsule_stream_on_bytes(&side->capsules, data, length, fin, wt_capsule_stream_apply_flow,
+                                      &side->capsules.peer_limits);
+  }
   if (side->stream_bytes + length <= sizeof(side->stream_data)) {
     if (length > 0U) memcpy(side->stream_data + side->stream_bytes, data, length);
     side->stream_bytes += length;
@@ -71,6 +76,7 @@ static void init_side(scenario_side_t *side, wt_http3_role_t role) {
   memset(side, 0, sizeof(*side));
   wt_http3_endpoint_init(&side->endpoint, role);
   wt_http3_driver_init(&side->driver, &side->endpoint);
+  wt_capsule_stream_init(&side->capsules);
   side->sink.context = side;
   side->sink.on_frame_payload = side_on_frame_payload;
   side->sink.on_stream_data = side_on_stream_data;
