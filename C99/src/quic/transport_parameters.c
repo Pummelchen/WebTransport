@@ -422,6 +422,14 @@ wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *p
   status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
                                                     4096U);
   if (status != WT_OK) return status;
+  /* RFC 9000 section 18.2: this is the limit for data the PEER sends on streams THIS endpoint opened, which is
+   * the response on the request stream and every answer on a WebTransport data stream. A client that omits it --
+   * which this did -- advertises zero, so a peer that honours the limit may send nothing back at all. Omitting it
+   * looked harmless because aioquic's server sent its answer anyway, and the two ends of this tree's own tests
+   * never had a peer to refuse (WT-145). */
+  status = wt_quic_transport_parameters_add_integer(
+      params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, 4096U);
+  if (status != WT_OK) return status;
   status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI, 4096U);
   if (status != WT_OK) return status;
   status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 8U);

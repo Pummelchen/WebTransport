@@ -406,8 +406,19 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   }
   out->established = 1;
 
+  /* The client's SETTINGS, from the one place that owns them: section 3.1 requires SETTINGS_H3_DATAGRAM and the
+   * draft-specific codepoint, and the set also carries the enabling codepoints of the earlier drafts, which is
+   * how section 7.1 negotiates with a peer that predates the rename (WT-145). */
   wt_http3_settings_init(&settings);
-  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+  {
+    wt_status_t status = wt_webtransport_settings_apply(&settings, 0);
+    if (status != WT_OK) {
+      record_oracle(&loop, out);
+      wt_runtime_session_clear(&loop.session);
+      wt_udp_close(&loop.socket);
+      return status;
+    }
+  }
   {
     wt_status_t status = wt_http3_driver_start_session(&loop.side.driver, &loop.transport, &settings,
                                                        config->authority, config->path, 0U, loop.now,
@@ -480,6 +491,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   wt_tls_server_config_t tls;
   wt_tls_server_identity_t identity;
   wt_http3_message_t request;
+  wt_http3_settings_t settings;
   wt_webtransport_request_policy_t policy;
   wt_webtransport_session_request_t decision;
   wt_http3_error_t h3_error = WT_HTTP3_NO_ERROR;
@@ -580,6 +592,29 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     return WT_ERR_TIMEOUT;
   }
   out->established = 1;
+
+  /* A WebTransport endpoint's SETTINGS, in the one place that owns them, and the server's own streams: this
+   * server sent NEITHER before, so it had no control stream and no SETTINGS frame at all. RFC 9114 section 6.2.1
+   * makes both mandatory for any HTTP/3 endpoint, and draft-16 section 3.1 makes the settings the thing a client
+   * waits for -- so this tool was not a server a third-party client could have talked to, and its own client
+   * never checked. Sent as soon as the handshake can carry 1-RTT data, which is before the response (WT-145). */
+  wt_http3_settings_init(&settings);
+  {
+    wt_status_t status = wt_webtransport_settings_apply(&settings, 1);
+    if (status != WT_OK) {
+      record_oracle(&loop, out);
+      wt_runtime_session_clear(&loop.session);
+      wt_udp_close(&loop.socket);
+      return status;
+    }
+    status = wt_http3_driver_start_own_streams(&loop.side.driver, &loop.transport, &settings, loop.now);
+    if (status != WT_OK) {
+      record_oracle(&loop, out);
+      wt_runtime_session_clear(&loop.session);
+      wt_udp_close(&loop.socket);
+      return status;
+    }
+  }
 
   /* The CONNECT, its section assembled from the driver's pieces, and the draft-16 decision. */
   for (round = 0U; round < deadline_rounds && loop.side.section_complete == 0; round++) {

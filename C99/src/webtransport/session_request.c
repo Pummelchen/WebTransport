@@ -9,6 +9,46 @@ static int token_is(const uint8_t *bytes, size_t length, const char *text) {
   return length == text_length && memcmp(bytes, text, text_length) == 0;
 }
 
+wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is_server) {
+  wt_status_t status;
+
+  if (settings == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  /* Section 3.1's list for BOTH roles, and the first is the one this function exists because of: an endpoint
+   * that omits SETTINGS_H3_DATAGRAM is not a WebTransport endpoint in draft-16's terms, and a peer that checks
+   * -- `web-transport`'s `supports_webtransport()` requires it plus a WebTransport setting -- will not accept
+   * the session at all (WT-145). */
+  status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U);
+  if (status != WT_OK) return status;
+
+  /* The draft-specific codepoint that identifies the version this tree implements. Section 7.1 makes it
+   * mandatory for a client of a draft version, and a server sends it too. */
+  status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+  if (status != WT_OK) return status;
+
+  /* The same negotiation for a peer that predates the rename: one codepoint per version, which is what section
+   * 7.1 asks of an endpoint that supports several. The value is the number of sessions this endpoint will
+   * accept on the connection, and one is what this tree's tools serve. */
+  status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS, 1U);
+  if (status != WT_OK) return status;
+  status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, 1U);
+  if (status != WT_OK) return status;
+  if (is_server) {
+    /* Only the server sets this half of the pair it replaced: the client sends ENABLE, the server answers with a
+     * limit. */
+    status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS_DEPRECATED, 1U);
+    if (status != WT_OK) return status;
+  }
+
+  if (is_server) {
+    /* RFC 9220 section 3: a client may only send `:protocol` once the server has advertised that it handles
+     * extended CONNECT, so a server that serves WebTransport at all has to say so (section 3.1's server list). */
+    status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U);
+    if (status != WT_OK) return status;
+  }
+  return WT_OK;
+}
+
 wt_status_t wt_webtransport_session_request_validate(
     const wt_http3_message_t *message, const wt_webtransport_request_policy_t *policy,
     wt_webtransport_session_request_t *out, wt_http3_error_t *out_error) {

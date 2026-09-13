@@ -115,8 +115,58 @@ static void test_rejections(void) {
                 (uint64_t)request.status);
 }
 
+
+/* A helper for the test below: is `identifier` present with exactly `value`? */
+static int has_setting(const wt_http3_settings_t *settings, uint64_t identifier, uint64_t value) {
+  int present = 0;
+  uint64_t read = wt_http3_settings_get(settings, identifier, &present);
+  return present != 0 && read == value;
+}
+
+/* What a WebTransport endpoint MUST advertise (draft-16 section 3.1), asserted as a set because a missing member
+ * is what the third-party peer refused: this tree's client sent only SETTINGS_WT_ENABLED, so `web-transport`'s
+ * `supports_webtransport()` -- datagram support AND a WebTransport setting -- saw no WebTransport endpoint and
+ * never answered the CONNECT (WT-145). The earlier drafts' enabling codepoints are asserted too, because section
+ * 7.1 negotiates a version with one codepoint per version and a peer that predates the rename recognises none of
+ * the others. */
+static void test_the_settings_a_webtransport_endpoint_advertises(void) {
+  wt_http3_settings_t settings;
+
+  /* A client: the datagram setting and the version codepoints, and NOT the CONNECT-protocol setting, which is
+   * the server's to advertise (RFC 9220 section 3: a client may only send `:protocol` once the server has). */
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("a client's settings apply", wt_webtransport_settings_apply(&settings, 0));
+  WT_EXPECT_INT("with H3_DATAGRAM", 1, has_setting(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
+  WT_EXPECT_INT("with the draft-specific WT_ENABLED codepoint", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_INT("with the earlier drafts' session codepoint", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS, 1U));
+  WT_EXPECT_INT("and with the codepoint it replaced", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, 1U));
+  WT_EXPECT_INT("but not ENABLE_CONNECT_PROTOCOL, which a server sends", 0,
+                has_setting(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U));
+
+  /* A server: everything the client sends, plus the extended-CONNECT advertisement and the limit half of the
+   * older pair. */
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("a server's settings apply", wt_webtransport_settings_apply(&settings, 1));
+  WT_EXPECT_INT("with H3_DATAGRAM", 1, has_setting(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
+  WT_EXPECT_INT("with the draft-specific WT_ENABLED codepoint", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_INT("with ENABLE_CONNECT_PROTOCOL", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U));
+  WT_EXPECT_INT("with the earlier drafts' session codepoint", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS, 1U));
+  WT_EXPECT_INT("and with its limit", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS_DEPRECATED, 1U));
+
+  WT_EXPECT_STATUS("a NULL settings is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_webtransport_settings_apply(NULL, 0));
+}
+
 int main(void) {
   test_accepted_and_not_ours();
   test_rejections();
+  test_the_settings_a_webtransport_endpoint_advertises();
   WT_TEST_MAIN_END("wt_webtransport_session_request");
 }

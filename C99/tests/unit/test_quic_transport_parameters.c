@@ -49,6 +49,24 @@ static void test_build_sends_the_mandatory_connection_ids(void) {
                      wt_quic_transport_parameters_get(&read_back,
                                                       WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, &value,
                                                       &value_length));
+    /* Every limit this endpoint advertises, read back from the wire. `initial_max_stream_data_bidi_remote` is
+     * the one a client got wrong: it is the credit for data the PEER sends on streams this endpoint opened, so
+     * omitting it advertises zero and a conforming peer may answer nothing at all -- which is the whole session
+     * (WT-145). The other two are here because a set is only right as a set. */
+    {
+      uint64_t limit = 0U;
+      WT_EXPECT_OK("with initial_max_stream_data_bidi_remote present",
+                   wt_quic_transport_parameters_integer(&read_back,
+                                                        WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, &limit));
+      WT_EXPECT_TRUE("and non-zero, because zero is the value a session cannot work with", limit > 0U);
+      WT_EXPECT_OK("with initial_max_stream_data_uni present",
+                   wt_quic_transport_parameters_integer(&read_back, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI,
+                                                        &limit));
+      WT_EXPECT_TRUE("and non-zero", limit > 0U);
+      WT_EXPECT_OK("with max_datagram_frame_size present",
+                   wt_quic_transport_parameters_integer(&read_back, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, &limit));
+      WT_EXPECT_TRUE("and non-zero, because draft-16 section 3.1 requires QUIC datagram support", limit > 0U);
+    }
   }
 
   /* A server: both parameters, and the second is the ID the CLIENT addressed it by, not its own. */

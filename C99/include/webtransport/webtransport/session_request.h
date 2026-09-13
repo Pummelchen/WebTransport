@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 #include "webtransport/http3/message.h"
+#include "webtransport/http3/settings.h"
 #include "webtransport/webtransport/protocol.h"
 #include "webtransport/status.h"
 
@@ -38,6 +39,18 @@ extern "C" {
 
 /* The draft-16 setting a server advertises to say it can serve WebTransport at all. */
 #define WT_HTTP3_SETTING_WT_ENABLED ((uint64_t)0x2c7cf000)
+
+/* The enabling codepoints a peer implementing the "max sessions" era of the draft looks for
+ * (`WEBTRANSPORT_MAX_SESSIONS`, and the pair it replaced in draft 06). Draft-16 section 7.1 is explicit that
+ * every draft version has its own codepoint and that an endpoint supporting several versions sends one per
+ * version, so these are how a session is negotiated with a peer that predates the rename -- and the session,
+ * stream and datagram wire formats this tree uses are the ones those codepoints describe. Without them a peer
+ * that gates WebTransport on the setting IT knows never treats the extended CONNECT as a session and answers
+ * nothing, which is exactly what `quinn`/`web-transport` did (WT-145). */
+#define WT_HTTP3_SETTING_WT_MAX_SESSIONS ((uint64_t)0xc671706a)
+#define WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED ((uint64_t)0x2b603742)
+#define WT_HTTP3_SETTING_WT_MAX_SESSIONS_DEPRECATED ((uint64_t)0x2b603743)
+
 
 /* The draft-16 settings that carry a session's INITIAL flow-control limits (section 5.1).
  * They are what turns the session's own flow control on: an endpoint that omits all three
@@ -117,6 +130,13 @@ wt_status_t wt_webtransport_session_response_selected_protocol(
 wt_status_t wt_webtransport_session_request_validate(
     const wt_http3_message_t *message, const wt_webtransport_request_policy_t *policy,
     wt_webtransport_session_request_t *out, wt_http3_error_t *out_error);
+
+/* What a WebTransport endpoint MUST advertise in its SETTINGS (section 3.1), in one place -- the same rule the
+ * mandatory transport parameters follow in `wt_quic_transport_parameters_build`, and for the same reason: a
+ * caller that had to remember each one eventually forgets one, and this call forgot
+ * `SETTINGS_H3_DATAGRAM` (WT-145). A server sends `SETTINGS_ENABLE_CONNECT_PROTOCOL` too, because an extended
+ * CONNECT is only legal once the peer has advertised RFC 9220 (section 3.1's list for servers). */
+wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is_server);
 
 #ifdef __cplusplus
 }
