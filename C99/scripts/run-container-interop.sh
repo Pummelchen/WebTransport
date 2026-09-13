@@ -67,7 +67,7 @@ for peer in $peers; do
   if [ "${WT_INTEROP_CAPTURE:-0}" = "1" ]; then
     docker rm -f "wt-capture-$peer" >/dev/null 2>&1 || true
     docker run -d --name "wt-capture-$peer" --network "container:wt-interop-$peer" \
-      nicolaka/netshoot tcpdump -n -l -i any -c 40 "udp port $port" >/dev/null 2>&1 || true
+      nicolaka/netshoot tcpdump -n -l -i any -c "${WT_INTEROP_CAPTURE_COUNT:-40}" "udp port $port" >/dev/null 2>&1 || true
     sleep 2
   fi
   # The client JOINS THE PEER'S NETWORK NAMESPACE rather than sitting beside it: `--trust local-development`
