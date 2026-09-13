@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 44 unit test files and 76,731 checks, run by `ctest` and again under
+- 45 unit test files and 76,759 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -395,6 +395,11 @@ What is here:
   the code a server aborts its own RESPONSE stream with, so it is reported as a stream error rather than a
   connection error. The response direction is deliberately not here: whether a HEADERS frame is an
   informational 1xx response is only known from the decoded `:status`, so that machine lands with QPACK.
+- **QPACK's static table** (Phase 6, first part): `http3/qpack.h` exposes RFC 9204 appendix A's 99
+  name/value pairs with the exact-pair and by-name lookups a field line needs, and the section 8 error
+  codes. The table is generated from the RFC by `tests/vectors/extract_rfc9204_static_table.py` and checked
+  by `check-vectors.sh`, because an encoder and a decoder that disagree on one entry produce two different
+  header sections with nothing in the exchange to say so.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

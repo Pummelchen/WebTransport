@@ -66,3 +66,16 @@ if [ ! -f "$rfc7748" ]; then
   fi
 fi
 python3 "$c99_root/tests/vectors/extract_rfc7748_x25519.py" "$rfc7748" --check
+
+# RFC 9204's static table, which the QPACK codec reads from the source tree.
+rfc9204="$rfc_dir/rfc9204.txt"
+if [ ! -f "$rfc9204" ]; then
+  url9204=https://www.rfc-editor.org/rfc/rfc9204.txt
+  echo "check-vectors: fetching $url9204"
+  if ! curl -fsSL "$url9204" -o "$rfc9204"; then
+    rm -f "$rfc9204"
+    echo "check-vectors: could not fetch $url9204" >&2
+    exit 2
+  fi
+fi
+python3 "$c99_root/tests/vectors/extract_rfc9204_static_table.py" "$rfc9204" --check

@@ -1436,7 +1436,25 @@ Port the complete Swift QPACK implementation.
 
 Tasks:
 
-- Implement full RFC 9204 static table.
+- **First part done: the static table.** `include/webtransport/http3/qpack.h` exposes RFC 9204 appendix
+A's 99 entries with the two lookups a field line needs -- an exact name-and-value match for an indexed field
+line, and the first entry with a name for a literal field line with a name reference -- plus section 8's
+error codes. The table is generated from the RFC's own ASCII table by
+`tests/vectors/extract_rfc9204_static_table.py`, which refuses to write it unless the indices are 0..98
+with no gap or repeat, every name is well formed and every row parses; `check-vectors.sh` runs its `--check`
+with the other five vector sets. A table transcribed by hand is the one kind of defect this project's vector
+rule exists to prevent: an encoder that indexes entry 17 as one field and a decoder that reads it as another
+produce two different header sections, and nothing in the exchange would say so.
+
+Two findings from the part are worth recording. The extractor's first version found the appendix heading in
+the RFC's table of contents rather than in the body -- the same mistake the Retry extractor made, which is
+why both now match headings as whole lines -- and the test's first version expected `:method` at index 44,
+which is where HPACK keeps it: QPACK orders its static table by frequency (CONNECT, DELETE, GET, HEAD,
+OPTIONS, POST, PUT at 15 to 21) and not by pseudo-header the way HPACK does. The code was right and the test
+was wrong, which is the direction that costs nothing, but it is exactly the kind of assumption a table
+shared between two specifications invites.
+
+Implement full RFC 9204 static table.
 - Implement Huffman encoding and decoding.
 - Implement static indexed fields.
 - Implement literal field lines.
