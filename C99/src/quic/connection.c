@@ -401,7 +401,7 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
     if (packet_log_path != NULL && packet_length > 0U) {
       FILE *packet_log = fopen(packet_log_path, "a");
       if (packet_log != NULL) {
-        size_t dump_limit = packet_length < 80U ? packet_length : 80U;
+        size_t dump_limit = packet_length < 1300U ? packet_length : 1300U;  /* an Initial is 1200 and has to be whole to open */
         size_t dump_index;
         fprintf(packet_log, "sent space=%d type_bits=%u first=0x%02x length=%zu pn=%llu bytes=", (int)space,
                 (unsigned)((packet[0] >> 4) & 0x03U), (unsigned)packet[0], packet_length,
