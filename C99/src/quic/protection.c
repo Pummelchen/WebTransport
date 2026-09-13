@@ -362,3 +362,65 @@ wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys,
   }
   return status;
 }
+
+/* RFC 9001 section 5.8's constants for version 1. They are protocol constants like the Initial salt,
+ * written here rather than extracted because the RFC states them and nothing derives them. */
+static const uint8_t WT_QUIC_RETRY_KEY[16] = {0xbeU, 0x0cU, 0x69U, 0x0bU, 0x9fU, 0x66U, 0x57U, 0x5aU,
+                                              0x1dU, 0x76U, 0x6bU, 0x54U, 0xe3U, 0x68U, 0xc8U, 0x4eU};
+static const uint8_t WT_QUIC_RETRY_NONCE[12] = {0x46U, 0x15U, 0x99U, 0xd3U, 0x5dU, 0x63U,
+                                                 0x2bU, 0xf2U, 0x23U, 0x98U, 0x25U, 0xbbU};
+
+/* The pseudo-packet: one length byte, the original destination connection ID, and the packet. Bounded by
+ * the protocol's own connection ID bound plus a packet, so the buffer is a constant. */
+#define WT_QUIC_RETRY_PSEUDO_MAX (1U + 20U + 1500U)
+
+wt_status_t wt_quic_retry_integrity_tag(const uint8_t *original_destination_connection_id,
+                                        size_t original_destination_connection_id_len,
+                                        const uint8_t *retry_packet_without_tag, size_t length,
+                                        uint8_t out[WT_AEAD_TAG_LEN]) {
+  uint8_t pseudo[WT_QUIC_RETRY_PSEUDO_MAX];
+  uint8_t scratch[1];
+  size_t total;
+  wt_status_t status;
+
+  if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (original_destination_connection_id == NULL && original_destination_connection_id_len != 0U) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  if (retry_packet_without_tag == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (original_destination_connection_id_len > 20U) return WT_ERR_LIMIT;
+  if (length > WT_QUIC_RETRY_PSEUDO_MAX - 1U - original_destination_connection_id_len) {
+    return WT_ERR_LIMIT;
+  }
+
+  total = 1U + original_destination_connection_id_len + length;
+  pseudo[0] = (uint8_t)original_destination_connection_id_len;
+  memcpy(pseudo + 1U, original_destination_connection_id, original_destination_connection_id_len);
+  memcpy(pseudo + 1U + original_destination_connection_id_len, retry_packet_without_tag, length);
+
+  status = wt_aead_seal(WT_AEAD_AES_128_GCM, WT_QUIC_RETRY_KEY, WT_QUIC_RETRY_NONCE, pseudo, total,
+                        scratch, 0U, scratch, out);
+  wt_secure_zero(pseudo, sizeof(pseudo));
+  return status;
+}
+
+wt_status_t wt_quic_retry_integrity_verify(const uint8_t *original_destination_connection_id,
+                                           size_t original_destination_connection_id_len,
+                                           const uint8_t *retry_packet, size_t length) {
+  uint8_t expected[WT_AEAD_TAG_LEN];
+  uint8_t difference = 0U;
+  size_t i;
+  wt_status_t status;
+
+  if (retry_packet == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (length < WT_AEAD_TAG_LEN) return WT_ERR_TRUNCATED;
+  status = wt_quic_retry_integrity_tag(original_destination_connection_id,
+                                       original_destination_connection_id_len, retry_packet,
+                                       length - WT_AEAD_TAG_LEN, expected);
+  if (status != WT_OK) return status;
+  for (i = 0U; i < WT_AEAD_TAG_LEN; i++) {
+    difference |= (uint8_t)(expected[i] ^ retry_packet[length - WT_AEAD_TAG_LEN + i]);
+  }
+  wt_secure_zero(expected, sizeof(expected));
+  return difference == 0U ? WT_OK : WT_ERR_AUTHENTICATION;
+}

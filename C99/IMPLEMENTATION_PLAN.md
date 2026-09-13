@@ -1118,6 +1118,20 @@ ignore -- and not on a stream whose receive half is already finished. A frame th
 leaves the stream as it was, because a caller that retries after WT_ERR_AGAIN must not be told it has
 already asked.
 
+**Thirty-first part done: the Retry integrity tag.** `wt_quic_retry_integrity_tag` and
+`wt_quic_retry_integrity_verify` are RFC 9001 section 5.8: AES-128-GCM with an empty plaintext over the
+pseudo-packet `ODCID Length || Original Destination Connection ID || Retry packet without its tag`, with
+the version's own key and nonce -- constants rather than a negotiated secret, because the point of the tag
+is that a client can tell a Retry the server sent from one an attacker injected BEFORE any handshake has
+happened. The verification accumulates differences instead of stopping at the first, so a fast answer
+cannot tell an attacker how much of a guess was right.
+
+The tag's VALUE is not asserted here: this repository's vectors are extracted from the documents, never
+transcribed, and RFC 9001 appendix A.4's Retry packet has not been extracted yet -- that is recorded as a
+task rather than satisfied with a hand-written constant. What the test does check is the property the tag
+exists for: the same inputs give the same tag, a verification accepts it, and a changed byte OR a
+different original destination connection ID is refused, the second being the attack it defends against.
+
 Implement the production network state machine.
 
 Tasks:

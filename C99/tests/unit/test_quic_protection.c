@@ -832,6 +832,57 @@ static void test_header_protection_mask_width(void) {
   }
 }
 
+/* RFC 9001 section 5.8's Retry integrity tag. The tag's VALUE comes from the RFC's own appendix A.4 and
+ * is not written here -- this repository's vectors are extracted from the documents, never transcribed --
+ * so what is checked is the property the tag exists for: the same inputs produce the same tag, a
+ * verification accepts it, and a changed byte OR a different original destination connection ID is
+ * refused. The second is the attack it defends against: a Retry is only valid for the connection ID the
+ * client sent, so an attacker who injects one for a different connection cannot make it verify. */
+static void test_retry_integrity_tag(void) {
+  static const uint8_t odcid[8] = {0x83U, 0x94U, 0xc8U, 0xf0U, 0x3eU, 0x51U, 0x57U, 0x08U};
+  static const uint8_t other_odcid[8] = {0x83U, 0x94U, 0xc8U, 0xf0U, 0x3eU, 0x51U, 0x57U, 0x09U};
+  /* A Retry packet without its tag: first byte, version, DCID, SCID and a token. */
+  uint8_t packet[64];
+  uint8_t tag[WT_AEAD_TAG_LEN];
+  uint8_t again[WT_AEAD_TAG_LEN];
+  size_t length;
+
+  memset(packet, 0, sizeof(packet));
+  packet[0] = 0xf0U;
+  packet[1] = 0x00U; packet[2] = 0x00U; packet[3] = 0x00U; packet[4] = 0x01U;
+  packet[5] = 8U;
+  memcpy(packet + 6U, odcid, sizeof(odcid));
+  packet[14] = 4U;
+  packet[15] = 1U; packet[16] = 2U; packet[17] = 3U; packet[18] = 4U;
+  packet[19] = 0x04U;   /* a four-byte token */
+  packet[20] = 0xdeU; packet[21] = 0xadU; packet[22] = 0xbeU; packet[23] = 0xefU;
+  length = 24U;
+
+  WT_EXPECT_OK("a tag is computed",
+               wt_quic_retry_integrity_tag(odcid, sizeof(odcid), packet, length, tag));
+  WT_EXPECT_OK("and again",
+               wt_quic_retry_integrity_tag(odcid, sizeof(odcid), packet, length, again));
+  WT_EXPECT_BYTES("with the same answer both times", tag, again, WT_AEAD_TAG_LEN);
+  WT_EXPECT_TRUE("which is not all zeroes", memcmp(tag, again, sizeof(tag)) == 0 &&
+                                                  !(tag[0] == 0U && tag[1] == 0U && tag[2] == 0U));
+
+  memcpy(packet + length, tag, WT_AEAD_TAG_LEN);
+  WT_EXPECT_OK("the packet verifies", wt_quic_retry_integrity_verify(odcid, sizeof(odcid), packet,
+                                                                    length + WT_AEAD_TAG_LEN));
+  WT_EXPECT_STATUS("but not against another original destination connection ID",
+                   WT_ERR_AUTHENTICATION,
+                   wt_quic_retry_integrity_verify(other_odcid, sizeof(other_odcid), packet,
+                                                  length + WT_AEAD_TAG_LEN));
+  packet[20] ^= 0x01U;
+  WT_EXPECT_STATUS("and not if the packet changed", WT_ERR_AUTHENTICATION,
+                   wt_quic_retry_integrity_verify(odcid, sizeof(odcid), packet,
+                                                  length + WT_AEAD_TAG_LEN));
+  WT_EXPECT_STATUS("a truncated packet is refused", WT_ERR_TRUNCATED,
+                   wt_quic_retry_integrity_verify(odcid, sizeof(odcid), packet, 8U));
+  WT_EXPECT_STATUS("and a null packet is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_retry_integrity_verify(odcid, sizeof(odcid), NULL, 32U));
+}
+
 int main(void) {
   WT_EXPECT_OK("the crypto backend initialises", wt_crypto_init());
 
@@ -842,5 +893,6 @@ int main(void) {
   test_chacha_short_header();
   test_header_protection_mask_width();
 
+  test_retry_integrity_tag();
   WT_TEST_MAIN_END("wt_quic_protection");
 }

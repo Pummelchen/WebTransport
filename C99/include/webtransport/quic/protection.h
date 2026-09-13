@@ -185,6 +185,32 @@ wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys,
                                      size_t len,
                                      const uint8_t tag[WT_AEAD_TAG_LEN]);
 
+/* RFC 9001 section 5.8's Retry integrity tag: AES-128-GCM with an empty plaintext over
+ *
+ *   Retry Pseudo-Packet = ODCID Length || Original Destination Connection ID || Retry packet
+ *
+ * where "Retry packet" is the packet WITHOUT its tag. The key and nonce are the version's own constants,
+ * not a negotiated secret: the point of the tag is that a client can tell a Retry the server sent from
+ * one an attacker injected, so it must be computable before any handshake has happened. `out` receives
+ * the sixteen-byte tag.
+ *
+ * WT_ERR_LIMIT when the pseudo-packet does not fit the bounded buffer this uses, which cannot happen for
+ * a connection ID of twenty bytes or fewer -- the protocol's own bound -- so it means a caller passed a
+ * length that is not a connection ID length. */
+wt_status_t wt_quic_retry_integrity_tag(const uint8_t *original_destination_connection_id,
+                                        size_t original_destination_connection_id_len,
+                                        const uint8_t *retry_packet_without_tag, size_t length,
+                                        uint8_t out[WT_AEAD_TAG_LEN]);
+
+/* Whether a Retry packet's tag is the one this ODCID and packet produce. WT_OK when it is,
+ * WT_ERR_AUTHENTICATION when it is not, which is the ordinary answer for a Retry an attacker sent: the
+ * comparison accumulates differences rather than stopping at the first, because the tag's bytes are
+ * derived from a secret only in the sense that an attacker does not have the packet -- a fast comparison
+ * would tell them how much of a guess was right. */
+wt_status_t wt_quic_retry_integrity_verify(const uint8_t *original_destination_connection_id,
+                                           size_t original_destination_connection_id_len,
+                                           const uint8_t *retry_packet, size_t length);
+
 /* Zero a key set. Called when a connection ends or a key is discarded. */
 void wt_quic_packet_keys_clear(wt_quic_packet_keys_t *keys);
 

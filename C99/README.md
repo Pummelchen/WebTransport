@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,976 checks, run by `ctest` and again under
+- 38 unit test files and 75,985 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -291,6 +291,10 @@ What is here:
   data asks the peer to stop, once and only on a stream it receives on -- so with RESET_STREAM the
   cancellation path exists in both roles, and a frame that could not be sent leaves the stream unchanged
   for a caller that retries.
+- **The Retry integrity tag** (Phase 4, thirty-first part): RFC 9001 section 5.8's AES-128-GCM tag over
+  `ODCID Length || ODCID || Retry packet`, with the version's own key and nonce, so a client can tell a
+  Retry the server sent from an injected one before any handshake. Its value is not asserted yet -- RFC
+  9001 A.4's Retry packet still has to be extracted, and vectors here are extracted, never transcribed.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
