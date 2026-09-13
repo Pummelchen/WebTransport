@@ -479,28 +479,13 @@ static void test_a_connect_crosses_a_real_connection(void) {
    * means the connection consumes STREAM frames into its own stream state and the inbound path has to
    * come from there rather than from the frame handler. That is recorded as WT-110 on the tracker with
    * this evidence, and the test asserts only what is true today: the bytes went out. */
+  /* MEASURED, and the one number that separates the two halves: across the pump rounds after the CONNECT,
+   * the client's `connection.packets_sent` does NOT move (it stays at 9 while the frame was accepted and the
+   * stream recorded it), and the packets the server reads in that time are its own retransmissions. So the
+   * CONNECT is written, recorded -- and never leaves. `wt_quic_connection_flush` is where that is decided,
+   * and the pump SWALLOWS its WT_ERR_AGAIN, which is the first thing the next round should stop doing.
+   * WT-110 carries this; the test asserts only what is true today. */
   rounds = pump_pair(&pair, 60U, NULL);
-  /* The measurement this round added, recorded as a comment because it is a FAILURE today and the test
-   * asserts only what is true:
-   *
-   *   - `wt_quic_connection_send_stream` on the client ACCEPTS an 8-byte send on the request stream and
-   *     returns WT_OK, but not one byte arrives (the server has no such stream) and the client's
-   *     `stream->send_offset` stays ZERO -- and `send_offset` is what the stream advances when data is
-   *     handed to the send path, so the call accepted the data and did not record or send it.
-   *   - The control stream's own send DID create a stream on the server (stream 2 exists), so the packet
-   *     path works and the fault is specific to sending STREAM data on a stream that this endpoint opened
-   *     after the handshake.
-   *
-   * A LATER measurement (round 59) refuted the last inference of this comment: `send_stream` returns
-   * WT_OK only when it has WRITTEN a frame, and the stream's `send_offset` is advanced by the CALLER
-   * (`wt_quic_stream_on_data_sent`), which the transport adapter was not doing -- a real bug, now fixed,
-   * with an assertion on `send_offset` above. The inbound path is still not reached (`frames_seen` stays
-   * zero on the server after the fix), so the next measurement is on the WIRE: whether the client's packet
-   * actually leaves, which is a counter the connection can expose. WT-110 carries it.
-   *
-   * The next experiment is therefore a minimal reproduction -- the handshake suite's own pair, which DOES
-   * exchange stream data, plus an assertion on `send_offset` -- to find what differs. WT-110 carries it.
-   */
   /* The stream RECORDS what it sent: the connection writes the frame and leaves the offset to whoever
    * asked for the send, so a transport adapter that did not record it would send every later frame at the
    * same offset -- and this assertion is what caught exactly that. */

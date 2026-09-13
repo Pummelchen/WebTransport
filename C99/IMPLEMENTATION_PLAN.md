@@ -2325,10 +2325,19 @@ this records it"). The transport adapter was not recording anything, so the stre
 the next send would have gone at the same offset -- a protocol error, not a slow stream. The adapter records now,
 and the test asserts `send_offset > 0` after a send.
 
-The inbound path is still not reached after that fix: the server's HTTP/3 handler counter stays at zero. The
-next measurement is therefore on the WIRE rather than in either layer -- whether the client's packet actually
-leaves -- which is a counter the connection can expose. WT-110 carries it. The test asserts only what is true
-today (the CONNECT goes out, the client records and tracks its request stream).
+The wire measurement then closed the question of which half is at fault, and the answer is neither of the two
+layers this session has: across the pump rounds after the CONNECT, the client's `connection.packets_sent` does
+NOT move -- it stays at 9 -- while the frame was accepted and the stream recorded it, and the packets the server
+reads in that time are the SERVER's own retransmissions. So the CONNECT is written, recorded, and never leaves:
+`wt_quic_connection_flush` is where that is decided.
+
+That also exposes a weakness in the pump this phase wrote: it SWALLOWS `WT_ERR_AGAIN` from the connection flush,
+so a refusal has been invisible for three rounds. The next round should stop swallowing it -- keep the status,
+report it, and assert on it -- because a pump that cannot tell "nothing to send" from "refused to send" is the
+same class of mistake as a conformance report that cannot tell "passed" from "not attempted" (WT-106).
+
+The test asserts only what is true today (the CONNECT goes out, the client records and tracks its request
+stream), and WT-110 carries the measurement and the next step.
 
 ## Phase 10: Test Port
 
