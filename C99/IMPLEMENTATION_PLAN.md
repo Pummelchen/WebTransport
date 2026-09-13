@@ -1988,6 +1988,24 @@ The peer-stream table is fixed (`WT_HTTP3_ENDPOINT_STREAMS_MAX`) and running int
 error code: it is this endpoint's bound, and inventing a peer-facing code for it would blame the peer for this
 implementation's table.
 
+### Phase 9's second part: request streams at the endpoint
+
+A WebTransport session IS a request stream, so the endpoint has to own them, and `http3/endpoint.h` now does:
+it tracks one `wt_http3_request_stream_t` per live request, forwards each frame to the request-ordering
+machine, and keeps that machine's rules in ONE place rather than re-implementing HEADERS-first and
+H3_REQUEST_INCOMPLETE here.
+
+The role rules are the RFC's and they are asymmetric: only a CLIENT opens a request stream, because HTTP/3
+has no server-initiated request, and section 6.1 makes a client that receives a server-initiated bidirectional
+stream a connection error of type H3_STREAM_CREATION_ERROR. Both directions are refused loudly rather than
+silently tracked, because tracking either would turn a role mix-up into something that looks like a protocol
+error from the peer.
+
+The request table is bounded (`WT_HTTP3_ENDPOINT_REQUESTS_MAX`), which makes it the number of concurrent
+sessions one connection may carry, and running into it is WT_ERR_LIMIT with no error code -- the same rule as
+the peer-stream table, for the same reason. A duplicate stream is detected BEFORE the bound, so a caller's own
+mistake is never reported as a limit, and the test asserts that ordering explicitly.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

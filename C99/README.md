@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 69 unit test files and 79,350 checks, run by `ctest` and again under
+- 69 unit test files and 79,391 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -101,6 +101,14 @@ What is here:
     unknown one -- which would lose a session's streams one at a time. The peer-stream
     table is fixed, so running into it is `WT_ERR_LIMIT` with no error code: this
     endpoint's bound, not the peer's mistake.
+  - the same header's request-stream lifecycle, which is the session's own stream: only
+    a client opens one (HTTP/3 has no server-initiated request, and section 6.1 makes a
+    client that receives a server-initiated bidirectional stream a
+    `H3_STREAM_CREATION_ERROR`), a complete request keeps its state until the stream
+    ends, and the request-ordering rules stay in `request.h` rather than being
+    re-implemented. The request table is bounded too, at
+    `WT_HTTP3_ENDPOINT_REQUESTS_MAX` sessions per connection, and a duplicate is found
+    before the bound so a caller's mistake is never reported as a limit.
   - `api/endpoint.h` — which side this program is, the name the peer's certificate
     must be valid for, and how it is judged, so a trust misconfiguration is a return
     value before any packet rather than a handshake failure afterwards. The

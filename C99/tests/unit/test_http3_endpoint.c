@@ -226,10 +226,108 @@ static void test_the_peer_table_is_bounded(void) {
                wt_http3_endpoint_on_uni_stream(&endpoint, 3U, bytes, length, NULL, &kind, &error));
 }
 
+static void test_request_streams_follow_the_roles(void) {
+  wt_http3_endpoint_t client;
+  wt_http3_endpoint_t server;
+  wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  uint8_t bytes[8];
+  size_t length = 0U;
+  size_t i;
+
+  wt_http3_endpoint_init(&client, WT_HTTP3_ROLE_CLIENT);
+  wt_http3_endpoint_init(&server, WT_HTTP3_ROLE_SERVER);
+
+  /* A client opens a request stream; that stream IS a WebTransport session once its
+   * extended CONNECT is accepted. */
+  WT_EXPECT_OK("a client opens a request stream",
+               wt_http3_endpoint_open_request(&client, 0U, &error));
+  WT_EXPECT_U64("which it tracks", 1U, (uint64_t)wt_http3_endpoint_request_count(&client));
+  WT_EXPECT_OK("with its ordering state readable",
+               wt_http3_endpoint_request_state(&client, 0U, &state));
+  WT_EXPECT_INT("starting at HEADERS", (int)WT_HTTP3_REQUEST_EXPECT_HEADERS, (int)state);
+
+  /* The request machine's rules are applied per stream, not re-implemented here. */
+  WT_EXPECT_STATUS("a DATA frame before HEADERS is refused", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_DATA, &error));
+  WT_EXPECT_U64("with the unexpected-frame code", WT_HTTP3_FRAME_UNEXPECTED, (uint64_t)error);
+  WT_EXPECT_OK("HEADERS is accepted",
+               wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_HEADERS, &error));
+  WT_EXPECT_OK("and its state moves",
+               wt_http3_endpoint_request_state(&client, 0U, &state));
+  WT_EXPECT_INT("to the body", (int)WT_HTTP3_REQUEST_BODY, (int)state);
+
+  /* A frame on a stream nobody opened is the caller's ordering. */
+  WT_EXPECT_STATUS("a frame on an untracked stream is a state error", WT_ERR_STATE,
+                   wt_http3_endpoint_on_request_frame(&client, 4U, WT_HTTP3_FRAME_HEADERS, &error));
+
+  /* A server cannot open one: HTTP/3 has no server-initiated request, and the peer would
+   * be required to treat it as a connection error. */
+  WT_EXPECT_STATUS("a server cannot open a request stream", WT_ERR_STATE,
+                   wt_http3_endpoint_open_request(&server, 0U, &error));
+
+  /* The other direction: a server receives one, and a client receiving one is a stream
+   * creation error. */
+  WT_EXPECT_OK("a server receives a request stream",
+               wt_http3_endpoint_on_request_stream(&server, 0U, &error));
+  WT_EXPECT_STATUS("a client may not receive one", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_request_stream(&client, 4U, &error));
+  WT_EXPECT_U64("with the stream creation code", WT_HTTP3_STREAM_CREATION_ERROR, (uint64_t)error);
+
+  /* Opening the same stream twice means the caller lost its place. */
+  WT_EXPECT_STATUS("opening a stream twice is a state error", WT_ERR_STATE,
+                   wt_http3_endpoint_open_request(&client, 0U, &error));
+
+  /* Ending before HEADERS is H3_REQUEST_INCOMPLETE -- the code section 4.1 defines for
+   * aborting the response, not for closing the connection -- and the stream is forgotten. */
+  WT_EXPECT_OK("a second request stream opens", wt_http3_endpoint_open_request(&client, 4U, &error));
+  WT_EXPECT_STATUS("ending it before HEADERS is incomplete", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_request_end(&client, 4U, &error));
+  WT_EXPECT_U64("with that code", WT_HTTP3_REQUEST_INCOMPLETE, (uint64_t)error);
+  WT_EXPECT_U64("and it is forgotten", 1U, (uint64_t)wt_http3_endpoint_request_count(&client));
+
+  /* A reset is not a frame-ordering matter: it just closes the stream out. */
+  WT_EXPECT_OK("a third request stream opens", wt_http3_endpoint_open_request(&client, 8U, &error));
+  WT_EXPECT_OK("and a reset closes it", wt_http3_endpoint_on_request_reset(&client, 8U));
+  WT_EXPECT_U64("forgotten too", 1U, (uint64_t)wt_http3_endpoint_request_count(&client));
+  WT_EXPECT_STATUS("so its state is gone", WT_ERR_STATE,
+                   wt_http3_endpoint_request_state(&client, 8U, &state));
+  WT_EXPECT_STATUS("and a reset of an untracked stream is a state error", WT_ERR_STATE,
+                   wt_http3_endpoint_on_request_reset(&client, 12U));
+
+  /* A complete request: HEADERS, DATA, the trailer. */
+  WT_EXPECT_OK("the tracked stream takes DATA",
+               wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_DATA, &error));
+  WT_EXPECT_OK("and a trailer",
+               wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_HEADERS, &error));
+  WT_EXPECT_OK("then the state is read",
+               wt_http3_endpoint_request_state(&client, 0U, &state));
+  WT_EXPECT_INT("as complete", (int)WT_HTTP3_REQUEST_COMPLETE, (int)state);
+  WT_EXPECT_STATUS("and nothing follows a trailer", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_DATA, &error));
+  WT_EXPECT_OK("a clean end is fine", wt_http3_endpoint_on_request_end(&client, 0U, &error));
+
+  /* The request table is this endpoint's bound, with no error code. */
+  for (i = 0U; i < (size_t)WT_HTTP3_ENDPOINT_REQUESTS_MAX; i++) {
+    WT_EXPECT_OK("a request stream opens",
+                 wt_http3_endpoint_open_request(&client, 100U + (uint64_t)i * 4U, &error));
+  }
+  WT_EXPECT_STATUS("one past the bound is limited", WT_ERR_LIMIT,
+                   wt_http3_endpoint_open_request(&client, 4096U, &error));
+  WT_EXPECT_U64("with no error code", (uint64_t)WT_HTTP3_NO_ERROR, (uint64_t)error);
+  /* A stream the endpoint already tracks is the caller's error even when the table is
+   * full: the duplicate is found before the bound. */
+  WT_EXPECT_STATUS("while a duplicate is still a state error", WT_ERR_STATE,
+                   wt_http3_endpoint_open_request(&client, 100U, &error));
+  (void)bytes;
+  (void)length;
+}
+
 int main(void) {
   test_our_own_streams_exist_once();
   test_peer_streams_are_classified();
   test_control_frames_are_forwarded();
   test_the_peer_table_is_bounded();
+  test_request_streams_follow_the_roles();
   WT_TEST_MAIN_END("wt_http3_endpoint");
 }

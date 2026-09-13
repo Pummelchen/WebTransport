@@ -5,6 +5,11 @@
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
 
+static wt_status_t refuse(wt_status_t status, wt_http3_error_t code, wt_http3_error_t *out_error) {
+  if (out_error != NULL) *out_error = code;
+  return status;
+}
+
 void wt_http3_endpoint_init(wt_http3_endpoint_t *endpoint, wt_http3_role_t role) {
   size_t i;
 
@@ -23,6 +28,138 @@ void wt_http3_endpoint_init(wt_http3_endpoint_t *endpoint, wt_http3_role_t role)
     endpoint->streams[i].kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
     endpoint->streams[i].type = 0U;
   }
+  endpoint->request_count = 0U;
+  for (i = 0U; i < WT_HTTP3_ENDPOINT_REQUESTS_MAX; i++) {
+    endpoint->requests[i].stream_id = 0U;
+    endpoint->requests[i].locally_opened = 0;
+    wt_http3_request_init(&endpoint->requests[i].request);
+  }
+}
+
+/* ------------------------------------------------ request streams */
+
+static wt_http3_endpoint_request_t *find_request(wt_http3_endpoint_t *endpoint,
+                                                 uint64_t stream_id) {
+  size_t i;
+  for (i = 0U; i < endpoint->request_count; i++) {
+    if (endpoint->requests[i].stream_id == stream_id) return &endpoint->requests[i];
+  }
+  return NULL;
+}
+
+static void forget_request(wt_http3_endpoint_t *endpoint, uint64_t stream_id) {
+  size_t i;
+  for (i = 0U; i < endpoint->request_count; i++) {
+    if (endpoint->requests[i].stream_id == stream_id) {
+      endpoint->requests[i] = endpoint->requests[endpoint->request_count - 1U];
+      endpoint->request_count--;
+      return;
+    }
+  }
+}
+
+static wt_status_t track_request(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                 int locally_opened) {
+  wt_http3_endpoint_request_t *slot;
+
+  if (find_request(endpoint, stream_id) != NULL) {
+    /* Tracked twice: the caller lost its place, and applying a stream's frames to two
+     * machines would make the state meaningless. */
+    return WT_ERR_STATE;
+  }
+  if (endpoint->request_count >= WT_HTTP3_ENDPOINT_REQUESTS_MAX) {
+    /* This endpoint's bound. No error code: nothing the peer did caused it. */
+    return WT_ERR_LIMIT;
+  }
+  slot = &endpoint->requests[endpoint->request_count];
+  slot->stream_id = stream_id;
+  slot->locally_opened = locally_opened;
+  wt_http3_request_init(&slot->request);
+  endpoint->request_count++;
+  return WT_OK;
+}
+
+wt_status_t wt_http3_endpoint_open_request(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                           wt_http3_error_t *out_error) {
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  /* HTTP/3 has no server-initiated request: a server that opens a request stream is
+   * building a stream the peer is required to treat as a connection error. */
+  if (endpoint->role != WT_HTTP3_ROLE_CLIENT) return WT_ERR_STATE;
+  return track_request(endpoint, stream_id, 1);
+}
+
+wt_status_t wt_http3_endpoint_on_request_stream(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                                wt_http3_error_t *out_error) {
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  /* Section 6.1: a server-initiated bidirectional stream is a connection error for a
+   * client, because the only bidirectional streams HTTP/3 defines are requests the client
+   * began. */
+  if (endpoint->role == WT_HTTP3_ROLE_CLIENT) {
+    return refuse(WT_ERR_PROTOCOL, WT_HTTP3_STREAM_CREATION_ERROR, out_error);
+  }
+  return track_request(endpoint, stream_id, 0);
+}
+
+wt_status_t wt_http3_endpoint_on_request_frame(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                               uint64_t type, wt_http3_error_t *out_error) {
+  wt_http3_endpoint_request_t *request;
+
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  request = find_request(endpoint, stream_id);
+  if (request == NULL) {
+    if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+    return WT_ERR_STATE;
+  }
+  return wt_http3_request_on_frame(&request->request, type, out_error);
+}
+
+wt_status_t wt_http3_endpoint_on_request_end(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                             wt_http3_error_t *out_error) {
+  wt_http3_endpoint_request_t *request;
+  wt_status_t status;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  request = find_request(endpoint, stream_id);
+  if (request == NULL) return WT_ERR_STATE;
+
+  status = wt_http3_request_on_end(&request->request, out_error);
+  forget_request(endpoint, stream_id);
+  return status;
+}
+
+wt_status_t wt_http3_endpoint_on_request_reset(wt_http3_endpoint_t *endpoint, uint64_t stream_id) {
+  wt_http3_endpoint_request_t *request;
+
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  request = find_request(endpoint, stream_id);
+  if (request == NULL) return WT_ERR_STATE;
+  (void)wt_http3_request_on_reset(&request->request);
+  forget_request(endpoint, stream_id);
+  return WT_OK;
+}
+
+wt_status_t wt_http3_endpoint_request_state(const wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                            wt_http3_request_state_t *out_state) {
+  size_t i;
+
+  if (endpoint == NULL || out_state == NULL) return WT_ERR_INVALID_ARGUMENT;
+  for (i = 0U; i < endpoint->request_count; i++) {
+    if (endpoint->requests[i].stream_id == stream_id) {
+      *out_state = endpoint->requests[i].request.state;
+      return WT_OK;
+    }
+  }
+  return WT_ERR_STATE;
+}
+
+size_t wt_http3_endpoint_request_count(const wt_http3_endpoint_t *endpoint) {
+  if (endpoint == NULL) return 0U;
+  return endpoint->request_count;
 }
 
 static wt_status_t write_type_prefix(uint64_t type, wt_writer_t *w) {
@@ -95,11 +232,6 @@ wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(
     if (endpoint->streams[i].stream_id == stream_id) return endpoint->streams[i].kind;
   }
   return WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
-}
-
-static wt_status_t refuse(wt_status_t status, wt_http3_error_t code, wt_http3_error_t *out_error) {
-  if (out_error != NULL) *out_error = code;
-  return status;
 }
 
 wt_status_t wt_http3_endpoint_on_uni_stream(wt_http3_endpoint_t *endpoint, uint64_t stream_id,

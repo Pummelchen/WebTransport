@@ -34,6 +34,7 @@
 
 #include "webtransport/http3/control.h"
 #include "webtransport/http3/frame.h"
+#include "webtransport/http3/request.h"
 #include "webtransport/http3/role.h"
 #include "webtransport/status.h"
 #include "webtransport/writer.h"
@@ -46,6 +47,12 @@ extern "C" {
  * connection has three of HTTP/3's own at most, plus the draft's WebTransport streams,
  * which are bounded by the session's own stream table. */
 #define WT_HTTP3_ENDPOINT_STREAMS_MAX 32U
+
+/* The largest number of request streams one endpoint tracks at once. A WebTransport
+ * session is one request stream, so this is the number of sessions one connection may
+ * carry; a client that wants more than its own bound must say so, and a server refuses
+ * past what it advertised. */
+#define WT_HTTP3_ENDPOINT_REQUESTS_MAX 8U
 
 typedef enum wt_http3_endpoint_stream_kind {
   WT_HTTP3_ENDPOINT_STREAM_CONTROL = 0,
@@ -66,6 +73,15 @@ typedef struct wt_http3_endpoint_stream {
   uint64_t type;
 } wt_http3_endpoint_stream_t;
 
+/* A request stream, with the ordering machine that belongs to it. */
+typedef struct wt_http3_endpoint_request {
+  uint64_t stream_id;
+  /* Whether THIS endpoint opened it, which decides who may send what next: the initiator
+   * sends the request, the peer answers with the response. */
+  int locally_opened;
+  wt_http3_request_stream_t request;
+} wt_http3_endpoint_request_t;
+
 typedef struct wt_http3_endpoint {
   wt_http3_role_t role;
   /* The peer's control stream, with the rules that make a second one an error. */
@@ -80,6 +96,9 @@ typedef struct wt_http3_endpoint {
   /* The peer's unidirectional streams while they live. */
   wt_http3_endpoint_stream_t streams[WT_HTTP3_ENDPOINT_STREAMS_MAX];
   size_t stream_count;
+  /* The request streams while they live, in either direction. */
+  wt_http3_endpoint_request_t requests[WT_HTTP3_ENDPOINT_REQUESTS_MAX];
+  size_t request_count;
 } wt_http3_endpoint_t;
 
 void wt_http3_endpoint_init(wt_http3_endpoint_t *endpoint, wt_http3_role_t role);
@@ -121,6 +140,54 @@ wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(
 
 /* How many peer streams the endpoint is tracking, for a caller that logs occupancy. */
 size_t wt_http3_endpoint_stream_count(const wt_http3_endpoint_t *endpoint);
+
+/* ------------------------------------------------ request streams (RFC 9114 section 6.1)
+
+ * A WebTransport session IS a request stream: the client sends an extended CONNECT on a
+ * client-initiated bidirectional stream and the server answers on the same one. These four
+ * calls are that stream's lifecycle, and the role rules in them are the RFC's rather than
+ * this implementation's preferences:
+ *
+ *   - only a CLIENT opens one. HTTP/3 has no server-initiated request, and section 6.1
+ *     makes a client that receives a server-initiated bidirectional stream a connection
+ *     error of type H3_STREAM_CREATION_ERROR, so the opening call refuses a server and the
+ *     receiving call refuses a client. Refusing here rather than silently tracking either
+ *     is what keeps a role mix-up from looking like a protocol error from the peer.
+ *
+ *   - the request-ordering machine's rules are applied per stream, through
+ *     `wt_http3_request_*`, so HEADERS first and H3_REQUEST_INCOMPLETE are decided in one
+ *     place and not re-implemented here. */
+
+/* Open a request stream (the client's side). Records it, so its frames have somewhere to
+ * be applied. A second call for the same stream, a stream past the table's bound, or a
+ * server calling it at all is refused. */
+wt_status_t wt_http3_endpoint_open_request(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                           wt_http3_error_t *out_error);
+
+/* A peer opened a request stream (the server's side). A client receiving one is
+ * H3_STREAM_CREATION_ERROR. */
+wt_status_t wt_http3_endpoint_on_request_stream(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                                wt_http3_error_t *out_error);
+
+/* One frame arrived on a tracked request stream. */
+wt_status_t wt_http3_endpoint_on_request_frame(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                               uint64_t type, wt_http3_error_t *out_error);
+
+/* The peer ended or reset a tracked request stream. Ending before HEADERS is
+ * H3_REQUEST_INCOMPLETE, which section 4.1 defines for aborting the response rather than
+ * for closing the connection. Either way the stream is forgotten afterwards, except when
+ * the request is complete: a complete request's state is still readable until the stream
+ * itself ends. */
+wt_status_t wt_http3_endpoint_on_request_end(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                             wt_http3_error_t *out_error);
+wt_status_t wt_http3_endpoint_on_request_reset(wt_http3_endpoint_t *endpoint, uint64_t stream_id);
+
+/* The ordering state of a tracked request stream. WT_ERR_STATE for a stream this endpoint
+ * is not tracking. */
+wt_status_t wt_http3_endpoint_request_state(const wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                            wt_http3_request_state_t *out_state);
+
+size_t wt_http3_endpoint_request_count(const wt_http3_endpoint_t *endpoint);
 
 #ifdef __cplusplus
 }
