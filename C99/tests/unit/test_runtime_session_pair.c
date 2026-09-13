@@ -55,6 +55,12 @@ static void build_parameters(void) {
                                                &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 8U));
   WT_EXPECT_OK("initial_max_streams_uni", wt_quic_transport_parameters_add_integer(
                                               &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 8U));
+  /* Datagram support is ADVERTISED, not assumed: a peer may only send a DATAGRAM frame when this endpoint's
+   * parameters said it would accept one, so the same match-the-advertisement rule as the flow-control grants
+   * applies here (WT-110's lesson, in a different parameter). */
+  WT_EXPECT_OK("max_datagram_frame_size",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE,
+                                                        1200U));
   WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&w, &params));
   g_parameters_len = wt_writer_offset(&w);
   WT_EXPECT_TRUE("with bytes in them", g_parameters_len > 0U);
@@ -114,6 +120,12 @@ typedef struct http3_side {
   uint8_t stream_data[64];
   size_t stream_bytes;
   uint64_t last_stream_id;
+  /* The session's datagrams, which arrive whole and are the draft's own framing: a quarter stream ID and then
+   * the payload. The driver hands them over uninterpreted, so this test parses them the way the session layer
+   * does. */
+  uint8_t datagram[128];
+  size_t datagram_bytes;
+  unsigned datagrams;
 } http3_side_t;
 
 typedef struct pair {
@@ -134,6 +146,7 @@ static wt_status_t side_on_frame_payload(void *context_side, uint64_t stream_id,
 static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);
 static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
                                        size_t length, int fin);
+static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t length);
 
 static void open_socket(wt_udp_socket_t *socket, wt_udp_address_t *address) {
   wt_udp_address_t local;
@@ -317,6 +330,17 @@ static void init_side(http3_side_t *side, wt_http3_role_t role) {
   side->sink.context = side;
   side->sink.on_frame_payload = side_on_frame_payload;
   side->sink.on_stream_data = side_on_stream_data;
+  side->sink.on_datagram = side_on_datagram;
+}
+
+static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t length) {
+  http3_side_t *side = context;
+  if (length <= sizeof(side->datagram)) {
+    if (length > 0U) memcpy(side->datagram, data, length);
+    side->datagram_bytes = length;
+  }
+  side->datagrams++;
+  return WT_OK;
 }
 
 /* ---- the tests ------------------------------------------------------------------------------- */
@@ -506,6 +530,42 @@ static void test_a_connect_and_its_response_cross_the_connection(void) {
     WT_EXPECT_BYTES("as the bytes that were sent", (const uint8_t *)"message", server.stream_data,
                     server.stream_bytes);
     WT_EXPECT_U64("on the stream it was sent on", stream_id, server.last_stream_id);
+  }
+
+  /* A MESSAGE AS A DATAGRAM, which is what `--exchange datagram` means: the draft's own framing -- a quarter
+   * stream ID and the payload -- sent in a QUIC DATAGRAM frame. A datagram IS the unit, so there is no
+   * reassembly and no ordering: what arrives is either the whole thing or nothing at all. */
+  {
+    uint8_t framed[128];
+    wt_writer_t w = wt_writer_init(framed, sizeof(framed));
+    const uint8_t *payload = NULL;
+    size_t payload_length = 0U;
+    uint64_t quarter = 0U;
+    wt_http3_error_t datagram_error = WT_HTTP3_NO_ERROR;
+
+    WT_EXPECT_OK("the datagram writes with its quarter stream ID",
+                 wt_webtransport_datagram_write(&w, request_stream_id / 4U,
+                                                (const uint8_t *)"ping", 4U));
+    WT_EXPECT_OK("and goes out",
+                 client_transport.send_datagram(client_transport.context, framed,
+                                                wt_writer_offset(&w)));
+    {
+      unsigned round;
+      for (round = 0U; round < 400U && server.datagrams == 0U; round++) {
+        (void)wt_udp_wait(&pair.server_socket, 2000U);
+        (void)wt_udp_wait(&pair.client_socket, 2000U);
+        if (wt_runtime_session_pump(&pair.server, pair.now) != WT_OK) break;
+        if (wt_runtime_session_pump(&pair.client, pair.now) != WT_OK) break;
+        pair.now += 1000U;
+      }
+    }
+    WT_EXPECT_U64("the server received a datagram", 1U, (uint64_t)server.datagrams);
+    WT_EXPECT_OK("whose framing parses the way the session layer parses it",
+                 wt_webtransport_datagram_parse(server.datagram, server.datagram_bytes, &quarter,
+                                                &payload, &payload_length, &datagram_error));
+    WT_EXPECT_U64("naming this session's quarter stream ID", request_stream_id / 4U, quarter);
+    WT_EXPECT_U64("with the payload's length", 4U, (uint64_t)payload_length);
+    WT_EXPECT_BYTES("and the payload", (const uint8_t *)"ping", payload, payload_length);
   }
 
   wt_runtime_session_clear(&pair.client);

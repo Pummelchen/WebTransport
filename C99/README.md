@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 79,928 checks, run by `ctest` and again under
+- 75 unit test files and 79,937 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -100,6 +100,14 @@ What is here:
   contract: arming, a bounded pump with an empty socket, an unstarted session refusing to
   pump, clearing twice (an error path that unwinds must not double free), and a server with no
   certificate being refused at start rather than at the first ClientHello.
+- **A message as a datagram** (Phase 9): `--exchange datagram` end to end. The client frames the
+  message the way the draft does — a quarter stream ID and then the payload — and sends it in a
+  QUIC DATAGRAM frame; the server's session sink receives it whole, and parsing it with the
+  session layer's own parser yields this session's quarter stream ID and exactly the payload.
+  Datagram support is *advertised* (`max_datagram_frame_size`), the same match-the-advertisement
+  rule as the flow-control grants: a peer may only send a DATAGRAM when those parameters said it
+  would accept one. A datagram IS the unit, so there is no reassembly and no ordering — what
+  arrives is the whole thing or nothing.
 - **A message on a WebTransport stream** (Phase 9): `--exchange stream` end to end. After the
   exchange's response, the client opens a unidirectional WebTransport stream — the draft's `0x54`
   type **and the session ID**, then the session's own bytes — and the server's session sink

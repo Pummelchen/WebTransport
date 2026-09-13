@@ -2522,6 +2522,23 @@ measurements have produced -- each previous one eliminated rather than argued aw
 The test asserts only what is true today (the CONNECT goes out, the client records and tracks its request
 stream), and WT-110 carries the measurement and the next step.
 
+### Phase 9's twenty-eighth part: a message as a datagram
+
+`--exchange datagram` works end to end, and it needed no library change at all: the driver's DATAGRAM branch
+already handed the payload over uninterpreted, and the test frames the message the way the draft does -- a
+quarter stream ID and the payload -- sends it in a QUIC DATAGRAM frame, and parses what arrives with the session
+layer's own parser, which yields this session's quarter stream ID and exactly the payload.
+
+Two properties are worth stating because they are the ones a datagram cannot negotiate. Datagram support is
+ADVERTISED (`max_datagram_frame_size`), which is the same match-the-advertisement rule as the flow-control
+grants: a peer may only send a DATAGRAM frame when this endpoint's parameters said it would accept one, and the
+first run of this test would have failed at the send with a peer that advertised nothing. And a datagram IS the
+unit: no reassembly, no ordering, no partial delivery -- which is why the receive path is a single hand-over
+rather than the piece-wise reporting the stream paths use.
+
+Both exchange modes the plan names now have a proven path at the library level, and both were checked in debug,
+release and ASan+UBSan before being committed.
+
 ### Phase 9's twenty-seventh part: a message on a WebTransport stream, and the session ID in the prefix
 
 `--exchange stream` works end to end: after the exchange's response, the client opens a unidirectional
