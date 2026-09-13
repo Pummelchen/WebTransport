@@ -63,6 +63,26 @@ static void test_the_layers_are_reachable(void) {
                  wt_webtransport_capsule_decode(&c, 64U, &capsule, &h3_error));
     WT_EXPECT_U64("named as a drain", WT_CAPSULE_DRAIN_SESSION, capsule.type);
   }
+  /* The consumer API: a session created through the umbrella alone, with its flow
+   * control configured, so a declaration that moved out of the umbrella fails HERE. */
+  {
+    wt_session_config_t config = wt_session_config_default();
+    wt_session_t *session = NULL;
+    wt_session_callbacks_t callbacks;
+    memset(&callbacks, 0, sizeof(callbacks));
+    config.authority = "localhost";
+    config.path = "/wt";
+    config.session_id = 4U;
+    WT_EXPECT_OK("a session is created from the umbrella alone",
+                 wt_session_create(&config, NULL, &session));
+    WT_EXPECT_OK("its callbacks install", wt_session_set_callbacks(session, &callbacks));
+    WT_EXPECT_OK("and its flow control configures",
+                 wt_session_flow_configure(session, 1, 100U, 1U, 1U));
+    WT_EXPECT_U64("with an allowance", 100U, wt_session_flow_data_allowance(session));
+    WT_EXPECT_INT("and a state to read", (int)WT_SESSION_ESTABLISHING,
+                  (int)wt_session_state(session));
+    wt_session_destroy(session, NULL);
+  }
 }
 
 int main(void) {

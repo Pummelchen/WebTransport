@@ -55,6 +55,7 @@ wt_status_t wt_session_create(const wt_session_config_t *config, const wt_alloca
   if (session == NULL) return WT_ERR_OUT_OF_MEMORY;
   memset(session, 0, sizeof(*session));
   wt_webtransport_session_init(&session->machine);
+  wt_webtransport_flow_limits_init(&session->limits);
   session->session_id = config->session_id;
   session->max_capsule_bytes = config->max_capsule_bytes;
   session->max_datagram_bytes =
@@ -154,6 +155,42 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
      * code" means at this surface. */
     wt_session_set_error(session, status, (uint64_t)code);
     return status;
+  }
+
+  /* The session's own flow control arrives the same way. With flow control off the
+   * capsule is IGNORED rather than refused -- the draft makes it conditional on SETTINGS,
+   * and a peer that sends one anyway is not breaking anything this endpoint relies on. */
+  if (capsule.type == WT_CAPSULE_MAX_DATA) {
+    uint64_t maximum = 0U;
+    status = wt_webtransport_max_data_parse(&capsule, &maximum, &h3_error);
+    if (status != WT_OK) {
+      wt_session_set_error(session, status, (uint64_t)h3_error);
+      return status;
+    }
+    if (session->flow_enabled == 0) return WT_OK;
+    {
+      uint64_t flow_error = 0U;
+      status = wt_webtransport_flow_on_max_data(&session->limits, maximum, &flow_error);
+      wt_session_set_error(session, status, flow_error);
+      return status;
+    }
+  }
+  if (capsule.type == WT_CAPSULE_MAX_STREAMS_BIDI || capsule.type == WT_CAPSULE_MAX_STREAMS_UNI) {
+    uint64_t maximum = 0U;
+    int bidirectional = capsule.type == WT_CAPSULE_MAX_STREAMS_BIDI;
+    status = wt_webtransport_max_streams_parse(&capsule, &maximum, &h3_error);
+    if (status != WT_OK) {
+      wt_session_set_error(session, status, (uint64_t)h3_error);
+      return status;
+    }
+    if (session->flow_enabled == 0) return WT_OK;
+    {
+      uint64_t flow_error = 0U;
+      status = wt_webtransport_flow_on_max_streams(&session->limits, bidirectional, maximum,
+                                                   &flow_error);
+      wt_session_set_error(session, status, flow_error);
+      return status;
+    }
   }
 
   /* Any other capsule is accepted and left alone: RFC 9297 has a receiver ignore what it

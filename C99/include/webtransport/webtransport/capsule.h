@@ -86,6 +86,11 @@ wt_status_t wt_webtransport_drain_session_write(wt_writer_t *w);
  * when a limit goes backwards. */
 #define WT_WEBTRANSPORT_FLOW_CONTROL_ERROR ((uint64_t)0x045d4487)
 
+/* The draft's ceiling on a stream-count limit: a limit above it is a flow-control error
+ * rather than a number to remember, because the stream ID space it would describe does
+ * not exist. */
+#define WT_WEBTRANSPORT_MAX_STREAMS_VALUE (UINT64_C(1) << 60)
+
 wt_status_t wt_webtransport_max_data_write(wt_writer_t *w, uint64_t maximum);
 wt_status_t wt_webtransport_max_stream_data_write(wt_writer_t *w, uint64_t stream_id,
                                                   uint64_t maximum);
@@ -117,9 +122,11 @@ wt_status_t wt_webtransport_streams_blocked_parse(const wt_webtransport_capsule_
                                                   uint64_t *out_maximum,
                                                   wt_http3_error_t *out_error);
 
-/* The connection-level limits a session's peer has granted, with the rule that they may
- * only grow (section 5.1): a value below what was sent before is WT_FLOW_CONTROL_ERROR,
- * because a limit that shrinks would invalidate data already in flight. */
+/* The connection-level limits a session's peer has granted, with the rule that they must
+ * STRICTLY increase (section 5.1): a value at or below what was sent before is
+ * WT_FLOW_CONTROL_ERROR. A repeat is refused along with a decrease because a repeat is
+ * what a peer sends when it is confused about what it already granted, and accepting it
+ * would hide the confusion. The first capsule establishes a limit; there is no default. */
 typedef struct wt_webtransport_flow_limits {
   uint64_t max_data;
   int max_data_set;

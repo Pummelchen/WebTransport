@@ -281,9 +281,11 @@ wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limi
                                              uint64_t *out_error) {
   if (out_error != NULL) *out_error = 0U;
   if (limits == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (limits->max_data_set && maximum < limits->max_data) {
-    /* Section 5.1: a limit that shrinks would invalidate data already sent against the
-     * old one, so it is a flow-control error rather than a new limit. */
+  if (limits->max_data_set && maximum <= limits->max_data) {
+    /* Section 5.1: the limits strictly increase. A limit that shrinks would invalidate
+     * data already sent against the old one, and a limit that repeats says the peer has
+     * lost track of what it granted; both are flow-control errors rather than new
+     * limits. */
     if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
     return WT_ERR_PROTOCOL;
   }
@@ -297,8 +299,14 @@ wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *l
                                                 uint64_t *out_error) {
   if (out_error != NULL) *out_error = 0U;
   if (limits == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* The draft's ceiling applies before the monotonic rule: a value the stream ID space
+   * cannot hold is not a limit at all. */
+  if (maximum > WT_WEBTRANSPORT_MAX_STREAMS_VALUE) {
+    if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
   if (bidirectional) {
-    if (limits->max_streams_bidi_set && maximum < limits->max_streams_bidi) {
+    if (limits->max_streams_bidi_set && maximum <= limits->max_streams_bidi) {
       if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
       return WT_ERR_PROTOCOL;
     }
@@ -306,7 +314,7 @@ wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *l
     limits->max_streams_bidi_set = 1;
     return WT_OK;
   }
-  if (limits->max_streams_uni_set && maximum < limits->max_streams_uni) {
+  if (limits->max_streams_uni_set && maximum <= limits->max_streams_uni) {
     if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
     return WT_ERR_PROTOCOL;
   }

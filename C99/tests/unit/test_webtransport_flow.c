@@ -129,11 +129,15 @@ static void test_limits_only_grow(void) {
                wt_webtransport_flow_on_max_data(&limits, 2000U, &error));
   WT_EXPECT_U64("replacing it", 2000U, limits.max_data);
 
-  /* The rule: a limit may not shrink. */
+  /* The rule: a limit must STRICTLY increase, so a smaller one and a repeat are both
+   * flow-control errors. */
   WT_EXPECT_STATUS("a smaller one is refused", WT_ERR_PROTOCOL,
                    wt_webtransport_flow_on_max_data(&limits, 1500U, &error));
   WT_EXPECT_U64("with the draft's flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
   WT_EXPECT_U64("and the old limit intact", 2000U, limits.max_data);
+  WT_EXPECT_STATUS("a repeat is refused too", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_data(&limits, 2000U, &error));
+  WT_EXPECT_U64("with the same code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
 
   /* The stream counts follow the same rule, per direction. */
   WT_EXPECT_OK("a bidirectional count is accepted",
@@ -142,6 +146,18 @@ static void test_limits_only_grow(void) {
                    wt_webtransport_flow_on_max_streams(&limits, 1, 4U, &error));
   WT_EXPECT_U64("which is the same code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
   WT_EXPECT_U64("leaving the count alone", 8U, limits.max_streams_bidi);
+
+  WT_EXPECT_STATUS("and a repeat of the count as well", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_streams(&limits, 1, 8U, &error));
+
+  /* The stream ID space has a ceiling: a limit above it is not a limit. */
+  WT_EXPECT_STATUS("a count above the draft's ceiling is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_streams(&limits, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE + 1U,
+                                                       &error));
+  WT_EXPECT_U64("with the flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+  WT_EXPECT_OK("while the ceiling itself is a legal limit",
+               wt_webtransport_flow_on_max_streams(&limits, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE,
+                                                   &error));
 
   /* The other direction is independent. */
   WT_EXPECT_OK("the unidirectional count is separate",

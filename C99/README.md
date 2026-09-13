@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 66 unit test files and 79,144 checks, run by `ctest` and again under
+- 67 unit test files and 79,222 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -88,6 +88,16 @@ What is here:
     `wt_session_config_default()` returns every bound at its default, because a C
     caller that forgot a field would otherwise pass whatever its stack held into a
     bound.
+  - `api/flow.h` — the session's send-side flow control, which is what backpressure
+    means when there is no socket to block on. The draft's rules are the
+    implementation: flow control is off until both endpoints' SETTINGS say otherwise
+    (and a capsule arriving while it is off is ignored, not refused, because the
+    draft makes it conditional); limits strictly increase, so a repeat and a decrease
+    are both the draft's flow-control error; a stream count above the draft's
+    `2^60` ceiling is that error too; and the allowance functions answer "may I send
+    this" before the refusal rather than after it. The initial limits come from the
+    peer's SETTINGS through `wt_session_flow_advertised`, so a setting the peer
+    omitted is zero rather than unlimited -- which is what it means on the wire.
 - **The QUIC wire core** (Phase 1), which is everything QUIC needs before there
   is a connection:
   - `quic/varint.h` — variable-length integers, encoding shortest and decoding

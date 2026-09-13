@@ -38,6 +38,13 @@ extern "C" {
 /* The draft-16 setting a server advertises to say it can serve WebTransport at all. */
 #define WT_HTTP3_SETTING_WT_ENABLED ((uint64_t)0x2c7cf000)
 
+/* The draft-16 settings that carry a session's INITIAL flow-control limits (section 5.1).
+ * They are what turns the session's own flow control on: an endpoint that omits all three
+ * is not doing it, and a session enabled by one of them starts the other two at zero. */
+#define WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA ((uint64_t)0x2b61)
+#define WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI ((uint64_t)0x2b64)
+#define WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_BIDI ((uint64_t)0x2b65)
+
 /* The status a refusal carries when the authority or path is not one this server
  * serves. */
 #define WT_WEBTRANSPORT_REJECT_NOT_FOUND ((uint32_t)404)

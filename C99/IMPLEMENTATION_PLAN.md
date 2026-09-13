@@ -1865,6 +1865,22 @@ rather than completes. Bounds that the handle cannot honour (a stream table larg
 datagram bound above the QUIC DATAGRAM ceiling) are refused at create rather than clamped: a caller that asks
 for more than the build can do must find out.
 
+**Fourth part done: the session's flow control, and two corrections it forced in Phase 7.** `api/flow.h`
+is the send-side view: the peer's grants, this endpoint's usage, and the allowance functions that answer
+"may I send this" before a refusal rather than after it. It mirrors the Swift reference's rules, which are the
+draft's: flow control is off until SETTINGS say otherwise and a capsule arriving while it is off is IGNORED
+rather than refused, because the draft makes the whole mechanism conditional; the limits strictly increase;
+and the session's initial limits come from the peer's SETTINGS, so a setting the peer omitted is zero and not
+unlimited, which is what it means on the wire. The three draft-16 setting identifiers
+(`WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA` and the two stream counts) are now defined beside `WT_ENABLED`.
+
+Writing it against the Swift state machine exposed two places where the Phase 7 flow-limit helper was more
+permissive than the draft. It accepted a limit EQUAL to the one already granted, where the draft requires the
+limits to strictly increase -- a repeat is what a peer sends when it has lost track of what it granted, and
+accepting it hides that. And it had no ceiling on a stream-count limit, where the draft forbids a value above
+`2^60` because the stream ID space it would describe does not exist. Both now refuse with the draft's
+flow-control error code, and `test_webtransport_flow` asserts the stricter reading rather than the old one.
+
 Design the public API after the protocol core is stable.
 
 API requirements:
