@@ -170,10 +170,21 @@ static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t l
   uint64_t quarter = 0U;
   wt_http3_error_t error = WT_HTTP3_NO_ERROR;
 
-  /* A datagram arrives with the draft's own framing, and this tool's job is the message: the quarter stream ID
-   * is checked against the session and the payload is what the caller asked for. */
+  /* A datagram arrives with the draft's own framing: the quarter stream ID names the SESSION, and the payload is
+   * what the caller asked for. The ID is checked -- the comment here used to claim it was while the code only
+   * parsed the framing -- because the library's own session object does check it and `docs/PUBLIC-API.md` states
+   * the rule: "a stream or datagram naming another session is refused with HTTP/3's identifier error, never
+   * delivered to the wrong session and never dropped silently" (WT-179).
+   *
+   * A single-session tool serves the CONNECT stream it started (the client's stream 0, the server's stream 0), so
+   * the expected quarter ID is that stream's; before the stream is known the value is 0, which is the same answer
+   * and is what lets a datagram that legitimately arrives BEFORE the CONNECT has been processed keep working. */
   if (wt_webtransport_datagram_parse(data, length, &quarter, &payload, &payload_length, &error) != WT_OK) {
     return WT_OK;
+  }
+  if (quarter != wt_webtransport_quarter_stream_id(side->request_stream_id)) {
+    wt_quic_connection_refuse_application(side->connection, (uint64_t)WT_HTTP3_ID_ERROR, 0U);
+    return WT_ERR_STATE;
   }
   if (side->data_bytes + payload_length <= sizeof(side->data)) {
     if (payload_length > 0U) memcpy(side->data + side->data_bytes, payload, payload_length);

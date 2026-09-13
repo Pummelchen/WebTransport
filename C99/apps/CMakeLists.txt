@@ -96,7 +96,12 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   # both sides of a real socket -- the client's report says what it sent, and the peer's says what it received.
   add_test(NAME wt_cli_hostile_peer
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-hostile.sh
-            $<TARGET_FILE:wt-conformance-c99> $<TARGET_FILE:wt-client-c99> 45427)
+            $<TARGET_FILE:wt-conformance-c99> $<TARGET_FILE:wt-client-c99> 45427 max-streams-decrease)
+  # The second act: a WebTransport DATAGRAM whose quarter stream ID names a session this endpoint does not have.
+  # The client must refuse it with HTTP/3's ID_ERROR and must NOT count it as a received message (WT-179).
+  add_test(NAME wt_cli_hostile_datagram
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-hostile.sh
+            $<TARGET_FILE:wt-conformance-c99> $<TARGET_FILE:wt-client-c99> 45428 datagram-for-another-session)
 
   add_test(NAME wt_cli_contract
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-contract.sh

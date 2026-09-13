@@ -163,7 +163,8 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
       } else if (is_flag(argument, "--hostile")) {
         /* The act is a NAME, and an unknown one is refused here rather than at the peer: a caller that asked for
          * a misbehaviour nobody implements should be told, not given a peer that behaves (WT-147). */
-        if (strcmp(value, "max-streams-decrease") != 0) {
+        if (strcmp(value, "max-streams-decrease") != 0 &&
+            strcmp(value, "datagram-for-another-session") != 0) {
           return fail("unsupported hostile act", value, out_error, out_error_argument);
         }
         options->hostile = value;

@@ -614,6 +614,18 @@ What is here:
   kept pumping until `--timeout-ms` after the transport was already closed, reporting `timeout` for a refusal that
   had already arrived; every wait now stops when the connection closes and names what happened
   (`protocol`, or `closed` for a peer that ended it).
+- **A datagram for another session is refused, not delivered** (WT-179): `docs/PUBLIC-API.md` states the routing
+  rule -- "a stream or datagram naming another session is refused with HTTP/3's identifier error, never delivered
+  to the wrong session and never dropped silently" -- and `wt_session_on_datagram` implements it. The CLI did
+  **not**: its datagram handler parsed the draft's framing and then appended the payload without ever comparing
+  the quarter stream ID with its own session, so a datagram naming a session this endpoint does not have was
+  counted as a received message. It now compares them (the expected ID is the CONNECT stream's, and 0 before the
+  stream is known, which is what keeps a datagram that legitimately arrives before the CONNECT has been processed
+  working) and refuses with `H3_ID_ERROR` as an **application** close. Measured by a second hostile act,
+  `datagram-for-another-session`, and CTest's `wt_cli_hostile_datagram`: the client exits non-zero with
+  `closeKind` 2 / `closeSentErrorCode` 264 and -- the point of the act -- **`receivedBytes` 0**. The conformance
+  tool's isolation scenario had asserted this rule against a model receiver all along; the tool a user runs did
+  not follow it.
 - **Shutdown and cancellation are safe at every point** (WT-178): the Swift suite tests its server's shutdown path
   from the operator's point of view -- refuse at once, return promptly with nothing served, survive being run
   twice -- and those assertions are about a server object this tree does not have. What they are about

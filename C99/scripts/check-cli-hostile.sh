@@ -19,10 +19,34 @@ set -eu
 conformance="$1"
 client="$2"
 port="${3:-45427}"
+act="${4:-max-streams-decrease}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-"$conformance" --listen "127.0.0.1:$port" --hostile max-streams-decrease --json \
+# What each act must make the client do. The acts differ in the CLOSE the client sends, and one of them also
+# differs in what must NOT happen: a datagram for another session must not be counted as received, which is the
+# whole reason that act exists (WT-179). Kept here rather than in the script's prose so a new act cannot be added
+# without saying what it expects.
+case "$act" in
+  max-streams-decrease)
+    # A transport close (kind 1) carrying PROTOCOL_VIOLATION and the frame that caused it.
+    expect_close='"closeKind":1,"closeSentErrorCode":10,"closeSentFrameType":18'
+    expect_status='"status":"protocol"'
+    expect_more='grep -q "\"receivedDatagram\":false" "$work/client.json" || fail "a refused frame was counted as a message"'
+    ;;
+  datagram-for-another-session)
+    # An APPLICATION close (kind 2) carrying HTTP/3's ID_ERROR, and NO received bytes.
+    expect_close='"closeKind":2,"closeSentErrorCode":264,"closeSentFrameType":0'
+    expect_status='"status":"state"'
+    expect_more='grep -q "\"receivedBytes\":0" "$work/client.json" || fail "a datagram for another session was delivered"'
+    ;;
+  *)
+    echo "cli hostile peer: unknown act $act"
+    exit 2
+    ;;
+esac
+
+"$conformance" --listen "127.0.0.1:$port" --hostile "$act" --json \
   >"$work/peer.json" 2>&1 &
 peer_pid=$!
 
@@ -47,13 +71,12 @@ fail() {
 grep -q '"established":true' "$work/client.json" || fail "the handshake did not complete, so nothing was refused"
 # The tool's own status names the LAYER, not the clock: "protocol" is the refusal, and "timeout" is what this run
 # used to say -- for a refusal that had already arrived (WT-147).
-grep -q '"status":"protocol"' "$work/client.json" || fail "the client did not report a protocol failure"
-grep -q '"closeKind":1,"closeSentErrorCode":10,"closeSentFrameType":18' "$work/client.json" \
-  || fail "the client did not send a transport close naming PROTOCOL_VIOLATION and MAX_STREAMS"
+grep -q "$expect_status" "$work/client.json" || fail "the client's status does not name the refusal"
+grep -q "$expect_close" "$work/client.json" || fail "the client's close is not the one this act requires"
+eval "$expect_more"
 # The peer's own view: what it sent, and the code it RECEIVED.
 grep -q '"sentHostileFrame":true' "$work/peer.json" || fail "the peer did not perform the act"
-grep -q '"peerClosed":true,"peerErrorCode":10,"peerCloseFrameType":18' "$work/peer.json" \
-  || fail "the peer did not receive the refusal it asked for"
+grep -q '"peerClosed":true' "$work/peer.json" || fail "the peer did not receive a close"
 grep -q '"result":"passed"' "$work/peer.json" || fail "the peer did not confirm the refusal"
 # The reports are JSON, so they are PARSED rather than grepped: a field appended without its comma produced a
 # report no caller could read while every substring assertion above passed it (WT-144).
@@ -70,4 +93,4 @@ for path in sys.argv[1:]:
                     sys.exit(1)
 VALIDATE
 
-echo "cli hostile peer: the client refused a decreasing MAX_STREAMS with 0xa naming frame 0x12, on both reports"
+echo "cli hostile peer: the client answered $act with the close this act requires, on both reports"

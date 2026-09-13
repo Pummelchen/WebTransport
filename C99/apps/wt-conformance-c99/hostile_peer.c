@@ -13,6 +13,11 @@
  *     already been told it may open that many streams, and section 19.11 names the frame. The expected answer is
  *     a transport close with code 0x0a naming frame type 0x12, which is what the test asserts -- on the CLIENT's
  *     report AND on this peer's, because "the code we sent" and "the code the peer received" are two claims.
+ *   - `datagram-for-another-session`: send a WebTransport DATAGRAM whose quarter stream ID names a session this
+ *     endpoint does not have (session 4 while the peer serves session 0). The rule is the library's own and
+ *     `docs/PUBLIC-API.md` states it -- a datagram naming another session is refused with HTTP/3's IDENTIFIER
+ *     error, "never delivered to the wrong session and never dropped silently" -- so the answer is an
+ *     APPLICATION close carrying 0x0108 (WT-179).
  *
  * This lives in the conformance tool rather than in a shipped server for a reason the plan states as a rule: a
  * production server that could be told to break a transport rule would be a server nobody could trust, so the
@@ -25,8 +30,10 @@
 #include <string.h>
 
 #include "webtransport/quic/packet.h"
+#include "webtransport/http3/frame.h"
 #include "webtransport/quic/transport_parameters.h"
 #include "webtransport/runtime/session.h"
+#include "webtransport/webtransport/framing.h"
 #include "webtransport/tls/self_signed.h"
 #include "webtransport/writer.h"
 
@@ -78,10 +85,10 @@ static void peer_pump(wt_runtime_session_t *session, wt_udp_socket_t *socket, ui
   *now += 1000U;
 }
 
-/* The one act, and what it is: a MAX_STREAMS below the limit this peer's own transport parameters granted.
- * `granted` is what the parameters advertised, so the frame is a DECREASE by construction rather than by a number
- * a reader has to check against another file. */
-static wt_status_t send_hostile_frame(wt_runtime_session_t *session, uint64_t now, int *out_sent) {
+/* A MAX_STREAMS below the limit these transport parameters granted: a DECREASE by construction rather than by a
+ * number a reader has to check against another file. RFC 9000 section 4.6 makes it a PROTOCOL_VIOLATION naming
+ * frame 0x12, so the peer answers with a TRANSPORT close. */
+static wt_status_t send_max_streams_decrease(wt_runtime_session_t *session, uint64_t now, int *out_sent) {
   wt_quic_frame_t frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_STREAMS);
   wt_status_t status;
 
@@ -94,6 +101,58 @@ static wt_status_t send_hostile_frame(wt_runtime_session_t *session, uint64_t no
   if (status != WT_OK) return status;
   *out_sent = 1;
   return WT_OK;
+}
+
+/* A WebTransport DATAGRAM for a session this endpoint does not have: the quarter stream ID names session 4 (the
+ * client's second bidirectional stream), while the peer serves session 0. The rule is the library's own
+ * (`wt_session_on_datagram`) and `docs/PUBLIC-API.md` states it: a datagram naming another session is refused
+ * with HTTP/3's IDENTIFIER error, never delivered to the wrong session and never dropped silently -- so the
+ * answer is an APPLICATION close carrying 0x0108, not a timeout and not a delivery (WT-179). */
+static wt_status_t send_datagram_for_another_session(wt_runtime_session_t *session, uint64_t now,
+                                                     int *out_sent) {
+  uint8_t payload[32];
+  wt_writer_t writer = wt_writer_init(payload, sizeof(payload));
+  wt_quic_frame_t frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_DATAGRAM);
+  wt_status_t status;
+
+  *out_sent = 0;
+  if (wt_webtransport_datagram_write(&writer, 1U, (const uint8_t *)"not-yours", 9U) != WT_OK) {
+    return WT_ERR_STATE;
+  }
+  frame.as.datagram.data = payload;
+  frame.as.datagram.length = wt_writer_offset(&writer);
+  status = wt_quic_connection_send_frame(&session->connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, now);
+  if (status != WT_OK) return status;
+  status = wt_quic_connection_flush(&session->connection, now);
+  if (status != WT_OK) return status;
+  *out_sent = 1;
+  return WT_OK;
+}
+
+/* What each act is, how it is performed, and what the peer is expected to answer with. One table rather than a
+ * chain of `if`s because the EXPECTATION differs per act, and an act whose expectation lived at the call site
+ * would be one a new act could forget to state. */
+typedef struct hostile_act {
+  const char *name;
+  wt_status_t (*perform)(wt_runtime_session_t *session, uint64_t now, int *out_sent);
+  uint64_t expected_code;
+  wt_quic_close_kind_t expected_kind;
+  uint64_t expected_frame;
+} hostile_act_t;
+
+static const hostile_act_t k_acts[] = {
+    {"max-streams-decrease", send_max_streams_decrease, WT_QUIC_PROTOCOL_VIOLATION,
+     WT_QUIC_CLOSE_TRANSPORT, WT_QUIC_FRAME_MAX_STREAMS_BIDI},
+    {"datagram-for-another-session", send_datagram_for_another_session, WT_HTTP3_ID_ERROR,
+     WT_QUIC_CLOSE_APPLICATION, 0U},
+};
+
+static const hostile_act_t *find_act(const char *name) {
+  size_t i;
+  for (i = 0U; i < sizeof(k_acts) / sizeof(k_acts[0]); i++) {
+    if (strcmp(k_acts[i].name, name) == 0) return &k_acts[i];
+  }
+  return NULL;
 }
 
 wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *act, char *detail,
@@ -121,10 +180,11 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
   wt_status_t status;
   wt_cli_result_t result = WT_CLI_RESULT_FAILED;
 
+  const hostile_act_t *chosen;
+
   if (address == NULL || act == NULL) return fail_peer(detail, detail_size, "no address or act");
-  if (strcmp(act, "max-streams-decrease") != 0) {
-    return fail_peer(detail, detail_size, "the act is not one this peer implements");
-  }
+  chosen = find_act(act);
+  if (chosen == NULL) return fail_peer(detail, detail_size, "the act is not one this peer implements");
   if (wt_udp_address_parse_host_port(address, &local) != WT_OK) {
     return fail_peer(detail, detail_size, "the address is not host:port");
   }
@@ -208,7 +268,7 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
     return fail_peer(detail, detail_size, "the handshake did not complete, so the act was not performed");
   }
 
-  status = send_hostile_frame(&session, now, &sent);
+  status = chosen->perform(&session, now, &sent);
   if (status != WT_OK || sent == 0) {
     wt_runtime_session_clear(&session);
     wt_udp_close(&socket);
@@ -233,18 +293,20 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
          (unsigned)session.connection.peer_close_kind);
 
   if (session.connection.peer_closed != 0 &&
-      session.connection.peer_error_code == (uint64_t)WT_QUIC_PROTOCOL_VIOLATION &&
-      session.connection.peer_frame_type == WT_QUIC_FRAME_MAX_STREAMS_BIDI) {
+      session.connection.peer_error_code == chosen->expected_code &&
+      session.connection.peer_close_kind == chosen->expected_kind &&
+      session.connection.peer_frame_type == chosen->expected_frame) {
     snprintf(detail, detail_size,
-             "the peer sent a MAX_STREAMS below its own grant and the client closed with 0x%llx naming frame "
-             "0x%llx",
+             "the peer performed %s and the client closed with 0x%llx (kind %u, frame 0x%llx)", act,
              (unsigned long long)session.connection.peer_error_code,
+             (unsigned)session.connection.peer_close_kind,
              (unsigned long long)session.connection.peer_frame_type);
     result = WT_CLI_RESULT_PASSED;
   } else {
     snprintf(detail, detail_size,
-             "the client did not refuse the decreasing MAX_STREAMS: peerClosed=%d code=0x%llx frame=0x%llx",
+             "the client did not answer %s as expected: peerClosed=%d code=0x%llx kind=%u frame=0x%llx", act,
              session.connection.peer_closed, (unsigned long long)session.connection.peer_error_code,
+             (unsigned)session.connection.peer_close_kind,
              (unsigned long long)session.connection.peer_frame_type);
   }
 
