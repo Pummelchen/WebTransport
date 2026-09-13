@@ -63,4 +63,12 @@ grep -q "\"receivedDatagram\":$([ "$mode" = datagram ] && echo true || echo fals
   || fail "the client's report does not match the $mode mode"
 grep -q "\"receivedDatagram\":$([ "$mode" = datagram ] && echo true || echo false)" "$work/server.json" \
   || fail "the server's report does not match the $mode mode"
+# And neither end may claim to have closed a connection it did not close: a report that says `ok` while its own
+# close says otherwise is the defect WT-144 fixed, and the reverse -- a false close on a healthy session -- is how
+# that fix would break the tools instead. The close is read from the connection's close STATE, so this also says
+# the field is wired to the peer's own CONNECT stream rather than defaulted.
+grep -q '"closeKind":0,"closeSentErrorCode":0,"closeSentFrameType":0,"closeCause":"ok"' "$work/client.json" \
+  || fail "the client claims a close it did not send"
+grep -q '"closeKind":0,"closeSentErrorCode":0,"closeSentFrameType":0,"closeCause":"ok"' "$work/server.json" \
+  || fail "the server claims a close it did not send"
 echo "cli session ($mode): client and server exchanged a WebTransport session over $host:$port"

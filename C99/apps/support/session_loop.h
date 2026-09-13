@@ -61,6 +61,14 @@ typedef struct wt_loop_result {
   int close_code_set;
   uint64_t peer_error_code;
   int peer_closed;
+  /* What THIS endpoint's own close said, when it closed one. `close_code` above is the hint a refusing handler
+   * leaves and the connection clears once used, so it reads as zero whether or not a close was sent; this is the
+   * close itself -- kind, code and frame type -- plus the status of the handler that refused. A run that ended
+   * with this endpoint having closed did NOT end well, whatever the exchange counters say (WT-144). */
+  unsigned close_kind;
+  uint64_t close_sent_error_code;
+  uint64_t close_sent_frame_type;
+  wt_status_t close_cause;
   /* How many datagrams/packets the receive loop DISCARDED rather than parsed. A discard is ordinary during a
    * handshake (a packet for a key level this endpoint does not have yet, an unauthenticated packet) and it is
    * exactly what a refusal is NOT: a run whose packets are all discarded needs keys, and a run that refuses

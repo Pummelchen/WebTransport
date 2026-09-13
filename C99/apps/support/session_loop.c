@@ -202,6 +202,18 @@ static int handshake_ready(const loop_t *loop) {
          loop->session.peer_parameters_applied != 0;
 }
 
+/* Whether this run ended with THIS endpoint having closed the connection, and why.
+ *
+ * A tool that answers "ok" here is lying: the peer was told the connection is over, whatever the exchange
+ * counters say. The status the refusing handler returned is the report when there was one -- it names the layer
+ * that refused -- and a deliberate close with no refusal is a protocol failure of the run's own making, which is
+ * `WT_ERR_PROTOCOL` rather than `WT_OK` (WT-144). */
+static wt_status_t loop_close_status(const loop_t *loop) {
+  if (wt_quic_connection_is_closed(&loop->session.connection) == 0) return WT_OK;
+  if (loop->session.connection.close_cause != WT_OK) return loop->session.connection.close_cause;
+  return WT_ERR_PROTOCOL;
+}
+
 static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->first_receive_error = loop->session.first_receive_error;
   out->receive_errors = loop->session.receive_errors;
@@ -212,6 +224,10 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->close_code_set = loop->session.connection.close_code_set;
   out->peer_error_code = loop->session.connection.peer_error_code;
   out->peer_closed = loop->session.connection.peer_closed;
+  out->close_kind = (unsigned)loop->session.connection.close.kind;
+  out->close_sent_error_code = loop->session.connection.close.error_code;
+  out->close_sent_frame_type = loop->session.connection.close.frame_type;
+  out->close_cause = loop->session.connection.close_cause;
   out->packets_discarded = loop->session.connection.packets_discarded;
   out->has_initial_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
   out->has_handshake_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
@@ -443,9 +459,13 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   out->received_datagram = loop.side.data_was_datagram;
 
   record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
-  wt_udp_close(&loop.socket);
-  return WT_OK;
+  {
+    /* Read BEFORE the clear, and reported instead of `WT_OK`: a run that closed the connection did not succeed. */
+    wt_status_t closed = loop_close_status(&loop);
+    wt_runtime_session_clear(&loop.session);
+    wt_udp_close(&loop.socket);
+    return closed;
+  }
 }
 
 wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t *out) {
@@ -632,7 +652,11 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
 
   record_oracle(&loop, out);
-  wt_runtime_session_clear(&loop.session);
-  wt_udp_close(&loop.socket);
-  return WT_OK;
+  {
+    /* The same rule as the client's: a session this endpoint ended by closing is not a session that went well. */
+    wt_status_t closed = loop_close_status(&loop);
+    wt_runtime_session_clear(&loop.session);
+    wt_udp_close(&loop.socket);
+    return closed;
+  }
 }

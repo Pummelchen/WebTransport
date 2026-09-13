@@ -866,6 +866,10 @@ static wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_
     uint64_t code = connection->close_code_set ? connection->close_code : WT_QUIC_INTERNAL_ERROR;
     uint64_t type = connection->close_code_set ? connection->close_frame_type : 0U;
     connection->close_code_set = 0;
+    /* Kept, because the hint above is about to be cleared and "why did this endpoint close" is not answerable
+     * from a cleared hint: a caller that asked got `WT_OK` and `close_code_set == 0`, which reads exactly like a
+     * connection that never closed (WT-144). */
+    connection->close_cause = status;
     (void)close_with(connection, code, type, visit->now);
   }
   return status;
@@ -2109,6 +2113,16 @@ wt_status_t wt_quic_connection_close(wt_quic_connection_t *connection, uint64_t 
 int wt_quic_connection_is_closed(const wt_quic_connection_t *connection) {
   if (connection == NULL) return 0;
   return connection->peer_closed != 0 || wt_quic_close_is_closed(&connection->close) != 0;
+}
+
+const wt_quic_close_state_t *wt_quic_connection_close_state(const wt_quic_connection_t *connection) {
+  if (connection == NULL) return NULL;
+  return &connection->close;
+}
+
+wt_status_t wt_quic_connection_close_cause(const wt_quic_connection_t *connection) {
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  return connection->close_cause;
 }
 
 int wt_quic_connection_is_drained(const wt_quic_connection_t *connection, uint64_t now) {

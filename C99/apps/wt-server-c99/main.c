@@ -152,11 +152,24 @@ int main(int argc, char **argv) {
           printf("%02x", (unsigned)identity.fingerprint[pin_index]);
         }
       }
-      printf("\"}\n");
+      printf("\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,\"closeCause\":\"%s\"}\n",
+             result.close_kind, (unsigned long long)result.close_sent_error_code,
+             (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause));
     } else {
       printf("server: %s on port %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.bound_port, (unsigned long long)result.received_bytes,
              result.received_datagram != 0 ? " as a datagram" : " on a stream");
+      /* A session this endpoint ENDED by closing is not a session that went well, so the close is reported here
+       * rather than only on the failure path -- staying silent about it is how a tool printed "ok" for a run that
+       * had sent CONNECTION_CLOSE (WT-144). */
+      if (result.close_kind != 0U) {
+        printf("server: THIS endpoint closed the connection with code 0x%llx, blaming frame type %llu\n",
+               (unsigned long long)result.close_sent_error_code,
+               (unsigned long long)result.close_sent_frame_type);
+        if (result.close_cause != WT_OK) {
+          printf("server: after a frame handler refused with %s\n", wt_status_name(result.close_cause));
+        }
+      }
     }
     return status == WT_OK ? 0 : 1;
   }

@@ -153,6 +153,8 @@ int main(int argc, char **argv) {
              "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u,\"packetsSeen\":%u,"
              "\"lastReceive\":\"%s\",\"closeCodeSet\":%s,\"closeCode\":%llu,"
              "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
+             "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,"
+             "\"closeCause\":\"%s\","
              "\"packetsDiscarded\":%llu,\"keys\":{\"initial\":%s,\"handshake\":%s,"
              "\"application\":%s},\"handshakeState\":\"%s\",\"resends\":%u,\"probes\":%u,"
              "\"probesWithData\":%u,\"requestStreamId\":%llu,"
@@ -167,6 +169,8 @@ int main(int argc, char **argv) {
              wt_status_name(result.last_receive), result.close_code_set != 0 ? "true" : "false",
              (unsigned long long)result.close_code, (unsigned long long)result.close_frame_type,
              result.peer_closed != 0 ? "true" : "false", (unsigned long long)result.peer_error_code,
+             result.close_kind, (unsigned long long)result.close_sent_error_code,
+             (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
              (unsigned long long)result.packets_discarded, result.has_initial_keys != 0 ? "true" : "false",
              result.has_handshake_keys != 0 ? "true" : "false",
              result.has_application_keys != 0 ? "true" : "false",
@@ -198,12 +202,20 @@ int main(int argc, char **argv) {
         if (result.resends > 0U) {
           printf("client: answered %u lost-frame report(s) by resending the request\n", result.resends);
         }
-        if (result.close_code_set != 0) {
-          printf("client: this endpoint refused with code 0x%llx, blaming frame type %llu\n",
-                 (unsigned long long)result.close_code, (unsigned long long)result.close_frame_type);
-        }
         if (result.peer_closed != 0) {
           printf("client: the peer closed with code 0x%llx\n", (unsigned long long)result.peer_error_code);
+        }
+      }
+      /* Printed whatever the status is, and THAT is the point: this endpoint's own close is a fact about the run,
+       * and a tool that stayed silent about it printed "ok" for a session it had ended itself (WT-144). The code
+       * comes from the connection's CLOSE STATE rather than from `closeCode` above, which is the hint a refusing
+       * handler leaves and the connection clears before the close is even sent. */
+      if (result.close_kind != 0U) {
+        printf("client: THIS endpoint closed the connection with code 0x%llx, blaming frame type %llu\n",
+               (unsigned long long)result.close_sent_error_code,
+               (unsigned long long)result.close_sent_frame_type);
+        if (result.close_cause != WT_OK) {
+          printf("client: after a frame handler refused with %s\n", wt_status_name(result.close_cause));
         }
       }
     }

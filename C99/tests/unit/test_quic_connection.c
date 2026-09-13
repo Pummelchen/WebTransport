@@ -1858,6 +1858,99 @@ static void test_packets_to_issued_connection_ids(void) {
   close_pair(&pair);
 }
 
+/* A handler that REFUSES every frame, which is what `deliver_to_handler`'s close path exists for. */
+static wt_status_t refuse_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
+  unsigned *count = context;
+  (void)space;
+  (void)frame;
+  (*count)++;
+  return WT_ERR_PROTOCOL;
+}
+
+/* What a refusal leaves behind, which is the question a tool asks when a session ends badly (WT-144).
+ *
+ * The device this replaces was the HINT: a refusing handler may leave `close_code`/`close_code_set` for the
+ * connection to name in its CONNECTION_CLOSE, and the connection CLEARS that flag before it closes. So a caller
+ * that asked "what did we close with, and why" read zeroes -- indistinguishable from a connection that never
+ * closed -- and a CLI went on printing `"status":"ok"` for a session it had ended with INTERNAL_ERROR. The close
+ * STATE and the cause are kept instead, and this is the test that says so. */
+static void test_a_refusal_leaves_a_readable_close(wt_udp_family_t family) {
+  connection_pair_t pair;
+  static const uint8_t payload[] = {0x01U, 0x02U, 0x03U, 0x04U};
+  unsigned refused = 0U;
+  const wt_quic_close_state_t *close_state;
+  uint64_t now = 1000000U;
+
+  open_pair(family, &pair);
+  wt_quic_connection_set_handlers(&pair.server, refuse_frame, &refused, record_lost,
+                                  &pair.server_witness);
+  WT_EXPECT_INT("a fresh connection has no close to report", 0, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("and no cause", (uint64_t)WT_OK, (uint64_t)wt_quic_connection_close_cause(&pair.server));
+  WT_EXPECT_U64("and no close state", (uint64_t)WT_QUIC_CLOSE_NONE,
+                (uint64_t)wt_quic_connection_close_state(&pair.server)->kind);
+
+  WT_EXPECT_OK("the client sends a frame",
+               wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 0U, payload,
+                                              sizeof(payload), now));
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("which the server's handler refused", 1U, (uint64_t)refused);
+
+  WT_EXPECT_INT("so this endpoint is closed", 1, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with the handler's own status kept as the cause", (uint64_t)WT_ERR_PROTOCOL,
+                (uint64_t)wt_quic_connection_close_cause(&pair.server));
+  close_state = wt_quic_connection_close_state(&pair.server);
+  WT_EXPECT_U64("and a close state of kind transport", (uint64_t)WT_QUIC_CLOSE_TRANSPORT,
+                (uint64_t)close_state->kind);
+  /* No handler named a code, so the connection says what it sent: INTERNAL_ERROR, blaming no frame. That is
+   * exactly the `code 0x1` the interop peer logged while this tree's tool reported success. */
+  WT_EXPECT_U64("naming INTERNAL_ERROR", (uint64_t)WT_QUIC_INTERNAL_ERROR, close_state->error_code);
+  WT_EXPECT_U64("and no frame type", 0U, close_state->frame_type);
+  /* The hint is cleared, which is WHY the state above has to exist. */
+  WT_EXPECT_INT("while the hint the handler could have left is cleared", 0, pair.server.close_code_set);
+  /* The peer's own close is a different question and is still unanswered. */
+  WT_EXPECT_INT("and nothing is recorded about the peer closing", 0, pair.server.peer_closed);
+
+  close_pair(&pair);
+}
+
+/* A handler that names its code, so the close the peer is told about is the handler's rather than a generic one. */
+static wt_status_t refuse_frame_with_code(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
+  wt_quic_connection_t *connection = context;
+  (void)space;
+  connection->close_code = (uint64_t)WT_QUIC_STREAM_STATE_ERROR;
+  connection->close_frame_type = WT_QUIC_FRAME_CRYPTO;
+  connection->close_code_set = 1;
+  (void)frame;
+  return WT_ERR_PROTOCOL;
+}
+
+static void test_a_handler_can_name_the_code_it_refused_with(wt_udp_family_t family) {
+  connection_pair_t pair;
+  static const uint8_t payload[] = {0x05U, 0x06U, 0x07U, 0x08U};
+  const wt_quic_close_state_t *close_state;
+  uint64_t now = 1000000U;
+
+  open_pair(family, &pair);
+  wt_quic_connection_set_handlers(&pair.server, refuse_frame_with_code, &pair.server, record_lost,
+                                  &pair.server_witness);
+  WT_EXPECT_OK("the client sends a frame",
+               wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 0U, payload,
+                                              sizeof(payload), now));
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+
+  close_state = wt_quic_connection_close_state(&pair.server);
+  WT_EXPECT_U64("the close the peer is told about names the handler's code",
+                (uint64_t)WT_QUIC_STREAM_STATE_ERROR, close_state->error_code);
+  WT_EXPECT_U64("and the frame the handler blamed", (uint64_t)WT_QUIC_FRAME_CRYPTO,
+                close_state->frame_type);
+  WT_EXPECT_U64("while the cause is still the status", (uint64_t)WT_ERR_PROTOCOL,
+                (uint64_t)wt_quic_connection_close_cause(&pair.server));
+
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1870,6 +1963,9 @@ int main(void) {
   test_packet_threshold_loss();
   test_ack_for_unsent_packet();
   test_close_paths();
+  test_a_refusal_leaves_a_readable_close(WT_UDP_IPV4);
+  test_a_refusal_leaves_a_readable_close(WT_UDP_IPV6);
+  test_a_handler_can_name_the_code_it_refused_with(WT_UDP_IPV4);
   test_discards();
   test_garbage(WT_UDP_IPV4);
   test_garbage(WT_UDP_IPV6);

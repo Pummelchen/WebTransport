@@ -249,6 +249,11 @@ typedef struct wt_quic_connection {
   uint64_t close_code;
   uint64_t close_frame_type;
   int close_code_set;
+  /* Why THIS endpoint closed, as the status of the handler that refused the frame. It is kept after the close
+   * because `close_code` above is a HINT that is cleared once it has been used, so a caller reading it to ask
+   * "what did we actually send" reads nothing -- which is how a tool reported a successful session after the
+   * connection had been closed with INTERNAL_ERROR (WT-144). */
+  wt_status_t close_cause;
   wt_quic_frame_lost_fn lost_handler;
   void *lost_context;
 
@@ -553,6 +558,18 @@ wt_status_t wt_quic_connection_close(wt_quic_connection_t *connection, uint64_t 
 
 /* Whether the peer closed, so that nothing but PADDING and the close's own frames is processed. */
 int wt_quic_connection_is_closed(const wt_quic_connection_t *connection);
+
+/* The close THIS endpoint sent: its kind, error code, frame type and reason phrase, or a state whose kind is
+ * `WT_QUIC_CLOSE_NONE` when it has sent none. It is the record of what the peer was told, which is a different
+ * question from `close_code`'s -- that is the hint a refusing handler leaves, and the connection clears it once
+ * it has been used (WT-144). The state is owned by the connection and the reason phrase is a view into the
+ * caller's bytes, so it lives as long as whatever passed them to `wt_quic_connection_close`. */
+const wt_quic_close_state_t *wt_quic_connection_close_state(const wt_quic_connection_t *connection);
+
+/* The status of the handler whose refusal closed this connection, or WT_OK when no handler refused -- a close
+ * this endpoint chose deliberately, or one the peer sent, has no cause here. A tool asks because a session that
+ * ended this way did NOT end well, whatever the exchange counters say. */
+wt_status_t wt_quic_connection_close_cause(const wt_quic_connection_t *connection);
 
 /* Whether the draining period has passed, after which the connection is gone and its state may be
  * released. */
