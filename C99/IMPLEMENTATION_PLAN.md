@@ -1881,6 +1881,22 @@ accepting it hides that. And it had no ceiling on a stream-count limit, where th
 `2^60` because the stream ID space it would describe does not exist. Both now refuse with the draft's
 flow-control error code, and `test_webtransport_flow` asserts the stricter reading rather than the old one.
 
+**Fifth part done: the sample consumer and the API's contract.** `apps/wt-api-sample` is a program that
+includes ONLY `webtransport/webtransport.h`, uses only the public functions, and walks a whole session --
+establishment, a peer stream, a peer datagram, a flow-control capsule, backpressure, drain, close, destroy --
+against the library. It is registered with CTest, so the plan's "public sample app compiles on all target
+platforms" is checked rather than compiled: the day a public declaration moves or starts needing a header the
+umbrella does not carry, this program stops building. `docs/PUBLIC-API.md` is the contract it exercises,
+covering endpoints, sessions, ownership, the error surface, the event loop, streams, datagrams, backpressure,
+close and drain, and every bound a caller sets -- with the parts that are NOT there yet (a trust surface, the
+blocking helpers, the send side) named as plainly as the parts that are.
+
+Registering the sample as a test found a silent failure worth recording: `add_test` called from the apps
+directory before `enable_testing()` is DROPPED, and CTest then reports a clean run of one fewer test. The tree
+now enables testing before its subdirectories, and guards the registration on the project's own switch rather
+than CTest's `BUILD_TESTING`, which this project never defines. Both mistakes report success, which is what
+makes them worth a paragraph.
+
 Design the public API after the protocol core is stable.
 
 API requirements:

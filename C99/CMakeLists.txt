@@ -289,12 +289,19 @@ else()
   set(WT_LINK_TARGET webtransport_static)
 endif()
 
+# enable_testing() runs BEFORE the subdirectories, because a test can be registered from
+# the apps directory too (the public API sample) and add_test in a tree where testing has
+# not been enabled yet is silently dropped -- CTest then reports a clean run of one fewer
+# test, which is the kind of failure that looks like success.
+if(WEBTRANSPORT_C99_BUILD_TESTS)
+  enable_testing()
+endif()
+
 if(WEBTRANSPORT_C99_BUILD_APPS)
   add_subdirectory(apps)
 endif()
 
 if(WEBTRANSPORT_C99_BUILD_TESTS)
-  enable_testing()
   add_subdirectory(tests)
 endif()
 

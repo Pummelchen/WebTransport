@@ -59,7 +59,10 @@ What is here:
   no LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by
   a local run on this machine; that is how the first one was found.
 - **The public API** (Phase 8), which is what a consumer outside this repository
-  builds against:
+  builds against; `docs/PUBLIC-API.md` is its contract, and
+  `apps/wt-api-sample/main.c` is a consumer that includes only the umbrella header
+  and is built and run by CTest on every platform, so the document is checked rather
+  than described:
   - `webtransport.h` — the one header a consumer includes, carrying the three rules
     that hold across every layer: a bound is this endpoint's and the code says so
     rather than blaming the peer, incomplete is not malformed on a stream (a
