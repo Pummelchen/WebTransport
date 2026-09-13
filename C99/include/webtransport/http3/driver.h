@@ -66,6 +66,39 @@ typedef struct wt_http3_driver_frame_state {
   uint64_t payload_received;
 } wt_http3_driver_frame_state_t;
 
+/* ---------------------------------------------- sending, without knowing QUIC
+
+ * The endpoint has to open streams and send bytes, and this header deliberately does not name
+ * a QUIC connection to do it: the transport is a small table of three calls. That keeps the
+ * HTTP/3 layer independent of the connection implementation -- and it makes the outbound half
+ * testable against a recording transport, which is how the bytes this layer produces are
+ * checked without standing up a handshake.
+
+ * The driver owns one scratch buffer for the bytes it sends, because a frame is measured
+ * before it is written (a length prefix's width depends on the length) and the measurement
+ * needs somewhere to live. It is a bound like every other one here: a section that does not
+ * fit is WT_ERR_LIMIT with no error code, and the caller can raise
+ * `WT_HTTP3_DRIVER_SCRATCH` by compiling its own copy or send the section itself. */
+
+#define WT_HTTP3_DRIVER_SCRATCH 1024U
+
+typedef wt_status_t (*wt_http3_open_stream_fn)(void *context, int bidirectional,
+                                               uint64_t *out_stream_id, uint64_t now);
+typedef wt_status_t (*wt_http3_send_stream_fn)(void *context, uint64_t stream_id,
+                                               const uint8_t *data, size_t length, int fin,
+                                               uint64_t now);
+typedef wt_status_t (*wt_http3_send_datagram_fn)(void *context, const uint8_t *data,
+                                                 size_t length);
+
+typedef struct wt_http3_driver_transport {
+  /* Open a stream this endpoint initiates, and say what ID it got. */
+  wt_http3_open_stream_fn open_stream;
+  /* Send bytes on a stream. `fin` ends it. */
+  wt_http3_send_stream_fn send_stream;
+  wt_http3_send_datagram_fn send_datagram;
+  void *context;
+} wt_http3_driver_transport_t;
+
 typedef struct wt_http3_driver {
   /* The endpoint whose streams these are. Not owned. */
   wt_http3_endpoint_t *endpoint;
@@ -74,6 +107,8 @@ typedef struct wt_http3_driver {
   /* Streams part way through a frame's header. */
   wt_http3_driver_frame_state_t frames[WT_HTTP3_DRIVER_FRAMES_MAX];
   size_t frame_count;
+  /* The bytes of the message being sent, measured before the frame around them is written. */
+  uint8_t scratch[WT_HTTP3_DRIVER_SCRATCH];
 } wt_http3_driver_t;
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint);
@@ -183,6 +218,25 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
                                           const wt_quic_frame_t *frame,
                                           const wt_http3_driver_sink_t *sink,
                                           uint64_t max_frame_bytes);
+
+/* Open and start the three streams HTTP/3 requires of an endpoint: the control stream with its
+ * SETTINGS, and both QPACK streams. Each is opened once; a second call is WT_ERR_STATE from the
+ * endpoint's own rules, and nothing is sent. */
+wt_status_t wt_http3_driver_start_own_streams(wt_http3_driver_t *driver,
+                                              const wt_http3_driver_transport_t *transport,
+                                              const wt_http3_settings_t *settings, uint64_t now);
+
+/* Send a request, a response or a trailer on a stream this endpoint owns, as a HEADERS frame.
+ * `peer_max_entries` is the peer's advertised QPACK capacity, from its SETTINGS. */
+wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
+                                         const wt_http3_driver_transport_t *transport,
+                                         uint64_t stream_id, const wt_http3_message_t *message,
+                                         uint64_t peer_max_entries, int fin, uint64_t now);
+
+/* Send a datagram: the payload is the session's, and this layer passes it through. */
+wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,
+                                          const wt_http3_driver_transport_t *transport,
+                                          const uint8_t *data, size_t length);
 
 /* Start this endpoint's control stream: the type prefix, then the SETTINGS frame built from
  * `settings`. The bytes go into the caller's writer, which is the stream the connection

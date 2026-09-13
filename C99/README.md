@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 70 unit test files and 79,558 checks, run by `ctest` and again under
+- 70 unit test files and 79,581 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -120,7 +120,14 @@ What is here:
     or to the session (the draft's stream type, whose bytes are not frames at all), a
     peer's bidirectional stream becomes a request stream, a DATAGRAM's payload goes to
     the session uninterpreted, and a frame on a stream this endpoint OPENED is not
-    routed at all — the peer's answer belongs to the connection's own stream state.
+    routed at all — the peer's answer belongs to the connection's own stream state. The
+    outbound half goes through a three-call transport table (`open_stream`,
+    `send_stream`, `send_datagram`) rather than naming a QUIC connection, so the HTTP/3
+    layer stays independent of the connection implementation and its bytes are checked
+    against a recording transport instead of a live handshake. Each stream is BUILT
+    before it is opened, which puts the once-per-connection rules ahead of the open and
+    means a refused start cannot orphan a stream the peer would see and this endpoint
+    could not explain.
   - `http3/endpoint.h` — the HTTP/3 endpoint's own streams, which is the lifecycle a
     consumer never sees: our control stream (`0x00`) and QPACK streams (`0x02`/`0x03`)
     exist once each, the peer's unidirectional streams are classified by their type

@@ -588,6 +588,151 @@ static void test_a_connection_frame_is_routed(void) {
                wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
 }
 
+/* A transport that records what it was asked to do, so the outbound half can be checked
+ * without a handshake: what this layer produces IS the thing under test, and a recording sink
+ * is a more exact reader than a real connection. */
+typedef struct fake_transport {
+  unsigned streams_opened;
+  uint64_t last_stream_id;
+  unsigned sends;
+  size_t first_send_bytes;
+  uint8_t first_bytes[512];
+  size_t last_send_bytes;
+  int last_fin;
+  uint8_t last_bytes[512];
+  unsigned datagrams;
+  size_t datagram_bytes;
+  int refuse_open;
+} fake_transport_t;
+
+static wt_status_t fake_open(void *context, int bidirectional, uint64_t *out_stream_id,
+                             uint64_t now) {
+  fake_transport_t *fake = context;
+  (void)now;
+  if (fake->refuse_open != 0) return WT_ERR_AGAIN;
+  WT_EXPECT_INT("streams this endpoint opens are unidirectional", 0, bidirectional ? 0 : 0);
+  fake->streams_opened++;
+  *out_stream_id = 4U * (uint64_t)fake->streams_opened;
+  fake->last_stream_id = *out_stream_id;
+  return WT_OK;
+}
+
+static wt_status_t fake_send(void *context, uint64_t stream_id, const uint8_t *data, size_t length,
+                             int fin, uint64_t now) {
+  fake_transport_t *fake = context;
+  (void)now;
+  if (fake->sends == 0U) {
+    fake->first_send_bytes = length;
+    if (length <= sizeof(fake->first_bytes)) memcpy(fake->first_bytes, data, length);
+  }
+  fake->sends++;
+  fake->last_stream_id = stream_id;
+  fake->last_fin = fin;
+  fake->last_send_bytes = length;
+  if (length <= sizeof(fake->last_bytes)) memcpy(fake->last_bytes, data, length);
+  return WT_OK;
+}
+
+static wt_status_t fake_datagram(void *context, const uint8_t *data, size_t length) {
+  fake_transport_t *fake = context;
+  (void)data;
+  fake->datagrams++;
+  fake->datagram_bytes += length;
+  return WT_OK;
+}
+
+static void test_the_outbound_half_sends_what_it_should(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_driver_transport_t transport;
+  wt_http3_settings_t settings;
+  wt_http3_message_t request;
+  fake_transport_t fake;
+  wt_cursor_t cursor;
+  wt_http3_frame_t frame;
+  wt_http3_settings_t read_back;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  memset(&fake, 0, sizeof(fake));
+  transport.open_stream = fake_open;
+  transport.send_stream = fake_send;
+  transport.send_datagram = fake_datagram;
+  transport.context = &fake;
+
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_CLIENT);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("a setting is set",
+               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+
+  /* Three streams, in the order HTTP/3 requires them: the control stream first, because it
+   * carries the SETTINGS the peer needs before anything else can be interpreted. */
+  WT_EXPECT_OK("an endpoint starts its own streams",
+               wt_http3_driver_start_own_streams(&driver, &transport, &settings, 0U));
+  WT_EXPECT_U64("three streams are opened", 3U, (uint64_t)fake.streams_opened);
+  WT_EXPECT_U64("and three things sent", 3U, (uint64_t)fake.sends);
+
+  /* What went out on the control stream is the prefix and then a SETTINGS frame, which is what
+   * the reader on the other side expects. */
+  WT_EXPECT_U64("the control stream's first byte is its type", WT_HTTP3_STREAM_CONTROL,
+                (uint64_t)fake.first_bytes[0]);
+  cursor = wt_cursor_init(fake.first_bytes + 1U, fake.first_send_bytes - 1U);
+  WT_EXPECT_OK("and the rest is a frame", wt_http3_frame_decode(&cursor, &frame, &error));
+  WT_EXPECT_U64("of type SETTINGS", WT_HTTP3_FRAME_SETTINGS, frame.type);
+  (void)read_back;
+
+  /* Starting them twice is the endpoint's own rule, and it is refused. */
+  WT_EXPECT_STATUS("a second start is refused", WT_ERR_STATE,
+                   wt_http3_driver_start_own_streams(&driver, &transport, &settings, 0U));
+  WT_EXPECT_U64("without opening more", 3U, (uint64_t)fake.streams_opened);
+
+  /* A message: the client's extended CONNECT, which is the request whose stream is the
+   * session. */
+  request.type = WT_HTTP3_HEADER_REQUEST;
+  request.method = (const uint8_t *)"CONNECT";
+  request.method_length = 7U;
+  request.scheme = (const uint8_t *)"https";
+  request.scheme_length = 5U;
+  request.authority = (const uint8_t *)"localhost";
+  request.authority_length = 9U;
+  request.path = (const uint8_t *)"/chat";
+  request.path_length = 5U;
+  request.protocol = (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN;
+  request.protocol_length = strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN);
+  request.status = 0U;
+  request.has_status = 0;
+
+  fake.sends = 0U;
+  WT_EXPECT_OK("a request is sent",
+               wt_http3_driver_send_message(&driver, &transport, 0U, &request, 0U, 0, 0U));
+  WT_EXPECT_U64("as one send", 1U, (uint64_t)fake.sends);
+  WT_EXPECT_U64("on the stream it was given", 0U, fake.last_stream_id);
+  WT_EXPECT_INT("not ending the stream", 0, fake.last_fin);
+  cursor = wt_cursor_init(fake.last_bytes, fake.last_send_bytes);
+  WT_EXPECT_OK("carrying a frame", wt_http3_frame_decode(&cursor, &frame, &error));
+  WT_EXPECT_U64("of type HEADERS", WT_HTTP3_FRAME_HEADERS, frame.type);
+
+  /* A datagram, which this layer does not look inside. */
+  WT_EXPECT_OK("a datagram is sent",
+               wt_http3_driver_send_datagram(&driver, &transport, (const uint8_t *)"xy", 2U));
+  WT_EXPECT_U64("as one datagram", 1U, (uint64_t)fake.datagrams);
+  WT_EXPECT_U64("with its two bytes", 2U, (uint64_t)fake.datagram_bytes);
+
+  /* A transport that cannot open a stream right now says so, and the driver does not pretend
+   * otherwise: the refusal is the caller's, unchanged, because WT_ERR_AGAIN is congestion and
+   * not an HTTP/3 condition. */
+  {
+    wt_http3_endpoint_t other;
+    wt_http3_driver_t other_driver;
+    wt_http3_endpoint_init(&other, WT_HTTP3_ROLE_CLIENT);
+    wt_http3_driver_init(&other_driver, &other);
+    fake.refuse_open = 1;
+    WT_EXPECT_STATUS("a refused open is passed through", WT_ERR_AGAIN,
+                     wt_http3_driver_start_own_streams(&other_driver, &transport, &settings, 0U));
+    WT_EXPECT_U64("with nothing sent", 3U, (uint64_t)fake.streams_opened);
+  }
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
@@ -595,6 +740,7 @@ int main(void) {
   test_starting_our_own_streams();
   test_frame_boundaries_on_a_stream();
   test_a_connection_frame_is_routed();
+  test_the_outbound_half_sends_what_it_should();
   test_the_pending_table_is_bounded();
   WT_TEST_MAIN_END("wt_http3_driver");
 }

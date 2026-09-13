@@ -484,3 +484,83 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
   /* Every other kind belongs to the connection or to nobody here. */
   return WT_OK;
 }
+
+/* ---------------------------------------------- sending through a transport */
+
+wt_status_t wt_http3_driver_start_own_streams(wt_http3_driver_t *driver,
+                                              const wt_http3_driver_transport_t *transport,
+                                              const wt_http3_settings_t *settings, uint64_t now) {
+  uint64_t stream_id = 0U;
+  wt_writer_t w;
+  size_t length;
+  wt_status_t status;
+  int i;
+
+  if (driver == NULL || driver->endpoint == NULL || transport == NULL ||
+      transport->open_stream == NULL || transport->send_stream == NULL || settings == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+
+  /* Each stream is BUILT before it is opened, and that order is deliberate: the once-per-
+   * connection rules are applied while the bytes are built, so a second call refuses without
+   * opening a stream it would then have nothing to send on. An orphaned stream is a stream the
+   * peer sees and this endpoint cannot explain.
+   *
+   * The frame goes into the first half of the scratch and its payload into the second, so the
+   * two cannot overlap while a payload is smaller than half the buffer -- which the SETTINGS
+   * encoder's own bound enforces. */
+  w = wt_writer_init(driver->scratch, sizeof(driver->scratch) / 2U);
+  status = wt_http3_driver_start_control(driver, settings,
+                                         driver->scratch + sizeof(driver->scratch) / 2U,
+                                         sizeof(driver->scratch) / 2U, &w);
+  if (status != WT_OK) return status;
+  length = wt_writer_offset(&w);
+  status = transport->open_stream(transport->context, 0, &stream_id, now);
+  if (status != WT_OK) return status;
+  status = transport->send_stream(transport->context, stream_id, driver->scratch, length, 0, now);
+  if (status != WT_OK) return status;
+
+  /* The two QPACK streams: their prefixes alone, since what follows on them is the QPACK
+   * layer's to write. */
+  for (i = 0; i < 2; i++) {
+    w = wt_writer_init(driver->scratch, sizeof(driver->scratch) / 2U);
+    status = wt_http3_driver_start_qpack_stream(driver, i == 0 ? 1 : 0, &w);
+    if (status != WT_OK) return status;
+    length = wt_writer_offset(&w);
+    status = transport->open_stream(transport->context, 0, &stream_id, now);
+    if (status != WT_OK) return status;
+    status = transport->send_stream(transport->context, stream_id, driver->scratch, length, 0, now);
+    if (status != WT_OK) return status;
+  }
+  return WT_OK;
+}
+
+wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
+                                         const wt_http3_driver_transport_t *transport,
+                                         uint64_t stream_id, const wt_http3_message_t *message,
+                                         uint64_t peer_max_entries, int fin, uint64_t now) {
+  wt_writer_t w;
+  wt_status_t status;
+
+  if (driver == NULL || driver->endpoint == NULL || transport == NULL ||
+      transport->send_stream == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  w = wt_writer_init(driver->scratch, sizeof(driver->scratch));
+  status = wt_http3_endpoint_write_headers(driver->endpoint, message, peer_max_entries,
+                                           driver->scratch + 256U,
+                                           sizeof(driver->scratch) - 256U, &w, NULL);
+  if (status != WT_OK) return status;
+  return transport->send_stream(transport->context, stream_id, driver->scratch,
+                                wt_writer_offset(&w), fin, now);
+}
+
+wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,
+                                          const wt_http3_driver_transport_t *transport,
+                                          const uint8_t *data, size_t length) {
+  if (driver == NULL || transport == NULL || transport->send_datagram == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  return transport->send_datagram(transport->context, data, length);
+}

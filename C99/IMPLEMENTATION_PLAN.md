@@ -2132,6 +2132,27 @@ enumerator named, and this handler acts on two of twenty-odd kinds. The if-chain
 the code, because "name twenty-one no-op cases to satisfy a warning" would make the two cases that matter
 harder to find -- the opposite of what the warning exists for.
 
+### Phase 9's ninth part: the outbound half, through a transport table
+
+The driver can now open and start an endpoint's own streams, send a request, a response or a trailer as a
+HEADERS frame, and send a datagram -- and it does none of that by naming a QUIC connection. The transport is a
+table of three calls (`open_stream`, `send_stream`, `send_datagram`), which keeps the HTTP/3 layer independent
+of the connection implementation and makes the outbound half testable against a RECORDING transport: what this
+layer produces is the thing under test, and a recorder is a more exact reader of it than a live handshake would
+be.
+
+One ordering bug came out of writing the test, and it is the kind that only shows up in a protocol: the first
+implementation OPENED the stream and then built the bytes, so a second call to start the endpoint's streams --
+which the endpoint's own once-per-connection rule refuses -- had already opened a fourth stream before the
+refusal. An orphaned stream is one the peer sees and this endpoint cannot explain, which is precisely the state
+a "refuse, never half-succeed" rule exists to prevent. Both are built before they are opened now, and the test
+asserts the stream count does not move on the refused call.
+
+The frame and its payload share the driver's scratch at fixed halves, so the two cannot overlap while a payload
+stays under half the buffer -- a bound the SETTINGS encoder's own limit enforces rather than a comment asking
+nicely. A transport that cannot open a stream right now (congestion, `WT_ERR_AGAIN`) passes its refusal straight
+through, because that is a connection condition and not an HTTP/3 one.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.
