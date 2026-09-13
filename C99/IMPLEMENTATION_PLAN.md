@@ -2994,6 +2994,28 @@ Completion criteria:
 - Release artifacts are reproducible.
 - Public docs match actual behavior.
 
+## Definition of Done audit (measured, 89 rounds in)
+
+Every claim below names the evidence, and the ones that are NOT met name what they still need. This is the
+honest state rather than an aspiration:
+
+| Criterion | State | Evidence, or what it still needs |
+| --- | --- | --- |
+| Full draft-16 spec matrix implemented | **partial** | Every layer is written and tested (Phases 0-9), and the session layer, the capsules, the flow control and the stream framing are all exercised end to end. What is missing is the MATRIX itself: the Swift side maps draft-16 requirements to code and tests, and the C99 tree has no equivalent document to be measured against. `WT-132`. |
+| All Swift-equivalent conformance tests pass in C99 | **partial** | The unit suites mirror the Swift suites layer by layer (78 suites, 80,052 checks), the malformed-input corpora exist for QUIC and for HTTP/3/QPACK/session, and the bounded tables are covered. The CONFORMANCE TOOL's scenario count is the gap: five scenarios against the Swift tools' two 40-scenario suites. `WT-133`. |
+| C99 client/server CLI passes local IPv4 and IPv6 | **met** | `wt-conformance-c99 --scenario all` runs both families (registered as `wt_conformance_scenarios`), and `wt-client-c99`/`wt-server-c99` exchange a session in two processes on IPv4 (registered as `wt_cli_session_stream`/`_datagram`). The tools themselves have not been driven over IPv6; the conformance tool has. `WT-133` covers extending them. |
+| C99 passes the five-implementation VPS interop matrix | **not met** | No C99 interop runner exists and no VPS is reachable from this work. The Swift side has `run-docker-interop.sh` and a VPS matrix; the C99 tree needs its own runner and a host to run it on. `WT-135`. |
+| CI is green on macOS 26, Debian, FreeBSD and Windows 11 | **partial** | `c99-ci.yml` builds and tests on macOS and Debian (the last completed run was green), with sanitizers, the package consumer and the CLI smoke. FreeBSD and Windows legs are absent, and they are not a YAML edit: Windows needs a sockets/poll adaptation (`WSAPoll`, `ws2_32`) and a toolchain decision before a job for it would be anything but red. `WT-134`. |
+| Sanitizers and static checks are clean | **met** | Every round's verification runs debug, release and ASan+UBSan; the build is warnings-as-errors with `-Wconversion -Wsign-conversion -Wcast-qual -Wswitch-enum -Wpedantic -Wshadow` and the rest. No separate static analyser (clang-tidy/scan-build) has been run; that would strengthen the claim. |
+| Public API is documented | **met** | `C99/docs/PUBLIC-API.md` covers trust, endpoints, sessions, streams, datagrams, backpressure, close, drain and ownership, and `apps/wt-api-sample` plus `test_public_api` check that the documented surface compiles and behaves. |
+| No placeholder, facade, deterministic test runtime or spike is exposed as production | **met** | The tools run real sessions; there is no test-only runtime in the library; the `api/`, `cli/`, `http3/`, `runtime/` modules are all reached by real callers. |
+| README status updated from `0%` to the measured final score | **not met** | The C99 README carries counts and a feature list but no score, because the score is what the matrix above produces. When `WT-132` lands, the score is written from the matrix rather than guessed. |
+
+**What that means for "100%":** four criteria are met, three are partially met and two are not. The remaining work
+is named with numbers, and none of it is blocked by a defect: it is a matrix to write (`WT-132`), scenario
+breadth (`WT-133`), two CI legs that need portability work first (`WT-134`), an interop runner plus a host
+(`WT-135`), and a score that follows the matrix (`WT-136`).
+
 ## Definition of Done for C99 100%
 
 The C99 implementation can be marked 100% only when all of the following are true:

@@ -194,6 +194,15 @@ What is here:
   runtime refuses to make it rather than inventing one. IPv4 is asserted unconditionally and
   IPv6 is available-or-skipped, because a test that fails without an IPv6 loopback is a test
   about the machine.
+- **Where this stands against the plan's Definition of Done** (an audit with evidence, kept in
+  `IMPLEMENTATION_PLAN.md`): **met** — the CLIs run local IPv4 and IPv6 sessions, sanitizers and
+  static checks are clean, the public API is documented, and nothing placeholder-shaped is exposed as
+  production. **Partial** — the protocol layers are complete but the draft-16 *compliance matrix* for
+  this tree is not written (there is nothing to measure "full spec matrix" against), the conformance
+  tool has five scenarios where the Swift tools have two 40-scenario suites, and CI covers macOS and
+  Debian but not FreeBSD or Windows. **Not met** — the five-implementation interop matrix (no C99
+  runner and no host here) and the README score, which follows the matrix. Each gap carries a tracker
+  number rather than a paragraph.
 - **The CLI tools' process contract** (Phase 10): the tools' exit statuses, refused command
   lines and JSON report are part of their interface, because scripts drive them. A CTest script
   checks them without a peer — an unsupported mode exits **2** and names what it refused, no mode
