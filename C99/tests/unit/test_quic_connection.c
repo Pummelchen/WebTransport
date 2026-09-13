@@ -2698,6 +2698,45 @@ static void test_a_retry_that_breaks_a_rule_is_discarded(void) {
   }
 }
 
+/* A datagram that cannot be shown to come from the peer is DISCARDED, not reported as a violation (WT-167).
+ *
+ * This is the measured defect: a packet protected with a key set this endpoint no longer holds -- quiche's
+ * answer to an Initial the Retry had already invalidated -- failed the header decode and came back as
+ * WT_ERR_PROTOCOL, so a successful interop reported `"firstReceiveError":"protocol"`. RFC 9001 section 5.3 makes
+ * a packet that cannot be authenticated one to DISCARD, and the fixed bit is in the AEAD's associated data, so a
+ * header this endpoint cannot parse is evidence of a packet that is not the peer's rather than of a peer
+ * breaking a rule. The packet below is well-formed enough to reach the read (a Length, a packet number, a
+ * payload) with the fixed bit CLEAR, which RFC 9000 section 17.2 says must be discarded.
+ */
+static void test_an_unauthenticable_packet_is_discarded(void) {
+  connection_pair_t pair;
+  uint8_t packet[32];
+  uint64_t now = 60000000U;
+  size_t at = 0U;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  memset(packet, 0, sizeof(packet));
+  packet[at++] = 0x80U; /* a long header, an Initial by its type bits, and the fixed bit CLEAR */
+  packet[at++] = 0x00U;
+  packet[at++] = 0x00U;
+  packet[at++] = 0x00U;
+  packet[at++] = 0x01U; /* version 1 */
+  packet[at++] = 8U;    /* an eight-byte Destination Connection ID */
+  at += 8U;             /* which may be anything: the header is refused before it is used */
+  packet[at++] = 0U;    /* a zero-length Source Connection ID */
+  packet[at++] = 0U;    /* no token */
+  packet[at++] = 8U;    /* Length: one packet number byte and seven of payload */
+  packet[at++] = 0U;    /* the packet number */
+  at += 7U;             /* and the payload, which is never reached */
+
+  WT_EXPECT_OK("the datagram is sent", wt_udp_send(&pair.server_socket, &pair.client_address, packet, at));
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_U64("the client DISCARDED it", 1U, pair.client.packets_discarded);
+  WT_EXPECT_INT("leaving the connection open", 0, wt_quic_connection_is_closed(&pair.client));
+  WT_EXPECT_INT("and with no refusal to report", 0, pair.client.close_code_set);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -2719,6 +2758,7 @@ int main(void) {
   test_garbage(WT_UDP_IPV6);
   test_a_retry_is_accepted_and_answered();
   test_a_retry_that_breaks_a_rule_is_discarded();
+  test_an_unauthenticable_packet_is_discarded();
 
   test_open_stream();
   test_peer_opens_stream();

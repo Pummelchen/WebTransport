@@ -236,15 +236,13 @@ wt_status_t wt_quic_long_header_decode(wt_cursor_t *c,
     return wt_quic_packet_fail(out_error, WT_QUIC_PROTOCOL_VIOLATION,
                                WT_ERR_PROTOCOL);
   }
-  /* RFC 9001 section 5.4: the two reserved bits must be zero once header
-   * protection is removed. They are inside the protected region, so a decoder
-   * that reads them before unprotection sees the masked value -- which is why
-   * this is reported as a violation only after that step in a real connection,
-   * and why the check lives here where the caller has already done it. */
-  if ((first & 0x0cU) != 0U) {
-    return wt_quic_packet_fail(out_error, WT_QUIC_PROTOCOL_VIOLATION,
-                               WT_ERR_PROTOCOL);
-  }
+  /* RFC 9000 section 17.2 makes non-zero reserved bits a connection error -- "after removing both packet
+   * and header protection". They are inside the AEAD's associated data, so a value that is non-zero here
+   * may simply be a packet protected with another key set, which RFC 9001 section 5.3 says to DISCARD.
+   * The decoder therefore REPORTS them and the caller refuses once the packet has authenticated: a
+   * refusal here turned every packet from another key epoch into a violation against the peer
+   * (WT-167). */
+  out->reserved_bits_set = (first & 0x0cU) != 0U ? 1 : 0;
   type_bits = (uint32_t)((first >> 4) & 0x03U);
   out->type = (wt_quic_packet_type_t)type_bits;
   out->packet_number_len = (size_t)(first & 0x03U) + 1U;
@@ -362,6 +360,9 @@ wt_status_t wt_quic_short_header_decode(wt_cursor_t *c,
   out->spin = (first & WT_QUIC_SPIN_BIT) ? 1 : 0;
   out->key_phase = (first & WT_QUIC_KEY_PHASE_BIT) ? 1 : 0;
   out->packet_number_len = (size_t)(first & 0x03U) + 1U;
+  /* RFC 9000 section 17.3's reserved bits, reported for the same reason the long header's are: the rule
+   * is about a packet whose protection has been REMOVED (WT-167). */
+  out->reserved_bits_set = (first & 0x18U) != 0U ? 1 : 0;
 
   out->destination_connection_id = wt_cursor_bytes(
       c, destination_connection_id_len);

@@ -357,13 +357,38 @@ int main(void) {
                      WT_ERR_PROTOCOL,
                      wt_quic_short_header_decode(&c, 8U, &short_header, &error));
 
+    /* Reserved bits are REPORTED, not refused (WT-167). RFC 9000 section 17.2 makes them a violation "after
+     * removing both packet and header protection", and they are inside the AEAD's associated data -- so a
+     * value that is non-zero after header unprotection may be a packet protected with another key set, which
+     * RFC 9001 section 5.3 says to DISCARD. The decoder reports; `wt_quic_packet_read` refuses once the packet
+     * has authenticated, which is what `test_quic_packet_io` asserts. Refusing here turned every packet from
+     * another key epoch into a violation against the peer, which is what a Retry produced against quiche. */
     error = 0U;
     c = wt_cursor_init(reserved, sizeof(reserved));
-    WT_EXPECT_STATUS("a long header with reserved bits set is refused",
+    WT_EXPECT_STATUS("a long header with reserved bits set is not refused FOR them",
                      WT_ERR_PROTOCOL,
                      wt_quic_long_header_decode(&c, &long_header, &error));
-    WT_EXPECT_U64("  as a protocol violation", WT_QUIC_PROTOCOL_VIOLATION,
-                  error);
+    WT_EXPECT_U64("  but for the Length field this buffer also gets wrong",
+                  WT_QUIC_FRAME_ENCODING_ERROR, error);
+    WT_EXPECT_INT("with the reserved bits reported on the way", 1, long_header.reserved_bits_set);
+
+    /* And a WELL-FORMED header whose reserved bits are set parses, reporting them: the violation is the
+     * caller's to make once the packet has authenticated (WT-167). */
+    {
+      static const uint8_t reserved_ok[17] = {
+          0xccU, 0x00U, 0x00U, 0x00U, 0x01U, /* Initial, one-byte packet number, reserved bits set */
+          0x00U,                            /* a zero-length Destination Connection ID */
+          0x00U,                            /* and a zero-length Source Connection ID */
+          0x00U,                            /* no token */
+          0x08U,                            /* Length: one packet number byte and seven of payload */
+          0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
+      error = 0U;
+      c = wt_cursor_init(reserved_ok, sizeof(reserved_ok));
+      WT_EXPECT_STATUS("a well-formed header with reserved bits set parses", WT_OK,
+                       wt_quic_long_header_decode(&c, &long_header, &error));
+      WT_EXPECT_INT("reporting them", 1, long_header.reserved_bits_set);
+      WT_EXPECT_U64("and its Length", 8U, (uint64_t)long_header.payload_len + 1U);
+    }
 
     error = 0U;
     c = wt_cursor_init(bad_cid, sizeof(bad_cid));

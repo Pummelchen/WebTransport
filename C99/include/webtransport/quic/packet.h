@@ -97,11 +97,20 @@ typedef struct wt_quic_long_header {
   /* The total number of bytes this packet occupies in the datagram, which is
    * where the next coalesced packet starts. */
   size_t total_len;
+  /* Whether the two reserved bits (0x0c of the first byte) were NON-zero once the header protection
+   * came off. REPORTED rather than refused, because the rule about them is a rule about an
+   * AUTHENTICATED packet: RFC 9000 section 17.2 says "after removing both packet and header
+   * protection", and RFC 9001 section 5.3 makes a packet that fails packet protection one to DISCARD.
+   * A decoder that refused them here turned every packet from another key epoch -- a Retry's
+   * predecessor, an injected datagram -- into a PROTOCOL_VIOLATION against the peer (WT-167). */
+  int reserved_bits_set;
 } wt_quic_long_header_t;
 
 typedef struct wt_quic_short_header {
   int key_phase;
   int spin;
+  /* As above: reported, and checked once the packet has authenticated. */
+  int reserved_bits_set;
   const uint8_t *destination_connection_id;
   size_t destination_connection_id_len;
   uint64_t packet_number;

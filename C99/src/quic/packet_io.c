@@ -143,11 +143,19 @@ wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
     size_t header_len;
     const uint8_t *payload;
     size_t payload_len;
+    int reserved_bits_set = 0;
 
     if (short_header) {
       wt_quic_short_header_t header;
       status = wt_quic_short_header_decode(&cursor, local_connection_id_len, &header, &error);
+      /* A header this endpoint cannot parse -- a cleared fixed bit, a type that does not exist -- is not
+       * evidence of a peer breaking a rule: the bytes cannot be shown to come from the peer at all until the
+       * packet protection verifies, and RFC 9001 section 5.3 makes such a packet one to DISCARD. Reporting a
+       * protocol violation here is how a packet from another key epoch (a Retry's predecessor, an injected
+       * datagram) became an error against the peer (WT-167). */
+      if (status == WT_ERR_PROTOCOL) return WT_ERR_AUTHENTICATION;
       if (status != WT_OK) return status;
+      reserved_bits_set = header.reserved_bits_set;
       /* `type` is left zeroed: a short header does not carry one, and which space it belongs to is
        * what the keys the caller chose say. */
       out->key_phase = header.key_phase;
@@ -161,7 +169,9 @@ wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
     } else {
       wt_quic_long_header_t header;
       status = wt_quic_long_header_decode(&cursor, &header, &error);
+      if (status == WT_ERR_PROTOCOL) return WT_ERR_AUTHENTICATION;
       if (status != WT_OK) return status;
+      reserved_bits_set = header.reserved_bits_set;
       out->type = header.type;
       out->version = header.version;
       out->destination_connection_id = header.destination_connection_id;
@@ -187,6 +197,10 @@ wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
                                       payload_len - WT_AEAD_TAG_LEN,
                                       payload + payload_len - WT_AEAD_TAG_LEN);
     if (status != WT_OK) return status;
+    /* NOW the reserved bits are worth a violation: the packet authenticated, so it really did come from
+     * whoever holds the key, and RFC 9000 section 17.2's "after removing both packet and header protection"
+     * is satisfied. Nothing reaches this line without a valid tag. */
+    if (reserved_bits_set != 0) return WT_ERR_PROTOCOL;
     out->payload = packet + header_len;
     out->payload_len = payload_len - WT_AEAD_TAG_LEN;
   }

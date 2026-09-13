@@ -567,12 +567,53 @@ static void test_short_payload_is_padded(void) {
   wt_quic_packet_keys_clear(&keys);
 }
 
+/* A header that cannot be parsed is NOT a violation by the peer (WT-167).
+ *
+ * RFC 9000 section 17.2 requires the fixed bit to be set and makes non-zero reserved bits a connection error
+ * only "after removing both packet and header protection". Both fields are inside the AEAD's associated data, so
+ * a header that fails to parse -- or reads as reserved bits set because it was protected with a key set this
+ * endpoint no longer holds -- is a packet that cannot be shown to come from the peer. RFC 9001 section 5.3 makes
+ * that a DISCARD, which at this layer is WT_ERR_AUTHENTICATION. Refusing it as PROTOCOL_VIOLATION is what made a
+ * successful quiche interop report `"firstReceiveError":"protocol"`: quiche's answer to an Initial the Retry had
+ * already invalidated arrived protected with the retired keys.
+ */
+static void test_a_header_that_cannot_be_parsed_is_not_a_violation(void) {
+  /* Twenty-nine bytes, which is the shortest packet that can be READ at all: the header runs to offset nine,
+   * the Length covers one packet number byte and nineteen of payload, and header protection's sample needs
+   * sixteen bytes starting four bytes past the packet number (RFC 9001 section 5.4.2). */
+  uint8_t packet[29];
+  wt_quic_packet_keys_t keys;
+  wt_quic_received_packet_t received;
+
+  make_keys(9U, &keys);
+  memset(packet, 0, sizeof(packet));
+  packet[0] = 0x80U; /* a long header, an Initial, with the fixed bit CLEAR */
+  packet[4] = 0x01U; /* version 1 */
+  packet[5] = 0x00U; /* a zero-length Destination Connection ID */
+  packet[6] = 0x00U; /* and a zero-length Source Connection ID */
+  packet[7] = 0x00U; /* no token */
+  packet[8] = 20U;   /* Length: one packet number byte and nineteen of payload */
+  memset(&received, 0, sizeof(received));
+  WT_EXPECT_STATUS("a header without the fixed bit is DISCARDED, not refused", WT_ERR_AUTHENTICATION,
+                   wt_quic_packet_read(packet, sizeof(packet), &keys, 0U, sizeof(k_dcid), &received));
+
+  /* And the ordering that makes it safe: a header with the RESERVED bits set and a tag that does not verify is
+   * the same answer -- the packet never authenticated, so nothing about it is a protocol violation yet. */
+  packet[0] = 0xccU; /* fixed bit back on, reserved bits set, one-byte packet number */
+  memset(&received, 0, sizeof(received));
+  WT_EXPECT_STATUS("reserved bits and a bad tag are a failed authentication",
+                   WT_ERR_AUTHENTICATION,
+                   wt_quic_packet_read(packet, sizeof(packet), &keys, 0U, sizeof(k_dcid), &received));
+  wt_quic_packet_keys_clear(&keys);
+}
+
 int main(void) {
   test_short_header_round_trip();
   test_long_header_round_trip();
   test_initial_with_token();
   test_packet_number_reconstruction();
   test_tamper_is_refused();
+  test_a_header_that_cannot_be_parsed_is_not_a_violation();
   test_wrong_connection_id_len();
   test_unprotected_packets_are_refused();
   test_truncated_is_refused();
