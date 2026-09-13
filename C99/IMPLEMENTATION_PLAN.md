@@ -2669,6 +2669,26 @@ Phase 9's remaining work is the CLIENT and SERVER tools' own loops (`--listen`/`
 `--timeout-ms`), which reuse exactly the pieces this scenario is built from: the runtime session, the HTTP/3
 driver, the self-signed identity and the report.
 
+### Phase 10's second part: a refactor that was reverted, and why
+
+The next item was WT-113 -- pairing the limits an endpoint ADVERTISES in its transport parameters with the
+LOCAL grants that enforce them, so that an endpoint which advertises a limit and grants nothing cannot close its
+own connection on the first stream frame (WT-110's root cause). The design is settled and small: one
+`wt_runtime_session_limits_t` passed to `wt_runtime_session_start_client`/`_server`, applied by the driver, and
+the callers stop calling `wt_quic_connection_set_max_data` and friends by hand.
+
+It was implemented and then REVERTED, because a public-signature change reaches four call sites (the session
+pair test, the runtime session test, the conformance scenario and the CLI session loop) and the scripted edits
+to those call sites started passing arguments in the wrong positions -- the compiler caught every one, but
+following them one at a time at the end of a long session is how a working tree becomes a half-changed one. The
+tree is back to the last verified state (80 CTest tests, green in debug, release and ASan+UBSan) and nothing
+half-changed is committed.
+
+The lesson is the one this phase has now earned three times over, in three different shapes: **a change that
+reaches several call sites is a change to make in one focused pass, with the exact edit list written down
+first, and with all three build configurations in the loop** -- not something to bolt onto the end of another
+round. WT-113 carries the design, and the file list above is the edit list.
+
 ### Phase 10's first part: a malformed-input corpus for the layers above QUIC
 
 The QUIC parsers have had a fuzz-style corpus since Phase 1 -- a deterministic pseudo-random byte stream, with
