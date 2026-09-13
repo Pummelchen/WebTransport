@@ -10,6 +10,8 @@
 
 #include "wt_test.h"
 
+#include <stdio.h>
+
 #include "webtransport/http3/driver.h"
 #include "webtransport/http3/settings.h"
 #include "webtransport/quic/connection.h"
@@ -917,6 +919,88 @@ static void test_a_bidi_stream_is_routed_by_its_prefix(void) {
   }
 }
 
+/* A prefix that arrives in PIECES on a bidirectional stream: the held bytes must be assembled, and for a
+ * REQUEST they must be REPLAYED -- the request path has to see a stream's first bytes rather than the middle of
+ * them. The first implementation skipped the assembly for the continuation frame, because its offset is not
+ * zero, and the counter that made the frame path say so is what found it. */
+static void test_a_bidirectional_prefix_split_across_frames(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_driver_sink_t sink;
+  session_log_t session;
+  wt_quic_frame_t frame;
+  uint8_t wire[64];
+  wt_writer_t w;
+  size_t wire_length;
+
+  memset(&session, 0, sizeof(session));
+  memset(&sink, 0, sizeof(sink));
+  sink.on_stream_data = record_stream_data;
+  sink.context = &session;
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_driver_set_session_id(&driver, 4U);
+
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_OK("a bidirectional prefix writes", wt_webtransport_stream_prefix_write(&w, 0, 4U));
+  wt_writer_bytes(&w, "split", 5U);
+  wire_length = wt_writer_offset(&w);
+
+  memset(&frame, 0, sizeof(frame));
+  frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+  frame.as.stream.id = 0U;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = wire;
+  frame.as.stream.length = 1U; /* inside the two-byte type: nothing is decided yet */
+  WT_EXPECT_OK("the first piece is held",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
+  WT_EXPECT_U64("with nothing delivered", 0U, (uint64_t)session.streams);
+  WT_EXPECT_U64("and the stream waiting", 1U, (uint64_t)wt_http3_driver_pending_count(&driver));
+  frame.as.stream.offset = 1U;
+  frame.as.stream.data = wire + 1;
+  frame.as.stream.length = wire_length - 1U;
+  WT_EXPECT_OK("the rest completes the prefix",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
+  WT_EXPECT_U64("and the session has the payload", 5U, (uint64_t)session.stream_bytes);
+  WT_EXPECT_U64("delivered once", 1U, (uint64_t)session.streams);
+  WT_EXPECT_U64("with nothing left waiting", 0U, (uint64_t)wt_http3_driver_pending_count(&driver));
+
+  /* A REQUEST split the same way: the held bytes are replayed, so the request path sees the first bytes. */
+  {
+    wt_http3_driver_t request_driver;
+    wt_http3_endpoint_t request_endpoint;
+    wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
+    uint8_t request[8];
+    wt_writer_t rw = wt_writer_init(request, sizeof(request));
+
+    wt_http3_endpoint_init(&request_endpoint, WT_HTTP3_ROLE_SERVER);
+    wt_http3_driver_init(&request_driver, &request_endpoint);
+    wt_writer_u8(&rw, 0x00U); /* a QPACK prefix and then a DATA frame */
+    wt_writer_u8(&rw, 0x00U);
+    wt_writer_u8(&rw, 0x00U);
+    wt_writer_u8(&rw, 0x01U);
+    wt_writer_u8(&rw, 0x00U);
+    frame.as.stream.id = 4U;
+    frame.as.stream.offset = 0U;
+    frame.as.stream.data = request;
+    frame.as.stream.length = 2U;
+    WT_EXPECT_OK("half a request prefix is held",
+                 wt_http3_driver_on_quic_frame(&request_driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink,
+                                               4096U));
+    frame.as.stream.offset = 2U;
+    frame.as.stream.data = request + 2;
+    frame.as.stream.length = wt_writer_offset(&rw) - 2U;
+    WT_EXPECT_OK("and its rest goes to the request path",
+                 wt_http3_driver_on_quic_frame(&request_driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink,
+                                               4096U));
+    WT_EXPECT_OK("which tracks the stream",
+                 wt_http3_endpoint_request_state(&request_endpoint, 4U, &state));
+    WT_EXPECT_TRUE("with the frames it was given applied",
+                   state == WT_HTTP3_REQUEST_BODY || state == WT_HTTP3_REQUEST_EXPECT_HEADERS);
+    WT_EXPECT_U64("and the session was told nothing", 1U, (uint64_t)session.streams);
+  }
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
@@ -928,6 +1012,7 @@ int main(void) {
   test_the_quic_transport_forwards();
   test_the_bidi_classifier();
   test_a_bidi_stream_is_routed_by_its_prefix();
+  test_a_bidirectional_prefix_split_across_frames();
   test_the_pending_table_is_bounded();
   WT_TEST_MAIN_END("wt_http3_driver");
 }

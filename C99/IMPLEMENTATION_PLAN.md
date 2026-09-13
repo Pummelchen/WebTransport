@@ -2820,6 +2820,29 @@ until proven otherwise; and the number reported as consumed is the PREFIX's leng
 test asserted wrongly at first (it expected two bytes where the type `0x41` needs a two-byte varint of its own),
 the same MSB-first varint lesson this tracker has recorded several times.
 
+### Phase 10's ninth part: the split bidirectional prefix, found by its counter
+
+The edge WT-120 left open is closed, and the method is the part worth recording because it is the third time this
+phase has needed it. WT-130's next step was prescribed as "a counter at each refusal, read on the second frame",
+and the first run of the instrumented assembly said everything at once:
+
+    DIAGBIDI id=0 have=0 copied=1  classified=8 kind=0 consumed=0   <- first frame: TRUNCATED, so it is held
+    DIAGBIDI second=9 stream_bytes=0                                <- second frame: refused, and NO assembly line
+
+No `DIAGBIDI` line for the second frame meant the assembly never ran for it, and the reason is the design's blind
+spot: **a continuation frame has a non-zero offset**, and the assembly's condition was "offset zero". The frame
+that would have completed the prefix fell through to the request path, where its middle bytes were read as a
+stream's first and refused with WT_ERR_LIMIT. The held-bytes lookup now comes first, so a stream with held bytes
+is assembled whatever the frame's offset says.
+
+The test covers both outcomes of the assembly: a WebTransport prefix split across frames delivers exactly its
+payload (once, with the pending entry released), and a REQUEST split the same way REPLAYS the held bytes so the
+request path sees the stream's first bytes. All three build configurations are green.
+
+Two of the three build configurations were green through every wrong version of this change, which is why the
+phase's rule is about counters and not about configurations alone: **a frame path is changed with a counter in
+it** -- the configurations say whether the change is SAFE, and the counter says whether it is RIGHT.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

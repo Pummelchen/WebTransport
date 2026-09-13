@@ -35,8 +35,10 @@
 extern "C" {
 #endif
 
-/* The longest type prefix a peer can send: a varint is at most eight bytes. */
-#define WT_HTTP3_DRIVER_PREFIX_MAX 8U
+/* The longest stream prefix a peer can send: a draft-16 WebTransport stream's prefix is the TYPE and then the
+ * session ID, each a varint of up to eight bytes, so sixteen rather than eight. A table sized for the type alone
+ * would refuse a legal prefix. */
+#define WT_HTTP3_DRIVER_PREFIX_MAX 16U
 
 /* How many opening streams may be waiting for the rest of their prefix at once. A peer that
  * opens more than this before completing any of them is refused with WT_ERR_LIMIT rather

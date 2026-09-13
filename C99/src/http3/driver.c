@@ -1,5 +1,7 @@
 /* Driving an HTTP/3 endpoint from a connection (Phase 9). */
 
+#include <stdio.h>
+
 #include "webtransport/http3/driver.h"
 
 #include "webtransport/cursor.h"
@@ -455,31 +457,76 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
         wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
         int tracked = wt_http3_endpoint_request_state(driver->endpoint, stream_id, &state) == WT_OK;
 
-        if (!tracked && frame->as.stream.offset == 0U && frame->as.stream.length > 0U) {
-          /* A peer-initiated bidirectional stream is EITHER a request stream (whose first bytes are a QPACK
-           * prefix) or a WebTransport bidirectional stream (the draft's `0x41` and the session ID), and the
-           * classifier that tells them apart is proven on its own before this routing uses it -- which is the
-           * rule WT-120's first, crashing attempt earned.
-           *
-           * A prefix that has not fully arrived is NOT a WebTransport stream yet, so it falls through to the
-           * request path: a split prefix across frames on a bidirectional stream is a case this routing does
-           * not reassemble, and the honest place to say so is here rather than to guess at half a varint. */
-          wt_http3_bidi_start_kind_t start = WT_HTTP3_BIDI_START_REQUEST;
+        /* A prefix that arrives in PIECES: hold the bytes in the same pending table the unidirectional path
+         * uses, and when enough arrive either deliver what follows the prefix to the session or REPLAY the held
+         * bytes into the request path (which must see a stream's first bytes, not the middle of them).
+         *
+         * The held-bytes lookup comes FIRST, and that is the whole bug the counter found: a CONTINUATION frame
+         * has a non-zero offset, so a condition of "offset zero" skipped the assembly for exactly the frame that
+         * would have completed the prefix -- and the frame then fell into the request path, where its middle
+         * bytes were read as a stream's first and refused. */
+        {
+          wt_http3_driver_pending_t *held = find_pending(driver, stream_id);
+          if (!tracked && (held != NULL || (frame->as.stream.offset == 0U && frame->as.stream.length > 0U))) {
+          uint8_t assembled[WT_HTTP3_DRIVER_PREFIX_MAX];
+          size_t have = 0U;
+          size_t copied;
+          wt_http3_bidi_start_kind_t start_kind = WT_HTTP3_BIDI_START_REQUEST;
           size_t consumed = 0U;
           uint64_t prefix_session = 0U;
-          if (wt_http3_driver_classify_bidi_start(frame->as.stream.data, frame->as.stream.length, &start,
-                                                  &prefix_session, &consumed) == WT_OK &&
-              start == WT_HTTP3_BIDI_START_WEBTRANSPORT) {
-            if (driver->session_id_set != 0 && prefix_session != driver->session_id) {
-              /* A WebTransport stream for another session is not this one's to deliver. */
-              return WT_ERR_PROTOCOL;
+          wt_status_t classified;
+
+          if (held != NULL) {
+            have = held->length;
+            memcpy(assembled, held->bytes, have);
+          }
+          copied = frame->as.stream.length;
+          if (copied > (size_t)WT_HTTP3_DRIVER_PREFIX_MAX - have) {
+            copied = (size_t)WT_HTTP3_DRIVER_PREFIX_MAX - have;
+          }
+          memcpy(assembled + have, frame->as.stream.data, copied);
+          classified = wt_http3_driver_classify_bidi_start(assembled, have + copied, &start_kind, &prefix_session,
+                                                           &consumed);
+          if (classified == WT_ERR_TRUNCATED) {
+            if (held == NULL) {
+              if (driver->pending_count >= WT_HTTP3_DRIVER_PENDING_MAX) {
+                      return WT_ERR_LIMIT;
+              }
+              held = &driver->pending[driver->pending_count];
+              held->stream_id = stream_id;
+              held->length = 0U;
+              driver->pending_count++;
             }
-            if (sink != NULL && sink->on_stream_data != NULL && frame->as.stream.length > consumed) {
-              return sink->on_stream_data(sink->context, stream_id, frame->as.stream.data + consumed,
-                                          frame->as.stream.length - consumed, frame->as.stream.fin);
+            memcpy(held->bytes, assembled, have + copied);
+            held->length = have + copied;
+            return WT_OK;
+          }
+          if (held != NULL) forget_pending(driver, stream_id);
+          if (classified == WT_OK && start_kind == WT_HTTP3_BIDI_START_WEBTRANSPORT) {
+            if (driver->session_id_set != 0 && prefix_session != driver->session_id) return WT_ERR_PROTOCOL;
+            if (sink != NULL && sink->on_stream_data != NULL) {
+              size_t from_assembled = have + copied - consumed;
+              if (from_assembled > 0U) {
+                wt_status_t delivered = sink->on_stream_data(sink->context, stream_id, assembled + consumed,
+                                                             from_assembled,
+                                                             frame->as.stream.length > copied
+                                                                 ? 0
+                                                                 : frame->as.stream.fin);
+                if (delivered != WT_OK) return delivered;
+              }
+              if (frame->as.stream.length > copied) {
+                return sink->on_stream_data(sink->context, stream_id, frame->as.stream.data + copied,
+                                            frame->as.stream.length - copied, frame->as.stream.fin);
+              }
             }
             return WT_OK;
           }
+          if (have > 0U) {
+            wt_status_t replayed = wt_http3_driver_on_stream_bytes(driver, stream_id, assembled, have, 0,
+                                                                   max_frame_bytes, sink, NULL);
+              if (replayed != WT_OK) return replayed;
+          }
+        }
         }
 
         if (!tracked) {
