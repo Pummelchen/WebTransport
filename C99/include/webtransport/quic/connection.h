@@ -359,6 +359,44 @@ typedef struct wt_quic_connection {
   uint64_t retries_discarded;
   uint64_t retry_accepted_count;
 
+  /* The 1-RTT key update lifecycle (RFC 9001 section 6). Only the Application space has one: the Initial and
+   * Handshake keys come from the handshake and are discarded rather than updated, so everything here is about
+   * the keys a WebTransport session actually runs on.
+   *
+   * `key_phase` and `key_phase_in` are the two directions' phase bits, which are NOT the same value: section
+   * 6.1 makes the initiator update its receive keys too, but a peer that has not yet responded still reads
+   * this endpoint's packets with the phase it negotiated. The next phase's keys are derived AHEAD of time
+   * (section 6.3) so that a packet which starts an update can be read where it arrives, and the phase being
+   * retired is retained for packets the network reordered (sections 6.1 and 6.5).
+   *
+   * `key_phase_first_pn` is the lowest packet number sent in the current phase, which section 6.1 makes the
+   * test for a SECOND update: it is allowed only once an acknowledgement has reached that number.
+   * `key_phase_in_first_pn` is the first packet number RECEIVED in the current incoming phase, and it is what
+   * tells a reordered packet from one that starts the next phase -- those two carry the SAME phase bit
+   * (section 6.5), so the packet number is the only thing that can decide. */
+  int key_phase;
+  int key_phase_in;
+  wt_quic_packet_keys_t next_keys_in;
+  int next_keys_in_ready;
+  wt_quic_packet_keys_t next_keys_out;
+  int next_keys_out_ready;
+  wt_quic_packet_keys_t previous_keys_in;
+  int previous_keys_in_ready;
+  uint64_t key_phase_first_pn;
+  int key_phase_first_pn_set;
+  uint64_t key_phase_in_first_pn;
+  int key_phase_in_first_pn_set;
+  int key_update_awaiting_confirmation;
+  /* Set when this endpoint has responded to the peer's update but has not yet sent anything in the new phase.
+   * A second update arriving then is section 6.2's consecutive-update error. */
+  int key_update_response_pending;
+  /* Diagnostics rather than protocol state: how many updates this endpoint initiated, how many the peer
+   * started, and how many were refused. A run whose keys never moved looks exactly like a run whose sessions
+   * were short without them. */
+  uint64_t key_updates_initiated;
+  uint64_t key_updates_responded;
+  uint64_t key_update_errors;
+
   /* Whether a CONNECTION_CLOSE frame has been sent, so that closing twice does not send two. A close
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is
    * how "do not send" and "have not sent yet" are told apart. */
@@ -669,6 +707,31 @@ int wt_quic_connection_retry_pending_keys(const wt_quic_connection_t *connection
 /* The Initial keys now match the accepted Retry's connection ID. Clears the flag above; without a Retry it does
  * nothing, because there is nothing pending. */
 void wt_quic_connection_retry_keys_installed(wt_quic_connection_t *connection);
+
+/* Initiate a 1-RTT key update (RFC 9001 section 6.1): the next write secret is derived, the Key Phase bit is
+ * toggled, the receive keys move to the same phase -- "the endpoint that initiates a key update also updates
+ * the keys that it uses for receiving packets" -- and the phase being left behind is retained for packets the
+ * network reordered.
+ *
+ * WT_ERR_STATE when the handshake is not confirmed (a MUST NOT), and WT_ERR_STATE when a previous update has
+ * not yet been acknowledged (the other MUST NOT: "unless it has received an acknowledgment for a packet that
+ * was sent protected with keys from the current key phase"). Both are the caller's errors rather than the
+ * peer's, so neither closes anything. */
+wt_status_t wt_quic_connection_initiate_key_update(wt_quic_connection_t *connection, uint64_t now);
+
+/* Whether an update may be initiated now, which is the two conditions above and nothing else. A caller that
+ * updates on a counter asks this first. */
+int wt_quic_connection_key_update_allowed(const wt_quic_connection_t *connection);
+
+/* The phase bit this endpoint protects its packets with: the header's Key Phase, which a peer reads to know
+ * which keys to use. */
+int wt_quic_connection_key_phase(const wt_quic_connection_t *connection);
+
+/* How many updates this endpoint has initiated and how many the peer has started, plus how many were refused
+ * with KEY_UPDATE_ERROR. Diagnostics, because a key that never moved is invisible from the outside. */
+uint64_t wt_quic_connection_key_updates_initiated(const wt_quic_connection_t *connection);
+uint64_t wt_quic_connection_key_updates_responded(const wt_quic_connection_t *connection);
+uint64_t wt_quic_connection_key_update_errors(const wt_quic_connection_t *connection);
 
 /* The Retry this connection accepted: its token and the Source Connection ID it named, for a caller that has to
  * derive keys from the latter or say what happened. WT_ERR_STATE when no Retry was accepted. The token is a view

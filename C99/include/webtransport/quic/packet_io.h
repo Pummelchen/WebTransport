@@ -104,6 +104,29 @@ typedef struct wt_quic_received_packet {
   size_t total_len;
 } wt_quic_received_packet_t;
 
+/* Remove header protection and locate the packet number, WITHOUT touching the payload.
+ *
+ * This is a separate step because the Key Phase bit is one of the bits the mask owns (RFC 9001 section 5.4
+ * masks the low five bits of a short header), so the phase -- and therefore which packet protection keys to
+ * use -- cannot be known until the mask is off. The header protection KEY is the one thing a key update does
+ * not change (section 6.1), so a caller may pass the phase it currently holds and still read a packet of any
+ * phase, which is what makes a key update expressible at all.
+ *
+ * `out_pn_len` is what the unmasked first byte revealed, and `out_total_len` is the packet's own length, not
+ * the datagram's. Every out parameter may be NULL. */
+wt_status_t wt_quic_packet_unprotect_header(uint8_t *packet, size_t length,
+                                            const wt_quic_packet_keys_t *keys,
+                                            size_t local_connection_id_len, size_t *out_pn_offset,
+                                            size_t *out_total_len, size_t *out_pn_len,
+                                            int *out_short_header);
+
+/* Decode and authenticate a packet whose header protection is ALREADY removed, with the keys the caller chose
+ * for its phase. `total_len` and `pn_len` come from `wt_quic_packet_unprotect_header`; `local_connection_id_len`
+ * is this endpoint's own connection ID length, which a short header does not carry. */
+wt_status_t wt_quic_packet_open(uint8_t *packet, size_t total_len, size_t pn_len,
+                                const wt_quic_packet_keys_t *keys, uint64_t largest_received,
+                                size_t local_connection_id_len, wt_quic_received_packet_t *out);
+
 /* Read one packet: remove header protection, reconstruct the packet number, authenticate and decrypt
  * the payload.
  *

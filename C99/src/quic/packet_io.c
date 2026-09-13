@@ -107,35 +107,52 @@ wt_status_t wt_quic_packet_build(const wt_quic_packet_build_t *params, uint8_t *
   return WT_OK;
 }
 
-wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
-                                const wt_quic_packet_keys_t *keys,
-                                uint64_t largest_received,
-                                size_t local_connection_id_len,
-                                wt_quic_received_packet_t *out) {
+wt_status_t wt_quic_packet_unprotect_header(uint8_t *packet, size_t length,
+                                            const wt_quic_packet_keys_t *keys,
+                                            size_t local_connection_id_len, size_t *out_pn_offset,
+                                            size_t *out_total_len, size_t *out_pn_len,
+                                            int *out_short_header) {
+  wt_status_t status;
   size_t pn_offset = 0U;
   size_t total_len = 0U;
-  size_t pn_len = 0U;
   int short_header = 0;
-  wt_status_t status;
+  size_t pn_len = 0U;
 
-  if (packet == NULL || keys == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
-  memset(out, 0, sizeof(*out));
+  if (packet == NULL || keys == NULL) return WT_ERR_INVALID_ARGUMENT;
 
   /* The packet number's offset cannot come from a decoder: the number's own length is behind the mask.
    * It comes from the layout, and with it the length of the packet -- which for a long header is the
    * Length field's and not the datagram's, because a datagram may hold several packets. */
-  status = wt_quic_protected_pn_offset(packet, length, local_connection_id_len, &pn_offset,
-                                       &total_len, &short_header);
+  status = wt_quic_protected_pn_offset(packet, length, local_connection_id_len, &pn_offset, &total_len,
+                                       &short_header);
   if (status != WT_OK) return status;
 
-  /* Header protection first: its sample is the ciphertext, and the packet number length it reveals is
-   * what the rest of this function is measured against. */
-  status = wt_quic_unprotect_header(keys->aead, keys->hp, keys->hp_len, packet, total_len,
-                                    pn_offset, &pn_len);
+  /* Header protection comes off here: its sample is the ciphertext, and the packet number length it reveals
+   * is what the rest of the read is measured against. A key update does NOT change the header protection
+   * key (RFC 9001 section 6.1), so a caller may pass the phase it currently holds and still read a packet
+   * from any phase -- which is the whole reason this is a separate step (WT-69). */
+  status = wt_quic_unprotect_header(keys->aead, keys->hp, keys->hp_len, packet, total_len, pn_offset,
+                                    &pn_len);
   if (status != WT_OK) return status;
 
-  /* Parsed again now that the mask is off: the first byte's low bits are the real packet number
-   * length, so the header's own lengths are now the ones the sender wrote. */
+  if (out_pn_offset != NULL) *out_pn_offset = pn_offset;
+  if (out_total_len != NULL) *out_total_len = total_len;
+  if (out_pn_len != NULL) *out_pn_len = pn_len;
+  if (out_short_header != NULL) *out_short_header = short_header;
+  return WT_OK;
+}
+
+wt_status_t wt_quic_packet_open(uint8_t *packet, size_t total_len, size_t pn_len,
+                                const wt_quic_packet_keys_t *keys, uint64_t largest_received,
+                                size_t local_connection_id_len, wt_quic_received_packet_t *out) {
+  wt_status_t status;
+
+  if (packet == NULL || keys == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (total_len > 0U && packet == NULL) return WT_ERR_INVALID_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+
+  /* Parsed now that the mask is off: the first byte's low bits are the real packet number length, so the
+   * header's own lengths are the ones the sender wrote. */
   {
     wt_cursor_t cursor = wt_cursor_init(packet, total_len);
     wt_quic_error_t error;
@@ -144,6 +161,7 @@ wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
     const uint8_t *payload;
     size_t payload_len;
     int reserved_bits_set = 0;
+    int short_header = (packet[0] & WT_QUIC_LONG_HEADER_BIT) == 0U ? 1 : 0;
 
     if (short_header) {
       wt_quic_short_header_t header;
@@ -156,8 +174,8 @@ wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
       if (status == WT_ERR_PROTOCOL) return WT_ERR_AUTHENTICATION;
       if (status != WT_OK) return status;
       reserved_bits_set = header.reserved_bits_set;
-      /* `type` is left zeroed: a short header does not carry one, and which space it belongs to is
-       * what the keys the caller chose say. */
+      /* `type` is left zeroed: a short header does not carry one, and which space it belongs to is what the
+       * keys the caller chose say. */
       out->key_phase = header.key_phase;
       out->destination_connection_id = header.destination_connection_id;
       out->destination_connection_id_len = header.destination_connection_id_len;
@@ -184,8 +202,9 @@ wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
       truncated = header.packet_number;
       out->packet_number_length = header.packet_number_len;
     }
-    /* The packet number is the truncated one against the largest this endpoint has seen, and it is
-     * read after the mask is off -- which is the whole reason the order here is what it is. */
+    (void)pn_len;
+    /* The packet number is the truncated one against the largest this endpoint has seen, and it is read after
+     * the mask is off -- which is the whole reason the order here is what it is. */
     out->packet_number = wt_quic_packet_number_decode(truncated, out->packet_number_length,
                                                       largest_received);
     out->header_len = header_len;
@@ -205,4 +224,22 @@ wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
     out->payload_len = payload_len - WT_AEAD_TAG_LEN;
   }
   return WT_OK;
+}
+
+wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
+                                const wt_quic_packet_keys_t *keys,
+                                uint64_t largest_received,
+                                size_t local_connection_id_len,
+                                wt_quic_received_packet_t *out) {
+  size_t total_len = 0U;
+  size_t pn_len = 0U;
+  wt_status_t status;
+
+  if (packet == NULL || keys == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+
+  status = wt_quic_packet_unprotect_header(packet, length, keys, local_connection_id_len, NULL, &total_len,
+                                           &pn_len, NULL);
+  if (status != WT_OK) return status;
+  return wt_quic_packet_open(packet, total_len, pn_len, keys, largest_received, local_connection_id_len, out);
 }

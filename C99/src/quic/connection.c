@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "webtransport/quic/frame.h"
+#include "webtransport/quic/packet_number.h"
 #include "webtransport/quic/packet_io.h"
 #include "webtransport/quic/transport_parameters.h"
 #include "webtransport/writer.h"
@@ -433,7 +434,9 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
   }
   build.packet_number = packet_number;
   build.packet_number_length = packet_number_length;
-  build.key_phase = 0;
+  /* RFC 9001 section 6.1's Key Phase bit: what a peer reads to know which keys protect this packet. It is only
+   * meaningful for the Application space, and the builder ignores it for the longer headers. */
+  build.key_phase = connection->key_phase;
   build.payload = payload;
   build.payload_len = payload_length;
   build.keys = &connection->keys_out[space];
@@ -487,6 +490,19 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
     return WT_ERR_LIMIT;
   }
 
+  if (space == WT_QUIC_SPACE_APPLICATION) {
+    if (connection->key_phase_first_pn_set == 0) {
+      /* The FIRST packet of this phase, which is the number section 6.1's test compares an acknowledgement
+       * against: "tracking the lowest packet number sent with each key phase and the highest acknowledged
+       * packet number in the 1-RTT space". */
+      connection->key_phase_first_pn = packet_number;
+      connection->key_phase_first_pn_set = 1;
+    }
+    /* Anything sent in the new phase is what section 6.2 asks for after responding to a peer's update -- "the
+     * next packet that contains an acknowledgment will cause the key update to be completed" -- so the flag
+     * that detects a peer updating twice without waiting is cleared by SENDING, not by acknowledging. */
+    connection->key_update_response_pending = 0;
+  }
   status = wt_udp_send(&connection->socket, &connection->peer, packet, packet_length);
   if (status != WT_OK) return status;
 
@@ -724,6 +740,16 @@ static wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t 
     if (status != WT_OK) return status;
     status = wt_quic_pn_space_on_ack(space_state, largest_newly_acked);
     if (status != WT_OK) return status;
+    /* RFC 9001 section 6.1: an acknowledgement that reaches the first packet sent in the current key phase is
+     * what CONFIRMS the update -- and what makes the next one allowed. */
+    if (space == WT_QUIC_SPACE_APPLICATION && connection->key_phase_first_pn_set != 0 &&
+        largest_newly_acked >= connection->key_phase_first_pn) {
+      connection->key_update_awaiting_confirmation = 0;
+      /* The phase being retired has done its job: a packet protected with the current keys has been
+       * acknowledged, so the peer holds them and a reordered packet from before the update is no longer worth
+       * retaining (sections 6.1 and 6.3). */
+      connection->previous_keys_in_ready = 0;
+    }
   }
 
   /* Anything the acknowledgement put beyond the thresholds is lost now rather than at the next timer,
@@ -2035,6 +2061,237 @@ static wt_status_t on_retry_packet(wt_quic_connection_t *connection, const uint8
   return WT_OK;
 }
 
+/* ---------------------------------------------- the 1-RTT key update (RFC 9001 section 6)
+
+ * A key update moves one traffic secret forward: `secret_<n+1> = HKDF-Expand-Label(secret_<n>, "quic ku", ...)`.
+ * What has to be got right is not the derivation -- `wt_quic_packet_keys_update` does that and is checked against
+ * the RFC's own vector -- but WHICH keys exist at each moment and which of them the receive path chooses, because
+ * the Key Phase bit is inside the header protection mask and because the phase being retired and the phase
+ * arriving carry the SAME bit (section 6.5).
+ */
+
+/* The next phase's keys carry the CURRENT header protection key: section 6.1 makes header protection the one
+ * thing a key update does not change, which is also what lets the receive path unprotect a header of any phase
+ * with the keys it already holds. */
+static wt_status_t derive_next_keys(const wt_quic_packet_keys_t *current, wt_quic_packet_keys_t *out) {
+  wt_status_t status = wt_quic_packet_keys_update(current, out);
+  if (status != WT_OK) return status;
+  memcpy(out->hp, current->hp, current->hp_len);
+  out->hp_len = current->hp_len;
+  return WT_OK;
+}
+
+/* The next phase's RECEIVE keys, derived on first use rather than at every pump: section 6.3 allows generating
+ * them as part of packet processing. */
+static wt_status_t ensure_next_keys_in(wt_quic_connection_t *connection) {
+  if (connection->next_keys_in_ready != 0) return WT_OK;
+  if (connection->has_keys_in[WT_QUIC_SPACE_APPLICATION] == 0) return WT_ERR_STATE;
+  {
+    wt_status_t status = derive_next_keys(&connection->keys_in[WT_QUIC_SPACE_APPLICATION],
+                                          &connection->next_keys_in);
+    if (status != WT_OK) return status;
+  }
+  connection->next_keys_in_ready = 1;
+  return WT_OK;
+}
+
+static wt_status_t ensure_next_keys_out(wt_quic_connection_t *connection) {
+  if (connection->next_keys_out_ready != 0) return WT_OK;
+  if (connection->has_keys_out[WT_QUIC_SPACE_APPLICATION] == 0) return WT_ERR_STATE;
+  {
+    wt_status_t status = derive_next_keys(&connection->keys_out[WT_QUIC_SPACE_APPLICATION],
+                                          &connection->next_keys_out);
+    if (status != WT_OK) return status;
+  }
+  connection->next_keys_out_ready = 1;
+  return WT_OK;
+}
+
+/* Whether the phase this endpoint is sending in has been acknowledged, which is section 6.1's condition for
+ * initiating another update. The handshake must be confirmed first, which is the other one. */
+int wt_quic_connection_key_update_allowed(const wt_quic_connection_t *connection) {
+  if (connection == NULL) return 0;
+  if (connection->handshake_confirmed == 0) return 0;
+  if (connection->has_keys_out[WT_QUIC_SPACE_APPLICATION] == 0) return 0;
+  if (connection->key_update_awaiting_confirmation != 0) return 0;
+  /* A phase whose first packet has NOT been sent has nothing to confirm: section 6.1's condition is about an
+   * ACKNOWLEDGED packet of the current phase, and before the first send there is none. */
+  if (connection->key_phase_first_pn_set != 0) return 1;
+  return (connection->key_updates_initiated == 0U && connection->key_updates_responded == 0U) ? 1 : 0;
+}
+
+wt_status_t wt_quic_connection_initiate_key_update(wt_quic_connection_t *connection, uint64_t now) {
+  wt_quic_packet_keys_t updated;
+  wt_status_t status;
+
+  (void)now;
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* RFC 9001 section 6.1: "An endpoint MUST NOT initiate a key update prior to having confirmed the
+   * handshake." The caller is told rather than the peer: nothing about the connection is wrong. */
+  if (connection->handshake_confirmed == 0) return WT_ERR_STATE;
+  if (connection->has_keys_out[WT_QUIC_SPACE_APPLICATION] == 0) return WT_ERR_STATE;
+  /* And the other MUST NOT: "unless it has received an acknowledgment for a packet that was sent protected
+   * with keys from the current key phase." A second update before that is this endpoint's own mistake, so it
+   * is a state error and not a connection close. */
+  if (connection->key_update_awaiting_confirmation != 0) return WT_ERR_STATE;
+
+  /* The new SEND keys, and the phase being left behind becomes the retained RECEIVE keys: section 6.1 makes the
+   * initiator update both directions, because the peer answers in the new phase. */
+  status = derive_next_keys(&connection->keys_out[WT_QUIC_SPACE_APPLICATION], &updated);
+  if (status != WT_OK) return status;
+  connection->keys_out[WT_QUIC_SPACE_APPLICATION] = updated;
+
+  connection->previous_keys_in = connection->keys_in[WT_QUIC_SPACE_APPLICATION];
+  connection->previous_keys_in_ready = 1;
+  status = derive_next_keys(&connection->previous_keys_in, &updated);
+  if (status != WT_OK) return status;
+  connection->keys_in[WT_QUIC_SPACE_APPLICATION] = updated;
+
+  connection->key_phase ^= 1;
+  connection->key_phase_in ^= 1;
+  /* The keys for the phase AFTER this one are derived from the new ones, so the next update -- either
+   * direction's -- has them ready. */
+  connection->next_keys_out_ready = 0;
+  connection->next_keys_in_ready = 0;
+  (void)ensure_next_keys_out(connection);
+  (void)ensure_next_keys_in(connection);
+
+  connection->key_phase_first_pn = 0U;
+  connection->key_phase_first_pn_set = 0;
+  connection->key_phase_in_first_pn_set = 0;
+  connection->key_update_awaiting_confirmation = 1;
+  connection->key_updates_initiated++;
+  return WT_OK;
+}
+
+/* The peer started an update and a packet in the new phase authenticated: section 6.2's response, which has to
+ * happen BEFORE the acknowledgement for that packet goes out. */
+static wt_status_t key_update_respond(wt_quic_connection_t *connection, uint64_t now) {
+  wt_quic_packet_keys_t updated;
+  wt_status_t status;
+
+  /* "If an endpoint detects a second update before it has sent any packets with updated keys containing an
+   * acknowledgment for the packet that initiated the key update, it indicates that its peer has updated keys
+   * twice without awaiting confirmation." A MAY, and this endpoint takes it: the alternative is a peer whose
+   * keys move under every packet. */
+  if (connection->key_update_response_pending != 0 && connection->key_phase_first_pn_set == 0) {
+    connection->key_update_errors++;
+    return close_with(connection, WT_QUIC_KEY_UPDATE_ERROR, 0U, now);
+  }
+
+  /* The phase that was current becomes the retained one, the derived next phase becomes current, and the send
+   * keys move with them -- section 6.2's "Sending keys MUST be updated before sending an acknowledgment for the
+   * packet that was received with updated keys". */
+  connection->previous_keys_in = connection->keys_in[WT_QUIC_SPACE_APPLICATION];
+  connection->previous_keys_in_ready = 1;
+  connection->keys_in[WT_QUIC_SPACE_APPLICATION] = connection->next_keys_in;
+  connection->next_keys_in_ready = 0;
+
+  status = derive_next_keys(&connection->keys_out[WT_QUIC_SPACE_APPLICATION], &updated);
+  if (status != WT_OK) return status;
+  connection->keys_out[WT_QUIC_SPACE_APPLICATION] = updated;
+
+  connection->key_phase ^= 1;
+  connection->key_phase_in ^= 1;
+  connection->key_phase_first_pn_set = 0;
+  connection->key_phase_in_first_pn_set = 0;
+  connection->key_update_response_pending = 1;
+  connection->key_update_awaiting_confirmation = 1;
+  connection->next_keys_out_ready = 0;
+  connection->key_updates_responded++;
+  return WT_OK;
+}
+
+/* Read one Application-space packet, choosing the keys by the Key Phase bit that only header unprotection can
+ * reveal (section 6.2) and by the packet number, which is the only thing that tells a delayed packet from one
+ * that starts the next phase -- those carry the same bit (section 6.5).
+ *
+ * A second attempt at the SAME packet needs a copy of it, and that is not an optimisation: a packet whose tag
+ * does not verify is WIPED by `wt_quic_unprotect_frames`, deliberately ("a caller never holds bytes whose tag did
+ * not verify"), so the ciphertext is gone the moment the first key set fails. The copy is made only where two key
+ * sets are possible, which is one packet per key update in the ordinary case.
+ */
+static wt_status_t read_application_packet(wt_quic_connection_t *connection, uint8_t *packet, size_t length,
+                                           uint64_t largest_received, size_t local_connection_id_len,
+                                           wt_quic_received_packet_t *out, uint64_t now) {
+  uint8_t saved[WT_QUIC_MAX_PACKET];
+  size_t total_len = 0U;
+  size_t pn_offset = 0U;
+  size_t pn_len = 0U;
+  int short_header = 0;
+  int phase;
+  uint64_t truncated = 0U;
+  uint64_t packet_number;
+  int has_reference;
+  size_t i;
+  wt_status_t status;
+
+  status = wt_quic_packet_unprotect_header(packet, length,
+                                           &connection->keys_in[WT_QUIC_SPACE_APPLICATION],
+                                           local_connection_id_len, &pn_offset, &total_len, &pn_len,
+                                           &short_header);
+  if (status != WT_OK) return status;
+  phase = (packet[0] & WT_QUIC_KEY_PHASE_BIT) != 0U ? 1 : 0;
+
+  if (phase == connection->key_phase_in) {
+    status = wt_quic_packet_open(packet, total_len, pn_len,
+                                 &connection->keys_in[WT_QUIC_SPACE_APPLICATION], largest_received,
+                                 local_connection_id_len, out);
+    if (status != WT_OK) return status;
+    if (connection->key_phase_in_first_pn_set == 0) {
+      connection->key_phase_in_first_pn = out->packet_number;
+      connection->key_phase_in_first_pn_set = 1;
+    }
+    return WT_OK;
+  }
+
+  /* The packet number decides between the two phases that share this bit: lower than any number of the current
+   * phase is a delayed packet from the one being retired, higher is the start of the next. */
+  for (i = 0U; i < pn_len; i++) truncated = (truncated << 8) | (uint64_t)packet[pn_offset + i];
+  packet_number = wt_quic_packet_number_decode(truncated, pn_len, largest_received);
+  has_reference = connection->key_phase_in_first_pn_set != 0;
+
+  if (has_reference && packet_number < connection->key_phase_in_first_pn) {
+    if (connection->previous_keys_in_ready == 0) return WT_ERR_AUTHENTICATION;
+    return wt_quic_packet_open(packet, total_len, pn_len, &connection->previous_keys_in, largest_received,
+                               local_connection_id_len, out);
+  }
+
+  /* The peer's next phase. Whether the packet is remembered for a second attempt depends on whether there is
+   * another key set it could belong to: with no packet of the current phase seen yet, a delayed packet from the
+   * retired phase is just as likely as the start of the next, and section 6.5's comparison has nothing to compare
+   * against. */
+  {
+    int keep_copy = connection->previous_keys_in_ready != 0 && total_len <= sizeof(saved);
+    if (keep_copy) memcpy(saved, packet, total_len);
+
+    status = ensure_next_keys_in(connection);
+    if (status != WT_OK) return status;
+    status = wt_quic_packet_open(packet, total_len, pn_len, &connection->next_keys_in, largest_received,
+                                 local_connection_id_len, out);
+    if (status == WT_OK) {
+      /* The packet authenticated in the phase after this endpoint's: the peer has updated, and it has to be
+       * answered in the new keys. */
+      return key_update_respond(connection, now);
+    }
+    if (status != WT_ERR_AUTHENTICATION || keep_copy == 0) return status;
+
+    /* The retired keys are the only other possibility. If THEY open it, one of two things is true: the packet was
+     * delayed and its number is below the current phase's first (handled above, so this is the no-reference
+     * case), or the peer protected a HIGHER-numbered packet with the older keys -- which section 6.4 makes
+     * KEY_UPDATE_ERROR. */
+    memcpy(packet, saved, total_len);
+    status = wt_quic_packet_open(packet, total_len, pn_len, &connection->previous_keys_in, largest_received,
+                                 local_connection_id_len, out);
+    if (status != WT_OK) return WT_ERR_AUTHENTICATION;
+    if (has_reference) {
+      connection->key_update_errors++;
+      return close_with(connection, WT_QUIC_KEY_UPDATE_ERROR, 0U, now);
+    }
+    return WT_OK;
+  }
+}
+
 wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_t now) {
   uint8_t datagram[WT_UDP_MAX_DATAGRAM];
   wt_udp_address_t from;
@@ -2143,9 +2400,17 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
     }
 
     memset(&packet, 0, sizeof(packet));
-    status = wt_quic_packet_read(datagram + offset, datagram_length - offset,
-                                 &connection->keys_in[space], largest_received,
-                                 connection->local_connection_id_length, &packet);
+    if (space == WT_QUIC_SPACE_APPLICATION) {
+      /* The Application space is the one that can be key-updated, so its keys are chosen AFTER the header
+       * protection comes off: the Key Phase bit is inside the mask (RFC 9001 sections 5.4 and 6.2). */
+      status = read_application_packet(connection, datagram + offset, datagram_length - offset,
+                                       largest_received, connection->local_connection_id_length, &packet,
+                                       now);
+    } else {
+      status = wt_quic_packet_read(datagram + offset, datagram_length - offset,
+                                   &connection->keys_in[space], largest_received,
+                                   connection->local_connection_id_length, &packet);
+    }
     if (status == WT_ERR_AUTHENTICATION) {
       /* RFC 9001 section 5.3: a packet that does not authenticate is discarded. So is the rest of the
        * datagram, because the next coalesced packet's position is only known from a header this one did
@@ -2461,4 +2726,20 @@ wt_status_t wt_quic_connection_retry(const wt_quic_connection_t *connection, con
     *out_source_connection_id_length = connection->retry_source_connection_id_length;
   }
   return WT_OK;
+}
+
+int wt_quic_connection_key_phase(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->key_phase : 0;
+}
+
+uint64_t wt_quic_connection_key_updates_initiated(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->key_updates_initiated : 0U;
+}
+
+uint64_t wt_quic_connection_key_updates_responded(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->key_updates_responded : 0U;
+}
+
+uint64_t wt_quic_connection_key_update_errors(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->key_update_errors : 0U;
 }
