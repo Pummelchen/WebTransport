@@ -388,6 +388,25 @@ wt_status_t wt_tls_client_begin(wt_tls_client_t *client,
   status = wt_tls13_transcript_append(&client->transcript, client_hello,
                                       client_hello_len);
   if (status != WT_OK) return fail(client, status);
+  /* A DIAGNOSTIC, gated by the same environment variable as the other two: the ClientHello this client HASHED, so
+   * that it can be compared byte for byte with the one that went out on the wire (decrypted independently from
+   * its Initial packet). A transcript that hashes bytes other than the ones it sent is invisible to a pair of the
+   * same code and fatal to a peer, which is the shape this investigation has been narrowing to (WT-135). */
+  {
+    const char *transcript_log_path = getenv("WT_TLS_TRANSCRIPT_LOG");
+    if (transcript_log_path != NULL) {
+      FILE *transcript_log = fopen(transcript_log_path, "a");
+      if (transcript_log != NULL) {
+        size_t index;
+        fprintf(transcript_log, "hashed-clienthello length=%zu bytes=", client_hello_len);
+        for (index = 0U; index < client_hello_len; index++) {
+          fprintf(transcript_log, "%02x", client_hello[index]);
+        }
+        fprintf(transcript_log, "\n");
+        (void)fclose(transcript_log);
+      }
+    }
+  }
   client->state = WT_TLS_CLIENT_WAIT_SERVER_HELLO;
   return WT_OK;
 }
@@ -447,6 +466,23 @@ wt_status_t wt_tls_client_begin_built(wt_tls_client_t *client,
   *out_len = hello_len;
   status = wt_tls13_transcript_append(&client->transcript, out, hello_len);
   if (status != WT_OK) return fail(client, status);
+  /* The same diagnostic as the other entry point: whichever way the ClientHello is built, what matters is which
+   * BYTES were hashed (WT-135). */
+  {
+    const char *transcript_log_path = getenv("WT_TLS_TRANSCRIPT_LOG");
+    if (transcript_log_path != NULL) {
+      FILE *transcript_log = fopen(transcript_log_path, "a");
+      if (transcript_log != NULL) {
+        size_t index;
+        fprintf(transcript_log, "hashed-clienthello length=%zu bytes=", hello_len);
+        for (index = 0U; index < hello_len; index++) {
+          fprintf(transcript_log, "%02x", out[index]);
+        }
+        fprintf(transcript_log, "\n");
+        (void)fclose(transcript_log);
+      }
+    }
+  }
   client->state = WT_TLS_CLIENT_WAIT_SERVER_HELLO;
   return WT_OK;
 }
