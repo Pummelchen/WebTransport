@@ -567,6 +567,13 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     tls.trust.host_name = config->authority;
     memcpy(tls.trust.fingerprints[0], config->pin, WT_SHA256_LEN);
     tls.trust.fingerprint_count = 1U;
+  } else if (config->trust == (int)WT_TLS_TRUST_SYSTEM) {
+    /* Validated against the platform trust store, AND the name in `authority` is checked as part of that
+     * validation, so a chain that is valid for a different host is refused. The CLI's own default is this mode,
+     * and it used to be accepted, echoed in the report as `"trust":"system"` and then ignored in favour of the
+     * bypass below -- a caller who asked for verification got none (WT-193). */
+    tls.trust.mode = WT_TLS_TRUST_SYSTEM;
+    tls.trust.host_name = config->authority;
   } else {
     /* The development bypass, which the trust layer restricts to loopback names. */
     tls.trust.mode = WT_TLS_TRUST_LOCAL_DEVELOPMENT;

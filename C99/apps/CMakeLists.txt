@@ -91,6 +91,13 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   add_test(NAME wt_cli_session_retry
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45423 stream "127.0.0.1" "" retry)
+  # `--trust` decides how the peer is validated, and it used to decide nothing: the client took the loopback
+  # development bypass whatever the option said, while its report still claimed `"trust":"system"` (WT-193). This
+  # is the case that cannot pass unless the option is honoured, because the two modes must DISAGREE about a
+  # self-signed leaf -- the bypass accepts it and the platform store refuses it.
+  add_test(NAME wt_cli_trust
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-trust.sh
+            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45441 45443)
   # The process CONTRACT: exit statuses, refused command lines and the JSON report, checked without a peer.
   # And the same session over IPv6, where the machine has it: 77 is CTest's SKIP_RETURN_CODE, which the script
   # returns when the conformance tool reports that this machine has no IPv6 loopback -- a fact about the machine

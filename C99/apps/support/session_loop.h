@@ -42,6 +42,10 @@ typedef struct wt_loop_config {
   /* The server's identity, and the pin the client checks it against. Exactly one of the two is used per side. */
   const wt_tls_self_signed_t *identity;
   const uint8_t *pin; /* WT_SHA256_LEN bytes, or NULL for the loopback development bypass */
+  /* CLIENT only: the `wt_tls_trust_mode_t` to validate the peer with, as an int so this header does not depend
+   * on the TLS headers. 0 is the loopback development bypass. It exists because the CLI accepted `--trust
+   * system`, reported it, and then always took the bypass: the option was wired to nothing (WT-193). */
+  int trust;
 } wt_loop_config_t;
 
 /* What the CLIENT decided about the response (WT-155). The server's report names why it refused a CONNECT --

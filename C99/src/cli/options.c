@@ -111,7 +111,8 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
     } else if (is_flag(argument, "--early-stream")) {
       options->early_stream = 1;
     } else if (is_flag(argument, "--transport") || is_flag(argument, "--trust") ||
-               is_flag(argument, "--origin") || is_flag(argument, "--protocol") ||
+               is_flag(argument, "--origin") || is_flag(argument, "--authority") ||
+               is_flag(argument, "--protocol") ||
                is_flag(argument, "--exchange") || is_flag(argument, "--message") ||
                is_flag(argument, "--timeout-ms") || is_flag(argument, "--scenario") ||
                is_flag(argument, "--hostile") || is_flag(argument, "--address")) {
@@ -143,6 +144,8 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
         options->trust_set = 1;
       } else if (is_flag(argument, "--origin")) {
         options->origin = value;
+      } else if (is_flag(argument, "--authority")) {
+        options->authority = value;
       } else if (is_flag(argument, "--protocol")) {
         options->protocol = value;
       } else if (is_flag(argument, "--message")) {
@@ -264,6 +267,12 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
     fprintf(stream, "null");
   } else {
     fprintf(stream, "\"%s\"", options->origin);
+  }
+  fprintf(stream, ",\"authority\":");
+  if (options->authority == NULL) {
+    fprintf(stream, "null");
+  } else {
+    fprintf(stream, "\"%s\"", options->authority);
   }
   fprintf(stream, ",\"protocol\":");
   if (options->protocol == NULL) {

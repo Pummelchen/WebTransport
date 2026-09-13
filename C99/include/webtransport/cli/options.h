@@ -57,6 +57,11 @@ typedef struct wt_cli_options {
   wt_cli_trust_t trust;
   int trust_set;
   const char *origin;
+  /* CLIENT only: the name the peer must prove, which is what the TLS layer checks the certificate against when
+   * `--trust system` is in use. It is separate from `--connect` so the transport address can stay numeric while
+   * the identity is the name the certificate carries -- the shape a routable interop run needs, where the peer is
+   * reached by address and is named by its certificate (WT-193). NULL means the origin, then "localhost". */
+  const char *authority;
   const char *protocol;
   int settings_validation;
   /* SERVER only: answer a client's first Initial with a Retry before serving it (WT-168). A client asking for it

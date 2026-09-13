@@ -38,9 +38,11 @@ static int wt_usage(const char *program) {
   printf("\n");
   printf("It connects to a peer, establishes a WebTransport session and exchanges\n");
   printf("the message named by --exchange over the transport named by --transport.\n");
-  printf("The peer's identity is checked according to --trust, including the pinned\n");
-  printf("identities a local development peer uses. It exits non-zero when the\n");
-  printf("session does not complete.\n");
+  printf("The peer's identity is checked according to --trust: system validates the\n");
+  printf("certificate against the platform trust store AND the name given by\n");
+  printf("--authority, while local-development skips validation and is refused for a\n");
+  printf("name that is not loopback.\n");
+  printf("It exits non-zero when the session does not complete.\n");
   return 3;
 }
 
@@ -136,16 +138,22 @@ int main(int argc, char **argv) {
     host[colon - options.address] = '\0';
     (void)snprintf(loop.host, sizeof(loop.host), "%s", host);
     loop.port = (uint16_t)strtoul(colon + 1, NULL, 10);
-    loop.authority = options.origin != NULL ? options.origin : "localhost";
+    /* The name the peer is expected to prove. It is what the TLS layer checks against the certificate whenever a
+     * validating trust mode is in use, so `--authority` names it explicitly and lets the transport address stay
+     * numeric while the identity is the name the certificate actually carries. Without it the origin, then
+     * "localhost", is the historical default. */
+    loop.authority =
+        options.authority != NULL ? options.authority : (options.origin != NULL ? options.origin : "localhost");
     loop.path = "/";
     loop.timeout_ms = options.timeout_ms;
     loop.datagram = options.exchange == WT_CLI_EXCHANGE_DATAGRAM;
     loop.early_stream = options.early_stream;
     loop.message = options.message;
-    /* The development bypass is restricted to loopback names, so a pin is generated here only to be printed:
-     * a real deployment passes --trust system and a certificate that validates. */
+    /* `--trust` decides how the peer is validated. This tool used to accept the flag, echo it in the report, and
+     * take the loopback bypass whatever it said, so a caller who asked for verification got none (WT-193). */
+    loop.trust = (int)options.trust;
     (void)wt_tls_self_signed_generate(&identity, "localhost");
-    loop.pin = NULL; /* the loopback development bypass: a pinned run is what a real deployment uses */
+    loop.pin = NULL; /* no pin: `--trust` selects the mode, and the bypass is only one of them */
 
     status = wt_loop_run_client(&loop, &result);
     if (options.json != 0) {

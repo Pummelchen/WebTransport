@@ -40,7 +40,10 @@ server_pid=$!
 # The server must be listening before the client writes; a short pause is enough for a bound socket, and the
 # client retransmits its Initial anyway, which is what a real peer does.
 sleep 1
-"$client" --connect "$host:$port" --origin localhost --exchange "$mode" --message ping \
+# The client's trust DEFAULT is `system`, and this peer is a self-signed local one, so the development bypass is
+# asked for by name. Before WT-193 the bypass was applied whether or not it was asked for, so a run that named no
+# trust mode proved nothing about the flag and nothing about verification.
+"$client" --connect "$host:$port" --trust local-development --origin localhost --exchange "$mode" --message ping \
   --timeout-ms 10000 --json >"$work/client.json" 2>&1
 
 wait "$server_pid"

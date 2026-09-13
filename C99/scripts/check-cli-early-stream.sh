@@ -48,7 +48,9 @@ server_pid=$!
 # The server must be listening before the client writes; a short pause is enough for a bound socket, and the
 # client retransmits its Initial anyway, which is what a real peer does.
 sleep 1
-"$client" --connect "127.0.0.1:$port" --origin localhost --exchange "$mode" --message ping \
+# `system` is the client's trust default and this peer is a self-signed local one, so the bypass is named
+# explicitly rather than inherited (WT-193).
+"$client" --connect "127.0.0.1:$port" --trust local-development --origin localhost --exchange "$mode" --message ping \
   --early-stream --timeout-ms 10000 --json >"$work/client.json" 2>&1
 wait "$server_pid"
 
