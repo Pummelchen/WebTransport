@@ -33,6 +33,11 @@ typedef struct wt_loop_config {
    * 8.1.2, WT-168). Off by default, because a Retry costs the client a round trip and is a policy about a
    * listener's exposure rather than something a protocol requires. */
   int retry;
+  /* CLIENT only: send the message BEFORE the CONNECT rather than after the response, which is the single flight
+   * draft-16 section 4.6 describes ("clients can ... send ... multiple WebTransport CONNECT requests,
+   * WebTransport data streams, and WebTransport datagrams all within a single flight"). It is the only order in
+   * which a server has something to park, so it is what reaches that path from the tools (WT-189). */
+  int early_stream;
   const char *message;
   /* The server's identity, and the pin the client checks it against. Exactly one of the two is used per side. */
   const wt_tls_self_signed_t *identity;
@@ -57,6 +62,8 @@ typedef struct wt_loop_result {
   uint32_t status;         /* the response's :status, 0 when none arrived */
   size_t received_bytes;   /* what the peer sent, in either mode */
   int received_datagram;
+  /* Whether the message went out BEFORE the CONNECT (WT-189), so a report says which order the run used. */
+  int early_stream_sent;
   uint16_t bound_port;     /* the server's actual port, which the caller may need to print or use */
   /* The first error the runtime recorded while RECEIVING, and how many there were. The status a failed run
    * returns is the tool's own ("timeout"), which says the handshake did not finish and nothing about why; this

@@ -650,10 +650,33 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
       return status;
     }
   }
+  /* The request stream is opened and the session ID is known, but the CONNECT has not been sent: this is the
+   * window section 4.6 is about, and `--early-stream` is what puts a message in it (WT-189). */
   {
-    wt_status_t status = wt_http3_driver_start_session(&loop.side.driver, &loop.transport, &settings,
-                                                       config->authority, config->path, 0U, loop.now,
-                                                       &loop.side.request_stream_id, &h3_error);
+    wt_status_t status = wt_http3_driver_open_session_stream(&loop.side.driver, &loop.transport, &settings,
+                                                             loop.now, &loop.side.request_stream_id,
+                                                             &h3_error);
+    if (status != WT_OK) {
+      record_oracle(&loop, out);
+      wt_runtime_session_clear(&loop.session);
+      wt_udp_close(&loop.socket);
+      return status;
+    }
+  }
+  if (config->early_stream != 0) {
+    wt_status_t status = send_message(&loop, &loop.transport, config);
+    if (status != WT_OK) {
+      record_oracle(&loop, out);
+      wt_runtime_session_clear(&loop.session);
+      wt_udp_close(&loop.socket);
+      return status;
+    }
+    out->early_stream_sent = 1;
+  }
+  {
+    wt_status_t status = wt_http3_driver_send_session_request(&loop.side.driver, &loop.transport,
+                                                              loop.side.request_stream_id, config->authority,
+                                                              config->path, 0U, loop.now, &h3_error);
     if (status != WT_OK) {
       record_oracle(&loop, out);
       wt_runtime_session_clear(&loop.session);
@@ -696,7 +719,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     if (out->connect_accepted != 0) wt_capsule_stream_established(&loop.side.capsules);
   }
 
-  {
+  if (config->early_stream == 0) {
     wt_status_t status = send_message(&loop, &loop.transport, config);
     if (status != WT_OK) {
       record_oracle(&loop, out);
@@ -1093,7 +1116,12 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
       out->request_line[used] = '\0';
     }
     out->request_outcome = (unsigned)decision.outcome;
-    out->request_status = (uint64_t)decision.status;
+    /* `status` is documented as "the answer to send when the outcome is a rejection" (session_request.h), and
+     * the validator leaves its default rejection in the field for an ACCEPTED request -- which is how this
+     * report came to say 404, with no error beside it, for a session the same report calls accepted and
+     * established. Zero for an acceptance: there was no answer to send, and a script that switches on this
+     * number must not read a refusal out of an accepted session (WT-190). */
+    out->request_status = decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT ? 0U : (uint64_t)decision.status;
     out->h3_error = (uint64_t)h3_error;
     if (validated == WT_OK && decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT) {
       /* The decision is kept and the exchange continues below. The request stream becomes a CAPSULE stream here,

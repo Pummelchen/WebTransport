@@ -223,6 +223,117 @@ static wt_status_t data_stream_on_data(void *context, uint64_t stream_id, const 
   return WT_OK;
 }
 
+/* A transport that hands out the stream IDs a REAL connection would: client-initiated bidirectional IDs
+ * (0, 4, 8, ...) for a bidirectional open and client-initiated unidirectional ones (2, 6, 10, ...) otherwise. The
+ * recording transport above returns 0, 1, 2, 3..., which cannot carry a session: a session IS its CONNECT
+ * stream, so only some stream IDs can be one (draft-16 section 3.2), and the prefix writer refuses the rest. */
+typedef struct class_fake {
+  uint64_t next_bidi; /* 0, 4, 8, ... */
+  uint64_t next_uni;  /* 2, 6, 10, ... */
+  uint8_t bytes[16][256];
+  size_t lengths[16];
+  uint64_t send_order[16];
+  size_t send_count;
+} class_fake_t;
+
+static wt_status_t class_open(void *context, int bidirectional, uint64_t *out_stream_id, uint64_t now) {
+  class_fake_t *fake = context;
+  (void)now;
+  if (bidirectional != 0) {
+    *out_stream_id = fake->next_bidi;
+    fake->next_bidi += 4U;
+  } else {
+    *out_stream_id = fake->next_uni;
+    fake->next_uni += 4U;
+  }
+  return WT_OK;
+}
+
+static wt_status_t class_send(void *context, uint64_t stream_id, const uint8_t *data, size_t length, int fin,
+                              uint64_t now) {
+  class_fake_t *fake = context;
+  (void)fin;
+  (void)now;
+  if (stream_id >= 16U) return WT_ERR_INVALID_ARGUMENT;
+  if (fake->lengths[stream_id] + length > sizeof(fake->bytes[0])) return WT_ERR_LIMIT;
+  if (length > 0U) memcpy(fake->bytes[stream_id] + fake->lengths[stream_id], data, length);
+  fake->lengths[stream_id] += length;
+  /* The ORDER of the writes is the claim under test, so it is recorded rather than inferred from a stream's
+   * contents: "the data stream went first" is a statement about time. */
+  if (fake->send_count < 16U) fake->send_order[fake->send_count] = stream_id;
+  fake->send_count++;
+  return WT_OK;
+}
+
+/* The session start SPLIT in two, so that a data stream can go out in between (WT-189). Draft-16 section 4.6
+ * describes a client that sends "a SETTINGS frame, multiple WebTransport CONNECT requests, WebTransport data
+ * streams, and WebTransport datagrams all within a single flight", and until this split the tree could not
+ * express it: `start_session` opened the request stream and wrote the CONNECT in one call, so nothing could
+ * precede the CONNECT and a server's parking path could not be reached from the tools at all. */
+static void test_the_session_start_can_be_split_around_a_data_stream(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_settings_t settings;
+  wt_http3_driver_transport_t transport;
+  class_fake_t fake;
+  uint64_t request_stream_id = 0U;
+  uint64_t data_stream_id = 0U;
+  uint64_t named = 0U;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  memset(&fake, 0, sizeof(fake));
+  /* The unidirectional IDs start at 2, because 0 is a bidirectional one: a fake that handed out 0 for a
+   * unidirectional stream would put the control stream where the CONNECT stream has to be. */
+  fake.next_uni = 2U;
+  memset(&transport, 0, sizeof(transport));
+  transport.open_stream = class_open;
+  transport.send_stream = class_send;
+  transport.context = &fake;
+
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_CLIENT);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("the endpoint advertises WebTransport",
+               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+
+  WT_EXPECT_OK("the request stream opens",
+               wt_http3_driver_open_session_stream(&driver, &transport, &settings, 1000U,
+                                                   &request_stream_id, &error));
+  /* The client's first bidirectional stream, which is what a CONNECT stream must be. */
+  WT_EXPECT_U64("as the client's first bidirectional stream", 0U, request_stream_id);
+  WT_EXPECT_U64("with nothing written on it yet", 0U, (uint64_t)fake.lengths[request_stream_id]);
+  WT_EXPECT_U64("and the session ID set to it", 0U, driver.session_id);
+
+  WT_EXPECT_OK("a data stream opens before the CONNECT",
+               wt_http3_driver_open_data_stream(&driver, &transport, 0, (const uint8_t *)"early", 5U, 1,
+                                                1000U, &data_stream_id));
+  WT_EXPECT_U64("as the NEXT bidirectional stream", 4U, data_stream_id);
+  WT_EXPECT_OK("whose session is readable",
+               wt_http3_driver_data_stream_session_id(&driver, data_stream_id, &named));
+  WT_EXPECT_U64("and is the request stream's ID, because the session IS its stream", request_stream_id,
+                named);
+  /* The draft's prefix, 0x41 and the session ID, then the message: three bytes of prefix and five of payload.
+   * Asserted as a length because the recording holds what the peer would receive. */
+  WT_EXPECT_U64("with the draft's prefix and the message on it", 8U, (uint64_t)fake.lengths[data_stream_id]);
+  WT_EXPECT_U64("BEFORE the request stream has anything on it", 0U,
+                (uint64_t)fake.lengths[request_stream_id]);
+
+  WT_EXPECT_OK("the CONNECT is sent when the caller is ready",
+               wt_http3_driver_send_session_request(&driver, &transport, request_stream_id, "example.com",
+                                                    "/chat", 0U, 1000U, &error));
+  WT_EXPECT_TRUE("which writes on the stream the first call opened",
+                 fake.lengths[request_stream_id] > 0U);
+  /* RFC 9114 section 7.2.1: a request's HEADERS frame, type 0x01. */
+  WT_EXPECT_U64("as an HTTP/3 HEADERS frame", 0x01U, (uint64_t)fake.bytes[request_stream_id][0]);
+  /* The ORDER is the claim, so it is read out of the write log rather than inferred: the session's own streams
+   * (the control stream and the two QPACK ones) come first because a peer cannot interpret anything before its
+   * SETTINGS, then the DATA STREAM, and the CONNECT last -- which is the whole point of the split. */
+  WT_EXPECT_U64("the data stream is written second to last", data_stream_id,
+                fake.send_order[fake.send_count - 2U]);
+  WT_EXPECT_U64("and the request is the LAST thing written", request_stream_id,
+                fake.send_order[fake.send_count - 1U]);
+}
+
 static void test_a_data_stream_this_endpoint_opened(void) {
   static const uint8_t k_message[] = {'h', 'e', 'l', 'l', 'o'};
   wt_http3_endpoint_t endpoint;
@@ -637,5 +748,6 @@ int main(void) {
   test_a_frame_that_ends_at_fin_names_the_http3_error();
   test_the_connect_streams_capsules_are_not_framed();
   test_a_server_marks_the_connect_stream_as_it_accepts_it();
+  test_the_session_start_can_be_split_around_a_data_stream();
   WT_TEST_MAIN_END("wt_http3_driver_streams");
 }

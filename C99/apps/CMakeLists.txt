@@ -76,6 +76,15 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   add_test(NAME wt_cli_session_datagram
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45419 datagram)
+  # A client that sends BEFORE its CONNECT (WT-189): the only order that reaches the SERVER's section 4.6 parking
+  # path from the tools, since every other script drives a well-ordered client whose CONNECT arrives first. Both
+  # exchange modes, because a stream and a datagram are parked by the same object through different paths.
+  add_test(NAME wt_cli_early_stream
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-early-stream.sh
+            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45431 stream)
+  add_test(NAME wt_cli_early_stream_datagram
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-early-stream.sh
+            $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45433 datagram)
   # The same exchange with the SERVER validating the client's address first (WT-168): the client has to accept the
   # Retry, adopt the connection ID it named, echo the token, and start a session on it. Every one of those is a
   # step the no-Retry path does not take, so this is the case that keeps the flow working.

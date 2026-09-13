@@ -63,6 +63,9 @@ typedef struct wt_cli_options {
    * is refused by `wt_cli_options_check`, because a client cannot make its server validate it. */
   int retry;
   wt_cli_exchange_t exchange;
+  /* CLIENT only: send the message as a WebTransport stream (or datagram) BEFORE the CONNECT, which is the
+   * single flight draft-16 section 4.6 describes and the order that reaches the server's parking path (WT-189). */
+  int early_stream;
   const char *message;
   uint64_t timeout_ms;
   int timeout_set;

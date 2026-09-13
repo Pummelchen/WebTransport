@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 84 test programs and 91,536 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
+- 84 test programs and 91,552 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -653,6 +653,14 @@ What is here:
   stream arriving in pieces, and a failing callback; `test_runtime_session_pair` drives the whole rule over a real
   pair in the only order that reaches it -- the client opens its data streams BEFORE the server answers the CONNECT
   -- and asserts the session ID of an early stream, the rejection, and the reset the peer sees on the wire.
+  **The tools reach that window too** (WT-189): `wt_http3_driver_open_session_stream` and
+  `wt_http3_driver_send_session_request` are `wt_http3_driver_start_session` split in two, so a caller can open the
+  request stream -- which is what makes the session ID known -- send a data stream or a datagram, and only then
+  write the CONNECT. That is the order the draft describes, and the CLI's `--early-stream` is it:
+  `scripts/check-cli-early-stream.sh` runs the client that way against the server and asserts the SERVER delivered
+  the message (four bytes it could only have got through the parking path) in both exchange modes, and that the
+  flag is refused with exit 2 where it means nothing. Registered with CTest as `wt_cli_early_stream` and
+  `wt_cli_early_stream_datagram`.
 - **A terminated session resets its streams** (WT-182): draft-16 section 6's MUST -- "Upon learning that the session
   has been terminated, the endpoint MUST reset the send side and abort reading on the receive side of all
   unidirectional and bidirectional streams associated with the session ... using the `WT_SESSION_GONE` error code;

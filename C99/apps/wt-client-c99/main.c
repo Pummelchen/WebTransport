@@ -140,6 +140,7 @@ int main(int argc, char **argv) {
     loop.path = "/";
     loop.timeout_ms = options.timeout_ms;
     loop.datagram = options.exchange == WT_CLI_EXCHANGE_DATAGRAM;
+    loop.early_stream = options.early_stream;
     loop.message = options.message;
     /* The development bypass is restricted to loopback names, so a pin is generated here only to be printed:
      * a real deployment passes --trust system and a certificate that validates. */
@@ -150,7 +151,7 @@ int main(int argc, char **argv) {
     if (options.json != 0) {
       printf("{\"role\":\"client\",\"status\":\"%s\",\"established\":%s,\"connectAccepted\":%s,"
              "\"responseStatus\":%u,\"responseOutcome\":%u,\"h3Error\":%llu,"
-             "\"receivedBytes\":%llu,\"receivedDatagram\":%s,"
+             "\"receivedBytes\":%llu,\"receivedDatagram\":%s,\"earlyStream\":%s,"
              "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u,\"packetsSeen\":%u,"
              "\"lastReceive\":\"%s\",\"closeCodeSet\":%s,\"closeCode\":%llu,"
              "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
@@ -171,6 +172,7 @@ int main(int argc, char **argv) {
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
              result.response_outcome, (unsigned long long)result.h3_error,
              (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
+             result.early_stream_sent != 0 ? "true" : "false",
              wt_status_name(result.first_receive_error), result.receive_errors, result.packets_seen,
              wt_status_name(result.last_receive), result.close_code_set != 0 ? "true" : "false",
              (unsigned long long)result.close_code, (unsigned long long)result.close_frame_type,

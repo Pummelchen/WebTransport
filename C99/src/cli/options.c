@@ -108,6 +108,8 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
       options->settings_validation = 1;
     } else if (is_flag(argument, "--retry")) {
       options->retry = 1;
+    } else if (is_flag(argument, "--early-stream")) {
+      options->early_stream = 1;
     } else if (is_flag(argument, "--transport") || is_flag(argument, "--trust") ||
                is_flag(argument, "--origin") || is_flag(argument, "--protocol") ||
                is_flag(argument, "--exchange") || is_flag(argument, "--message") ||
@@ -220,6 +222,12 @@ wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **o
    * flag, and a flag that is silently ignored is a report nobody can trust. */
   if (options->retry != 0 && options->mode != WT_CLI_MODE_LISTEN) {
     if (out_error != NULL) *out_error = "--retry is a listener's option: it validates a client's address";
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  /* And the mirror image: parking an early stream is something a SERVER does. A listener that asked to SEND one
+   * would be asking for an order it cannot be in -- the CONNECT is what makes it a server (WT-189). */
+  if (options->early_stream != 0 && options->mode != WT_CLI_MODE_CONNECT) {
+    if (out_error != NULL) *out_error = "--early-stream is a client's option: it sends before its CONNECT";
     return WT_ERR_INVALID_ARGUMENT;
   }
   /* The development bypass is tied to a loopback name in the API as well, but a tool that

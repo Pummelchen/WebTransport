@@ -451,6 +451,32 @@ wt_status_t wt_http3_driver_data_stream_session_id(const wt_http3_driver_t *driv
 wt_status_t wt_http3_driver_reject_data_stream(wt_http3_driver_t *driver, uint64_t stream_id,
                                                uint64_t error_code, uint64_t now);
 
+/* The two halves of starting a session, for a caller that has something to send BETWEEN them (WT-189).
+ *
+ * `wt_http3_driver_start_session` is both halves in order, and that is what a client normally wants. It is split
+ * because the draft says a client's flight may hold more than its CONNECT: "clients can, however, send a SETTINGS
+ * frame, multiple WebTransport CONNECT requests, WebTransport data streams, and WebTransport datagrams all within
+ * a single flight. As those can arrive out of order, a WebTransport server can receive a stream or a datagram
+ * without a corresponding session" (section 4.6). A client that sends a data stream first is therefore
+ * CONFORMING, and this tree could not express it: `start_session` opens the request stream and writes the CONNECT
+ * in one call, so no stream could precede it and the server's parking path had no way to be reached from the
+ * tools.
+ *
+ * So: open the request stream, which is also where this endpoint learns its SESSION ID (section 3.2) -- after
+ * which `wt_http3_driver_open_data_stream` names the right session -- and send the CONNECT on it when the caller
+ * is ready. `stream_id` must be the one the first call reported; sending a request on any other stream is the
+ * caller's error, and the message would simply be an HTTP/3 request on it. */
+wt_status_t wt_http3_driver_open_session_stream(wt_http3_driver_t *driver,
+                                                const wt_http3_driver_transport_t *transport,
+                                                const wt_http3_settings_t *settings, uint64_t now,
+                                                uint64_t *out_stream_id, wt_http3_error_t *out_error);
+
+wt_status_t wt_http3_driver_send_session_request(wt_http3_driver_t *driver,
+                                                 const wt_http3_driver_transport_t *transport,
+                                                 uint64_t stream_id, const char *authority,
+                                                 const char *path, uint64_t peer_max_entries, uint64_t now,
+                                                 wt_http3_error_t *out_error);
+
 /* Say that a stream is a WebTransport CONNECT stream, so that once its single HEADERS frame has passed, the rest
  * of what arrives on it is the SESSION's capsules rather than HTTP/3 frames (draft-16 section 5).
  *
