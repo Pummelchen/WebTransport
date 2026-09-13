@@ -2522,6 +2522,25 @@ measurements have produced -- each previous one eliminated rather than argued aw
 The test asserts only what is true today (the CONNECT goes out, the client records and tracks its request
 stream), and WT-110 carries the measurement and the next step.
 
+### Phase 9's twenty-sixth part: a change that was REVERTED, and why that is the right outcome
+
+The next piece is the `--exchange stream` behaviour: a WebTransport BIDIRECTIONAL stream is a peer-initiated
+bidirectional stream whose first bytes are the draft's `0x41` prefix, so the driver's bidirectional branch has to
+tell it apart from a request stream's QPACK prefix before routing it. That classification was implemented, the
+session-ID check was added beside it (a WebTransport stream must name the session this endpoint serves, or it is
+refused rather than delivered to the wrong one), and a unit test fed both shapes through the same entry point.
+
+**The change was reverted, because the release build SEGFAULTED in `test_http3_driver` while the debug and
+sanitizer builds passed.** A crash that appears only in one configuration is exactly the kind of defect this
+project's four-configuration test loop exists to catch, and shipping it to make a round look productive would
+have been the wrong trade: the classification is desirable, the implementation was not trustworthy, and a
+segfault in a frame path is the worst possible place to be unsure. The tree is back to the last verified state
+(77 CTest tests, all green in debug, release and ASan+UBSan), and the work is recorded as WT-120 with the
+measurement, the design note (prefix-first, session-checked, unidirectional-flag agreement enforced) and the rule
+that follows: **a frame path is changed with all three build configurations in the loop before anything is
+committed** -- the sanitizers catch memory errors in code that RUNS, and a path reached only by a release-mode
+test may not run the same way at all.
+
 ### Phase 9's twenty-fifth part: a self-signed identity, so a local server needs no certificate file
 
 `tls/self_signed.h` generates, in memory, what a local development server needs: an ECDSA P-256 key and a
