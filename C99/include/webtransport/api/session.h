@@ -35,6 +35,10 @@ extern "C" {
 /* The session's state, as a consumer sees it. The names match the draft's phases rather
  * than this implementation's internals, so a caller reads them without a header of ours
  * in hand. */
+/* A QUIC DATAGRAM frame cannot carry more than this, and the quarter stream ID travels
+ * inside it, so it is the ceiling a datagram bound may ask for. */
+#define WT_SESSION_DATAGRAM_MAX 65535U
+
 typedef enum wt_session_state {
   WT_SESSION_ESTABLISHING = 0,
   WT_SESSION_ESTABLISHED = 1,
@@ -56,10 +60,28 @@ typedef struct wt_session_config {
    * the caller's strings may go out of scope. */
   const char *authority;
   const char *path;
+  /* The CONNECT stream ID this session lives on. A datagram's quarter stream ID and a
+   * WebTransport stream's prefix are both checked against it, which is what keeps two
+   * sessions on one connection from delivering each other's traffic. */
+  uint64_t session_id;
   /* The largest capsule value this session will look at. A peer-controlled length above
    * it is refused rather than buffered. */
   size_t max_capsule_bytes;
+  /* The largest datagram payload this session will deliver. Zero means the ceiling of
+   * 65535 bytes the draft's own datagram bound implies -- a QUIC DATAGRAM frame cannot
+   * carry more -- and a value above that ceiling is refused at create. */
+  size_t max_datagram_bytes;
+  /* How many peer streams may be open at once. Zero means `WT_SESSION_STREAM_MAX` from
+   * `api/events.h`; a value above it is refused at create, because the table is fixed. */
+  size_t max_streams;
 } wt_session_config_t;
+
+/* A configuration with every bound at its default and no authority, path or session ID:
+ * a caller fills in the three required fields and changes only the bounds it cares about.
+ * Returning the whole struct by value is deliberate -- a C caller that forgets a field
+ * would otherwise pass whatever its stack held into a bound, which is exactly the class of
+ * bug a bound exists to stop. */
+wt_session_config_t wt_session_config_default(void);
 
 typedef struct wt_session wt_session_t;
 
@@ -71,6 +93,9 @@ wt_status_t wt_session_create(const wt_session_config_t *config, const wt_alloca
 void wt_session_destroy(wt_session_t *session, const wt_allocator_t *allocator);
 
 wt_session_state_t wt_session_state(const wt_session_t *session);
+
+/* The CONNECT stream ID this session was created for. */
+uint64_t wt_session_id(const wt_session_t *session);
 
 wt_session_error_t wt_session_last_error(const wt_session_t *session);
 

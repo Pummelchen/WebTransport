@@ -59,6 +59,7 @@ set(WT_UNIT_TESTS
   test_webtransport_session
   test_webtransport_framing
   test_public_api
+  test_api_events
   test_api_session
   test_qpack_static
   test_qpack_primitives

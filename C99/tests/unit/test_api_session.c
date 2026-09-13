@@ -63,6 +63,7 @@ static void test_create_and_destroy(void) {
   allocator.realloc = counting_realloc;
   allocator.free = counting_free;
 
+  config = wt_session_config_default();
   config.authority = "localhost";
   config.path = "/wt";
   config.max_capsule_bytes = 1024U;
@@ -114,6 +115,7 @@ static void test_capsules_and_the_sanitized_error(void) {
   size_t length = 0U;
   wt_session_error_t error;
 
+  config = wt_session_config_default();
   config.authority = "localhost";
   config.path = "/wt";
   config.max_capsule_bytes = 64U;
@@ -168,6 +170,7 @@ static void test_the_capsule_bound(void) {
   static uint8_t oversized[80];
   wt_session_error_t error;
 
+  config = wt_session_config_default();
   config.authority = "localhost";
   config.path = "/wt";
   config.max_capsule_bytes = 32U;

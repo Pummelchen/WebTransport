@@ -1845,6 +1845,26 @@ with `WT_ERR_LIMIT` instead of being truncated, because a truncated authority na
 capsule value larger than `max_capsule_bytes` is refused with `WT_ERR_LIMIT` and the H3 excessive-load code,
 which is a statement about this endpoint's buffer and not about the peer's encoding.
 
+**Third part done: the event-loop seam.** `include/webtransport/api/events.h` is the callback table
+`wt_session_callbacks_t` plus the feed functions that report through it, and the interesting part is what it
+refuses to do. It owns no thread and no queue, so a callback runs inside the call the application made; it
+does not re-enter itself, so the sequence a recording callback sees is a faithful one; and it does not turn
+"nobody asked for this" into a connection error, because blaming the peer for this endpoint's configuration is
+the failure mode that makes an API unusable from a program that only wants streams. The one thing it does
+refuse is a bound this endpoint published: a stream table sized by `max_streams` and a datagram bound
+`sized by` `max_datagram_bytes`, both refused with the H3 excessive-load code and never grown for a peer.
+
+Peer streams live in a fixed table (`WT_SESSION_STREAM_MAX` slots) rather than a dynamic one, and a stream or
+datagram that names a DIFFERENT session is refused with HTTP/3's identifier error rather than delivered to the
+wrong session or dropped silently -- a silent drop here would be indistinguishable from a lost packet.
+
+The configuration gained `session_id`, `max_datagram_bytes` and `max_streams`, and with them the problem every
+C configuration struct has: a caller that sets three fields of a six-field struct passes whatever the stack
+held into a bound. `wt_session_config_default()` returns a fully initialized value, so the caller overwrites
+rather than completes. Bounds that the handle cannot honour (a stream table larger than the fixed one, a
+datagram bound above the QUIC DATAGRAM ceiling) are refused at create rather than clamped: a caller that asks
+for more than the build can do must find out.
+
 Design the public API after the protocol core is stable.
 
 API requirements:

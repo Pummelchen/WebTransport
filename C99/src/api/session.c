@@ -4,31 +4,33 @@
 
 #include <string.h>
 
+#include "session_internal.h"
 #include "webtransport/webtransport/capsule.h"
 #include "webtransport/webtransport/session.h"
 #include "webtransport/writer.h"
 
-/* The handle's definition lives here and nowhere else: the header declares it opaque, so
- * a consumer cannot depend on the layout and this file may change it. */
-struct wt_session {
-  wt_webtransport_session_t machine;
-  wt_session_error_t error;
-  size_t max_capsule_bytes;
-  /* The authority and path are copied in, because a caller's strings are the caller's to
-   * free the moment create returns. */
-  char authority[128];
-  char path[128];
-};
+/* The handle's definition is in session_internal.h: the header declares the type opaque,
+ * and the seam in events.c has to see the same layout. */
+void wt_session_set_error(wt_session_t *session, wt_status_t status, uint64_t code) {
+  session->error.status = status;
+  session->error.code = code;
+}
+
+wt_session_config_t wt_session_config_default(void) {
+  wt_session_config_t config;
+  config.authority = NULL;
+  config.path = NULL;
+  config.session_id = 0U;
+  config.max_capsule_bytes = 16384U;
+  config.max_datagram_bytes = (size_t)WT_SESSION_DATAGRAM_MAX;
+  config.max_streams = (size_t)WT_SESSION_STREAM_MAX;
+  return config;
+}
 
 const char *wt_session_status_name(wt_status_t status) {
   /* wt_status_name is the library's own; this wrapper exists so the API has one name for
    * it and a consumer does not have to know which module owns it. */
   return wt_status_name(status);
-}
-
-static void set_error(wt_session_t *session, wt_status_t status, uint64_t code) {
-  session->error.status = status;
-  session->error.code = code;
 }
 
 wt_status_t wt_session_create(const wt_session_config_t *config, const wt_allocator_t *allocator,
@@ -43,15 +45,25 @@ wt_status_t wt_session_create(const wt_session_config_t *config, const wt_alloca
      * truncated: a truncated authority would name a DIFFERENT session. */
     return WT_ERR_LIMIT;
   }
+  /* Two configuration bounds are the handle's own table and would have to be silently
+   * clamped to be honoured, so they are refused instead: a caller that asks for more
+   * streams than this build can track must be told, not quietly given fewer. */
+  if (config->max_streams > (size_t)WT_SESSION_STREAM_MAX) return WT_ERR_LIMIT;
+  if (config->max_datagram_bytes > (size_t)WT_SESSION_DATAGRAM_MAX) return WT_ERR_LIMIT;
 
   session = (wt_session_t *)wt_alloc(allocator, sizeof(*session));
   if (session == NULL) return WT_ERR_OUT_OF_MEMORY;
   memset(session, 0, sizeof(*session));
   wt_webtransport_session_init(&session->machine);
+  session->session_id = config->session_id;
   session->max_capsule_bytes = config->max_capsule_bytes;
+  session->max_datagram_bytes =
+      config->max_datagram_bytes == 0U ? (size_t)WT_SESSION_DATAGRAM_MAX
+                                                              : config->max_datagram_bytes;
+  session->max_streams = config->max_streams == 0U ? (size_t)WT_SESSION_STREAM_MAX : config->max_streams;
   memcpy(session->authority, config->authority, strlen(config->authority) + 1U);
   memcpy(session->path, config->path, strlen(config->path) + 1U);
-  set_error(session, WT_OK, 0U);
+  wt_session_set_error(session, WT_OK, 0U);
   *out = session;
   return WT_OK;
 }
@@ -62,6 +74,11 @@ void wt_session_destroy(wt_session_t *session, const wt_allocator_t *allocator) 
    * contents in a pool for the next object to find. */
   memset(session, 0, sizeof(*session));
   wt_dealloc(allocator, session, sizeof(*session));
+}
+
+uint64_t wt_session_id(const wt_session_t *session) {
+  if (session == NULL) return 0U;
+  return session->session_id;
 }
 
 wt_session_state_t wt_session_state(const wt_session_t *session) {
@@ -92,7 +109,7 @@ wt_status_t wt_session_established(wt_session_t *session) {
 
   if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
   status = wt_webtransport_session_established(&session->machine);
-  set_error(session, status, 0U);
+  wt_session_set_error(session, status, 0U);
   return status;
 }
 
@@ -111,31 +128,37 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
   if (status != WT_OK) {
     /* The bound is reported as WT_ERR_LIMIT, and the error code says excessive load; a
      * caller can tell it from a malformed capsule. */
-    set_error(session, status, (uint64_t)h3_error);
+    wt_session_set_error(session, status, (uint64_t)h3_error);
     return status;
   }
 
   if (capsule.type == WT_CAPSULE_DRAIN_SESSION) {
     status = wt_webtransport_session_on_drain(&session->machine, 0);
-    set_error(session, status, 0U);
+    if (status == WT_OK && session->callbacks.on_drain != NULL) {
+      session->callbacks.on_drain(session->callbacks.context);
+    }
+    wt_session_set_error(session, status, 0U);
     return status;
   }
   if (capsule.type == WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION) {
     status = wt_webtransport_close_session_parse(&capsule, &code, NULL, NULL, &h3_error);
     if (status != WT_OK) {
-      set_error(session, status, (uint64_t)h3_error);
+      wt_session_set_error(session, status, (uint64_t)h3_error);
       return status;
     }
     status = wt_webtransport_session_on_close(&session->machine, 0, code);
+    if (status == WT_OK && session->callbacks.on_close != NULL) {
+      session->callbacks.on_close(session->callbacks.context, code);
+    }
     /* The peer's code travels to the caller: that is what "the refusal keeps the peer's
      * code" means at this surface. */
-    set_error(session, status, (uint64_t)code);
+    wt_session_set_error(session, status, (uint64_t)code);
     return status;
   }
 
   /* Any other capsule is accepted and left alone: RFC 9297 has a receiver ignore what it
    * does not understand, and a public API must not be the layer that starts refusing. */
-  set_error(session, WT_OK, 0U);
+  wt_session_set_error(session, WT_OK, 0U);
   return WT_OK;
 }
 
@@ -149,11 +172,11 @@ wt_status_t wt_session_write_drain(wt_session_t *session, uint8_t *out, size_t c
   w = wt_writer_init(out, capacity);
   status = wt_webtransport_session_write_drain(&session->machine, &w);
   if (status != WT_OK) {
-    set_error(session, status, 0U);
+    wt_session_set_error(session, status, 0U);
     return status;
   }
   *out_length = wt_writer_offset(&w);
-  set_error(session, WT_OK, 0U);
+  wt_session_set_error(session, WT_OK, 0U);
   return WT_OK;
 }
 
@@ -169,10 +192,10 @@ wt_status_t wt_session_write_close(wt_session_t *session, uint32_t error_code, c
   status = wt_webtransport_session_write_close(&session->machine, &w, error_code,
                                               (const uint8_t *)reason, reason_length);
   if (status != WT_OK) {
-    set_error(session, status, 0U);
+    wt_session_set_error(session, status, 0U);
     return status;
   }
   *out_length = wt_writer_offset(&w);
-  set_error(session, WT_OK, 0U);
+  wt_session_set_error(session, WT_OK, 0U);
   return WT_OK;
 }

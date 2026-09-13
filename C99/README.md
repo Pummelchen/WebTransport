@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 65 unit test files and 79,083 checks, run by `ctest` and again under
+- 66 unit test files and 79,144 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -75,6 +75,19 @@ What is here:
     too long for the handle's copy is refused rather than truncated (a truncated
     authority names a different session) and a capsule value over
     `max_capsule_bytes` is refused as excessive load rather than buffered.
+  - `api/events.h` — the event-loop seam: a callback table with a context and
+    nothing else, so a caller needs no synchronization it did not already have for
+    the call it made. The contract is written down where a caller can see it: the
+    library never calls a callback from a thread of its own and never re-enters
+    itself, a pointer passed to a callback is a view valid for the call only, and
+    no callback for an event means the event is accepted and discarded rather than
+    turned into a connection error. Peer streams live in a fixed table sized by
+    `max_streams` (the peer runs into the bound; the table never grows for one), and
+    a stream or datagram naming another session is refused with HTTP/3's identifier
+    error instead of being delivered to the wrong session or dropped silently.
+    `wt_session_config_default()` returns every bound at its default, because a C
+    caller that forgot a field would otherwise pass whatever its stack held into a
+    bound.
 - **The QUIC wire core** (Phase 1), which is everything QUIC needs before there
   is a connection:
   - `quic/varint.h` — variable-length integers, encoding shortest and decoding
