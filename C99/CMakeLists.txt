@@ -152,6 +152,7 @@ list(APPEND WT_CORE_SOURCES ${WT_HTTP3_SOURCES})
 
 set(WT_PUBLIC_HEADERS
   include/webtransport/status.h
+  include/webtransport/webtransport.h
   include/webtransport/checked.h
   include/webtransport/endian.h
   include/webtransport/cursor.h
