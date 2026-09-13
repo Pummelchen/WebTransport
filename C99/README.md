@@ -45,7 +45,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 61 unit test files and 78,939 checks, run by `ctest` and again under
+- 62 unit test files and 78,989 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -498,6 +498,11 @@ What is here:
   finish), after a close nothing at all, and the FIRST close's code is the one the session reports however
   many more arrive. A stream that simply ends has no application code, which the state records separately
   from a close whose code happens to be zero.
+- **The session's flow control** (Phase 7, fourth part): the draft's flow-control capsules -- MAX_DATA,
+  MAX_STREAM_DATA, MAX_STREAMS in both directions, and the blocked signals -- each carrying one or two
+  varints, with a value that is not exactly that being a message error rather than a bigger number. The
+  connection-level limits may only grow: a limit below one already granted would invalidate data sent against
+  the old one, so it is `WT_FLOW_CONTROL_ERROR` rather than a new limit.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

@@ -74,6 +74,68 @@ wt_status_t wt_webtransport_close_session_parse(const wt_webtransport_capsule_t 
 /* The drain capsule, which has no value. */
 wt_status_t wt_webtransport_drain_session_write(wt_writer_t *w);
 
+/* ------------------------------------- draft-16 section 5.1's flow control capsules
+ *
+ * The session has its own flow control, carried as capsules on the CONNECT stream: a
+ * connection-level data limit, a per-stream one, the number of streams of each
+ * direction, and the blocked signals that ask for more. Each value is one varint -- two
+ * for the per-stream and blocked capsules, which name a stream as well -- and a
+ * capsule whose value is not exactly that is malformed rather than short. */
+
+/* The draft's error code for a flow-control violation, which is what an endpoint sends
+ * when a limit goes backwards. */
+#define WT_WEBTRANSPORT_FLOW_CONTROL_ERROR ((uint64_t)0x045d4487)
+
+wt_status_t wt_webtransport_max_data_write(wt_writer_t *w, uint64_t maximum);
+wt_status_t wt_webtransport_max_stream_data_write(wt_writer_t *w, uint64_t stream_id,
+                                                  uint64_t maximum);
+wt_status_t wt_webtransport_max_streams_write(wt_writer_t *w, int bidirectional, uint64_t maximum);
+wt_status_t wt_webtransport_data_blocked_write(wt_writer_t *w, uint64_t maximum);
+wt_status_t wt_webtransport_stream_data_blocked_write(wt_writer_t *w, uint64_t stream_id,
+                                                      uint64_t maximum);
+wt_status_t wt_webtransport_streams_blocked_write(wt_writer_t *w, int bidirectional,
+                                                 uint64_t maximum);
+
+/* Parse the one-varint capsules. Anything but exactly one varint is
+ * H3_MESSAGE_ERROR: a flow-control value that is not a number is not a limit. */
+wt_status_t wt_webtransport_max_data_parse(const wt_webtransport_capsule_t *capsule,
+                                           uint64_t *out_maximum, wt_http3_error_t *out_error);
+wt_status_t wt_webtransport_max_streams_parse(const wt_webtransport_capsule_t *capsule,
+                                              uint64_t *out_maximum, wt_http3_error_t *out_error);
+wt_status_t wt_webtransport_data_blocked_parse(const wt_webtransport_capsule_t *capsule,
+                                               uint64_t *out_maximum, wt_http3_error_t *out_error);
+
+/* Parse the two-varint capsules: a stream id and a value. */
+wt_status_t wt_webtransport_max_stream_data_parse(const wt_webtransport_capsule_t *capsule,
+                                                  uint64_t *out_stream_id, uint64_t *out_maximum,
+                                                  wt_http3_error_t *out_error);
+wt_status_t wt_webtransport_stream_data_blocked_parse(const wt_webtransport_capsule_t *capsule,
+                                                      uint64_t *out_stream_id,
+                                                      uint64_t *out_maximum,
+                                                      wt_http3_error_t *out_error);
+wt_status_t wt_webtransport_streams_blocked_parse(const wt_webtransport_capsule_t *capsule,
+                                                  uint64_t *out_maximum,
+                                                  wt_http3_error_t *out_error);
+
+/* The connection-level limits a session's peer has granted, with the rule that they may
+ * only grow (section 5.1): a value below what was sent before is WT_FLOW_CONTROL_ERROR,
+ * because a limit that shrinks would invalidate data already in flight. */
+typedef struct wt_webtransport_flow_limits {
+  uint64_t max_data;
+  int max_data_set;
+  uint64_t max_streams_bidi;
+  int max_streams_bidi_set;
+  uint64_t max_streams_uni;
+  int max_streams_uni_set;
+} wt_webtransport_flow_limits_t;
+
+void wt_webtransport_flow_limits_init(wt_webtransport_flow_limits_t *limits);
+wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limits, uint64_t maximum,
+                                             uint64_t *out_error);
+wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *limits,
+                                                int bidirectional, uint64_t maximum,
+                                                uint64_t *out_error);
+
 #ifdef __cplusplus
 }
 #endif

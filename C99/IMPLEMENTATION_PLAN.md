@@ -1751,6 +1751,22 @@ error rather than a transition, because the session does not exist yet and inven
 a caller half-open one. And every transition after the close is refused, because a capsule that arrives after
 the end is a message the peer has no state for -- this layer cannot honour it and must not pretend to.
 
+**Fourth part done: the session's flow control.** The draft's flow-control capsules are in the capsule
+module: MAX_DATA, MAX_STREAM_DATA, MAX_STREAMS in both directions, and the blocked signals that ask for more.
+Each carries one varint, or two for the ones that name a stream, and a value that is not exactly that is a
+message error rather than a bigger number -- the same rule as everywhere else in this tree, and the reason a
+trailing byte cannot pass as a larger limit.
+
+The rule worth the part is the connection-level one: a limit may only GROW. A value below one already granted
+would invalidate data sent against the old limit, so it is WT_FLOW_CONTROL_ERROR (the draft's own code for it)
+rather than a new limit. An implementation that simply stored it would accept a peer rewriting a promise it
+had already relied on, which is the flow-control equivalent of evicting a referenced entry.
+
+One bug, of the kind that hides behind a small number: the writer emitted a CONSTANT one-byte length for every
+one-varint capsule, so a value of 100000 -- a four-byte varint -- was described as one byte long and decoded as
+its first byte. Every small test value passed. The length is the value's own encoded size, and the test that
+caught it used a limit large enough to need more than one byte.
+
 Port the Swift WebTransport session layer.
 
 Tasks:
