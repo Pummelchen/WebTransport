@@ -145,6 +145,26 @@ static void test_rfc8448_handshake(void) {
                   WT_RFC8448_CLIENT_APPLICATION_SECRET, write_secret,
                   WT_TLS13_SECRET_LEN);
 
+  /* RFC 8446 section 4.6: a NewSessionTicket arrives AFTER the handshake and is accepted and ignored, not
+   * refused. It is the message every real server sends, and refusing it is not a security property but a defect a
+   * third-party peer found: quinn's ticket made this endpoint fail the whole handshake with
+   * CRYPTO_ERROR/unexpected_message, which is why a container interop session never started (WT-145). The header
+   * is one byte of type and three of length, so a zero-length body is the shortest message that still exercises
+   * the rule -- the body is skipped by that length, never parsed. The Finished below is 36 bytes of CRYPTO body
+   * this function must not touch. */
+  {
+    static const uint8_t ticket[] = {0x04U, 0x00U, 0x00U, 0x00U};
+    size_t accepted_length = 0U;
+    WT_EXPECT_OK("a NewSessionTicket after the handshake is accepted",
+                 wt_tls_client_receive(&client, ticket, sizeof(ticket), finished, sizeof(finished),
+                                       &accepted_length));
+    WT_EXPECT_U64("without leaving the connected state", (uint64_t)WT_TLS_CLIENT_CONNECTED,
+                  (uint64_t)wt_tls_client_state(&client));
+    WT_EXPECT_U64("and with nothing to send back", 0U, (uint64_t)accepted_length);
+    WT_EXPECT_OK("and the application secrets are still available",
+                 wt_tls_client_application_secrets(&client, read_secret, write_secret));
+  }
+
   /* A message after the handshake is a state error rather than a second handshake. */
   WT_EXPECT_STATUS("another message is refused", WT_ERR_STATE,
                    wt_tls_client_receive(&client, WT_RFC8448_SERVER_FINISHED_MESSAGE,

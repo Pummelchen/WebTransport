@@ -55,6 +55,22 @@ const char *wt_quic_space_name(wt_quic_space_t space) {
 /* The idle timeout this connection enforces: the smaller of its own and the peer's, because RFC 9000
  * section 10.1 makes the effective value the minimum of the two nonzero ones. Zero means neither end
  * limited it. */
+/* RFC 9000 section 18.2 gives `max_idle_timeout` in MILLISECONDS, and this runtime's clock -- and therefore
+ * `config.idle_timeout` and `peer_limits.max_idle_timeout` -- is in MICROSECONDS. The conversion happens exactly
+ * once, here.
+ *
+ * Reading the wire value as microseconds is not a rounding error, it is a hundredth of the timeout the peer
+ * asked for, and it was an interop defect: a peer advertising 30000 (30 s) became a 30 ms limit, so this
+ * endpoint closed the connection silently -- RFC 9000 section 10.1 sends nothing -- while the peer was still
+ * preparing its answer, and every local test passed because both ends of a local session read the same wrong
+ * number. A saturated multiply rather than a wrapping one, because the wire value is a varint and a peer may
+ * legitimately name a timeout far beyond what microseconds can hold; saturation is "no practical limit", which
+ * is what such a value means (WT-145). */
+static uint64_t microseconds_of_milliseconds(uint64_t milliseconds) {
+  if (milliseconds > UINT64_MAX / 1000U) return UINT64_MAX;
+  return milliseconds * 1000U;
+}
+
 static uint64_t idle_timeout_of(const wt_quic_connection_t *connection) {
   uint64_t local = connection->config.idle_timeout;
   uint64_t peer = connection->peer_limits.max_idle_timeout;
@@ -94,7 +110,8 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   if (status != WT_OK) return status;
 
   memset(&limits, 0, sizeof(limits));
-  limits.max_idle_timeout = parameter_or(&params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 0U);
+  limits.max_idle_timeout =
+      microseconds_of_milliseconds(parameter_or(&params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 0U));
   limits.max_udp_payload_size = parameter_or(&params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE,
                                             WT_QUIC_DEFAULT_MAX_UDP_PAYLOAD_SIZE);
   limits.initial_max_data = parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_DATA, 0U);
@@ -719,7 +736,13 @@ static int frame_forbidden_in_space(wt_quic_frame_type_t kind, wt_quic_space_t s
       kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION) {
     return 0; /* section 12.5 allows these in every packet type */
   }
-  if (kind == WT_QUIC_FRAME_KIND_CRYPTO) return space == WT_QUIC_SPACE_APPLICATION;
+  /* RFC 9000 section 12.4's Table 3 gives CRYPTO the packet types `IH01`: every one this implementation has.
+   * Forbidding it in the Application space (which this did) is not a safety property but a defect a third-party
+   * peer found -- quinn sends its post-handshake NewSessionTicket on a 1-RTT CRYPTO frame, and this endpoint
+   * answered with PROTOCOL_VIOLATION blaming the frame, so the session never started (WT-145). What the RFCs
+   * actually forbid is CRYPTO in 0-RTT (RFC 9001 section 4.6.1), and this tree implements no 0-RTT. The
+   * post-handshake CONTENT is the handshake layer's to accept or ignore; the frame's permission is not. */
+  if (kind == WT_QUIC_FRAME_KIND_CRYPTO) return 0;
   return space != WT_QUIC_SPACE_APPLICATION;
 }
 
@@ -1747,6 +1770,7 @@ wt_status_t wt_quic_connection_flush(wt_quic_connection_t *connection, uint64_t 
       if (status != WT_OK) return status;
       if (sent) {
         connection->close_sent = 1;
+        connection->close_frame_sent = 1;
         return WT_OK;
       }
     }
@@ -2123,6 +2147,11 @@ const wt_quic_close_state_t *wt_quic_connection_close_state(const wt_quic_connec
 wt_status_t wt_quic_connection_close_cause(const wt_quic_connection_t *connection) {
   if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
   return connection->close_cause;
+}
+
+int wt_quic_connection_close_was_sent(const wt_quic_connection_t *connection) {
+  if (connection == NULL) return 0;
+  return connection->close_frame_sent;
 }
 
 int wt_quic_connection_is_drained(const wt_quic_connection_t *connection, uint64_t now) {

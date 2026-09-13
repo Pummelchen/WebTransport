@@ -29,8 +29,12 @@ static size_t build_parameters(uint8_t *out, size_t capacity) {
   wt_writer_t w = wt_writer_init(out, capacity);
 
   wt_quic_transport_parameters_init(&params);
+  /* The wire value is MILLISECONDS (RFC 9000 section 18.2) and the runtime's is MICROSECONDS, so this is 7000
+   * ms = 7 s and the expectation below is 7,000,000. The same number on both sides of this test is what let the
+   * missing conversion live: every local session read the same wrong value, so nothing disagreed until a peer
+   * that advertises 30000 (quinn) had its 30 seconds taken for 30 milliseconds (WT-145). */
   WT_EXPECT_OK("max_idle_timeout", wt_quic_transport_parameters_add_integer(
-                                       &params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 7000000U));
+                                       &params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 7000U));
   WT_EXPECT_OK("max_udp_payload_size", wt_quic_transport_parameters_add_integer(
                                            &params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE, 1452U));
   WT_EXPECT_OK("initial_max_data", wt_quic_transport_parameters_add_integer(
@@ -94,7 +98,8 @@ static void test_limits(void) {
 
   limits = wt_quic_connection_peer_limits(&connection);
   WT_EXPECT_INT("now they have", 1, limits->set);
-  WT_EXPECT_U64("the idle timeout", 7000000U, limits->max_idle_timeout);
+  WT_EXPECT_U64("the idle timeout, converted from the wire's milliseconds", 7000000U,
+                limits->max_idle_timeout);
   WT_EXPECT_U64("the payload size", 1452U, limits->max_udp_payload_size);
   WT_EXPECT_U64("the connection's data limit", 100000U, limits->initial_max_data);
   WT_EXPECT_U64("the bidi-local stream limit", 200000U,
@@ -118,7 +123,7 @@ static void test_limits(void) {
                                                                         &error));
     WT_EXPECT_OK("and max_idle_timeout reads back",
                  wt_quic_transport_parameters_integer(&decoded, WT_QUIC_TP_MAX_IDLE_TIMEOUT, &value));
-    WT_EXPECT_U64("as the value that was written", 7000000U, value);
+    WT_EXPECT_U64("as the value that was written, in the wire's own milliseconds", 7000U, value);
   }
 
   /* The peer's idle timeout is smaller than this endpoint's, so it is the one that applies: the
@@ -128,6 +133,31 @@ static void test_limits(void) {
     WT_EXPECT_OK("the idle timer is armed", wt_quic_connection_next_timeout(&connection, 0U, &delay));
     WT_EXPECT_U64("for the smaller of the two idle timeouts", 7000000U, delay);
   }
+}
+
+/* A huge max_idle_timeout must saturate, not wrap. The wire value is a varint, so a peer may name a timeout far
+ * past what a microsecond clock can hold; multiplying without a bound would turn "longer than any run" into a
+ * few microseconds and close the connection at once -- the same failure the missing conversion caused, in the
+ * other direction (WT-145). */
+static void test_a_huge_idle_timeout_saturates(void) {
+  wt_quic_connection_t connection;
+  wt_quic_transport_parameters_t params;
+  const wt_quic_peer_limits_t *limits;
+  uint8_t encoded[64];
+  wt_writer_t w = wt_writer_init(encoded, sizeof(encoded));
+  size_t length;
+
+  init_connection(&connection, 30000000U);
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("a timeout past what microseconds can hold is named",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_IDLE_TIMEOUT,
+                                                        ((UINT64_C(1) << 62) - 1U)));
+  WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
+  length = wt_writer_offset(&w);
+  WT_EXPECT_OK("the connection reads it",
+               wt_quic_connection_set_peer_parameters(&connection, encoded, length));
+  limits = wt_quic_connection_peer_limits(&connection);
+  WT_EXPECT_U64("and the limit saturates rather than wrapping", UINT64_MAX, limits->max_idle_timeout);
 }
 
 /* The defaults: an empty list grants no flow control, allows the two connection IDs, and leaves the
@@ -164,9 +194,11 @@ static void test_defaults(void) {
     uint8_t encoded[64];
     size_t length;
     wt_quic_transport_parameters_init(&params);
+    /* 4000 on the wire is four SECONDS (RFC 9000 section 18.2 counts milliseconds), which is 4,000,000
+     * microseconds -- the number the assertion below wants, written as the peer would write it. */
     WT_EXPECT_OK("the peer's idle timeout",
                  wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_IDLE_TIMEOUT,
-                                                          4000000U));
+                                                          4000U));
     w = wt_writer_init(encoded, sizeof(encoded));
     WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&w, &params));
     length = wt_writer_offset(&w);
@@ -215,6 +247,7 @@ static void test_malformed(void) {
 
 int main(void) {
   test_limits();
+  test_a_huge_idle_timeout_saturates();
   test_defaults();
   test_malformed();
 

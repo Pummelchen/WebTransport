@@ -115,8 +115,6 @@ int main(int argc, char **argv) {
   }
   /* The session itself: connect, CONNECT, response, and one message each way. This is the tool's whole job
    * when it was asked to connect; the usage below stays for the case where it was not. */
-  fprintf(stderr, "DIAG mode=%d address=%s\n", (int)options.mode,
-          options.address != NULL ? options.address : "(null)");
   if (options.mode == WT_CLI_MODE_CONNECT) {
     wt_loop_config_t loop;
     wt_loop_result_t result;
@@ -154,7 +152,7 @@ int main(int argc, char **argv) {
              "\"lastReceive\":\"%s\",\"closeCodeSet\":%s,\"closeCode\":%llu,"
              "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
              "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,"
-             "\"closeCause\":\"%s\","
+             "\"closeCause\":\"%s\",\"closeSent\":%s,"
              "\"packetsDiscarded\":%llu,\"keys\":{\"initial\":%s,\"handshake\":%s,"
              "\"application\":%s},\"handshakeState\":\"%s\",\"resends\":%u,\"probes\":%u,"
              "\"probesWithData\":%u,\"requestStreamId\":%llu,"
@@ -171,6 +169,7 @@ int main(int argc, char **argv) {
              result.peer_closed != 0 ? "true" : "false", (unsigned long long)result.peer_error_code,
              result.close_kind, (unsigned long long)result.close_sent_error_code,
              (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
+             result.close_was_sent != 0 ? "true" : "false",
              (unsigned long long)result.packets_discarded, result.has_initial_keys != 0 ? "true" : "false",
              result.has_handshake_keys != 0 ? "true" : "false",
              result.has_application_keys != 0 ? "true" : "false",

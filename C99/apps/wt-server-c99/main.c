@@ -152,23 +152,32 @@ int main(int argc, char **argv) {
           printf("%02x", (unsigned)identity.fingerprint[pin_index]);
         }
       }
-      printf("\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,\"closeCause\":\"%s\"}\n",
+      /* The pin's value is closed and separated HERE, at one comma, because the fields after it were once
+       * appended to a `"}` that had already closed both -- which produced `"pin":"..."closeKind":0` and a report
+       * that no JSON parser would read. Every assertion here matched a substring, so nothing said so; the check
+       * script validates the report as JSON now, which is what a caller parsing it does (WT-144). */
+      printf("\",\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,\"closeCause\":\"%s\","
+             "\"closeSent\":%s}\n",
              result.close_kind, (unsigned long long)result.close_sent_error_code,
-             (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause));
+             (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
+             result.close_was_sent != 0 ? "true" : "false");
     } else {
       printf("server: %s on port %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.bound_port, (unsigned long long)result.received_bytes,
              result.received_datagram != 0 ? " as a datagram" : " on a stream");
       /* A session this endpoint ENDED by closing is not a session that went well, so the close is reported here
        * rather than only on the failure path -- staying silent about it is how a tool printed "ok" for a run that
-       * had sent CONNECTION_CLOSE (WT-144). */
-      if (result.close_kind != 0U) {
+       * had sent CONNECTION_CLOSE (WT-144). `close_was_sent` says the peer was actually TOLD: a silent idle
+       * timeout (RFC 9000 section 10.1) is a connection this endpoint stopped, not one it announced (WT-145). */
+      if (result.close_was_sent != 0) {
         printf("server: THIS endpoint closed the connection with code 0x%llx, blaming frame type %llu\n",
                (unsigned long long)result.close_sent_error_code,
                (unsigned long long)result.close_sent_frame_type);
         if (result.close_cause != WT_OK) {
           printf("server: after a frame handler refused with %s\n", wt_status_name(result.close_cause));
         }
+      } else if (result.close_kind != 0U) {
+        printf("server: the connection was closed silently (the idle timeout; no CONNECTION_CLOSE was sent)\n");
       }
     }
     return status == WT_OK ? 0 : 1;

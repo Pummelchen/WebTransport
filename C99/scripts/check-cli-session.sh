@@ -63,12 +63,27 @@ grep -q "\"receivedDatagram\":$([ "$mode" = datagram ] && echo true || echo fals
   || fail "the client's report does not match the $mode mode"
 grep -q "\"receivedDatagram\":$([ "$mode" = datagram ] && echo true || echo false)" "$work/server.json" \
   || fail "the server's report does not match the $mode mode"
+# The reports are JSON, so they are PARSED rather than grepped: a field appended without its comma produced
+# `"pin":"..."closeKind":0` -- a report no caller could read -- and every substring assertion here passed it
+# (WT-144). One parser run on each line is the check that cannot be fooled that way.
+python3 - "$work/client.json" "$work/server.json" <<'VALIDATE' || fail "a report is not valid JSON"
+import json, sys
+for path in sys.argv[1:]:
+    with open(path) as handle:
+        for number, line in enumerate(handle, 1):
+            if line.strip():
+                try:
+                    json.loads(line)
+                except ValueError as error:
+                    sys.stderr.write(f"{path}:{number}: {error}\n")
+                    sys.exit(1)
+VALIDATE
 # And neither end may claim to have closed a connection it did not close: a report that says `ok` while its own
 # close says otherwise is the defect WT-144 fixed, and the reverse -- a false close on a healthy session -- is how
 # that fix would break the tools instead. The close is read from the connection's close STATE, so this also says
 # the field is wired to the peer's own CONNECT stream rather than defaulted.
-grep -q '"closeKind":0,"closeSentErrorCode":0,"closeSentFrameType":0,"closeCause":"ok"' "$work/client.json" \
+grep -q '"closeKind":0,"closeSentErrorCode":0,"closeSentFrameType":0,"closeCause":"ok","closeSent":false' "$work/client.json" \
   || fail "the client claims a close it did not send"
-grep -q '"closeKind":0,"closeSentErrorCode":0,"closeSentFrameType":0,"closeCause":"ok"' "$work/server.json" \
+grep -q '"closeKind":0,"closeSentErrorCode":0,"closeSentFrameType":0,"closeCause":"ok","closeSent":false' "$work/server.json" \
   || fail "the server claims a close it did not send"
 echo "cli session ($mode): client and server exchanged a WebTransport session over $host:$port"

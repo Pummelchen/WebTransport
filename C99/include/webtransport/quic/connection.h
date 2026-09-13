@@ -136,6 +136,10 @@ typedef struct wt_quic_connection_config {
    * limit: the receive-side counterpart of the peer's initial_max_stream_data_*, and zero -- which
    * grants nothing -- until a caller that knows what it can buffer sets it. */
   uint64_t local_max_stream_data;
+  /* The longest this endpoint will let the connection sit idle before closing it silently (RFC 9000 section
+   * 10.1), in MICROSECONDS, because it is compared against the same clock as `now`. The wire's
+   * `max_idle_timeout` is in MILLISECONDS, and the conversion happens once, where the peer's parameters are
+   * read (WT-145). Zero means no local limit. */
   uint64_t idle_timeout;
   /* The largest packet this path will carry. RFC 9000 section 14.1 requires every datagram to hold at
    * least WT_QUIC_MAX_PACKET, so a smaller value is refused rather than used. */
@@ -300,6 +304,13 @@ typedef struct wt_quic_connection {
    * that is silent -- the idle timeout, RFC 9000 section 10.1 -- sets this without sending, which is
    * how "do not send" and "have not sent yet" are told apart. */
   int close_sent;
+
+  /* Whether a CONNECTION_CLOSE FRAME actually went to the peer, which `close_sent` above does not say: the idle
+   * timeout closes silently (RFC 9000 section 10.1) and sets `close_sent` too, because it means "send nothing
+   * further" rather than "one was sent". The difference is the whole question a tool asks -- did the peer get
+   * told the connection is over, or did this endpoint simply give up? -- and answering it from `close` alone is
+   * how a silent idle timeout would read as a close this endpoint announced (WT-144, WT-145). */
+  int close_frame_sent;
 
   /* The close the peer sent. It is separate from `close` above, which is this endpoint's own intent:
    * the peer's close ends the connection without this endpoint sending anything, and a caller that
@@ -570,6 +581,11 @@ const wt_quic_close_state_t *wt_quic_connection_close_state(const wt_quic_connec
  * this endpoint chose deliberately, or one the peer sent, has no cause here. A tool asks because a session that
  * ended this way did NOT end well, whatever the exchange counters say. */
 wt_status_t wt_quic_connection_close_cause(const wt_quic_connection_t *connection);
+
+/* Whether a CONNECTION_CLOSE frame was actually SENT to the peer. A close this endpoint decided on but never
+ * announced -- the idle timeout, RFC 9000 section 10.1 -- is not one the peer was told about, so a caller must
+ * ask this and not infer it from `wt_quic_connection_close_state`: the state is set either way (WT-144). */
+int wt_quic_connection_close_was_sent(const wt_quic_connection_t *connection);
 
 /* Whether the draining period has passed, after which the connection is gone and its state may be
  * released. */

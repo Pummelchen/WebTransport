@@ -540,7 +540,21 @@ wt_status_t wt_tls_client_receive(wt_tls_client_t *client, const uint8_t *messag
       status = receive_finished(client, message, len, out, out_capacity, out_len);
       break;
     case WT_TLS_CLIENT_START:
+      return fail(client, WT_ERR_STATE);
     case WT_TLS_CLIENT_CONNECTED:
+      /* RFC 8446 section 4.6: the handshake is not the end of the CRYPTO stream. A server sends
+       * NewSessionTicket (4) afterwards, and a client that does not resume MUST accept and ignore it -- refusing
+       * it is not a security property but a defect a third-party peer found: quinn's ticket made this endpoint
+       * fail the handshake with CRYPTO_ERROR/unexpected_message (alert 10, code 266), so the session never
+       * started (WT-145). The handshake header's own length covers the whole message, so skipping it is exact
+       * and no body needs parsing. Everything else really is unexpected here: a CONNECTED client has no
+       * post-handshake authentication to answer (13), and KeyUpdate (24) would change the keys, which this tree
+       * does not implement -- calling that unexpected is the honest answer rather than silently ignoring it and
+       * then failing to decrypt the peer's next packet. */
+      if (header.type != WT_TLS_HANDSHAKE_NEW_SESSION_TICKET) {
+        return fail(client, WT_ERR_STATE);
+      }
+      break;
     case WT_TLS_CLIENT_FAILED:
     default:
       return fail(client, WT_ERR_STATE);

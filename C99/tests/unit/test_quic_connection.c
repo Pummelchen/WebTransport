@@ -1951,6 +1951,48 @@ static void test_a_handler_can_name_the_code_it_refused_with(wt_udp_family_t fam
   close_pair(&pair);
 }
 
+/* RFC 9000 section 12.4's Table 3 gives CRYPTO the packet types `IH01`, so a 1-RTT CRYPTO frame is ALLOWED --
+ * that is where a server's post-handshake messages live. This endpoint used to answer one with PROTOCOL_VIOLATION
+ * and close, and a third-party peer rejected it: quinn sends its NewSessionTicket on a 1-RTT CRYPTO frame, so the
+ * session never started (WT-145). What the RFCs forbid is CRYPTO in 0-RTT (RFC 9001 section 4.6.1), and this tree
+ * implements no 0-RTT. */
+static void test_crypto_is_permitted_in_the_application_space(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  static const uint8_t ticket[] = {0x04U, 0x00U, 0x00U, 0x00U};
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 95000000U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x50U + i);
+  WT_EXPECT_OK("application keys derive",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the client sends with them",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads with them",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_CRYPTO);
+  frame.as.crypto.offset = 0U;
+  frame.as.crypto.data = ticket;
+  frame.as.crypto.length = sizeof(ticket);
+  send_frame_to(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U, now);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+
+  WT_EXPECT_INT("a 1-RTT CRYPTO frame does not close the connection", 0,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("and it reaches the handler", 1U, (uint64_t)pair.server_witness.count);
+  WT_EXPECT_U64("as a CRYPTO frame", (uint64_t)WT_QUIC_FRAME_KIND_CRYPTO,
+                (uint64_t)pair.server_witness.frames[0].kind);
+  WT_EXPECT_U64("in the application space", (uint64_t)WT_QUIC_SPACE_APPLICATION,
+                (uint64_t)pair.server_witness.frames[0].space);
+
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1966,6 +2008,7 @@ int main(void) {
   test_a_refusal_leaves_a_readable_close(WT_UDP_IPV4);
   test_a_refusal_leaves_a_readable_close(WT_UDP_IPV6);
   test_a_handler_can_name_the_code_it_refused_with(WT_UDP_IPV4);
+  test_crypto_is_permitted_in_the_application_space();
   test_discards();
   test_garbage(WT_UDP_IPV4);
   test_garbage(WT_UDP_IPV6);

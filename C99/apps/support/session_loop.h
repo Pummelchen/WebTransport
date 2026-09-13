@@ -69,6 +69,10 @@ typedef struct wt_loop_result {
   uint64_t close_sent_error_code;
   uint64_t close_sent_frame_type;
   wt_status_t close_cause;
+  /* Whether that close was actually SENT to the peer. The idle timeout closes silently (RFC 9000 section 10.1),
+   * so the fields above are set either way and only this says whether the peer was told -- which is the
+   * difference between a session this endpoint ended and one it merely stopped (WT-144, WT-145). */
+  int close_was_sent;
   /* How many datagrams/packets the receive loop DISCARDED rather than parsed. A discard is ordinary during a
    * handshake (a packet for a key level this endpoint does not have yet, an unauthenticated packet) and it is
    * exactly what a refusal is NOT: a run whose packets are all discarded needs keys, and a run that refuses

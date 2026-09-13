@@ -205,11 +205,12 @@ static int handshake_ready(const loop_t *loop) {
 /* Whether this run ended with THIS endpoint having closed the connection, and why.
  *
  * A tool that answers "ok" here is lying: the peer was told the connection is over, whatever the exchange
- * counters say. The status the refusing handler returned is the report when there was one -- it names the layer
- * that refused -- and a deliberate close with no refusal is a protocol failure of the run's own making, which is
- * `WT_ERR_PROTOCOL` rather than `WT_OK` (WT-144). */
+ * counters say. It asks whether the close was SENT, not merely decided on -- the idle timeout closes silently
+ * (RFC 9000 section 10.1), and a run whose only close is that one has told the peer nothing, so `WT_OK` is the
+ * honest answer and `WT_ERR_PROTOCOL` would be an invented failure (WT-144, WT-145). The status the refusing
+ * handler returned is the report when there was one, because it names the layer that refused. */
 static wt_status_t loop_close_status(const loop_t *loop) {
-  if (wt_quic_connection_is_closed(&loop->session.connection) == 0) return WT_OK;
+  if (wt_quic_connection_close_was_sent(&loop->session.connection) == 0) return WT_OK;
   if (loop->session.connection.close_cause != WT_OK) return loop->session.connection.close_cause;
   return WT_ERR_PROTOCOL;
 }
@@ -228,6 +229,7 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->close_sent_error_code = loop->session.connection.close.error_code;
   out->close_sent_frame_type = loop->session.connection.close.frame_type;
   out->close_cause = loop->session.connection.close_cause;
+  out->close_was_sent = wt_quic_connection_close_was_sent(&loop->session.connection);
   out->packets_discarded = loop->session.connection.packets_discarded;
   out->has_initial_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
   out->has_handshake_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
