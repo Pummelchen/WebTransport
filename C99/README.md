@@ -45,7 +45,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 60 unit test files and 78,904 checks, run by `ctest` and again under
+- 61 unit test files and 78,939 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -493,6 +493,11 @@ What is here:
   reason no longer than 1024 bytes). An incomplete capsule is `WT_ERR_TRUNCATED` rather than malformed, an
   unknown type is handed on rather than refused, and a value longer than the caller will buffer is
   `H3_EXCESSIVE_LOAD` -- the same three rules the QPACK instruction parsers and the frame codec follow.
+- **The session lifecycle** (Phase 7, third part): `webtransport/session.h` is the draft's three rules about
+  what a session may DO -- after a drain in either direction no new stream may start (existing ones may
+  finish), after a close nothing at all, and the FIRST close's code is the one the session reports however
+  many more arrive. A stream that simply ends has no application code, which the state records separately
+  from a close whose code happens to be zero.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

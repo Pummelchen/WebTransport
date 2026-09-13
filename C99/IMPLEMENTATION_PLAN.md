@@ -1738,6 +1738,19 @@ value longer than the caller will buffer is H3_EXCESSIVE_LOAD, because the bound
 now the fourth, fifth and sixth appearances of the same three decisions, which is why they are recorded as this
 project's standing rules rather than as each part's local choice.
 
+**Third part done: the session lifecycle.** `include/webtransport/webtransport/session.h` is the draft's
+three rules about what a session may DO, as opposed to what its bytes say: after a drain, in either direction,
+no new stream may be started for the session while existing ones may finish; after a close, nothing at all;
+and the FIRST close's code is the one the session reports, however many more arrive, because the session ended
+at the first one. The drain and the close remember which direction each came from, so a caller can tell "the
+peer is going away" from "we are", and a stream that simply ends is recorded as having no application code --
+which is not the same as a close whose code happens to be zero, and the flag is what keeps them apart.
+
+Two boundaries of the machine are deliberate. A drain or a close before the response has gone out is a caller
+error rather than a transition, because the session does not exist yet and inventing a state for it would let
+a caller half-open one. And every transition after the close is refused, because a capsule that arrives after
+the end is a message the peer has no state for -- this layer cannot honour it and must not pretend to.
+
 Port the Swift WebTransport session layer.
 
 Tasks:

@@ -55,6 +55,7 @@ set(WT_UNIT_TESTS
   test_http3_message
   test_webtransport_session_request
   test_webtransport_capsule
+  test_webtransport_session
   test_qpack_static
   test_qpack_primitives
   test_qpack_huffman

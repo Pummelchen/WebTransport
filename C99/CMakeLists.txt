@@ -122,6 +122,7 @@ list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 set(WT_WEBTRANSPORT_SOURCES
   src/webtransport/session_request.c
   src/webtransport/capsule.c
+  src/webtransport/session.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_WEBTRANSPORT_SOURCES})
 
@@ -188,6 +189,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/http3/message.h
   include/webtransport/webtransport/session_request.h
   include/webtransport/webtransport/capsule.h
+  include/webtransport/webtransport/session.h
   include/webtransport/http3/qpack.h
   include/webtransport/crypto/crypto.h
   include/webtransport/tls/keyschedule.h
