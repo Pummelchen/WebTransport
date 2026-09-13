@@ -226,8 +226,9 @@ What is here:
   Windows CI legs need portability work before a job for them would be anything but red. The two
   partial criteria are conformance scenario breadth (forty-two scenarios, two of them end-to-end
   sessions over real sockets, against the Swift tools' 40-scenario suite -- all five of its interop
-  matrices now have a counterpart; what does not is its two release checks, which assert packaging files
-  and belong in `scripts/check-package.sh` rather than in a scenario) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
+  matrices now have a counterpart, and its two release checks are mirrored where they belong:
+  `scripts/check-package.sh` installs the tree and asserts that the product list is the three tools and
+  that nothing which exists to test the library came with them) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
   sessions, sanitizers and static checks are clean, the public API is documented, nothing
   placeholder-shaped is exposed as production, and the matrix itself exists and is checked.
 
