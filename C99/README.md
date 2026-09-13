@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 79,904 checks, run by `ctest` and again under
+- 75 unit test files and 79,922 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -100,6 +100,15 @@ What is here:
   contract: arming, a bounded pump with an empty socket, an unstarted session refusing to
   pump, clearing twice (an error path that unwinds must not double free), and a server with no
   certificate being refused at start rather than at the first ClientHello.
+- **A self-signed identity for local development** (Phase 9): `tls/self_signed.h` generates the
+  pair a local server needs *in memory* — an ECDSA P-256 key and a certificate for the loopback
+  names — and returns its SHA-256 fingerprint. The pin is the point: a self-signed certificate is
+  trusted by nothing by definition, so a client reaches it through
+  `WT_TLS_TRUST_PINNED_CERTIFICATE` with that fingerprint, or through the development bypass the
+  trust layer already restricts to loopback names. One call therefore produces both halves of a
+  local development setup, and `--listen --trust local-development` needs no certificate file. The
+  test is a closed loop rather than a self-comparison: generate, pin what the generator returned,
+  let the trust layer accept it, and let it refuse a different pin.
 - **The tools' local socket** (Phase 9): `cli/endpoint.h` turns a `host:port` into a bound or
   targeted UDP endpoint, and both tools open theirs and report it in the `--json` output. The
   FAMILY comes from the address rather than a flag — an IPv4 address on an IPv6 socket is not

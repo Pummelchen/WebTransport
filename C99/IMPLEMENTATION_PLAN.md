@@ -2522,6 +2522,28 @@ measurements have produced -- each previous one eliminated rather than argued aw
 The test asserts only what is true today (the CONNECT goes out, the client records and tracks its request
 stream), and WT-110 carries the measurement and the next step.
 
+### Phase 9's twenty-fifth part: a self-signed identity, so a local server needs no certificate file
+
+`tls/self_signed.h` generates, in memory, what a local development server needs: an ECDSA P-256 key and a
+certificate for the loopback names, both DER, plus the SHA-256 fingerprint that makes the certificate useful. The
+fingerprint is the design rather than a convenience: a self-signed certificate is trusted by NOTHING by
+definition, so a client can only reach it by PINNING that value (`WT_TLS_TRUST_PINNED_CERTIFICATE`) or through
+the development bypass -- which the trust layer already restricts to loopback names. One call therefore produces
+both halves of a local setup, which is what `--listen --trust local-development` needs and what the conformance
+tool's session scenarios need without borrowing the repository's test fixtures.
+
+Two details are the ones worth keeping. The identity and the certificate passed to the handshake and to the
+trust check are built by SEPARATE calls that point into the generated buffers, so the structure never contains a
+pointer to itself -- a self-referential struct is one `memcpy` away from pointing at somebody else's stack, which
+is exactly the bug that cost a round of debugging in the session pair (WT-111). And the generator compiles
+against OpenSSL unconditionally, like the trust layer beside it: a build with a stub generator next to a real
+trust layer would be a promise the build cannot keep.
+
+The test is a closed loop rather than a self-comparison: it generates, pins what the generator returned, has the
+TRUST LAYER accept it, checks that a different pin is refused, that no pin at all is refused, and that two
+generations differ -- because a generator tested against its own output proves nothing about whether anything can
+trust it.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

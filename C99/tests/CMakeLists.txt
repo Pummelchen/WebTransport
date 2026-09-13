@@ -62,6 +62,7 @@ set(WT_UNIT_TESTS
   test_api_endpoint
   test_cli_endpoint
   test_runtime_session
+  test_tls_self_signed
   test_runtime_session_pair
   test_cli_options
   test_cli_report

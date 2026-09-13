@@ -106,6 +106,7 @@ set(WT_TLS_SOURCES
   src/tls/extension.c
   src/tls/handshake.c
   src/tls/keyshare.c
+  src/tls/self_signed.c
   src/tls/trust.c
   src/tls/session.c
 )
@@ -231,6 +232,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/tls/extension.h
   include/webtransport/tls/handshake.h
   include/webtransport/tls/keyshare.h
+  include/webtransport/tls/self_signed.h
   include/webtransport/tls/trust.h
   include/webtransport/tls/session.h
   include/webtransport/runtime/session.h
