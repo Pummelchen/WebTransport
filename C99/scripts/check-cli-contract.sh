@@ -48,6 +48,30 @@ status=$?
 set -e
 [ "$status" -eq 2 ] || fail "an unsupported scenario must exit 2 (got $status)" "$work/err"
 
+# The development trust bypass is restricted to LOOPBACK names, and the restriction is a security rule rather
+# than a convenience: a bypass that accepted any name is one a deployment could enable by accident. The library
+# enforces it in the trust policy (with its own test), and the TOOL refuses the combination before it does any
+# I/O -- which is the half no test asserted, so a refactor that dropped the check would have passed everything
+# (WT-180, mirroring the Swift suite's `localSelfSignedTrustPolicyIsLoopbackOnly`).
+set +e
+"$client" --connect example.com:443 --trust local-development >"$work/out" 2>"$work/err"
+status=$?
+set -e
+[ "$status" -eq 2 ] || fail "the bypass on a real host must exit 2 (got $status)" "$work/err"
+grep -q "refused for a non-loopback address" "$work/err" \
+  || fail "and say why the bypass was refused" "$work/err"
+# And the loopback forms are still accepted, so the refusal is about the ADDRESS and not about the mode.
+for loopback in localhost 127.0.0.1 "[::1]"; do
+  set +e
+  "$client" --connect "$loopback:1" --trust local-development --timeout-ms 200 >"$work/out" 2>"$work/err"
+  status=$?
+  set -e
+  # Whatever the connection does (nothing is listening on port 1), it is not the ARGUMENT refusal: exit 2 with
+  # that message would mean the loopback form was turned away too.
+  grep -q "refused for a non-loopback address" "$work/err" \
+    && fail "$loopback must be allowed to use the bypass" "$work/err"
+done
+
 # --help is a success, and says what the tool is.
 set +e
 "$client" --help >"$work/out" 2>&1

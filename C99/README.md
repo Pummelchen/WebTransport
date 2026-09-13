@@ -625,7 +625,12 @@ What is here:
   `datagram-for-another-session`, and CTest's `wt_cli_hostile_datagram`: the client exits non-zero with
   `closeKind` 2 / `closeSentErrorCode` 264 and -- the point of the act -- **`receivedBytes` 0**. The conformance
   tool's isolation scenario had asserted this rule against a model receiver all along; the tool a user runs did
-  not follow it.
+  not follow it. The other half of the draft's rule is there too: **section 4.6** says an endpoint SHOULD buffer a
+  stream or datagram that arrives before the session it belongs to is known, and MUST bound how many it keeps --
+  so a datagram that arrives before this endpoint knows its session's ID is **parked** (four datagrams, then
+  dropped and counted) and drained when the ID becomes known, with the ones naming this session delivered and the
+  rest dropped rather than refused, because they were never an error at the time they arrived. A datagram that
+  arrives once the ID IS known and names another session is refused, which is what the hostile act measures.
 - **Shutdown and cancellation are safe at every point** (WT-178): the Swift suite tests its server's shutdown path
   from the operator's point of view -- refuse at once, return promptly with nothing served, survive being run
   twice -- and those assertions are about a server object this tree does not have. What they are about

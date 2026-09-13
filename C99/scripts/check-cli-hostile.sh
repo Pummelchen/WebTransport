@@ -38,7 +38,13 @@ case "$act" in
     # An APPLICATION close (kind 2) carrying HTTP/3's ID_ERROR, and NO received bytes.
     expect_close='"closeKind":2,"closeSentErrorCode":264,"closeSentFrameType":0'
     expect_status='"status":"state"'
-    expect_more='grep -q "\"receivedBytes\":0" "$work/client.json" || fail "a datagram for another session was delivered"'
+    # Two assertions: the foreign datagram was not counted as a message, and the peer's own payload bytes are
+    # NOT echoed into this endpoint's report. The second is the C99 form of the Swift suite's rule that a refusal
+    # must not expose what the peer sent (WT-180): a report is this endpoint's account, not a copy of the wire.
+    # An `if` rather than `grep && fail`: under `set -e` a failing grep as the last command of an `&&` list ends
+    # the script silently, which is exactly how this assertion first "passed" by killing the run.
+    expect_more='grep -q "\"receivedBytes\":0" "$work/client.json" || fail "a datagram for another session was delivered"
+    if grep -q "not-yours" "$work/client.json"; then fail "the client report echoed the peer payload"; fi'
     ;;
   *)
     echo "cli hostile peer: unknown act $act"

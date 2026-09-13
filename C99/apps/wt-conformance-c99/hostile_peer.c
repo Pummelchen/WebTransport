@@ -140,10 +140,28 @@ typedef struct hostile_act {
   uint64_t expected_frame;
 } hostile_act_t;
 
+/* What the peer watches for before performing certain acts: the client's CONNECT arrives as STREAM frames, and an
+ * act that depends on the client's session EXISTING has to wait for them -- otherwise it races the client's own
+ * first flight, and a test whose subject is the refusal would sometimes measure the parking rule instead
+ * (draft-16 section 4.6). */
+typedef struct hostile_watch {
+  unsigned stream_frames;
+} hostile_watch_t;
+
+static wt_status_t watch_frames(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
+  hostile_watch_t *watch = context;
+  (void)space;
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) watch->stream_frames++;
+  return WT_OK;
+}
+
 static const hostile_act_t k_acts[] = {
     {"max-streams-decrease", send_max_streams_decrease, WT_QUIC_PROTOCOL_VIOLATION,
      WT_QUIC_CLOSE_TRANSPORT, WT_QUIC_FRAME_MAX_STREAMS_BIDI},
-    {"datagram-for-another-session", send_datagram_for_another_session, WT_HTTP3_ID_ERROR,
+    /* This act waits for the client's CONNECT first, so that what it measures is the refusal rather than the
+   * parking rule: a datagram that arrives before the session exists is parked, not refused, and the test would
+   * otherwise pass or fail on which of the two happened to come first. */
+  {"datagram-for-another-session", send_datagram_for_another_session, WT_HTTP3_ID_ERROR,
      WT_QUIC_CLOSE_APPLICATION, 0U},
 };
 
@@ -177,6 +195,7 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
   uint64_t now = 1000U;
   unsigned round;
   int sent = 0;
+  hostile_watch_t watch;
   wt_status_t status;
   wt_cli_result_t result = WT_CLI_RESULT_FAILED;
 
@@ -255,6 +274,10 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
     wt_udp_close(&socket);
     return fail_peer(detail, detail_size, "the advertised limits could not be put in force");
   }
+  /* Installed before the handshake, because the client's CONNECT rides the handshake's own connection and a
+   * handler added afterwards could miss it. What it counts is what the wait below waits for. */
+  memset(&watch, 0, sizeof(watch));
+  (void)wt_runtime_session_set_frame_handler(&session, watch_frames, &watch);
 
   /* The handshake, then the act: a MAX_STREAMS can only travel in the Application space, so a peer that sent one
    * before 1-RTT keys would be the one breaking a rule. */
@@ -266,6 +289,19 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
     wt_runtime_session_clear(&session);
     wt_udp_close(&socket);
     return fail_peer(detail, detail_size, "the handshake did not complete, so the act was not performed");
+  }
+
+  /* The client's session must EXIST before any act, or an act about a session's content (a datagram naming one)
+   * would race the client's own first flight: a datagram that arrives before the session is known is PARKED by
+   * section 4.6's rule, not refused, and the test would measure whichever of the two came first. Bounded, because
+   * a client that never sends a CONNECT must fail this peer rather than hang it. */
+  for (round = 0U; round < WT_HOSTILE_ROUNDS && watch.stream_frames == 0U; round++) {
+    peer_pump(&session, &socket, &now);
+  }
+  if (watch.stream_frames == 0U) {
+    wt_runtime_session_clear(&session);
+    wt_udp_close(&socket);
+    return fail_peer(detail, detail_size, "the client never sent a CONNECT, so the act was not performed");
   }
 
   status = chosen->perform(&session, now, &sent);

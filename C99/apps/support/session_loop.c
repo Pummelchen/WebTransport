@@ -35,6 +35,19 @@
 #define WT_LOOP_PEEK_ROUNDS_FOR(timeout_ms) \
   (((uint64_t)(timeout_ms) * 1000U) / ((uint64_t)WT_LOOP_WAIT_MICROS * 10U))
 
+/* How many datagrams that arrived BEFORE this endpoint knew its session's ID are kept, and how large each may
+ * be. Draft-16 section 4.6 says such a datagram "SHOULD" be buffered until it can be associated with an
+ * established session, and that an endpoint "MUST limit" how many it buffers: this is that bound, and a datagram
+ * over it is dropped rather than being allowed to grow the tool. */
+#define WT_LOOP_EARLY_DATAGRAMS 4U
+#define WT_LOOP_EARLY_DATAGRAM_MAX 256U
+
+typedef struct loop_early_datagram {
+  uint64_t quarter;
+  size_t length;
+  uint8_t payload[WT_LOOP_EARLY_DATAGRAM_MAX];
+} loop_early_datagram_t;
+
 typedef struct loop_side {
   wt_http3_endpoint_t endpoint;
   wt_http3_driver_t driver;
@@ -58,6 +71,14 @@ typedef struct loop_side {
   const wt_http3_driver_transport_t *transport;
   wt_quic_connection_t *connection;
   uint64_t now_for_close;
+  /* Whether this endpoint knows which session it is serving -- the client from the moment it starts one, the
+   * server from the moment it accepts the CONNECT. Until then a datagram cannot be associated, so it is parked
+   * (draft-16 section 4.6) and drained when the ID becomes known: the ones that name this session are delivered,
+   * the rest are dropped. `early_dropped` counts what the bound turned away. */
+  int session_known;
+  loop_early_datagram_t early[WT_LOOP_EARLY_DATAGRAMS];
+  size_t early_count;
+  uint64_t early_dropped;
   /* The HTTP/3 code of the last capsule refusal, for the report: a run that closed the connection should say which
    * rule it closed it over (WT-165). */
   uint64_t capsule_error;
@@ -163,6 +184,15 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
   return WT_OK;
 }
 
+/* Take a datagram's payload as this session's message. */
+static void side_take_datagram(loop_side_t *side, const uint8_t *payload, size_t payload_length) {
+  if (side->data_bytes + payload_length <= sizeof(side->data)) {
+    if (payload_length > 0U) memcpy(side->data + side->data_bytes, payload, payload_length);
+    side->data_bytes += payload_length;
+  }
+  side->data_was_datagram = 1;
+}
+
 static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t length) {
   loop_side_t *side = context;
   const uint8_t *payload = NULL;
@@ -172,26 +202,56 @@ static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t l
 
   /* A datagram arrives with the draft's own framing: the quarter stream ID names the SESSION, and the payload is
    * what the caller asked for. The ID is checked -- the comment here used to claim it was while the code only
-   * parsed the framing -- because the library's own session object does check it and `docs/PUBLIC-API.md` states
-   * the rule: "a stream or datagram naming another session is refused with HTTP/3's identifier error, never
-   * delivered to the wrong session and never dropped silently" (WT-179).
-   *
-   * A single-session tool serves the CONNECT stream it started (the client's stream 0, the server's stream 0), so
-   * the expected quarter ID is that stream's; before the stream is known the value is 0, which is the same answer
-   * and is what lets a datagram that legitimately arrives BEFORE the CONNECT has been processed keep working. */
+   * parsed the framing -- because the library's own session object checks it and `docs/PUBLIC-API.md` states the
+   * rule: "a stream or datagram naming another session is refused with HTTP/3's identifier error, never delivered
+   * to the wrong session and never dropped silently" (WT-179). */
   if (wt_webtransport_datagram_parse(data, length, &quarter, &payload, &payload_length, &error) != WT_OK) {
     return WT_OK;
   }
+
+  if (side->session_known == 0) {
+    /* Draft-16 section 4.6: a datagram can arrive before the session it belongs to is known -- the client sends
+     * its CONNECT, its data streams and its datagrams in one flight -- and such a datagram is PARKED rather than
+     * refused or delivered, because until the ID is known there is no way to tell "mine, early" from "not mine".
+     * The bound is the section's MUST: over it, a datagram is dropped. */
+    if (side->early_count < WT_LOOP_EARLY_DATAGRAMS && payload_length <= WT_LOOP_EARLY_DATAGRAM_MAX) {
+      loop_early_datagram_t *parked = &side->early[side->early_count++];
+      parked->quarter = quarter;
+      parked->length = payload_length;
+      if (payload_length > 0U) memcpy(parked->payload, payload, payload_length);
+    } else {
+      side->early_dropped++;
+    }
+    return WT_OK;
+  }
+
   if (quarter != wt_webtransport_quarter_stream_id(side->request_stream_id)) {
     wt_quic_connection_refuse_application(side->connection, (uint64_t)WT_HTTP3_ID_ERROR, 0U);
     return WT_ERR_STATE;
   }
-  if (side->data_bytes + payload_length <= sizeof(side->data)) {
-    if (payload_length > 0U) memcpy(side->data + side->data_bytes, payload, payload_length);
-    side->data_bytes += payload_length;
-  }
-  side->data_was_datagram = 1;
+  side_take_datagram(side, payload, payload_length);
   return WT_OK;
+}
+
+/* The session's ID is known now: drain what was parked while it was not.
+ *
+ * This is the other half of section 4.6's buffering rule. A parked datagram that names THIS session is delivered;
+ * one that names another is dropped rather than refused, because it was never an error at the time it arrived --
+ * the reference point did not exist yet. A datagram that arrives AFTER this point and names another session is
+ * the error the section 4.2 rule covers, and `side_on_datagram` refuses it. */
+static void side_session_known(loop_side_t *side) {
+  size_t index;
+  uint64_t mine;
+
+  if (side->session_known != 0) return;
+  side->session_known = 1;
+  mine = wt_webtransport_quarter_stream_id(side->request_stream_id);
+  for (index = 0U; index < side->early_count; index++) {
+    if (side->early[index].quarter == mine) {
+      side_take_datagram(side, side->early[index].payload, side->early[index].length);
+    }
+  }
+  side->early_count = 0U;
 }
 
 static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
@@ -516,6 +576,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   /* Bound so that a refusal with an HTTP/3 error reaches the peer as an application close (WT-159). */
   wt_http3_driver_bind_connection(&loop.side.driver, &loop.session.connection);
   (void)wt_runtime_session_set_lost_frame_handler(&loop.session, client_on_lost_frame, &loop);
+  /* The client chose the CONNECT stream, so it knows its session's ID from here: a datagram naming it is
+   * associable even before the response arrives, and one naming anything else is the error section 4.2 covers. */
+  side_session_known(&loop.side);
 
   deadline_rounds = WT_LOOP_ROUNDS_FOR(config->timeout_ms);
   if (deadline_rounds > WT_LOOP_ROUNDS) deadline_rounds = WT_LOOP_ROUNDS;
@@ -1008,6 +1071,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     }
   }
   out->connect_accepted = 1;
+  /* The CONNECT was accepted: the session has an ID now, so what arrived before it can be associated (draft-16
+   * section 4.6). */
+  side_session_known(&loop.side);
   out->status = 200U;
 
   {
