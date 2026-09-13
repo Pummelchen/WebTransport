@@ -2318,10 +2318,17 @@ stream at all and the frame never reached its frame walk. The next measurement a
 - The control stream's own send DID create a stream on the server (stream 2 exists), so packets flow and the
   fault is specific to sending STREAM data on a stream this endpoint opened AFTER the handshake.
 
-The next step is a minimal reproduction: the handshake suite's pair already exchanges stream data (its
-`g_stream_*` records prove it), so the difference between that setup and this one is the thing to find -- a
-focused test with an assertion on `send_offset` is the way to find it, and WT-110 carries that. The test asserts
-only what is true today (the CONNECT goes out, the client tracks its request stream).
+Reading `wt_quic_connection_send_stream` then showed that inference was wrong too, and turned up a real bug on
+this side: the function returns WT_OK only when it has WRITTEN a frame, and it leaves the stream's `send_offset`
+and final size to the CALLER (`wt_quic_stream_on_data_sent`: "the caller has already had the frame written, so
+this records it"). The transport adapter was not recording anything, so the stream never learned it had data and
+the next send would have gone at the same offset -- a protocol error, not a slow stream. The adapter records now,
+and the test asserts `send_offset > 0` after a send.
+
+The inbound path is still not reached after that fix: the server's HTTP/3 handler counter stays at zero. The
+next measurement is therefore on the WIRE rather than in either layer -- whether the client's packet actually
+leaves -- which is a counter the connection can expose. WT-110 carries it. The test asserts only what is true
+today (the CONNECT goes out, the client records and tracks its request stream).
 
 ## Phase 10: Test Port
 

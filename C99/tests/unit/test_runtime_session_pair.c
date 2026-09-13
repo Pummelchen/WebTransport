@@ -491,9 +491,26 @@ static void test_a_connect_crosses_a_real_connection(void) {
    *     path works and the fault is specific to sending STREAM data on a stream that this endpoint opened
    *     after the handshake.
    *
+   * A LATER measurement (round 59) refuted the last inference of this comment: `send_stream` returns
+   * WT_OK only when it has WRITTEN a frame, and the stream's `send_offset` is advanced by the CALLER
+   * (`wt_quic_stream_on_data_sent`), which the transport adapter was not doing -- a real bug, now fixed,
+   * with an assertion on `send_offset` above. The inbound path is still not reached (`frames_seen` stays
+   * zero on the server after the fix), so the next measurement is on the WIRE: whether the client's packet
+   * actually leaves, which is a counter the connection can expose. WT-110 carries it.
+   *
    * The next experiment is therefore a minimal reproduction -- the handshake suite's own pair, which DOES
    * exchange stream data, plus an assertion on `send_offset` -- to find what differs. WT-110 carries it.
    */
+  /* The stream RECORDS what it sent: the connection writes the frame and leaves the offset to whoever
+   * asked for the send, so a transport adapter that did not record it would send every later frame at the
+   * same offset -- and this assertion is what caught exactly that. */
+  {
+    wt_quic_stream_t *sent_stream = wt_quic_connection_stream(&pair.client.connection, request_stream_id);
+    WT_EXPECT_TRUE("the client has its request stream", sent_stream != NULL);
+    if (sent_stream != NULL) {
+      WT_EXPECT_TRUE("and recorded the bytes it sent", sent_stream->send_offset > 0U);
+    }
+  }
   WT_EXPECT_TRUE("the client flushed packets", pair.client.flushes > 0U);
   WT_EXPECT_TRUE("and the server read packets", pair.server.packets_seen > 0U);
   /* Where the inbound path stops, MEASURED rather than guessed, and left as a comment because the

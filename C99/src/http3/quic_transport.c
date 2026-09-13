@@ -29,7 +29,23 @@ static wt_status_t quic_send_stream(void *context, uint64_t stream_id, const uin
   /* Where the stream is, from the stream itself: an adapter that tracked its own offsets
    * would be a second opinion about a number the connection already owns. */
   offset = stream->send_offset;
-  return wt_quic_connection_send_stream(connection, stream_id, offset, data, length, fin, now);
+  {
+    wt_status_t status = wt_quic_connection_send_stream(connection, stream_id, offset, data, length,
+                                                        fin, now);
+    if (status != WT_OK) return status;
+  }
+
+  /* RECORDING THE SEND IS THE CALLER'S, and it is not bookkeeping this layer may skip: the connection
+   * writes the frame and leaves the stream's `send_offset` and final size to whoever asked for the send
+   * (`wt_quic_stream_on_data_sent`: "the caller has already had the frame written, so this records it").
+   * Without it the stream never learns it has data, the NEXT send goes at the same offset, and the peer
+   * sees a stream whose offsets repeat -- which is a protocol error, not a slow stream. */
+  {
+    wt_status_t status = wt_quic_stream_on_data_sent(stream, (uint64_t)length);
+    if (status != WT_OK) return status;
+  }
+  if (fin != 0) return wt_quic_stream_on_fin_sent(stream);
+  return WT_OK;
 }
 
 static wt_status_t quic_send_datagram(void *context, const uint8_t *data, size_t length) {
