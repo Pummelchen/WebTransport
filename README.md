@@ -177,14 +177,22 @@ The [1.3.8 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.
 ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
 binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
 later. They are ad-hoc signed rather than Developer ID signed, and are not
-notarized, so Gatekeeper quarantines them on first run; clear it after verifying
-the checksums:
+notarized, so Gatekeeper quarantines them on first run; a release upload does not
+carry a file's mode, so make them executable, then clear the quarantine flag after
+verifying the checksums:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
+chmod +x WebTransportClient WebTransportServer
 xattr -d com.apple.quarantine WebTransportClient WebTransportServer
 ./WebTransportServer --scenario all
 ```
+
+Two of the forty conformance scenarios assert properties of the source tree -- they
+read `Package.swift` and `Swift/build-release-apple-silicon.sh` from the working
+directory -- so run them from a checkout; the other 38 exercise the transport and
+run anywhere. From a directory that holds only the assets the suite reports
+`passed=38 failed=2` (WT-186).
 
 Both builds are reproducible: `./Swift/build-release-apple-silicon.sh` performs
 two clean builds and compares normalized Mach-O hashes, so the published
