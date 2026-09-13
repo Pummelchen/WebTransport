@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "webtransport/quic/stream.h"
+#include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
 #include "webtransport/quic/varint.h"
 
@@ -614,6 +615,39 @@ wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
   if (status != WT_OK) return status;
   return transport->send_stream(transport->context, stream_id, driver->scratch,
                                 wt_writer_offset(&w), fin, now);
+}
+
+wt_status_t wt_http3_driver_classify_bidi_start(const uint8_t *bytes, size_t length,
+                                                wt_http3_bidi_start_kind_t *out_kind,
+                                                uint64_t *out_session_id, size_t *out_consumed) {
+  wt_cursor_t cursor;
+  uint64_t type = 0U;
+  uint64_t session_id = 0U;
+  size_t type_bytes;
+  size_t session_bytes;
+
+  if (out_kind == NULL || out_session_id == NULL || out_consumed == NULL) return WT_ERR_INVALID_ARGUMENT;
+  *out_kind = WT_HTTP3_BIDI_START_REQUEST;
+  *out_session_id = 0U;
+  *out_consumed = 0U;
+  if (bytes == NULL) return length == 0U ? WT_OK : WT_ERR_INVALID_ARGUMENT;
+
+  cursor = wt_cursor_init(bytes, length);
+  if (wt_quic_varint_decode(&cursor, &type) != WT_OK) {
+    /* Not even the type has arrived. On a stream that is a wait: the caller comes back with more bytes. */
+    return WT_ERR_TRUNCATED;
+  }
+  if (type != WT_WEBTRANSPORT_STREAM_BIDI) {
+    /* An HTTP/3 request stream, and the type varint it "has" is really the first byte of a QPACK prefix. */
+    return WT_OK;
+  }
+  type_bytes = length - wt_cursor_remaining(&cursor);
+  if (wt_quic_varint_decode(&cursor, &session_id) != WT_OK) return WT_ERR_TRUNCATED;
+  session_bytes = (length - type_bytes) - wt_cursor_remaining(&cursor);
+  *out_kind = WT_HTTP3_BIDI_START_WEBTRANSPORT;
+  *out_session_id = session_id;
+  *out_consumed = type_bytes + session_bytes;
+  return WT_OK;
 }
 
 wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,

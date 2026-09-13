@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 80,011 checks, run by `ctest` and again under
+- 75 unit test files and 80,022 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -76,6 +76,15 @@ What is here:
   rather than trusting it). Both sides end confirmed with application keys installed. That
   is the plan's "run local IPv4 and IPv6 packet sessions" at the library level; the tools'
   own session loop is what remains before the CLI can claim it.
+- **The bidirectional-stream classifier** (Phase 10): a peer's opening bytes on a bidirectional
+  stream are either an HTTP/3 request (a QPACK field-section prefix) or a WebTransport
+  bidirectional stream (the draft's `0x41` type and the session ID), and
+  `wt_http3_driver_classify_bidi_start` decides which as a PURE function of those bytes — it reads,
+  it does not route. That separation is deliberate: the routing that uses it is where WT-120's
+  release-only crash lived, so the classifier is proven in all three build configurations before
+  anything is routed by it. A prefix that has not fully arrived is `WT_ERR_TRUNCATED` — a wait on a
+  stream, never a refusal — and a stream with no bytes yet is a request stream until proven
+  otherwise.
 - **The bounded tables, at their bounds** (Phase 10): every table in HTTP/3 and the session
   layer is fixed, because a table that grows with a peer is a heap exhaustion path with the peer's
   name on it. The suite drives each one — the endpoint's peer-stream and request tables, the

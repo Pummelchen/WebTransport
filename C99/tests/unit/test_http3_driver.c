@@ -795,6 +795,55 @@ static void test_the_quic_transport_forwards(void) {
   wt_quic_connection_clear(&connection);
 }
 
+/* The bidirectional-stream classifier, on its own: the routing that uses it is a separate step because that is
+ * where WT-120's release-build crash lived, and a pure function can be proven in all three configurations
+ * first. */
+static void test_the_bidi_classifier(void) {
+  uint8_t wire[16];
+  wt_writer_t w;
+  size_t length;
+  size_t consumed = 0U;
+  uint64_t session_id = 0U;
+  wt_http3_bidi_start_kind_t kind = WT_HTTP3_BIDI_START_REQUEST;
+
+  /* The draft's bidirectional prefix: `0x41` and the session ID. */
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_OK("a bidirectional prefix writes", wt_webtransport_stream_prefix_write(&w, 0, 4U));
+  wt_writer_bytes(&w, "body", 4U);
+  length = wt_writer_offset(&w);
+  WT_EXPECT_OK("and classifies as WebTransport",
+               wt_http3_driver_classify_bidi_start(wire, length, &kind, &session_id, &consumed));
+  WT_EXPECT_INT("as the WebTransport kind", (int)WT_HTTP3_BIDI_START_WEBTRANSPORT, (int)kind);
+  WT_EXPECT_U64("naming the session", 4U, session_id);
+  /* Three bytes: the TYPE `0x41` needs a two-byte varint (65 > 63) and the session id is one byte. This is the
+   * MSB-first varint lesson the tracker has recorded several times, and the assertion that caught it here was
+   * "consumed is the prefix, not the body". */
+  WT_EXPECT_U64("with the prefix's length consumed, not the body's", 3U, (uint64_t)consumed);
+
+  /* An HTTP/3 request stream: a QPACK prefix, which is not the draft's type. */
+  {
+    uint8_t request[8];
+    wt_writer_t rw = wt_writer_init(request, sizeof(request));
+    wt_writer_u8(&rw, 0x00U);
+    wt_writer_u8(&rw, 0x00U);
+    wt_writer_u8(&rw, 0x80U);
+    WT_EXPECT_OK("a request stream classifies as a request",
+                 wt_http3_driver_classify_bidi_start(request, wt_writer_offset(&rw), &kind, &session_id,
+                                                     &consumed));
+    WT_EXPECT_INT("as the request kind", (int)WT_HTTP3_BIDI_START_REQUEST, (int)kind);
+    WT_EXPECT_U64("with nothing consumed", 0U, (uint64_t)consumed);
+  }
+
+  /* A prefix that has not fully arrived is a WAIT on a stream, never a refusal. */
+  WT_EXPECT_STATUS("a lone type byte is incomplete", WT_ERR_TRUNCATED,
+                   wt_http3_driver_classify_bidi_start(wire, 1U, &kind, &session_id, &consumed));
+  /* And nothing at all is simply a stream with no bytes yet: a request stream until proven otherwise. */
+  WT_EXPECT_OK("no bytes classify as a request",
+               wt_http3_driver_classify_bidi_start(NULL, 0U, &kind, &session_id, &consumed));
+  WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_http3_driver_classify_bidi_start(wire, length, NULL, &session_id, &consumed));
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
@@ -804,6 +853,7 @@ int main(void) {
   test_a_connection_frame_is_routed();
   test_the_outbound_half_sends_what_it_should();
   test_the_quic_transport_forwards();
+  test_the_bidi_classifier();
   test_the_pending_table_is_bounded();
   WT_TEST_MAIN_END("wt_http3_driver");
 }

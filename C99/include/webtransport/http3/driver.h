@@ -195,6 +195,27 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
  * in progress, which is what a caller needs to decide between WT_ERR_TRUNCATED and silence. */
 int wt_http3_driver_forget_frame(wt_http3_driver_t *driver, uint64_t stream_id);
 
+/* What a peer's opening bytes on a BIDIRECTIONAL stream make it.
+ *
+ * A peer-initiated bidirectional stream is either a request stream (an HTTP/3 CONNECT, whose first bytes are a
+ * QPACK field-section prefix) or a WebTransport bidirectional stream (the draft's `0x41` type and the session
+ * ID). The two are told apart by those first bytes and nothing else, so this is a pure function of them: it
+ * reads, it does not route, and the caller decides what to do with the answer. That separation is deliberate --
+ * the routing that USES this is where the release-build crash of WT-120 lived, and a pure classifier can be
+ * proven in all three build configurations before anything is routed by it. */
+typedef enum wt_http3_bidi_start_kind {
+  /* Not a WebTransport prefix: an HTTP/3 request stream, or so few bytes that nothing is decided yet. */
+  WT_HTTP3_BIDI_START_REQUEST = 0,
+  /* The draft's bidirectional WebTransport prefix, whose length is `*out_consumed`. */
+  WT_HTTP3_BIDI_START_WEBTRANSPORT = 1
+} wt_http3_bidi_start_kind_t;
+
+/* WT_ERR_TRUNCATED means the prefix has not fully arrived, which on a stream is a WAIT rather than a refusal: a
+ * peer may open a stream and send its first bytes in the next packet. */
+wt_status_t wt_http3_driver_classify_bidi_start(const uint8_t *bytes, size_t length,
+                                                wt_http3_bidi_start_kind_t *out_kind,
+                                                uint64_t *out_session_id, size_t *out_consumed);
+
 /* One frame the connection handed over, routed to whichever of the sink's callbacks owns it.
  *
  * This is the shape `wt_quic_connection_set_handlers` wants, so a caller installs the driver

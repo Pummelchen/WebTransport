@@ -2749,6 +2749,23 @@ The count assertions are the ones that matter, and the reason is worth keeping: 
 entry past its bound would show a short, clean run, and "the peer opened one more stream than we allow" is
 exactly the case where a silent drop and a refusal look identical from the outside.
 
+### Phase 10's fifth part: the bidirectional-stream classifier, isolated first
+
+WT-120's bidirectional WebTransport stream classification is being retried in the small steps its own rule
+asked for, and the first step is the classifier ALONE: `wt_http3_driver_classify_bidi_start` decides whether a
+peer's opening bytes on a bidirectional stream are an HTTP/3 request (a QPACK field-section prefix) or a
+WebTransport bidirectional stream (the draft's `0x41` type and the session ID). It is a PURE function -- it
+reads, it does not route, and the caller decides -- and the separation is the point: the ROUTING that uses it is
+where the release-build crash of the first attempt lived, so the classifier is proven in debug, release AND
+ASan+UBSan before anything is routed by it.
+
+Its contract is the one the streaming layer needs rather than the one a buffer parser would have: a prefix that
+has not fully arrived is `WT_ERR_TRUNCATED`, which on a stream is a WAIT and not a refusal, because a peer may
+open a stream and send its first bytes in the next packet; a stream with no bytes at all is a request stream
+until proven otherwise; and the number reported as consumed is the PREFIX's length, not the body's -- which the
+test asserted wrongly at first (it expected two bytes where the type `0x41` needs a two-byte varint of its own),
+the same MSB-first varint lesson this tracker has recorded several times.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.
