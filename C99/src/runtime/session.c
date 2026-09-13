@@ -131,6 +131,27 @@ wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
   return WT_OK;
 }
 
+wt_status_t wt_runtime_session_advertise(wt_runtime_session_t *session, uint64_t initial_max_data,
+                                         uint64_t initial_max_stream_data,
+                                         uint64_t initial_max_streams_bidi,
+                                         uint64_t initial_max_streams_uni) {
+  wt_status_t status;
+
+  if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  /* The per-stream limit is a field of the connection's configuration rather than a frame: it is read when a
+   * stream is created, so it must be in place before the first peer stream arrives. The three counts and the
+   * data limit are state the connection updates and can also announce. */
+  session->connection.config.local_max_stream_data = initial_max_stream_data;
+  status = wt_quic_connection_set_max_data(&session->connection, initial_max_data);
+  if (status != WT_OK) return status;
+  status = wt_quic_connection_set_max_streams(&session->connection, WT_QUIC_STREAM_BIDIRECTIONAL,
+                                              initial_max_streams_bidi);
+  if (status != WT_OK) return status;
+  return wt_quic_connection_set_max_streams(&session->connection, WT_QUIC_STREAM_UNIDIRECTIONAL,
+                                            initial_max_streams_uni);
+}
+
 wt_status_t wt_runtime_session_set_frame_handler(wt_runtime_session_t *session,
                                                  wt_runtime_frame_handler_fn handler,
                                                  void *context) {

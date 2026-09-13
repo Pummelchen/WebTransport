@@ -2669,6 +2669,27 @@ Phase 9's remaining work is the CLIENT and SERVER tools' own loops (`--listen`/`
 `--timeout-ms`), which reuse exactly the pieces this scenario is built from: the runtime session, the HTTP/3
 driver, the self-signed identity and the report.
 
+### Phase 10's third part: WT-113, in one focused pass
+
+The reverted refactor is done, and it is done the way the previous part's rule asked for: one focused pass, with
+the edit list written down first and all three build configurations in the loop from the first build.
+
+The API is `wt_runtime_session_advertise(session, initial_max_data, initial_max_stream_data,
+initial_max_streams_bidi, initial_max_streams_uni)`: one call, after starting a session, that puts what the
+endpoint ADVERTISED in its transport parameters into force. It is deliberately NOT four more parameters on
+`start_client`/`start_server` -- a call that already takes seven numbers does not need four more, and a caller's
+arguments cannot drift when they are not there. It is idempotent (the limits are monotonic), and a caller that
+advertises nothing does not call it at all.
+
+Every caller that advertises now uses it: the session pair test, the conformance tool's IPv4/IPv6 scenarios, and
+both CLI session loops. The manual `grant_receive_room` helpers those three call sites used to need are GONE,
+which is the point: the pairing lives in the driver, once, instead of in every caller's memory. The pair test
+asserts the RESULT -- the grants in force before any stream is sent -- rather than the mechanism.
+
+That closes WT-113. The failure it prevents is the one that cost several rounds of measurement (WT-110): an
+endpoint that advertises a limit, grants nothing, and closes its own connection on the first stream frame as
+FLOW_CONTROL_ERROR, which presents as a peer that says nothing rather than as a missing grant.
+
 ### Phase 10's second part: a refactor that was reverted, and why
 
 The next item was WT-113 -- pairing the limits an endpoint ADVERTISES in its transport parameters with the

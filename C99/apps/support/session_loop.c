@@ -141,14 +141,6 @@ static void connection_config(wt_quic_connection_config_t *config, wt_quic_role_
   config->max_datagram_size = 1200U;
 }
 
-static void grant_receive_room(loop_t *loop) {
-  /* The advertised value and the local grant must agree, or the first stream frame is refused. */
-  loop->session.connection.config.local_max_stream_data = 4096U;
-  (void)wt_quic_connection_set_max_data(&loop->session.connection, 100000U);
-  (void)wt_quic_connection_set_max_streams(&loop->session.connection, WT_QUIC_STREAM_BIDIRECTIONAL, 8U);
-  (void)wt_quic_connection_set_max_streams(&loop->session.connection, WT_QUIC_STREAM_UNIDIRECTIONAL, 8U);
-}
-
 static void pump_once(loop_t *loop) {
   (void)wt_udp_wait(&loop->socket, WT_LOOP_WAIT_MICROS);
   (void)wt_runtime_session_pump(&loop->session, loop->now);
@@ -250,7 +242,8 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
       return status;
     }
   }
-  grant_receive_room(&loop);
+  /* The advertised limits, in force: the promise and the enforcement in one place. */
+  (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
   init_side(&loop.side, WT_HTTP3_ROLE_CLIENT);
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &transport);
@@ -413,7 +406,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
       (void)bound;
     }
   }
-  grant_receive_room(&loop);
+  /* The advertised limits, in force: the promise and the enforcement in one place. */
+  (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
   init_side(&loop.side, WT_HTTP3_ROLE_SERVER);
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &transport);

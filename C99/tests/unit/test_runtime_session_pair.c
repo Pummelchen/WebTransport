@@ -232,28 +232,11 @@ static void arm_pair(pair_t *pair) {
                                                &pair->server_address, k_connection_id,
                                                sizeof(k_connection_id), &client_connection,
                                                &client_tls, pair->now));
-}
-
-/* The receive-side grants, which must MATCH what each endpoint advertises: the advertised number is a promise
- * and the local grant is the enforcement. Without them the flow account starts at zero and the FIRST stream
- * frame is refused as FLOW_CONTROL_ERROR -- which presents as a peer that says nothing. */
-static void grant_receive_room(pair_t *pair) {
-  wt_quic_connection_t *ends[2];
-  size_t i;
-
-  ends[0] = &pair->client.connection;
-  ends[1] = &pair->server.connection;
-  for (i = 0U; i < 2U; i++) {
-    ends[i]->config.local_max_stream_data = 4096U;
-    WT_EXPECT_OK("session-level receive credit",
-                 wt_quic_connection_set_max_data(ends[i], 100000U));
-    WT_EXPECT_OK("bidirectional stream room",
-                 wt_quic_connection_set_max_streams(ends[i], WT_QUIC_STREAM_BIDIRECTIONAL, 8U));
-    WT_EXPECT_OK("and unidirectional room",
-                 wt_quic_connection_set_max_streams(ends[i], WT_QUIC_STREAM_UNIDIRECTIONAL, 8U));
-  }
-  WT_EXPECT_U64("the server's unidirectional grant is readable", 8U,
-                wt_quic_connection_max_streams(&pair->server.connection, WT_QUIC_STREAM_UNIDIRECTIONAL));
+  /* What the parameters above advertise, in force on both sides: the same numbers, one place. */
+  WT_EXPECT_OK("the server's advertised limits are in force",
+               wt_runtime_session_advertise(&pair->server, 100000U, 4096U, 8U, 8U));
+  WT_EXPECT_OK("and the client's",
+               wt_runtime_session_advertise(&pair->client, 100000U, 4096U, 8U, 8U));
 }
 
 static int both_established(const pair_t *pair) {
@@ -351,7 +334,6 @@ static void test_a_handshake_completes_over_loopback(void) {
 
   memset(&pair, 0, sizeof(pair));
   arm_pair(&pair);
-  grant_receive_room(&pair);
 
   rounds = pump_pair(&pair, 400U, both_established);
   WT_EXPECT_TRUE("the handshake completes under the pump", rounds < 400U);
@@ -396,7 +378,6 @@ static void test_a_connect_and_its_response_cross_the_connection(void) {
 
   memset(&pair, 0, sizeof(pair));
   arm_pair(&pair);
-  grant_receive_room(&pair);
 
   /* The handshake first: without it there are no application keys and HTTP/3's bytes would go nowhere. */
   rounds = pump_pair(&pair, 400U, both_established);

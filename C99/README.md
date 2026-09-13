@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 79,946 checks, run by `ctest` and again under
+- 75 unit test files and 79,936 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -97,6 +97,14 @@ What is here:
   refused as `FLOW_CONTROL_ERROR` (code 3, frame type 8) and the connection closed — which
   presents as a peer that says nothing, not as a missing grant. `runtime/session.h` now states
   the rule, and pairing it automatically is recorded as a task.
+- **The advertised limits are put in force in one place**: `wt_runtime_session_advertise`
+  applies what an endpoint promised in its transport parameters — the session-level data limit, the
+  per-stream limit and the stream counts — so the promise and the enforcement cannot disagree. The
+  failure this removes is the one that cost several rounds of measurement: an endpoint that
+  advertised a limit, granted nothing, and then closed its own connection on the FIRST stream
+  frame as `FLOW_CONTROL_ERROR`, which presents as a peer that says nothing. It is deliberately a
+  separate call rather than four more parameters on a call that already takes seven: a caller's
+  arguments cannot drift out of order, and a caller that advertises nothing simply does not call it.
 - **A packet session driver** (Phase 9): `runtime/session.h` is the only place where the
   socket, the QUIC connection and the TLS handshake meet — the connection needs somewhere to
   send, the handshake needs a connection with Initial keys, and the socket needs a caller to

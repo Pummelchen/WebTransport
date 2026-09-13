@@ -147,21 +147,6 @@ static void connection_config(wt_quic_connection_config_t *config, wt_quic_role_
   config->max_datagram_size = 1200U;
 }
 
-static void grant_receive_room(scenario_pair_t *pair) {
-  wt_quic_connection_t *ends[2];
-  size_t i;
-  ends[0] = &pair->client.connection;
-  ends[1] = &pair->server.connection;
-  for (i = 0U; i < 2U; i++) {
-    /* The advertised value and the local grant must agree: the advertised number is a promise and the grant is
-     * the enforcement, so an endpoint that grants nothing receives nothing. */
-    ends[i]->config.local_max_stream_data = 4096U;
-    (void)wt_quic_connection_set_max_data(ends[i], 100000U);
-    (void)wt_quic_connection_set_max_streams(ends[i], WT_QUIC_STREAM_BIDIRECTIONAL, 8U);
-    (void)wt_quic_connection_set_max_streams(ends[i], WT_QUIC_STREAM_UNIDIRECTIONAL, 8U);
-  }
-}
-
 /* Pump both sides once. The socket is waited on first: a non-blocking receive finds nothing until the packet
  * has arrived, and a loop that spun faster than loopback would finish before the first Initial packet did. */
 static void pump_once(scenario_pair_t *pair) {
@@ -291,7 +276,15 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
     wt_udp_close(&pair.server_socket);
     return WT_CLI_RESULT_FAILED;
   }
-  grant_receive_room(&pair);
+  {
+    /* The advertised limits, in force: the promise and the enforcement in one place. */
+    wt_status_t granted = wt_runtime_session_advertise(&pair.server, 100000U, 4096U, 8U, 8U);
+    if (granted == WT_OK) granted = wt_runtime_session_advertise(&pair.client, 100000U, 4096U, 8U, 8U);
+    if (granted != WT_OK) {
+      detail_set(detail, detail_size, "the advertised limits could not be put in force");
+      goto done_failed;
+    }
+  }
 
   /* The handshake. */
   for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {

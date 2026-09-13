@@ -82,6 +82,24 @@ typedef struct wt_runtime_session {
  * arrive; the same is true per stream through the connection's `local_max_stream_data`, and for stream
  * COUNTS through `wt_quic_connection_set_max_streams`. Pairing them automatically is a task on the tracker
  * (it needs the advertised parameters, which this driver does not see). */
+/* Put the limits this endpoint ADVERTISED in its transport parameters into force.
+ *
+ * It exists because the two halves must agree and nothing paired them: the advertised `initial_max_data` is a
+ * promise and `wt_quic_connection_set_max_data` is the enforcement, so an endpoint that advertised a limit and
+ * granted nothing refused the FIRST stream frame it received as FLOW_CONTROL_ERROR and closed the connection --
+ * which presents as a peer that says nothing rather than as a missing grant (WT-110's root cause, found after
+ * several rounds of measurement). Calling this once, after starting a session, moves the pairing into the
+ * driver instead of leaving it in every caller's memory.
+ *
+ * It is a separate call rather than more parameters on `start_client`/`start_server` so that a caller's
+ * arguments cannot drift out of order: four more numbers on a call that already takes seven is a mistake
+ * waiting for a tired afternoon. Calling it twice is not an error -- the values are monotonic limits -- and a
+ * caller that advertises nothing simply does not call it (WT-113). */
+wt_status_t wt_runtime_session_advertise(wt_runtime_session_t *session, uint64_t initial_max_data,
+                                         uint64_t initial_max_stream_data,
+                                         uint64_t initial_max_streams_bidi,
+                                         uint64_t initial_max_streams_uni);
+
 typedef wt_status_t (*wt_runtime_frame_handler_fn)(void *context, wt_quic_space_t space,
                                                    const wt_quic_frame_t *frame);
 
