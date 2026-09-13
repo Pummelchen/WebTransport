@@ -10,6 +10,8 @@ Requires: the `cryptography` package (already present in the aioquic peer image)
 """
 
 import binascii
+import hashlib
+import hmac
 import struct
 import sys
 
@@ -41,11 +43,15 @@ INITIAL_SALT = binascii.unhexlify("38762cf7f55934b34d179ae6a4c80cadccbb7f0a")  #
 
 def initial_client_secret(dcid: bytes) -> bytes:
     """RFC 9001 section 5.2: the Initial secret comes from the connection ID, so no keylog is needed."""
-    initial_secret = HKDF(algorithm=hashes.SHA256(), length=32, salt=INITIAL_SALT, info=b"").derive(dcid)
+    # HKDF-EXTRACT, not extract-then-expand: RFC 9001 section 5.2's initial_secret IS the PRK, and asking
+    # `cryptography`'s HKDF for 32 bytes would give Expand(PRK, "", 32) -- HMAC(PRK, 0x01) -- which is a different
+    # value and was this tool's bug for one round.
+    initial_secret = hmac.new(INITIAL_SALT, dcid, hashlib.sha256).digest()
     return expand_label(initial_secret, "client in", 32)
 
 
-def open_packet(secret: bytes, packet: bytearray, packet_number: int, long_header: bool) -> int:
+def open_packet(secret: bytes, packet: bytearray, packet_number: int, long_header: bool,
+                initial: bool = False) -> int:
     """Derive the keys, remove header protection and open the AEAD. Returns 0 on success."""
     key = expand_label(secret, "quic key", 16)
     iv = expand_label(secret, "quic iv", 12)
@@ -57,6 +63,11 @@ def open_packet(secret: bytes, packet: bytearray, packet_number: int, long_heade
         offset += 1 + dcid_len
         scid_len = packet[offset]
         offset += 1 + scid_len
+        if initial:
+            # An Initial packet carries a Token field between the source connection ID and the Length, and
+            # skipping it is what kept this tool from opening one for a round.
+            token_length, offset = varint_read(packet, offset)
+            offset += token_length
         _, offset = varint_read(packet, offset)
     else:
         offset = 1
@@ -97,7 +108,7 @@ def main() -> int:
         # RFC 9001 section 5.2: the Initial secret comes from the connection ID, so no keylog is needed.
         packet = bytearray(binascii.unhexlify(sys.argv[2]))
         dcid = bytes(packet[6:6 + packet[5]])
-        return open_packet(initial_client_secret(dcid), packet, 0, True)
+        return open_packet(initial_client_secret(dcid), packet, 0, True, initial=True)
     kind = sys.argv[1]
     secret = binascii.unhexlify(sys.argv[2])
     packet_number = int(sys.argv[3])
