@@ -222,6 +222,20 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->sent_initial = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_INITIAL];
   out->sent_handshake = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_HANDSHAKE];
   out->sent_application = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_APPLICATION];
+  {
+    const wt_tls13_transcript_t *transcript = NULL;
+    size_t index;
+    if (loop->session.connection.config.role == WT_QUIC_ROLE_CLIENT) {
+      transcript = &loop->session.handshake.client.transcript;
+    } else {
+      transcript = &loop->session.handshake.server.transcript;
+    }
+    out->transcript_types_length = 0U;
+    for (index = 0U; index < (size_t)transcript->messages && index < sizeof(out->transcript_types); index++) {
+      out->transcript_types[index] = transcript->types[index];
+      out->transcript_types_length = index + 1U;
+    }
+  }
   out->request_stream_id = loop->side.request_stream_id;
   out->streams_opened_bidi = (unsigned)loop->session.connection.streams.opened_by_us_bidi;
   out->streams_opened_uni = (unsigned)loop->session.connection.streams.opened_by_us_uni;

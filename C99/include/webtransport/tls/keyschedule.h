@@ -70,12 +70,22 @@ extern "C" {
  * bytes went in: a message absorbed without its header, or in two pieces, still
  * produces a plausible hash, and every secret derived from it is wrong with nothing
  * to point at. */
+/* How many handshake messages a transcript records the TYPE of. The list a TLS 1.3 handshake absorbs is short
+ * (ClientHello, ServerHello, EncryptedExtensions, Certificate, CertificateVerify, Finished), so this is a
+ * diagnostic bound rather than a protocol one -- and recording the types is what makes "what did this client
+ * hash" answerable at all, which is the question a third-party peer forced (WT-135). */
+#define WT_TLS13_TRANSCRIPT_TYPES_MAX 16U
+
 typedef struct wt_tls13_transcript {
   wt_sha256_ctx_t hash;
   /* How many messages have been absorbed. Not used by any derivation; it is what
    * makes a transcript state printable in a diagnostic without printing the
    * handshake. */
   unsigned long messages;
+  /* The type byte of each message absorbed, in order, up to the bound above. Nothing derives from this; it is
+   * what a diagnostic prints so that a transcript can be compared with RFC 8446's list rather than merely
+   * trusted. */
+  uint8_t types[WT_TLS13_TRANSCRIPT_TYPES_MAX];
 } wt_tls13_transcript_t;
 
 wt_status_t wt_tls13_transcript_init(wt_tls13_transcript_t *transcript);

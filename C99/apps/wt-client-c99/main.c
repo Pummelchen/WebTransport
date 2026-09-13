@@ -17,6 +17,19 @@
 #include "webtransport/cli/options.h"
 #include "webtransport/version.h"
 
+/* The transcript's message types as hex, for the JSON: "0102080b0d..." reads as ClientHello, ServerHello, ... */
+static const char *wt_client_transcript_types(const wt_loop_result_t *result) {
+  static char text[2U * 16U + 1U];
+  static const char digits[] = "0123456789abcdef";
+  size_t index;
+  for (index = 0U; index < result->transcript_types_length && index < 16U; index++) {
+    text[index * 2U] = digits[(result->transcript_types[index] >> 4) & 0x0fU];
+    text[index * 2U + 1U] = digits[result->transcript_types[index] & 0x0fU];
+  }
+  text[result->transcript_types_length * 2U] = '\0';
+  return text;
+}
+
 static int wt_usage(const char *program) {
   printf("usage: %s [options]\n", program);
   printf("\n");
@@ -144,7 +157,8 @@ int main(int argc, char **argv) {
              "\"application\":%s},\"handshakeState\":\"%s\",\"resends\":%u,\"probes\":%u,"
              "\"probesWithData\":%u,\"requestStreamId\":%llu,"
              "\"streamsOpened\":{\"bidi\":%u,\"uni\":%u},"
-             "\"sent\":{\"initial\":%u,\"handshake\":%u,\"application\":%u}}\n",
+             "\"sent\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},"
+             "\"transcriptTypes\":\"%s\"}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
              (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
@@ -159,7 +173,7 @@ int main(int argc, char **argv) {
              result.probes, result.probes_with_data,
              (unsigned long long)result.request_stream_id, result.streams_opened_bidi,
              result.streams_opened_uni, result.sent_initial, result.sent_handshake,
-             result.sent_application);
+             result.sent_application, wt_client_transcript_types(&result));
     } else {
       printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.status, (unsigned long long)result.received_bytes,

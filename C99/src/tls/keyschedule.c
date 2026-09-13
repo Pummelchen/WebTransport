@@ -32,6 +32,9 @@ wt_status_t wt_tls13_transcript_append(wt_tls13_transcript_t *transcript,
   if (declared != len - 4U) return WT_ERR_PROTOCOL;
   status = wt_sha256_update(&transcript->hash, message, len);
   if (status != WT_OK) return status;
+  if (transcript->messages < (unsigned long)WT_TLS13_TRANSCRIPT_TYPES_MAX) {
+    transcript->types[transcript->messages] = message[0];
+  }
   transcript->messages++;
   return WT_OK;
 }

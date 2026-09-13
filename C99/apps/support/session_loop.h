@@ -85,6 +85,12 @@ typedef struct wt_loop_result {
   unsigned sent_initial;
   unsigned sent_handshake;
   unsigned sent_application;
+  /* The TYPE BYTES of the messages this endpoint absorbed into its TLS transcript, in order. The list must be
+   * RFC 8446's (ClientHello, ServerHello, EncryptedExtensions, Certificate, CertificateVerify, Finished) and
+   * nothing else -- a transcript that hashed something extra is invisible to a pair of the same code and fatal
+   * to a peer that hashes the RFC's list (WT-135). `transcript_types_length` is how many are recorded. */
+  uint8_t transcript_types[16];
+  size_t transcript_types_length;
   /* The stream id the driver opened for the request, and how many streams this endpoint opened in each class:
    * a request on a stream the peer reads as unidirectional is an interop-only defect, and the id is the only
    * thing that says which it is (WT-135). */
