@@ -20,7 +20,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.3.7](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.7) |
+| Latest release | [1.3.8](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.8) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 26.6 or later, Swift 6.3.3 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -66,6 +66,16 @@ long-header validity, HKDF output length, transport-parameter values, and the
 curve parameters now throws a catchable error instead of terminating the process. See
 the [changelog](CHANGELOG.md) for the full list.
 
+1.3.8 reports a peer that ends a stream before sending the bytes that stream has to
+begin with as exactly that, instead of as `QUICCodecError.truncated(needed: 1,
+available: 0)`. The runtime read the first chunk of a stream and dropped the
+`endOfStream` flag, so a peer that FINed an inbound stream without writing to it
+produced a message that reads like an internal truncation rather than a peer that is
+not following the protocol. `WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID:)`
+names the stream and the cause, and a read that returns no bytes while the stream is
+still open is now waited out, so "nothing yet" and "the peer is done" cannot be
+confused. Reported in issue #24.
+
 1.3.7 fixes a listener that stopped accepting for the rest of its life once it had
 served `maxConcurrentConnections` sessions in total. The ceiling was handed to
 Network.framework's `newConnectionLimit`, which counts connections over the
@@ -105,7 +115,7 @@ before adopting this in production.
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.3.7"
+    exact: "1.3.8"
 )
 ```
 
@@ -165,7 +175,7 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 
 ## Prebuilt binaries
 
-The [1.3.7 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.7)
+The [1.3.8 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.8)
 ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
 binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
 later. They are ad-hoc signed rather than Developer ID signed, and are not
