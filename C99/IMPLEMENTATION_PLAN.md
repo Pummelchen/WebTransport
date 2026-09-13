@@ -2669,6 +2669,27 @@ Phase 9's remaining work is the CLIENT and SERVER tools' own loops (`--listen`/`
 `--timeout-ms`), which reuse exactly the pieces this scenario is built from: the runtime session, the HTTP/3
 driver, the self-signed identity and the report.
 
+### Phase 10's first part: a malformed-input corpus for the layers above QUIC
+
+The QUIC parsers have had a fuzz-style corpus since Phase 1 -- a deterministic pseudo-random byte stream, with
+the assertion that a refusal is a STATUS and never a crash -- and the layers above them were owed the same
+treatment. `test_http3_malformed` feeds 4,000 generated inputs to: the HTTP/3 frame decoder, the SETTINGS
+parser, the WebTransport capsule decoder and the value parsers for the capsules it decodes, the datagram
+parser, the QPACK field-section decoder with NO dynamic table (the strictest configuration, where a section that
+references a table this endpoint does not have must be refused rather than read against indices that do not
+exist), the draft-16 request validator on whatever decoded, and the HTTP/3 driver's stream classifier and
+frame-boundary reassembler. Under AddressSanitizer and UndefinedBehaviorSanitizer the corpus is the test that
+matters, because a read past a buffer there is a failure rather than a plausible value.
+
+Two things about the corpus are worth keeping, and both came out of writing it. It asserts that it REFUSES and
+that it ACCEPTS, because a generator change that made every input valid would silently turn the suite into a
+no-op -- but the proportions are asserted as they ARE, not as a guess: a capsule decoder accepts most of the
+corpus, because an unknown capsule type with a length that fits is a VALID capsule (RFC 9297 tells a receiver to
+ignore what it does not understand), and the stream classifier accepts an unknown stream TYPE for the same
+reason (section 6.2.1). The first version of the test asserted "refused > accepted" in both places and failed --
+which is the same lesson this tracker carries from several earlier rounds: assert what the code does, not what a
+paragraph about it suggests it should.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

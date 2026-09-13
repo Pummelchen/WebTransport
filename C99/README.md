@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 79,937 checks, run by `ctest` and again under
+- 75 unit test files and 79,946 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -76,6 +76,16 @@ What is here:
   rather than trusting it). Both sides end confirmed with application keys installed. That
   is the plan's "run local IPv4 and IPv6 packet sessions" at the library level; the tools'
   own session loop is what remains before the CLI can claim it.
+- **A malformed-input corpus for HTTP/3, QPACK and the session layer** (Phase 10): the same
+  treatment the QUIC parsers already had — a deterministic pseudo-random byte stream fed to the
+  frame decoder, the SETTINGS parser, the capsule decoder and its value parsers, the datagram
+  parser, the QPACK field-section decoder with **no dynamic table** (the strictest configuration)
+  and the draft-16 request validator, plus the HTTP/3 driver's stream classifier and frame-boundary
+  reassembler. The assertion is that a refusal is a STATUS and never a crash — under ASan+UBSan a
+  read past a buffer is a failure rather than a plausible value — and the corpus also asserts that
+  it refuses *and* accepts, because a generator change that made every input valid would turn the
+  suite into a no-op. Where the corpus is a refusal corpus by construction (a random field section
+  against an empty dynamic table), the test says so instead of pretending to be balanced.
 - **An extended CONNECT across a real connection** (Phase 9): `test_runtime_session_pair` now
   drives the WHOLE WebTransport handshake-over-HTTP/3 path — two sessions complete a TLS 1.3
   handshake inside QUIC, the client opens HTTP/3's control and QPACK streams and sends an
