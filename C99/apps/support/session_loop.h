@@ -66,6 +66,16 @@ typedef struct wt_loop_result {
    * exactly what a refusal is NOT: a run whose packets are all discarded needs keys, and a run that refuses
    * needs a parser (WT-135). */
   uint64_t packets_discarded;
+  /* Whether the connection holds RECEIVE keys for each packet-number space. This is the one fact that says where
+   * a stalled handshake stopped: Initial keys without Handshake keys means the ClientHello went out and the
+   * ServerHello was never processed, so the peer's encrypted flight is correctly discarded and no parser can be
+   * at fault (WT-135). */
+  int has_initial_keys;
+  int has_handshake_keys;
+  int has_application_keys;
+  /* What the handshake's own state machine says. Keys installed and the state not CONNECTED is the shape of a
+   * flight that was READ but not completed -- and the two facts together are what a diagnosis needs (WT-135). */
+  const char *handshake_state;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */

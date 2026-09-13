@@ -285,6 +285,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->peer_error_code = loop.session.connection.peer_error_code;
     out->peer_closed = loop.session.connection.peer_closed;
     out->packets_discarded = loop.session.connection.packets_discarded;
+    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
+    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
+    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
+    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -299,6 +303,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->peer_error_code = loop.session.connection.peer_error_code;
     out->peer_closed = loop.session.connection.peer_closed;
     out->packets_discarded = loop.session.connection.packets_discarded;
+    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
+    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
+    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
+    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -313,6 +321,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->peer_error_code = loop.session.connection.peer_error_code;
     out->peer_closed = loop.session.connection.peer_closed;
     out->packets_discarded = loop.session.connection.packets_discarded;
+    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
+    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
+    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
+    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -327,6 +339,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->peer_error_code = loop.session.connection.peer_error_code;
     out->peer_closed = loop.session.connection.peer_closed;
     out->packets_discarded = loop.session.connection.packets_discarded;
+    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
+    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
+    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
+    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -341,6 +357,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->peer_error_code = loop.session.connection.peer_error_code;
     out->peer_closed = loop.session.connection.peer_closed;
     out->packets_discarded = loop.session.connection.packets_discarded;
+    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
+    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
+    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
+    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
     /* The oracle, on the CLIENT's own failure paths: the first version of this set the fields
      * only in the server's, so a client run reported zeroes that were DEFAULTS rather than
      * measurements -- and "the connection saw 0 packets" was read as a fact about the network
@@ -355,6 +375,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->peer_error_code = loop.session.connection.peer_error_code;
     out->peer_closed = loop.session.connection.peer_closed;
     out->packets_discarded = loop.session.connection.packets_discarded;
+    out->has_initial_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
+    out->has_handshake_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
+    out->has_application_keys = loop.session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
+    out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop.session.handshake));
     return WT_ERR_TIMEOUT;
   }
   out->established = 1;
