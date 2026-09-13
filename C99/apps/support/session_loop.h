@@ -61,6 +61,11 @@ typedef struct wt_loop_result {
   int close_code_set;
   uint64_t peer_error_code;
   int peer_closed;
+  /* How many datagrams/packets the receive loop DISCARDED rather than parsed. A discard is ordinary during a
+   * handshake (a packet for a key level this endpoint does not have yet, an unauthenticated packet) and it is
+   * exactly what a refusal is NOT: a run whose packets are all discarded needs keys, and a run that refuses
+   * needs a parser (WT-135). */
+  uint64_t packets_discarded;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */

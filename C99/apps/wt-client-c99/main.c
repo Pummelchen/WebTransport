@@ -139,14 +139,16 @@ int main(int argc, char **argv) {
              "\"responseStatus\":%u,\"receivedBytes\":%llu,\"receivedDatagram\":%s,"
              "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u,\"packetsSeen\":%u,"
              "\"lastReceive\":\"%s\",\"closeCodeSet\":%s,\"closeCode\":%llu,"
-             "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu}\n",
+             "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
+             "\"packetsDiscarded\":%llu}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
              (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
              wt_status_name(result.first_receive_error), result.receive_errors, result.packets_seen,
              wt_status_name(result.last_receive), result.close_code_set != 0 ? "true" : "false",
              (unsigned long long)result.close_code, (unsigned long long)result.close_frame_type,
-             result.peer_closed != 0 ? "true" : "false", (unsigned long long)result.peer_error_code);
+             result.peer_closed != 0 ? "true" : "false", (unsigned long long)result.peer_error_code,
+             (unsigned long long)result.packets_discarded);
     } else {
       printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.status, (unsigned long long)result.received_bytes,
@@ -158,7 +160,8 @@ int main(int argc, char **argv) {
                wt_status_name(result.first_receive_error));
       }
       if (status != WT_OK) {
-        printf("client: the connection saw %u packet(s); its last receive said %s\n", result.packets_seen,
+        printf("client: the connection saw %u packet(s) and discarded %llu; its last receive said %s\n",
+               result.packets_seen, (unsigned long long)result.packets_discarded,
                wt_status_name(result.last_receive));
         if (result.close_code_set != 0) {
           printf("client: this endpoint refused with code 0x%llx, blaming frame type %llu\n",
