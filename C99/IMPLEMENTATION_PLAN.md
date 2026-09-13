@@ -3051,6 +3051,27 @@ deterministically (H3_ID_ERROR for a client, H3_STREAM_CREATION_ERROR for a serv
 it, and **a peer that changes its connection ID during the handshake**, which the tests do not cover because they
 use the same connection ID at both ends -- the recorded transport gap rather than a claimed feature.
 
+### WT-134, first step: the platform surface, inventoried and checked
+
+FreeBSD and Windows CI legs are the Definition of Done's CI criterion, and the honest first step is not a YAML
+job but an inventory: `docs/PORTABILITY.md` lists every place this code assumes POSIX and the adaptation each
+needs -- socket headers, `WSAStartup` (which has no home in this library yet, since the UDP layer is the only
+place it touches the operating system), `ws2_32`, the `SOCKET` type and `INVALID_SOCKET`, `closesocket`,
+`ioctlsocket` for non-blocking mode, `WSAPoll`, `WSAGetLastError` and its different error set, `WSABUF` with
+`WSARecvFrom`/`WSASendTo`, and the one BEHAVIOURAL difference: on Windows `MSG_PEEK` does not report a datagram's
+full length, so a listener must hold the datagram it looked at -- which is exactly the shape the runtime
+session's pending table already has. FreeBSD, by contrast, is close to Debian: the same POSIX calls, and the
+difference is the toolchain and the OpenSSL package.
+
+**The inventory is checked, not trusted.** `scripts/check-portability.sh` greps the library for the POSIX-only
+names a port must replace and fails if one is used without being named in the document -- the same pattern as the
+compliance matrix, for the same reason: an inventory that reads like a plan but has gone out of date is worse
+than no inventory at all. It caught `sendto` and `recvfrom` missing on its first run. CI runs it.
+
+**The adaptation itself is NOT done, and no Windows job is added until it is.** A CI job that cannot pass is
+worse than an absent one, because it teaches everyone to ignore CI -- so the order is: the private platform
+header, `WSAStartup` ownership, the peek difference, then the job.
+
 ### WT-136: the score, measured rather than remembered
 
 The Definition of Done's last criterion is that the README's status goes "from 0% to the measured final score",

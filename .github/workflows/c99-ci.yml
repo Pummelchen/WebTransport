@@ -112,6 +112,10 @@ jobs:
         # A matrix that names functions nobody wrote is worse than no matrix, because it reads like
         # evidence: this greps every symbol it names and fails if one is missing.
         run: C99/scripts/check-matrix.sh
+      - name: Check the portability inventory against the tree
+        # The inventory lists what a Windows or FreeBSD build needs; this fails if the library uses a POSIX-only
+        # call the inventory does not name, which is how such a document stays true.
+        run: C99/scripts/check-portability.sh
 
       - name: CLI smoke
         run: |
