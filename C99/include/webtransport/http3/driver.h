@@ -116,6 +116,13 @@ typedef struct wt_http3_driver {
    * belongs to. */
   uint64_t session_id;
   int session_id_set;
+  /* The request this endpoint sent, so it can be sent AGAIN when a probe timeout reports it lost (RFC 9002
+   * section 6.2.4). The bytes are the ones `send_message` left in `scratch`, so they stay valid until the
+   * driver sends another message -- which for a client's CONNECT is the rest of the handshake, and which the
+   * resend function says in its own contract (WT-135). */
+  uint64_t request_stream_id;
+  size_t request_length;
+  int request_retained;
 } wt_http3_driver_t;
 
 void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint);
@@ -281,6 +288,15 @@ wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
 
 /* Send a request, a response or a trailer on a stream this endpoint owns, as a HEADERS frame.
  * `peer_max_entries` is the peer's advertised QPACK capacity, from its SETTINGS. */
+/* Send the retained request again, because its packet was reported lost.
+ *
+ * The bytes are the driver's own `scratch` at the length it last sent, so this is only valid while nothing else
+ * has used the scratch: the caller knows when that is (a client's CONNECT is the only message it sends before the
+ * response). WT_ERR_STATE when there is nothing retained, which is a caller that asked at the wrong time rather
+ * than a peer that did something. */
+wt_status_t wt_http3_driver_resend_request(wt_http3_driver_t *driver,
+                                           const wt_http3_driver_transport_t *transport, uint64_t now);
+
 wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
                                          const wt_http3_driver_transport_t *transport,
                                          uint64_t stream_id, const wt_http3_message_t *message,

@@ -697,8 +697,22 @@ wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
                                            driver->scratch + 256U,
                                            sizeof(driver->scratch) - 256U, &w, NULL);
   if (status != WT_OK) return status;
+  /* Retained on the way out: a probe timeout may have to send these very bytes again (WT-135). */
+  driver->request_stream_id = stream_id;
+  driver->request_length = wt_writer_offset(&w);
+  driver->request_retained = 1;
   return transport->send_stream(transport->context, stream_id, driver->scratch,
                                 wt_writer_offset(&w), fin, now);
+}
+
+wt_status_t wt_http3_driver_resend_request(wt_http3_driver_t *driver,
+                                           const wt_http3_driver_transport_t *transport, uint64_t now) {
+  if (driver == NULL || transport == NULL || transport->send_stream == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  if (driver->request_retained == 0 || driver->request_length == 0U) return WT_ERR_STATE;
+  return transport->send_stream(transport->context, driver->request_stream_id, driver->scratch,
+                                driver->request_length, 0, now);
 }
 
 wt_status_t wt_http3_driver_classify_bidi_start(const uint8_t *bytes, size_t length,
