@@ -137,11 +137,13 @@ int main(int argc, char **argv) {
     if (options.json != 0) {
       printf("{\"role\":\"client\",\"status\":\"%s\",\"established\":%s,\"connectAccepted\":%s,"
              "\"responseStatus\":%u,\"receivedBytes\":%llu,\"receivedDatagram\":%s,"
-             "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u}\n",
+             "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u,\"packetsSeen\":%u,"
+             "\"lastReceive\":\"%s\"}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
              (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
-             wt_status_name(result.first_receive_error), result.receive_errors);
+             wt_status_name(result.first_receive_error), result.receive_errors, result.packets_seen,
+             wt_status_name(result.last_receive));
     } else {
       printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.status, (unsigned long long)result.received_bytes,
@@ -151,6 +153,10 @@ int main(int argc, char **argv) {
       if (result.receive_errors > 0U) {
         printf("client: the runtime recorded %u receive error(s), the first being %s\n", result.receive_errors,
                wt_status_name(result.first_receive_error));
+      }
+      if (status != WT_OK) {
+        printf("client: the connection saw %u packet(s); its last receive said %s\n", result.packets_seen,
+               wt_status_name(result.last_receive));
       }
     }
     return status == WT_OK ? 0 : 1;

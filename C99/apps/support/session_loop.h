@@ -48,6 +48,11 @@ typedef struct wt_loop_result {
    * exactly like a peer that never answered (WT-135). */
   wt_status_t first_receive_error;
   unsigned receive_errors;
+  /* How many packets the connection SAW, and what its last receive call returned. A stall has two shapes --
+   * "nothing arrived" and "things arrived and were not consumed" -- and they look the same from the tool's
+   * status alone (WT-135). */
+  unsigned packets_seen;
+  wt_status_t last_receive;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */
