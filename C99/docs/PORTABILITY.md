@@ -34,16 +34,20 @@ Windows is the real work. Every item below is a place where the current code ass
    `wt_udp_platform_set_nonblocking`, `wt_udp_platform_wait_readable`, `wt_udp_platform_last_error`), plus the
    handle type. `udp.c` names those operations now rather than spelling POSIX in a dozen places. The `_WIN32`
    branches are written from this inventory and are **not verified** -- nothing here builds them -- and they say
-   so in the header. What remains in `udp.c` is the datagram calls themselves (`recvmsg`/`sendmsg` with
-   `struct iovec`) and the public `int fd` field, which a Windows port must widen to `SOCKET`. Three call sites
-   spell them: `wt_udp_send`, `wt_udp_receive` and `wt_udp_peek`. A partial conversion does not compile here --
-   `-Werror` rejects the unused wrapper -- so this is one focused pass with the datagram-message shape carried
-   into all three at once, which is the shape `wt_udp_platform_message_t` was drafted for.
+   so in the header. **DONE**: the datagram calls are the header's business too, through
+   `wt_udp_platform_message_t` and `wt_udp_platform_send_message` / `wt_udp_platform_receive_message`, and the
+   three call sites (`wt_udp_send`, `wt_udp_receive`, `wt_udp_peek`) went over in one pass -- a partial
+   conversion does not compile here, because `-Werror` rejects the wrapper nothing calls. Two things the first
+   two attempts got wrong are worth keeping: the message structure has to be defined AFTER the handle it
+   names (`unknown type name wt_udp_handle_t`), and the two calls cannot have a non-`static` prototype above a
+   `static` definition. What remains in `udp.c` is the public `int fd` field, which a Windows port must widen
+   to `SOCKET`.
 2. `WSAStartup` somewhere that owns a process lifetime: the UDP layer is the only place this library touches the
    operating system, so a reference count there is the natural home.
-3. The `wt_udp_peek` difference above, which is behavioural rather than syntactic: on Windows a peek cannot see
-   the whole datagram, so a listener must hold the datagram it looked at. The runtime session's pending table is
-   the shape that needs.
+3. The `wt_udp_peek` difference, which is behavioural rather than syntactic and is now named in the header
+   rather than discovered: on Windows a peek cannot see past the caller's buffer, so the `FULL_LENGTH` flag
+   cannot be honoured there and a listener must hold the datagram it looked at. The runtime session's pending
+   table is the shape that needs.
 4. A CMake branch that links `ws2_32` and finds OpenSSL, and a CI job that builds it.
 
 **Status:** the inventory is complete and mechanically checked; step 1 (the platform header) is done and verified

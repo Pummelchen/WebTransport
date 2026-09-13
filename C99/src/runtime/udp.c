@@ -294,7 +294,7 @@ wt_status_t wt_udp_send(const wt_udp_socket_t *socket, const wt_udp_address_t *t
                         const uint8_t *data, size_t length) {
   struct sockaddr_storage storage;
   socklen_t storage_len = 0;
-  ssize_t written;
+  size_t written = 0U;
   wt_status_t status;
 
   if (socket == NULL || to == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -307,21 +307,22 @@ wt_status_t wt_udp_send(const wt_udp_socket_t *socket, const wt_udp_address_t *t
 
   status = to_sockaddr(to, &storage, &storage_len);
   if (status != WT_OK) return status;
-  written = sendto(socket->fd, data, length, 0, (const struct sockaddr *)(const void *)&storage,
-                   storage_len);
-  if (written < 0) return map_errno(wt_udp_platform_last_error());
+  if (wt_udp_platform_send_message((wt_udp_handle_t)socket->fd,
+                                   (const struct sockaddr *)(const void *)&storage, (int)storage_len, data,
+                                   length, &written) != 0) {
+    return map_errno(wt_udp_platform_last_error());
+  }
   /* A datagram is sent whole or not at all, so a short count is not a partial send: it is a platform
    * that did something this layer does not describe. */
-  if ((size_t)written != length) return WT_ERR_IO;
+  if (written != length) return WT_ERR_IO;
   return WT_OK;
 }
 
 wt_status_t wt_udp_receive(const wt_udp_socket_t *socket, uint8_t *buffer, size_t capacity,
                            size_t *out_length, wt_udp_address_t *out_from) {
   struct sockaddr_storage storage;
-  struct iovec iov;
-  struct msghdr message;
-  ssize_t received;
+  wt_udp_platform_message_t message;
+  int address_length = (int)sizeof(storage);
   wt_status_t status;
 
   if (socket == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -330,44 +331,42 @@ wt_status_t wt_udp_receive(const wt_udp_socket_t *socket, uint8_t *buffer, size_
   *out_length = 0U;
 
   memset(&storage, 0, sizeof(storage));
-  memset(&iov, 0, sizeof(iov));
   memset(&message, 0, sizeof(message));
-  iov.iov_base = buffer;
-  iov.iov_len = capacity;
-  message.msg_name = &storage;
-  message.msg_namelen = (socklen_t)sizeof(storage);
-  message.msg_iov = &iov;
-  message.msg_iovlen = 1;
+  message.bytes = buffer;
+  message.capacity = capacity;
+  message.address = &storage;
+  message.address_length = &address_length;
+  message.flags_in = 0;
 
-  /* recvmsg rather than recvfrom so that MSG_TRUNC is reported in `msg_flags`: a receive that only
-   * returned a short count would leave a caller unable to tell a truncated datagram from a peer that
-   * sent a small one (WT-36). */
-  received = recvmsg(socket->fd, &message, 0);
-  if (received < 0) return map_errno(errno);
+  /* The platform call receives one datagram WITH its sender and its truncation flag: a receive that only
+   * returned a short count would leave a caller unable to tell a truncated datagram from a peer that sent a
+   * small one (WT-36). */
+  if (wt_udp_platform_receive_message((wt_udp_handle_t)socket->fd, &message) != 0) {
+    return map_errno(wt_udp_platform_last_error());
+  }
 
   /* The sender is reported even when the datagram is discarded, because it is known and it is what a
    * diagnostic needs. */
   if (out_from != NULL) {
-    status = from_sockaddr((const struct sockaddr *)(const void *)&storage, message.msg_namelen,
+    status = from_sockaddr((const struct sockaddr *)(const void *)&storage, (socklen_t)address_length,
                            out_from);
     if (status != WT_OK) return status;
   }
 
-  if ((message.msg_flags & MSG_TRUNC) != 0) {
+  if ((message.flags_out & WT_UDP_PLATFORM_TRUNCATED) != 0) {
     /* The datagram was larger than the buffer, so its bytes are not the datagram. Nothing is written
      * to the length, which is what keeps a caller from parsing the prefix of a packet. */
     return WT_ERR_TRUNCATED;
   }
-  *out_length = (size_t)received;
+  *out_length = message.bytes_out;
   return WT_OK;
 }
 
 wt_status_t wt_udp_peek(const wt_udp_socket_t *socket, uint8_t *buffer, size_t capacity,
                         size_t *out_length, size_t *out_available, wt_udp_address_t *out_from) {
   struct sockaddr_storage storage;
-  struct iovec iov;
-  struct msghdr message;
-  ssize_t received;
+  wt_udp_platform_message_t message;
+  int address_length = (int)sizeof(storage);
   wt_status_t status;
 
   if (socket == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -377,28 +376,29 @@ wt_status_t wt_udp_peek(const wt_udp_socket_t *socket, uint8_t *buffer, size_t c
   if (out_available != NULL) *out_available = 0U;
 
   memset(&storage, 0, sizeof(storage));
-  memset(&iov, 0, sizeof(iov));
   memset(&message, 0, sizeof(message));
-  iov.iov_base = buffer;
-  iov.iov_len = capacity;
-  message.msg_name = &storage;
-  message.msg_namelen = (socklen_t)sizeof(storage);
-  message.msg_iov = &iov;
-  message.msg_iovlen = 1;
+  message.bytes = buffer;
+  message.capacity = capacity;
+  message.address = &storage;
+  message.address_length = &address_length;
+  /* PEEK is the whole point: the datagram is read and left in the queue, so the connection's own receive
+   * finds it exactly where it was. FULL_LENGTH is what makes the reported length the datagram's OWN rather
+   * than the copied one -- and it is the flag a platform that cannot see past the buffer will not honour,
+   * which the platform header says in the structure's comment. */
+  message.flags_in = WT_UDP_PLATFORM_PEEK | WT_UDP_PLATFORM_FULL_LENGTH;
 
-  /* MSG_PEEK is the whole point: the datagram is read and left in the queue, so the connection's own receive
-   * finds it exactly where it was. MSG_TRUNC is not an error here as it is in `wt_udp_receive`: this call is
-   * reporting what is there, and the length it reports is the datagram's own. */
-  received = recvmsg(socket->fd, &message, MSG_PEEK | MSG_TRUNC);
-  if (received < 0) return map_errno(errno);
+  if (wt_udp_platform_receive_message((wt_udp_handle_t)socket->fd, &message) != 0) {
+    return map_errno(wt_udp_platform_last_error());
+  }
 
   if (out_from != NULL) {
-    status = from_sockaddr((const struct sockaddr *)(const void *)&storage, message.msg_namelen, out_from);
+    status = from_sockaddr((const struct sockaddr *)(const void *)&storage, (socklen_t)address_length,
+                           out_from);
     if (status != WT_OK) return status;
   }
-  *out_length = (size_t)received;
+  *out_length = message.bytes_out;
   if (out_available != NULL) {
-    size_t copied = (size_t)received < capacity ? (size_t)received : capacity;
+    size_t copied = message.bytes_out < capacity ? message.bytes_out : capacity;
     *out_available = copied;
   }
   return WT_OK;
