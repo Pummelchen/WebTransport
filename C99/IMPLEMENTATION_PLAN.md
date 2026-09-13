@@ -1360,7 +1360,27 @@ Four tests: SETTINGS first and only once, every frame type that may not open the
 refused sets after SETTINGS, and the one-stream and closure rules.
 
 Implement control stream lifecycle.
-- Implement request stream lifecycle.
+- **Sixth part done: the request stream's frame order.** `include/webtransport/http3/request.h` is RFC 9114
+section 4.1's shape for the request direction: a single HEADERS frame, optionally the content as DATA
+frames, optionally a single trailing HEADERS. "Receipt of an invalid sequence of frames MUST be treated as a
+connection error of type H3_FRAME_UNEXPECTED. In particular, a DATA frame before any HEADERS frame, or a
+HEADERS or DATA frame after the trailing HEADERS frame, is considered invalid", and the machine refuses
+everything that is not the next frame in that shape -- which also covers the frames the stream table has
+already ruled out, so a caller cannot reach this with a SETTINGS frame and get a different answer.
+
+Two decisions are worth recording. The response direction is deliberately absent: a server may send zero or
+more informational (1xx) responses before the final one, and whether a HEADERS frame is informational is
+only known from its decoded `:status`, so that machine belongs with QPACK rather than being guessed from
+frame order. And an end before the request's HEADERS is an incomplete request rather than a malformed
+sequence: section 4.1 has the server abort its own response stream with H3_REQUEST_INCOMPLETE, which is a
+STREAM error, and the machine reports it as one -- a caller that closed the connection for it would be
+turning its own decision into the peer's fault.
+
+Three tests: the legal shapes (HEADERS alone, with content, with a trailer), every frame type in each of the
+three positions where it is wrong, and the endings, including a reset, which is not an ordering matter at
+all.
+
+Implement request stream lifecycle.
 - **Fourth part done: GOAWAY.** `include/webtransport/http3/goaway.h` carries RFC 9114 section 7.2.6 and
 section 5.2's shutdown rules. The payload is one varint, so the work is in what the identifier means and
 when it may change: a server's is a client-initiated bidirectional stream ID (section 7.2.6 makes any other

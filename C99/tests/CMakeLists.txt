@@ -50,6 +50,7 @@ set(WT_UNIT_TESTS
   test_http3_control
   test_http3_goaway
   test_http3_streams
+  test_http3_request
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)

@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 43 unit test files and 76,674 checks, run by `ctest` and again under
+- 44 unit test files and 76,731 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -388,6 +388,13 @@ What is here:
   of the rules, so the receiver's role is a parameter: MAX_PUSH_ID is a client's frame (section 7.2.7) and
   PUSH_PROMISE a server's (section 7.2.5), and receiving one's own frame is H3_FRAME_UNEXPECTED. Unknown
   frame types stay allowed, because HTTP/3 grows by extension frames.
+- **The request stream's frame order** (Phase 5, sixth part): `http3/request.h` is RFC 9114 section 4.1's
+  shape for the request direction -- one HEADERS frame, optional DATA, one optional trailing HEADERS -- with
+  anything else, and anything after the trailer, H3_FRAME_UNEXPECTED. A stream that ends before the
+  request's HEADERS is an incomplete request instead: H3_REQUEST_INCOMPLETE, which section 4.1 defines as
+  the code a server aborts its own RESPONSE stream with, so it is reported as a stream error rather than a
+  connection error. The response direction is deliberately not here: whether a HEADERS frame is an
+  informational 1xx response is only known from the decoded `:status`, so that machine lands with QPACK.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it
