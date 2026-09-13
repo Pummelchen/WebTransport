@@ -21,4 +21,7 @@ void wt_scenario_matrix_run(wt_cli_report_t *report);
 /* Add the datagram interop matrix to the report. */
 void wt_scenario_datagram_matrix(wt_cli_report_t *report);
 
+/* Add the GOAWAY, close and drain interop matrix to the report. */
+void wt_scenario_goaway_close_drain_matrix(wt_cli_report_t *report);
+
 #endif /* WT_CONFORMANCE_SCENARIO_MATRIX_H */

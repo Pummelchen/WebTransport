@@ -7,12 +7,16 @@
 
 #include "webtransport/cursor.h"
 #include "webtransport/http3/driver.h"
+#include "webtransport/http3/goaway.h"
+#include "webtransport/http3/role.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/writer.h"
 
 #include "webtransport/http3/frame.h"
 
 #include "webtransport/quic/datagram.h"
+#include "webtransport/webtransport/capsule.h"
+#include "webtransport/webtransport/session.h"
 #include "webtransport/quic/varint.h"
 
 #define WT_MATRIX_MAX_CASES 12U
@@ -358,4 +362,164 @@ void wt_scenario_datagram_matrix(wt_cli_report_t *report) {
   }
 
   report_matrix(report, "interop-datagram-matrix", "datagram interop cases", rows, count);
+}
+
+void wt_scenario_goaway_close_drain_matrix(wt_cli_report_t *report) {
+  matrix_row_t rows[WT_MATRIX_MAX_CASES];
+  unsigned count = 0U;
+
+  /* A GOAWAY gates the streams it names: it says which identifiers the sender will still process, so
+   * everything at or above it is refused and everything below it is not. */
+  {
+    wt_http3_goaway_t goaway;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    int ok;
+    wt_http3_goaway_init(&goaway);
+    (void)wt_http3_goaway_on_received(&goaway, WT_HTTP3_ROLE_SERVER, 4U, &error);
+    ok = wt_http3_goaway_rejects_stream(&goaway, 0U) == 0 && wt_http3_goaway_rejects_stream(&goaway, 4U) == 1 &&
+         wt_http3_goaway_rejects_stream(&goaway, 8U) == 1 &&
+         wt_http3_goaway_allows_new_requests(&goaway) == 0;
+    rows[count].name = "a GOAWAY gates the streams at or above its identifier";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* A drain, in either direction, is what stops NEW streams: the session is still alive, which is the whole
+   * point of a drain rather than a close. */
+  {
+    wt_webtransport_session_t session;
+    int ok;
+    wt_webtransport_session_init(&session);
+    (void)wt_webtransport_session_established(&session);
+    ok = wt_webtransport_session_on_drain(&session, 0) == WT_OK &&
+         session.state == WT_WEBTRANSPORT_SESSION_DRAINING &&
+         session.drain_received == 1 && wt_webtransport_session_allows_new_streams(&session) == 0;
+    rows[count].name = "a received drain stops new streams";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_session_t session;
+    int ok;
+    wt_webtransport_session_init(&session);
+    (void)wt_webtransport_session_established(&session);
+    ok = wt_webtransport_session_on_drain(&session, 1) == WT_OK &&
+         session.state == WT_WEBTRANSPORT_SESSION_DRAINING && session.drain_sent == 1 &&
+         wt_webtransport_session_allows_new_streams(&session) == 0;
+    rows[count].name = "a sent drain stops new streams";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* A drain repeated is not an error -- a peer may send it twice while it is shutting down -- and it does not
+   * end the session: the close capsule can still be written afterwards. */
+  {
+    wt_webtransport_session_t session;
+    int ok;
+    wt_webtransport_session_init(&session);
+    (void)wt_webtransport_session_established(&session);
+    ok = wt_webtransport_session_on_drain(&session, 0) == WT_OK &&
+         wt_webtransport_session_on_drain(&session, 0) == WT_OK &&
+         session.state == WT_WEBTRANSPORT_SESSION_DRAINING;
+    rows[count].name = "a repeated drain is accepted and does not close the session";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_session_t session;
+    uint8_t bytes[64];
+    wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
+    int ok;
+    wt_webtransport_session_init(&session);
+    (void)wt_webtransport_session_established(&session);
+    (void)wt_webtransport_session_on_drain(&session, 0);
+    ok = wt_webtransport_session_write_close(&session, &w, 0U, NULL, 0U) == WT_OK;
+    rows[count].name = "a draining session can still write its close";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The close, and the two rules that go with it: the first code is the session's, and a capsule after the end
+   * is a message the peer has no state for. */
+  {
+    wt_webtransport_session_t session;
+    int ok;
+    wt_webtransport_session_init(&session);
+    (void)wt_webtransport_session_established(&session);
+    (void)wt_webtransport_session_on_close(&session, 1, 22U);
+    ok = session.state == WT_WEBTRANSPORT_SESSION_CLOSED && session.close_error_set == 1 &&
+         session.close_error_code == 22U && wt_webtransport_session_allows_new_streams(&session) == 0;
+    rows[count].name = "a close ends the session with its own code";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_session_t session;
+    int ok;
+    wt_webtransport_session_init(&session);
+    (void)wt_webtransport_session_established(&session);
+    (void)wt_webtransport_session_on_close(&session, 1, 22U);
+    (void)wt_webtransport_session_on_close(&session, 0, 99U);
+    ok = session.close_error_code == 22U;
+    rows[count].name = "the first close's code is the one the session keeps";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_session_t session;
+    uint8_t bytes[64];
+    wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
+    int ok;
+    wt_webtransport_session_init(&session);
+    (void)wt_webtransport_session_established(&session);
+    (void)wt_webtransport_session_on_close(&session, 1, 22U);
+    ok = wt_webtransport_session_write_close(&session, &w, 22U, NULL, 0U) != WT_OK;
+    rows[count].name = "a capsule after the end is refused";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The capsule itself: the code and the reason a peer reads, which is what a close is FOR. */
+  {
+    static const uint8_t reason[] = "interop done";
+    uint8_t bytes[64];
+    wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
+    wt_cursor_t c;
+    wt_webtransport_capsule_t capsule;
+    uint32_t code = 0U;
+    const uint8_t *read_reason = NULL;
+    size_t read_length = 0U;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    int ok = wt_webtransport_close_session_write(&w, 22U, reason, sizeof(reason) - 1U) == WT_OK;
+    c = wt_cursor_init(bytes, wt_writer_offset(&w));
+    memset(&capsule, 0, sizeof(capsule));
+    ok = ok && wt_webtransport_capsule_decode(&c, sizeof(bytes), &capsule, &error) == WT_OK &&
+         capsule.type == WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION &&
+         wt_webtransport_close_session_parse(&capsule, &code, &read_reason, &read_length, &error) == WT_OK &&
+         code == 22U && read_length == sizeof(reason) - 1U &&
+         memcmp(read_reason, reason, sizeof(reason) - 1U) == 0;
+    rows[count].name = "the close capsule carries its code and its reason";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The drain capsule, which has no value at all: a peer that reads one finds the type and nothing else. */
+  {
+    uint8_t bytes[16];
+    wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
+    wt_cursor_t c;
+    wt_webtransport_capsule_t capsule;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    int ok = wt_webtransport_drain_session_write(&w) == WT_OK;
+    c = wt_cursor_init(bytes, wt_writer_offset(&w));
+    memset(&capsule, 0, sizeof(capsule));
+    ok = ok && wt_webtransport_capsule_decode(&c, sizeof(bytes), &capsule, &error) == WT_OK &&
+         capsule.type == WT_CAPSULE_DRAIN_SESSION && capsule.value_length == 0U &&
+         capsule.bytes_consumed == wt_writer_offset(&w);
+    rows[count].name = "the drain capsule carries no value";
+    rows[count].held = ok;
+    count++;
+  }
+
+  report_matrix(report, "interop-goaway-close-drain-matrix", "goaway, close and drain cases", rows, count);
 }
