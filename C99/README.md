@@ -648,6 +648,15 @@ What is here:
   the connection's whole life, the two very different limits the suite implies (2^23 and 2^52 for AES-GCM,
   2^36 for ChaCha20-Poly1305's integrity), a rotation before the limit is reached, and `AEAD_LIMIT_REACHED`
   when a rotation is not possible.
+- **Consuming and retiring connection IDs** (Phase 4, eleventh part): RFC 9000 section 5.1.2's other half, which
+  the identity table alone never was. `wt_quic_connection_use_new_connection_id` switches the destination to an ID
+  the peer issued -- "an endpoint can change the connection ID it uses for a peer to another available one at any
+  time" -- and retires the one it abandons with a RETIRE_CONNECTION_ID, because the section forbids forgetting one
+  without saying so. A NEW_CONNECTION_ID whose `retire_prior_to` covers IDs this endpoint holds retires them all,
+  and the ORDER is not arbitrary: section 19.16 forbids a RETIRE from naming the destination of the packet that
+  carries it, so when the ID in use is one of the retired ones the replacement in that same frame is adopted
+  first and the retires ride it. A test caught exactly that: the first version retired first and the peer refused
+  the frame, which is what a test with a real peer is for.
 - **The CRYPTO stream** (Phase 4, ninth part): `quic/crypto_stream.h` is the handshake bytes, which
   arrive by offset rather than in order. The receive half is a window with a bitmap of what has
   arrived, delivering only up to the first hole, so a ClientHello split across two packets reads

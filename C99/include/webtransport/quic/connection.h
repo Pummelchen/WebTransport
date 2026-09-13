@@ -246,6 +246,17 @@ typedef struct wt_quic_connection {
   /* And the ones the peer has issued to this endpoint. */
   wt_quic_peer_connection_id_t peer_ids[WT_QUIC_PEER_CONNECTION_IDS_MAX];
   size_t peer_id_count;
+  /* The sequence of the peer ID this endpoint is sending TO, when it is one the peer issued rather than the
+   * handshake's or a Retry's -- those have no sequence. A client that switches IDs (section 5.1.2: "An endpoint
+   * can change the connection ID it uses for a peer to another available one at any time") has to know which one
+   * it is abandoning, because abandoning it means retiring it, and `peer_ids_retired` counts those for the
+   * diagnostics a connection-ID bug is invisible without. */
+  uint64_t current_peer_sequence;
+  int current_peer_sequence_set;
+  uint64_t peer_ids_retired;
+  /* Set while a NEW_CONNECTION_ID is being handled whose retire_prior_to retired the ID this endpoint was
+   * using: the replacement arrives in that same frame, so it is adopted once it has been stored. */
+  int retire_current_after_store;
   /* The streams this connection has, bounded by the table. */
   wt_quic_stream_table_t streams;
   /* The CONNECTION-level flow control, both directions: what this endpoint has granted and received,
@@ -737,6 +748,25 @@ wt_status_t wt_quic_connection_initiate_key_update(wt_quic_connection_t *connect
 /* Whether an update may be initiated now, which is the two conditions above and nothing else. A caller that
  * updates on a counter asks this first. */
 int wt_quic_connection_key_update_allowed(const wt_quic_connection_t *connection);
+
+/* Switch to another connection ID the PEER issued (RFC 9000 section 5.1.2): "An endpoint can change the
+ * connection ID it uses for a peer to another available one at any time during the connection." The ID being
+ * abandoned is RETIRED with a frame, because the section also says an endpoint must not forget a connection ID
+ * without retiring it -- and a retire is what asks the peer for a replacement.
+ *
+ * WT_ERR_STATE when the peer has issued nothing to switch to, which is the ordinary state of a connection whose
+ * peer sent no NEW_CONNECTION_ID (the handshake's ID is not one of these and needs no retiring to leave, though
+ * leaving it does retire it if it came from a NEW_CONNECTION_ID).
+ *
+ * A caller uses this to migrate, or simply to stop being linkable by a connection ID it has used for a while
+ * (section 9.5). */
+wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *connection, uint64_t now);
+
+/* How many connection IDs this endpoint has retired from the peer -- the ones it stopped using -- and how many
+ * of the peer's are stored and available. Diagnostics: a retire that was never sent looks exactly like a peer
+ * that never asked. */
+uint64_t wt_quic_connection_peer_ids_retired(const wt_quic_connection_t *connection);
+size_t wt_quic_connection_peer_id_count(const wt_quic_connection_t *connection);
 
 /* RFC 9001 section 6.6's counters and limits. `aead_encrypted` is per packet-number space and is reset for the
  * Application space by a key update, because it counts packets per KEY SET; `aead_failed` is the connection's,

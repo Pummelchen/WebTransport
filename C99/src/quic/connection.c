@@ -934,6 +934,104 @@ static uint64_t frame_stream_id(const wt_quic_frame_t *frame) {
   return 0U;
 }
 
+/* Send a RETIRE_CONNECTION_ID for a sequence the peer issued to this endpoint (RFC 9000 section 19.16).
+ *
+ * Section 5.1.2: "An endpoint MUST NOT forget a connection ID without retiring it", and the retire is also what
+ * asks the peer to replace it. The frame goes through the ordinary send path, so it is retransmitted when it is
+ * lost -- which is why the section's SHOULD about limiting unacknowledged retires is a bound this layer does not
+ * track rather than one it ignores: the retransmission machinery is what makes the count converge.
+ *
+ * A retire that cannot be sent (no room, no keys) is reported to the caller and the connection ID is NOT
+ * forgotten: forgetting one without saying so is the single thing the section forbids outright. */
+static wt_status_t send_retire_connection_id(wt_quic_connection_t *connection, uint64_t sequence,
+                                             uint64_t now) {
+  wt_quic_frame_t frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID);
+
+  frame.as.retire_connection_id.sequence = sequence;
+  return wt_quic_connection_send_frame(connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, now);
+}
+
+/* Forget the stored peer ID with this sequence, retiring it first. Returns 1 when one was stored. */
+static wt_status_t forget_peer_connection_id(wt_quic_connection_t *connection, uint64_t sequence,
+                                             uint64_t now, int *out_forgotten) {
+  size_t i;
+  wt_status_t status;
+
+  if (out_forgotten != NULL) *out_forgotten = 0;
+  for (i = 0U; i < WT_QUIC_PEER_CONNECTION_IDS_MAX; i++) {
+    if (!connection->peer_ids[i].in_use || connection->peer_ids[i].sequence != sequence) continue;
+    status = send_retire_connection_id(connection, sequence, now);
+    if (status != WT_OK) return status;
+    connection->peer_ids[i].in_use = 0;
+    connection->peer_id_count--;
+    connection->peer_ids_retired++;
+    if (connection->current_peer_sequence_set != 0 &&
+        connection->current_peer_sequence == sequence) {
+      /* The ID being abandoned was the one in use: this endpoint is now addressing the peer by an ID it has
+       * retired, which section 5.1.2 forbids, so the caller has to adopt another (or the handshake's) before
+       * anything else goes out. */
+      connection->current_peer_sequence_set = 0;
+    }
+    if (out_forgotten != NULL) *out_forgotten = 1;
+    return WT_OK;
+  }
+  return WT_OK;
+}
+
+/* Adopt a stored peer ID as the destination, WITHOUT retiring what it replaces (the caller does that, in the
+ * order section 5.1.2 requires). */
+static void adopt_stored_peer_id(wt_quic_connection_t *connection, size_t slot) {
+  adopt_peer_connection_id(connection, connection->peer_ids[slot].id, connection->peer_ids[slot].length);
+  connection->current_peer_sequence = connection->peer_ids[slot].sequence;
+  connection->current_peer_sequence_set = 1;
+}
+
+/* The first stored peer ID that is not the one in use, or WT_QUIC_PEER_CONNECTION_IDS_MAX for none. */
+static size_t first_other_peer_id(const wt_quic_connection_t *connection) {
+  size_t i;
+  for (i = 0U; i < WT_QUIC_PEER_CONNECTION_IDS_MAX; i++) {
+    if (!connection->peer_ids[i].in_use) continue;
+    if (connection->current_peer_sequence_set != 0 &&
+        connection->peer_ids[i].sequence == connection->current_peer_sequence) {
+      continue;
+    }
+    return i;
+  }
+  return WT_QUIC_PEER_CONNECTION_IDS_MAX;
+}
+
+wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *connection, uint64_t now) {
+  size_t slot;
+  uint64_t abandoned;
+  int had_current;
+
+  if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
+  slot = first_other_peer_id(connection);
+  if (slot == WT_QUIC_PEER_CONNECTION_IDS_MAX) return WT_ERR_STATE;
+
+  /* Adopt FIRST, then retire. RFC 9000 section 19.16: "The sequence number specified in a RETIRE_CONNECTION_ID
+   * frame MUST NOT refer to the Destination Connection ID field of the packet in which the frame is contained" --
+   * so the retirement has to ride an ID that is not the one being retired, and the replacement is right here. A
+   * first version retired first and addressed the frame to the ID it was abandoning, which the peer rightly
+   * refused as a PROTOCOL_VIOLATION. */
+  abandoned = connection->current_peer_sequence;
+  had_current = connection->current_peer_sequence_set;
+  adopt_stored_peer_id(connection, slot);
+  if (had_current != 0) {
+    int forgotten = 0;
+    return forget_peer_connection_id(connection, abandoned, now, &forgotten);
+  }
+  return WT_OK;
+}
+
+uint64_t wt_quic_connection_peer_ids_retired(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->peer_ids_retired : 0U;
+}
+
+size_t wt_quic_connection_peer_id_count(const wt_quic_connection_t *connection) {
+  return connection != NULL ? connection->peer_id_count : 0U;
+}
+
 /* A NEW_CONNECTION_ID from the peer (RFC 9000 section 19.15): store it, bounded by what this endpoint
  * said it would store, and refuse what the section makes an error rather than something to ignore. */
 static wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
@@ -972,11 +1070,30 @@ static wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
       }
       return WT_OK;
     }
-    /* A retire_prior_to retires everything below it, which is how a peer asks for the old ones back. */
-    if (known->sequence < frame->as.new_connection_id.retire_prior_to) {
-      connection->peer_ids[i].in_use = 0;
-      connection->peer_id_count--;
+  }
+
+  /* A retire_prior_to retires everything below it. WHICH ORDER the two halves of that take depends on whether
+   * the ID this endpoint is USING is one of them:
+   *
+   *   - if it is not, the RETIRE frames go out first and the new ID is stored after, which is section 5.1.2's
+   *     own ordering ("retire them with RETIRE_CONNECTION_ID frames before adding the newly provided connection
+   *     ID to the set of active connection IDs");
+   *   - if it IS, the replacement has to be adopted first, because section 19.16 forbids a RETIRE_CONNECTION_ID
+   *     from naming the destination of the packet that carries it -- the retires then ride the ID this frame
+   *     provides, which is exactly why the peer put a new one in it.
+   *
+   * Either way an endpoint that cannot SEND a retire does not forget the ID (section 5.1.2's MUST NOT). */
+  {
+    int dropped_current = 0;
+    for (i = 0U; i < WT_QUIC_PEER_CONNECTION_IDS_MAX; i++) {
+      if (!connection->peer_ids[i].in_use) continue;
+      if (connection->peer_ids[i].sequence >= frame->as.new_connection_id.retire_prior_to) continue;
+      if (connection->current_peer_sequence_set != 0 &&
+          connection->peer_ids[i].sequence == connection->current_peer_sequence) {
+        dropped_current = 1;
+      }
     }
+    connection->retire_current_after_store = dropped_current;
   }
   if (slot == WT_QUIC_PEER_CONNECTION_IDS_MAX) {
     /* Every slot is taken by an ID that is still active, which is more than this endpoint said it would
@@ -1002,6 +1119,21 @@ static wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
   memcpy(connection->peer_ids[slot].reset_token,
          frame->as.new_connection_id.stateless_reset_token, 16U);
   connection->peer_id_count++;
+  if (connection->retire_current_after_store != 0) {
+    connection->retire_current_after_store = 0;
+    adopt_stored_peer_id(connection, slot);
+  }
+  /* And now the retires, in whichever order the branch above left them: addressed to an ID that is not being
+   * retired, because the one in use has just been replaced if it was covered. */
+  for (i = 0U; i < WT_QUIC_PEER_CONNECTION_IDS_MAX; i++) {
+    int forgotten = 0;
+    wt_status_t status;
+    if (!connection->peer_ids[i].in_use) continue;
+    if (connection->peer_ids[i].sequence >= frame->as.new_connection_id.retire_prior_to) continue;
+    status = forget_peer_connection_id(connection, connection->peer_ids[i].sequence, now, &forgotten);
+    if (status != WT_OK) return status;
+    i = (size_t)-1; /* the table compacted under this index; start again */
+  }
   return WT_OK;
 }
 

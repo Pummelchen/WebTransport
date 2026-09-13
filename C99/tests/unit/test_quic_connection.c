@@ -3248,6 +3248,249 @@ static void test_the_limits_follow_the_suite(void) {
                 wt_quic_connection_aead_integrity_limit(&connection));
 }
 
+/* Hand one frame from one side of the pair to the other, addressed to a chosen connection ID. The frames the
+ * ISSUING side sends itself -- `wt_quic_connection_issue_connection_id` sends the NEW_CONNECTION_ID -- need no
+ * helper; this is for the one case a real peer cannot produce on demand: a `retire_prior_to` above zero, which
+ * the library's own issuer never writes. */
+static void send_frame_from_side(connection_pair_t *pair, int to_client, const wt_quic_frame_t *frame,
+                                 const wt_quic_packet_keys_t *keys, uint64_t packet_number,
+                                 const uint8_t *dcid, size_t dcid_len) {
+  uint8_t payload[128];
+  uint8_t datagram[256];
+  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+  size_t len;
+  size_t datagram_len = 0U;
+  wt_quic_packet_build_t build;
+
+  WT_EXPECT_OK("the frame encodes", wt_quic_frame_encode(&w, frame));
+  len = wt_writer_offset(&w);
+  memset(&build, 0, sizeof(build));
+  build.short_header = 1;
+  build.version = WT_QUIC_VERSION_1;
+  build.destination_connection_id = dcid;
+  build.destination_connection_id_len = dcid_len;
+  build.packet_number = packet_number;
+  build.packet_number_length = 2U;
+  build.payload = payload;
+  build.payload_len = len;
+  build.keys = keys;
+  WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  if (to_client != 0) {
+    WT_EXPECT_OK("and is sent", wt_udp_send(&pair->server_socket, &pair->client_address, datagram,
+                                            datagram_len));
+  } else {
+    WT_EXPECT_OK("and is sent", wt_udp_send(&pair->client_socket, &pair->server_address, datagram,
+                                            datagram_len));
+  }
+}
+
+/* Take one datagram off a socket and throw it away, WITHOUT handing it to a connection: it is how a test keeps
+ * the network from delivering a frame it wants to replace, which a real peer cannot do and which is the only way
+ * to see a `retire_prior_to` the library's own issuer never writes. */
+static void discard_one_datagram(wt_udp_socket_t *socket) {
+  uint8_t buffer[WT_QUIC_MAX_PACKET];
+  size_t length = 0U;
+
+  WT_EXPECT_OK("a datagram arrives to discard", wt_udp_wait(socket, 2000000U));
+  WT_EXPECT_OK("and is read raw", wt_udp_receive(socket, buffer, sizeof(buffer), &length, NULL));
+}
+
+/* Both directions of the Application space, and the peer's parameters -- because issuing an ID the peer cannot
+ * store is refused, so the limit it granted is part of the setup. */
+static void arm_for_connection_ids(connection_pair_t *pair, uint8_t seed) {
+  wt_quic_packet_keys_t keys;
+  wt_quic_transport_parameters_t params;
+  uint8_t secret[WT_SHA256_LEN];
+  uint8_t encoded[64];
+  wt_writer_t pw = wt_writer_init(encoded, sizeof(encoded));
+  size_t i;
+
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(seed + i);
+  WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the server writes",
+               wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the client reads",
+               wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("the client writes",
+               wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads",
+               wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("a peer limit of four connection IDs",
+               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 4U));
+  WT_EXPECT_OK("which encodes", wt_quic_transport_parameters_encode(&pw, &params));
+  WT_EXPECT_OK("and is applied",
+               wt_quic_connection_set_peer_parameters(&pair->server, encoded, wt_writer_offset(&pw)));
+  /* And what THIS endpoint will store: the default of two counts the handshake's ID and leaves room for one
+   * spare (RFC 9000 section 5.1.1), so a client that wants two spares says so. */
+  pair->client.config.local_active_connection_id_limit = 4U;
+}
+
+/* Count the frames of one kind a witness recorded. */
+static unsigned witness_frames_of(const fs_witness_t *witness, wt_quic_frame_type_t kind) {
+  unsigned found = 0U;
+  size_t index;
+  for (index = 0U; index < witness->count; index++) {
+    if (witness->frames[index].kind == kind) found++;
+  }
+  return found;
+}
+
+/* RFC 9000 section 5.1.2's first sentence: "An endpoint can change the connection ID it uses for a peer to
+ * another available one at any time during the connection", and the section's MUST NOT: "An endpoint MUST NOT
+ * forget a connection ID without retiring it."
+ *
+ * The frames are the ISSUER's own: `wt_quic_connection_issue_connection_id` sends the NEW_CONNECTION_ID, so the
+ * client reads a real one. A test that hand-built them instead would be sending a second frame for a sequence the
+ * client already has -- which section 19.15 rightly treats as a duplicate to ignore, and which is how a first
+ * version of this test quietly proved nothing.
+ */
+static void test_using_an_issued_connection_id(void) {
+  connection_pair_t pair;
+  uint8_t token_a[16];
+  uint8_t token_b[16];
+  static const uint8_t id_a[8] = {0xa1U, 0xa2U, 0xa3U, 0xa4U, 0xa5U, 0xa6U, 0xa7U, 0xa8U};
+  static const uint8_t id_b[8] = {0xb1U, 0xb2U, 0xb3U, 0xb4U, 0xb5U, 0xb6U, 0xb7U, 0xb8U};
+  uint64_t now = 106000000U;
+
+  memset(token_a, 0x33, sizeof(token_a));
+  memset(token_b, 0x44, sizeof(token_b));
+  open_pair(WT_UDP_IPV4, &pair);
+  arm_for_connection_ids(&pair, 0x50U);
+
+  /* A connection whose peer has issued nothing has only the handshake's ID, and this API does not move away
+   * from that one. */
+  WT_EXPECT_STATUS("with no issued ID there is nothing to switch to", WT_ERR_STATE,
+                   wt_quic_connection_use_new_connection_id(&pair.client, now));
+
+  WT_EXPECT_OK("the server issues the first ID",
+               wt_quic_connection_issue_connection_id(&pair.server, id_a, sizeof(id_a), token_a, now));
+  now += 1000U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_U64("the client stored it", 1U, (uint64_t)wt_quic_connection_peer_id_count(&pair.client));
+
+  WT_EXPECT_OK("and the second",
+               wt_quic_connection_issue_connection_id(&pair.server, id_b, sizeof(id_b), token_b, now + 1U));
+  now += 1000U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_U64("which it stored too", 2U, (uint64_t)wt_quic_connection_peer_id_count(&pair.client));
+
+  /* Use one: the destination becomes an ID the peer issued. Nothing is retired yet, because the handshake's ID
+   * is not in the peer's table and has no sequence to name. */
+  WT_EXPECT_OK("the client switches to an issued ID",
+               wt_quic_connection_use_new_connection_id(&pair.client, now + 1U));
+  WT_EXPECT_TRUE("and addresses the peer by it",
+                 pair.client.config.peer_connection_id_length == sizeof(id_a) &&
+                     memcmp(pair.client.config.peer_connection_id, id_a, sizeof(id_a)) == 0);
+  WT_EXPECT_U64("with nothing retired", 0U, wt_quic_connection_peer_ids_retired(&pair.client));
+
+  /* And again, which abandons the first: this is where a RETIRE_CONNECTION_ID is owed, and it goes out
+   * addressed to the ID still in use, which the server issued and therefore accepts. */
+  WT_EXPECT_OK("switching again abandons the first",
+               wt_quic_connection_use_new_connection_id(&pair.client, now + 2U));
+  WT_EXPECT_TRUE("so the destination is the second ID",
+                 pair.client.config.peer_connection_id_length == sizeof(id_b) &&
+                     memcmp(pair.client.config.peer_connection_id, id_b, sizeof(id_b)) == 0);
+  WT_EXPECT_U64("with one ID retired", 1U, wt_quic_connection_peer_ids_retired(&pair.client));
+  WT_EXPECT_U64("and one still available", 1U, (uint64_t)wt_quic_connection_peer_id_count(&pair.client));
+  WT_EXPECT_INT("and nothing closed", 0, wt_quic_connection_is_closed(&pair.client));
+
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("the peer was TOLD, with a RETIRE_CONNECTION_ID frame", 1U,
+                (uint64_t)witness_frames_of(&pair.server_witness, WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID));
+  WT_EXPECT_INT("and did not close over it", 0, wt_quic_connection_is_closed(&pair.server));
+
+  close_pair(&pair);
+}
+
+/* RFC 9000 section 5.1.2's ordering rule: "Upon receipt of an increased Retire Prior To field, the peer MUST stop
+ * using the corresponding connection IDs and retire them with RETIRE_CONNECTION_ID frames before adding the newly
+ * provided connection ID to the set of active connection IDs... This ordering allows an endpoint to replace all
+ * active connection IDs without the possibility of a peer having no available connection IDs."
+ *
+ * The library's own issuer writes retire_prior_to zero, so this is the one frame a test has to build: a fresh
+ * sequence (the peer's next, read from its counter) carrying a retire_prior_to that covers the ID in use.
+ */
+static void test_a_retire_prior_to_replaces_the_id_in_use(void) {
+  connection_pair_t pair;
+  wt_quic_frame_t frame;
+  uint8_t token_a[16];
+  uint8_t token_b[16];
+  uint8_t token_c[16];
+  static const uint8_t id_a[8] = {0xc1U, 0xc2U, 0xc3U, 0xc4U, 0xc5U, 0xc6U, 0xc7U, 0xc8U};
+  static const uint8_t id_b[8] = {0xd1U, 0xd2U, 0xd3U, 0xd4U, 0xd5U, 0xd6U, 0xd7U, 0xd8U};
+  static const uint8_t id_c[8] = {0xe1U, 0xe2U, 0xe3U, 0xe4U, 0xe5U, 0xe6U, 0xe7U, 0xe8U};
+  uint64_t next_sequence;
+  uint64_t now = 107000000U;
+
+  memset(token_a, 0x55, sizeof(token_a));
+  memset(token_b, 0x66, sizeof(token_b));
+  memset(token_c, 0x77, sizeof(token_c));
+  open_pair(WT_UDP_IPV4, &pair);
+  arm_for_connection_ids(&pair, 0x60U);
+
+  /* Two IDs issued and told, so the client has something to be using when the third arrives. */
+  WT_EXPECT_OK("the server issues the first",
+               wt_quic_connection_issue_connection_id(&pair.server, id_a, sizeof(id_a), token_a, now));
+  now += 1000U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_OK("and the second",
+               wt_quic_connection_issue_connection_id(&pair.server, id_b, sizeof(id_b), token_b, now + 1U));
+  now += 1000U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_OK("the client uses the first",
+               wt_quic_connection_use_new_connection_id(&pair.client, now + 1U));
+  WT_EXPECT_TRUE("which is the ID it now sends to",
+                 pair.client.config.peer_connection_id_length == sizeof(id_a) &&
+                     memcmp(pair.client.config.peer_connection_id, id_a, sizeof(id_a)) == 0);
+  WT_EXPECT_U64("and nothing is retired yet", 0U, wt_quic_connection_peer_ids_retired(&pair.client));
+
+  /* The peer issues the third ID -- so its own receive path will accept the retires that follow, which ride the
+   * ID being adopted -- and its automatic NEW_CONNECTION_ID frame is TAKEN OFF THE WIRE unread. That is the only
+   * way to see a `retire_prior_to` at all: the library's issuer writes zero, and a second frame for a sequence
+   * the client already has is the duplicate section 19.15 says to ignore. */
+  WT_EXPECT_OK("the server issues the third ID",
+               wt_quic_connection_issue_connection_id(&pair.server, id_c, sizeof(id_c), token_c, now + 2U));
+  now += 1000U;
+  discard_one_datagram(&pair.client_socket);
+
+  /* And now the frame that tells the client about it, with a retire_prior_to covering everything below it.
+   * Read the counter first, so this is the FIRST frame the client sees for that sequence. */
+  next_sequence = pair.server.next_issued_sequence - 1U;
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID);
+  frame.as.new_connection_id.sequence = next_sequence;
+  frame.as.new_connection_id.retire_prior_to = next_sequence;
+  frame.as.new_connection_id.connection_id = id_c;
+  frame.as.new_connection_id.connection_id_length = sizeof(id_c);
+  frame.as.new_connection_id.stateless_reset_token = token_c;
+  send_frame_from_side(&pair, 1, &frame, &pair.server.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, k_dcid,
+                       sizeof(k_dcid));
+  now += 1000U;
+  receive_on(&pair.client, &pair.client_socket, now);
+
+  /* Everything below the field is retired, not only the ID in use: two were stored, so two go. */
+  WT_EXPECT_U64("both IDs below the field were retired", 2U,
+                wt_quic_connection_peer_ids_retired(&pair.client));
+  WT_EXPECT_U64("only the new one is left", 1U, (uint64_t)wt_quic_connection_peer_id_count(&pair.client));
+  WT_EXPECT_TRUE("and the client already ADDRESSES the peer by it, rather than by an ID it retired",
+                 pair.client.config.peer_connection_id_length == sizeof(id_c) &&
+                     memcmp(pair.client.config.peer_connection_id, id_c, sizeof(id_c)) == 0);
+  WT_EXPECT_INT("with nothing closed", 0, wt_quic_connection_is_closed(&pair.client));
+
+  /* Both retires went out, each in its own packet, addressed to the ID the client just adopted -- which the
+   * peer issued and therefore accepts. Two datagrams, so two reads. */
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("and the peer was told about both", 2U,
+                (uint64_t)witness_frames_of(&pair.server_witness, WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID));
+
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -3279,6 +3522,8 @@ int main(void) {
   test_a_limit_with_no_update_possible_closes();
   test_the_integrity_limit_closes_the_connection();
   test_the_limits_follow_the_suite();
+  test_using_an_issued_connection_id();
+  test_a_retire_prior_to_replaces_the_id_in_use();
 
   test_open_stream();
   test_peer_opens_stream();
