@@ -2000,6 +2000,30 @@ wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint
   }
 
   if (probe_space != WT_QUIC_SPACE_COUNT) {
+    /* RFC 9002 section 6.2.4: a probe timeout MUST send new frames OR RETRANSMIT unacknowledged data. The probe
+     * packet itself is a PING (see the acknowledgement path), so without this the DATA is never resent -- which
+     * is what a third-party peer showed and a relayed packet drop reproduces: the CONNECT went out once, the
+     * peer could not read it, and nothing ever sent it again (WT-135).
+     *
+     * The oldest outstanding ack-eliciting packet's descriptor is handed to the owner, and the descriptor is NOT
+     * freed: the packet is still in flight, and a later acknowledgement is what retires it. The owner -- the
+     * layer that kept the bytes -- is what resends them. */
+    size_t oldest = connection->loss.count;
+    for (i = 0U; i < connection->loss.count; i++) {
+      const wt_quic_sent_packet_t *sent_packet = &connection->loss.sent[i];
+      uint64_t tag = sent_packet->tag;
+      if (sent_packet->packet_number_space != (uint8_t)probe_space) continue;
+      if (!sent_packet->ack_eliciting) continue;
+      if (tag >= (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX) continue;
+      if (!connection->frames[tag].in_use) continue;
+      if (oldest == connection->loss.count || sent_packet->time_sent < connection->loss.sent[oldest].time_sent) {
+        oldest = i;
+      }
+    }
+    if (oldest < connection->loss.count && connection->lost_handler != NULL) {
+      connection->lost_handler(connection->lost_context,
+                               &connection->frames[connection->loss.sent[oldest].tag]);
+    }
     wt_quic_loss_on_pto(&connection->loss);
     return flush_space(connection, probe_space, 1, 0, now);
   }
