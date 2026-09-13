@@ -2994,6 +2994,30 @@ Completion criteria:
 - Release artifacts are reproducible.
 - Public docs match actual behavior.
 
+### WT-133, second half: the refusal scenarios, seven of them
+
+The Swift conformance suites are half NEGATIVE -- a request for the wrong path, a CONNECT for another protocol, a
+capsule over the bound, a stream for another session -- and the C99 tool had only the positive side. The tool now
+reports twelve scenarios, seven of them new, and every one of the seven asserts the CODE the peer would be sent
+rather than merely that something failed:
+
+- a path this server does not serve is a `404`, compared exactly (a prefix match would let one host's request be
+  served as another's);
+- an extended CONNECT for another protocol is `NOT_WEBTRANSPORT`, and the caller answers it as an ordinary request;
+- a server that never advertised `WT_ENABLED` refuses a session it could not have been expected to serve;
+- a capsule value over the bound is `WT_ERR_LIMIT` with `H3_EXCESSIVE_LOAD`;
+- a peer stream past the endpoint's bound is `WT_ERR_LIMIT` with NO error code, because the bound is this
+  endpoint's rather than the peer's mistake;
+- an empty datagram is `WT_ERR_PROTOCOL` with `H3_MESSAGE_ERROR`, because a datagram IS the unit and has no
+  "incomplete";
+- and the positive edge this project earned the hard way: half a prefix decides NOTHING, and the whole one
+  classifies the stream.
+
+They need no sockets, because a refusal is a decision rather than a session, which is what makes them cheap enough
+to run in the report on every build. That is breadth in the direction the suites actually differ: the C99 tool
+already had the two hard end-to-end scenarios (WT-123), and what it lacked was the long tail of negative cases
+that a conformance suite exists to enumerate.
+
 ### WT-133, first half: the tools over IPv6, and an honest skip
 
 The Definition of Done's third criterion is "the C99 client/server CLI passes local IPv4 and IPv6", and the

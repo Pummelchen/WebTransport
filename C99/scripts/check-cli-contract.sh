@@ -70,6 +70,8 @@ grep -q '"status":"ok"' "$work/out" && fail "and must NOT claim ok" "$work/out"
 
 # The conformance tool's report is machine-readable and its summary is consistent with its scenarios.
 "$conformance" --scenario all --json >"$work/out" 2>"$work/err"
-grep -q '"summary":{"total":5' "$work/out" || fail "the conformance summary must count five scenarios" "$work/out"
+grep -q '"summary":{"total":12' "$work/out" || fail "the conformance summary must count twelve scenarios" "$work/out"
+grep -q '"passed":12,"failed":0,"unsupported":0' "$work/out" \
+  || fail "and every scenario must pass on this machine (IPv6 reports unsupported only where it is absent)" "$work/out"
 
 echo "cli contract: exit statuses, refusals and the JSON report all hold"

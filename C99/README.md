@@ -229,6 +229,16 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): twelve scenarios in one
+  machine-readable report. The three codec ones (varints across every form, a close capsule's round
+  trip, the draft-16 decision on an extended CONNECT) plus **six refusal scenarios** — a path this
+  server does not serve is a `404`, an extended CONNECT for another protocol is not a WebTransport
+  request, a server that never advertised `WT_ENABLED` refuses the session, a capsule value over the
+  bound is excessive load, a peer stream past the bound is `WT_ERR_LIMIT` with **no** error code
+  because the bound is ours, an empty datagram is malformed rather than short — plus the positive edge
+  this project earned the hard way (a prefix split across frames decides nothing until it is whole) and
+  the two **real sessions** over IPv4 and IPv6. Registered with CTest, so the whole report is checked
+  on every build.
 - **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
   stands up two endpoints in **one process** over loopback — a generated, pinned identity, a real
   TLS 1.3 handshake inside QUIC, an extended CONNECT accepted by the draft-16 layer, the response,

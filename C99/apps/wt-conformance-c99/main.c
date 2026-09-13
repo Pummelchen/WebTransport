@@ -15,6 +15,7 @@
 #include "webtransport/cli/report.h"
 
 #include "scenario_session.h"
+#include "scenario_refusals.h"
 #include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/capsule.h"
@@ -184,6 +185,10 @@ int main(int argc, char **argv) {
                                       : "the request decision differed");
       (void)w;
     }
+
+    /* The refusal scenarios: what this endpoint refuses, and with which code. They need no sockets, because a
+     * refusal is a decision rather than a session, and the code is the value the report can carry. */
+    wt_scenario_refusals_run(&report);
 
     /* The two session scenarios: two endpoints in ONE process over loopback, with a generated and pinned
      * identity, running the whole exchange -- handshake, CONNECT, response, a stream message and a datagram.
