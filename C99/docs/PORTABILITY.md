@@ -29,23 +29,20 @@ Windows is the real work. Every item below is a place where the current code ass
 
 ## The adaptation the code needs, in order
 
-1. **DONE for the operations, NOT for the types** -- a private header (`src/runtime/udp_platform.h`) names the
-   five differences: `close`, non-blocking mode, readiness, the error number and the **datagram calls**
-   (`wt_udp_platform_close`, `wt_udp_platform_set_nonblocking`, `wt_udp_platform_wait_readable`,
-   `wt_udp_platform_last_error`, `wt_udp_platform_send_message`, `wt_udp_platform_receive_message` over
-   `wt_udp_platform_message_t`), plus the handle type and the socket LIFETIME. The three datagram call sites
-   went over in one pass -- a partial conversion does not compile here, because `-Werror` rejects the wrapper
-   nothing calls. What is **still POSIX in `udp.c`** is the ADDRESS layer: `struct sockaddr_storage`,
-   `socklen_t`, `inet_pton`, `ntohs` and the `AF_INET*` constants, about forty uses, plus the three includes
-   that supply them. An earlier version of this document said the datagram calls were the last thing; the
-   cross-compile below is what made the address layer visible, and it is the next step.
+1. **DONE** -- a private header (`src/runtime/udp_platform.h`) names every difference: `close`, non-blocking
+   mode, readiness, the error number AND its classification, the datagram calls (`wt_udp_platform_close`,
+   `wt_udp_platform_set_nonblocking`, `wt_udp_platform_wait_readable`, `wt_udp_platform_last_error`,
+   `wt_udp_platform_status_of_error`, `wt_udp_platform_send_message`, `wt_udp_platform_receive_message` over
+   `wt_udp_platform_message_t`), the handle type and the socket lifetime, and the ADDRESS conversions
+   (`wt_udp_platform_address_to_storage`, `..._from_storage`, `..._family_domain`, `..._parse_address`,
+   `..._format_address`, `..._set_v6_only`) over this library's own address type. `udp.c` names those calls and
+   no longer includes a socket header or names `AF_INET`, `sockaddr_in`, `inet_pton` or `ntohs` itself.
+   **`udp.c` compiles for Windows**, which is the claim this step is measured by.
 2. **DONE** -- `WSAStartup` is owned by the socket lifetime in the same header: `wt_udp_platform_acquire` is
    called before the socket is made and released in `wt_udp_close`, with the count being the number of OPEN
    sockets, so the last close is what releases Winsock and a failed open releases it too. The POSIX side has
-   the same two calls as no-ops, so `udp.c` names one lifetime rather than carrying an `#if`.
-   The public handle is `intptr_t` now -- `WT_UDP_INVALID_FD` is `(intptr_t)-1`, which is both POSIX's `-1` and
-   Windows' `INVALID_SOCKET` -- because a `SOCKET` is pointer-sized and an `int` field would truncate it
-   silently.
+   the same two calls as no-ops. The public handle is `intptr_t` (`WT_UDP_INVALID_FD` is `(intptr_t)-1`, which
+   is both POSIX's `-1` and Windows' `INVALID_SOCKET`) because a `SOCKET` is pointer-sized.
 3. The `wt_udp_peek` difference, which is behavioural rather than syntactic and is now named in the header
    rather than discovered: on Windows a peek cannot see past the caller's buffer, so the `FULL_LENGTH` flag
    cannot be honoured there and a listener must hold the datagram it looked at. The runtime session's pending
@@ -59,13 +56,23 @@ larger one than nothing.
 
 `scripts/check-windows-platform.sh` compiles the branch with a mingw cross-compiler -- the same warnings the
 POSIX build turns into errors -- and reports `unsupported` with that reason on a machine that has none. CI
-installs one where it can. **It found a real defect on its first run:** `FIONBIO` does not fit a signed `long`
-on Windows (`0x8004667E` is above `LONG_MAX`), so passing it to `ioctlsocket` is a sign-conversion error, and
-the cast the platform's own headers expect is now there. That is the difference between an inventory and a
-compiler.
+installs one where it can. **It found real defects, one after another, and each was a thing the inventory had not
+named:**
 
-What remains is the address layer named in step 1, and the Windows runner: a job that cannot pass is worse than
-an absent one, because it teaches people to ignore CI -- so the job comes after the address layer, not before.
+- `FIONBIO` does not fit a signed `long` on Windows (`0x8004667E` is above `LONG_MAX`);
+- `EHOSTDOWN` does not exist there at all, which is why the error CLASSIFICATION (not just the number) belongs
+  to the platform: `wt_udp_platform_status_of_error` is now one function per branch;
+- `inet_ntop` takes a `size_t` on Windows and a `socklen_t` on POSIX, so the capacity has a platform name too;
+- `setsockopt` wants `const char *` for its option value there and `const void *` here, which is why
+  `wt_udp_platform_set_v6_only` exists rather than an `#if` at the call site.
+
+That is the difference between an inventory and a compiler, and it is the argument for checking a branch
+rather than describing it.
+
+What remains is the Windows RUNNER and FreeBSD. A job that cannot pass is worse than an absent one, because it
+teaches people to ignore CI -- and the cross-compile is what makes a job plausible now: `udp.c` compiles for the
+platform, while what a runner would still need is a linked build (OpenSSL for Windows) and a way to run the
+tests there.
 
 ## The two symbols this document is checked for
 

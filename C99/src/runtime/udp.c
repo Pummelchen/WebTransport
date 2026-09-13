@@ -17,11 +17,6 @@
  * written down in docs/PORTABILITY.md rather than pretended away. */
 #include "udp_platform.h"
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/uio.h>
-
 #include "webtransport/time.h"
 
 /* How many bytes of an IPv4 address are meaningful, and of an IPv6 one. Named because the literal 4
@@ -30,120 +25,13 @@
 #define WT_UDP_IPV6_BYTES 16U
 #define WT_UDP_MAX_PORT 65535U
 
-/* One place where a platform failure becomes a status.
- *
- * The mapping is deliberately narrow: a failure this layer cannot classify is WT_ERR_IO rather than a
- * guess, because a caller that reads "limit" or "closed" acts on it, and a wrong classification is
- * worse than a vague one. The classes that DO have names here are the ones a QUIC runtime branches on:
- * a full send buffer is retried (WT_ERR_AGAIN), an unreachable peer is a dead path (WT_ERR_CLOSED), a
- * refused bind is a limit (WT_ERR_LIMIT), and a datagram the kernel will not carry is also a limit. */
-static wt_status_t map_errno(int error) {
-  switch (error) {
-    case EAGAIN:
-#if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
-    case EWOULDBLOCK:
-#endif
-    case EINTR:
-      /* A signal interrupted the call, or a non-blocking socket had nothing to give. Both mean "ask
-       * again", which is what a caller's event loop does anyway. */
-      return WT_ERR_AGAIN;
-    case EMSGSIZE:
-      /* The datagram is larger than the path, or than UDP, can carry. */
-      return WT_ERR_LIMIT;
-    case ENOBUFS:
-    case ENOMEM:
-      return WT_ERR_OUT_OF_MEMORY;
-    case ETIMEDOUT:
-      return WT_ERR_TIMEOUT;
-    case ECONNREFUSED:
-      /* An ICMP port-unreachable from a previous send, reported here. For QUIC that is a path with
-       * nobody on the other end, which is what CLOSED says. */
-    case ENETUNREACH:
-    case EHOSTUNREACH:
-    case ENETDOWN:
-    case EHOSTDOWN:
-      return WT_ERR_CLOSED;
-    case EADDRINUSE:
-    case EADDRNOTAVAIL:
-    case EACCES:
-    case EPERM:
-      /* A bind or a send the system refused: a port already taken, an address this host does not
-       * have, or a privilege it does not grant. Refused rather than malformed, which is WT_ERR_LIMIT. */
-      return WT_ERR_LIMIT;
-    case EAFNOSUPPORT:
-    case EPROTONOSUPPORT:
-    case EOPNOTSUPP:
-      return WT_ERR_UNSUPPORTED;
-    case EISCONN:
-    case EALREADY:
-    case ENOTCONN:
-      return WT_ERR_STATE;
-    case EBADF:
-    case EINVAL:
-    case EDESTADDRREQ:
-      return WT_ERR_INVALID_ARGUMENT;
-    default:
-      /* EIO and the hundred platform-specific values: reported as what they are, an I/O failure this
-       * layer does not classify, rather than folded into a name that means something else. */
-      return WT_ERR_IO;
-  }
-}
+/* The platform's error number and its classification both live in `udp_platform.h` now: the numbers are a
+ * different integer space on Windows, and so is the set of names available to switch on. */
 
-/* The socket address for one of this library's addresses. Both families are turned into the same
- * `struct sockaddr_storage`, so the callers below do not branch on the family more than once. */
-static wt_status_t to_sockaddr(const wt_udp_address_t *address, struct sockaddr_storage *out,
-                               socklen_t *out_len) {
-  memset(out, 0, sizeof(*out));
-  if (address->family == WT_UDP_IPV4) {
-    struct sockaddr_in *v4 = (struct sockaddr_in *)(void *)out;
-    v4->sin_family = AF_INET;
-    v4->sin_port = htons(address->port);
-    memcpy(&v4->sin_addr, address->bytes, WT_UDP_IPV4_BYTES);
-    *out_len = (socklen_t)sizeof(*v4);
-    return WT_OK;
-  }
-  if (address->family == WT_UDP_IPV6) {
-    struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)(void *)out;
-    v6->sin6_family = AF_INET6;
-    v6->sin6_port = htons(address->port);
-    memcpy(&v6->sin6_addr, address->bytes, WT_UDP_IPV6_BYTES);
-    v6->sin6_scope_id = address->scope_id;
-    *out_len = (socklen_t)sizeof(*v6);
-    return WT_OK;
-  }
-  return WT_ERR_INVALID_ARGUMENT;
-}
-
-/* And back. A family this library does not carry -- an IPv4-mapped address on a dual-stack socket,
- * say -- is WT_ERR_UNSUPPORTED rather than a silent zero, because a connection keyed on a zeroed
- * address would be the wrong connection. */
-static wt_status_t from_sockaddr(const struct sockaddr *from, socklen_t from_len,
-                                 wt_udp_address_t *out) {
-  if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
-  memset(out, 0, sizeof(*out));
-  if (from->sa_family == AF_INET) {
-    const struct sockaddr_in *v4 = (const struct sockaddr_in *)(const void *)from;
-    if (from_len < (socklen_t)sizeof(*v4)) return WT_ERR_INVALID_ARGUMENT;
-    out->family = WT_UDP_IPV4;
-    out->port = ntohs(v4->sin_port);
-    memcpy(out->bytes, &v4->sin_addr, WT_UDP_IPV4_BYTES);
-    return WT_OK;
-  }
-  if (from->sa_family == AF_INET6) {
-    const struct sockaddr_in6 *v6 = (const struct sockaddr_in6 *)(const void *)from;
-    if (from_len < (socklen_t)sizeof(*v6)) return WT_ERR_INVALID_ARGUMENT;
-    out->family = WT_UDP_IPV6;
-    out->port = ntohs(v6->sin6_port);
-    memcpy(out->bytes, &v6->sin6_addr, WT_UDP_IPV6_BYTES);
-    out->scope_id = v6->sin6_scope_id;
-    return WT_OK;
-  }
-  return WT_ERR_UNSUPPORTED;
-}
-
-static int family_of(wt_udp_family_t family) {
-  return family == WT_UDP_IPV4 ? AF_INET : (family == WT_UDP_IPV6 ? AF_INET6 : -1);
-}
+/* The address conversions and the family names live in `udp_platform.h` now, one implementation per platform:
+ * they are the last place this file named `AF_INET`, `sockaddr_in` or `inet_pton`, and a socket header is what a
+ * Windows build does not have. What is left here is the policy -- which family a literal names, which scope ids
+ * are legal -- rather than the platform's types. */
 
 const char *wt_udp_family_name(wt_udp_family_t family) {
   switch (family) {
@@ -181,8 +69,8 @@ int wt_udp_address_equal(const wt_udp_address_t *a, const wt_udp_address_t *b) {
 }
 
 wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
-  int domain = family_of(family);
-  int fd;
+  int domain = wt_udp_platform_family_domain(family);
+  wt_udp_handle_t fd;
 
   if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
   out->fd = WT_UDP_INVALID_FD;
@@ -193,13 +81,13 @@ wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
   /* The socket LIFETIME is the platform's first: on Windows this is where Winsock starts, and the matching
    * release is in `wt_udp_close`, which is the only other end of a socket's life. Every failure below
    * releases it, so a failed open does not leave the process holding the library. */
-  if (wt_udp_platform_acquire() != 0) return map_errno(wt_udp_platform_last_error());
+  if (wt_udp_platform_acquire() != 0) return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
 
   fd = socket(domain, SOCK_DGRAM, 0);
-  if (fd < 0) {
+  if (fd == WT_UDP_INVALID_HANDLE) {
     int error = wt_udp_platform_last_error();
     wt_udp_platform_release();
-    return map_errno(error);
+    return wt_udp_platform_status_of_error(error);
   }
 
   /* Non-blocking from the start: a socket that blocked on receive would make the connection runtime's
@@ -208,7 +96,7 @@ wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
     int error = wt_udp_platform_last_error();
     (void)wt_udp_platform_close(fd);
     wt_udp_platform_release();
-    return map_errno(error);
+    return wt_udp_platform_status_of_error(error);
   }
 
   if (family == WT_UDP_IPV6) {
@@ -216,22 +104,23 @@ wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
      * socket that is sometimes dual-stack would make "which family is this connection" depend on the
      * host. One because a dual-stack socket would also receive IPv4-mapped addresses, which this
      * library's address type reports as a family it does not carry. */
-    int on = 1;
-    if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &on, (socklen_t)sizeof(on)) < 0) {
+    if (wt_udp_platform_set_v6_only(fd, 1) < 0) {
       int error = wt_udp_platform_last_error();
       (void)wt_udp_platform_close(fd);
       wt_udp_platform_release();
-      return map_errno(error);
+      return wt_udp_platform_status_of_error(error);
     }
   }
 
-  out->fd = fd;
+  /* A handle is a handle: on Windows this is a pointer-sized unsigned value going into an `intptr_t`, which is
+   * the same bits and a different sign. The cast says so rather than letting a warning-as-error decide. */
+  out->fd = (intptr_t)fd;
   return WT_OK;
 }
 
 wt_status_t wt_udp_bind(wt_udp_socket_t *socket, const wt_udp_address_t *address) {
   struct sockaddr_storage storage;
-  socklen_t storage_len = 0;
+  wt_udp_socklen_t storage_len = 0;
   wt_status_t status;
 
   if (socket == NULL || address == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -241,10 +130,10 @@ wt_status_t wt_udp_bind(wt_udp_socket_t *socket, const wt_udp_address_t *address
      * mismatch would bind the wrong thing. */
     return WT_ERR_INVALID_ARGUMENT;
   }
-  status = to_sockaddr(address, &storage, &storage_len);
+  status = wt_udp_platform_address_to_storage(address, &storage, &storage_len);
   if (status != WT_OK) return status;
   if (bind((wt_udp_handle_t)socket->fd, (const struct sockaddr *)(const void *)&storage, storage_len) < 0) {
-    return map_errno(wt_udp_platform_last_error());
+    return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   }
   socket->port = address->port;
   {
@@ -270,23 +159,25 @@ wt_status_t wt_udp_bind_loopback(wt_udp_socket_t *socket, uint16_t port, uint16_
 
 wt_status_t wt_udp_local_port(const wt_udp_socket_t *socket, uint16_t *out_port) {
   struct sockaddr_storage storage;
-  socklen_t storage_len = (socklen_t)sizeof(storage);
+  wt_udp_socklen_t storage_len = (wt_udp_socklen_t)sizeof(storage);
 
   if (socket == NULL || out_port == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (socket->fd == WT_UDP_INVALID_FD) return WT_ERR_STATE;
   memset(&storage, 0, sizeof(storage));
   if (getsockname((wt_udp_handle_t)socket->fd, (struct sockaddr *)(void *)&storage, &storage_len) < 0) {
-    return map_errno(wt_udp_platform_last_error());
+    return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   }
-  if (storage.ss_family == AF_INET) {
-    *out_port = ntohs(((const struct sockaddr_in *)(const void *)&storage)->sin_port);
-    return WT_OK;
+  /* The port is read through the same conversion a received datagram uses, so "which family is this" has one
+   * answer in this file rather than two. A family this library does not carry is UNSUPPORTED here, exactly as
+   * it was when the code read `ss_family` itself. */
+  {
+    wt_udp_address_t bound;
+    wt_status_t status = wt_udp_platform_address_from_storage((const struct sockaddr *)(const void *)&storage,
+                                                              storage_len, &bound);
+    if (status != WT_OK) return status;
+    *out_port = bound.port;
   }
-  if (storage.ss_family == AF_INET6) {
-    *out_port = ntohs(((const struct sockaddr_in6 *)(const void *)&storage)->sin6_port);
-    return WT_OK;
-  }
-  return WT_ERR_UNSUPPORTED;
+  return WT_OK;
 }
 
 void wt_udp_close(wt_udp_socket_t *socket) {
@@ -307,7 +198,7 @@ void wt_udp_close(wt_udp_socket_t *socket) {
 wt_status_t wt_udp_send(const wt_udp_socket_t *socket, const wt_udp_address_t *to,
                         const uint8_t *data, size_t length) {
   struct sockaddr_storage storage;
-  socklen_t storage_len = 0;
+  wt_udp_socklen_t storage_len = 0;
   size_t written = 0U;
   wt_status_t status;
 
@@ -319,12 +210,12 @@ wt_status_t wt_udp_send(const wt_udp_socket_t *socket, const wt_udp_address_t *t
   if (length > WT_UDP_MAX_DATAGRAM) return WT_ERR_LIMIT;
   if (to->family != socket->family) return WT_ERR_INVALID_ARGUMENT;
 
-  status = to_sockaddr(to, &storage, &storage_len);
+  status = wt_udp_platform_address_to_storage(to, &storage, &storage_len);
   if (status != WT_OK) return status;
   if (wt_udp_platform_send_message((wt_udp_handle_t)socket->fd,
                                    (const struct sockaddr *)(const void *)&storage, (int)storage_len, data,
                                    length, &written) != 0) {
-    return map_errno(wt_udp_platform_last_error());
+    return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   }
   /* A datagram is sent whole or not at all, so a short count is not a partial send: it is a platform
    * that did something this layer does not describe. */
@@ -356,14 +247,14 @@ wt_status_t wt_udp_receive(const wt_udp_socket_t *socket, uint8_t *buffer, size_
    * returned a short count would leave a caller unable to tell a truncated datagram from a peer that sent a
    * small one (WT-36). */
   if (wt_udp_platform_receive_message((wt_udp_handle_t)socket->fd, &message) != 0) {
-    return map_errno(wt_udp_platform_last_error());
+    return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   }
 
   /* The sender is reported even when the datagram is discarded, because it is known and it is what a
    * diagnostic needs. */
   if (out_from != NULL) {
-    status = from_sockaddr((const struct sockaddr *)(const void *)&storage, (socklen_t)address_length,
-                           out_from);
+    status = wt_udp_platform_address_from_storage((const struct sockaddr *)(const void *)&storage,
+                                                  (wt_udp_socklen_t)address_length, out_from);
     if (status != WT_OK) return status;
   }
 
@@ -402,12 +293,12 @@ wt_status_t wt_udp_peek(const wt_udp_socket_t *socket, uint8_t *buffer, size_t c
   message.flags_in = WT_UDP_PLATFORM_PEEK | WT_UDP_PLATFORM_FULL_LENGTH;
 
   if (wt_udp_platform_receive_message((wt_udp_handle_t)socket->fd, &message) != 0) {
-    return map_errno(wt_udp_platform_last_error());
+    return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   }
 
   if (out_from != NULL) {
-    status = from_sockaddr((const struct sockaddr *)(const void *)&storage, (socklen_t)address_length,
-                           out_from);
+    status = wt_udp_platform_address_from_storage((const struct sockaddr *)(const void *)&storage,
+                                                  (wt_udp_socklen_t)address_length, out_from);
     if (status != WT_OK) return status;
   }
   *out_length = message.bytes_out;
@@ -447,7 +338,7 @@ wt_status_t wt_udp_wait(const wt_udp_socket_t *socket, uint64_t timeout_micros) 
   entry.revents = 0;
 
   ready = wt_udp_platform_wait_readable(entry.fd, timeout_ms);
-  if (ready < 0) return map_errno(errno);
+  if (ready < 0) return wt_udp_platform_status_of_error(errno);
   if (ready == 0) return WT_ERR_TIMEOUT;
   return WT_OK;
 }
@@ -489,7 +380,7 @@ wt_status_t wt_udp_address_parse(const char *text, uint16_t port, wt_udp_address
   }
   if (scope_id != 0UL && out->family != WT_UDP_IPV6) return WT_ERR_INVALID_ARGUMENT;
 
-  if (inet_pton(family, host, out->bytes) != 1) return WT_ERR_INVALID_ARGUMENT;
+  if (wt_udp_platform_parse_address(host, family, out->bytes) != 1) return WT_ERR_INVALID_ARGUMENT;
   /* A scope on an address that cannot have one is a mistake worth reporting rather than dropping. */
   if (scope_id != 0UL) {
     /* A scope id means "on this interface", which only an address that is per-interface can carry:
@@ -566,10 +457,10 @@ size_t wt_udp_address_format(const wt_udp_address_t *address, char *out, size_t 
   if (capacity != 0U && out != NULL) out[0] = '\0';
 
   if (address->family == WT_UDP_IPV4) {
-    if (inet_ntop(AF_INET, address->bytes, host, (socklen_t)sizeof(host)) == NULL) return 0U;
+    if (wt_udp_platform_format_address(AF_INET, address->bytes, host, sizeof(host)) == 0U) return 0U;
     written = snprintf(text, sizeof(text), "%s:%u", host, (unsigned int)address->port);
   } else if (address->family == WT_UDP_IPV6) {
-    if (inet_ntop(AF_INET6, address->bytes, host, (socklen_t)sizeof(host)) == NULL) return 0U;
+    if (wt_udp_platform_format_address(AF_INET6, address->bytes, host, sizeof(host)) == 0U) return 0U;
     if (address->scope_id != 0U) {
       written = snprintf(text, sizeof(text), "[%s%%%u]:%u", host, (unsigned int)address->scope_id,
                          (unsigned int)address->port);

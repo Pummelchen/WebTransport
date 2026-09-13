@@ -1,7 +1,7 @@
 #!/bin/sh
 # Compile the Windows branch of the platform header with a cross-compiler (WT-134).
 #
-# The `_WIN32` branch of `src/runtime/udp_platform.h` was written from the portability inventory and marked NOT
+# The `_WIN32` branch of the platform layer was written from the portability inventory and marked NOT
 # VERIFIED, because nothing in this repository compiled it. A cross-compiler is enough to change that much: it
 # says whether the branch COMPILES, which is a smaller claim than "the port works" and a much larger one than
 # "written from the inventory". It is also cheap enough to run on every CI job that can install one.
@@ -34,6 +34,13 @@ trap 'rm -rf "$output"' EXIT
 # warnings would not be evidence of much. Found this way already: FIONBIO does not fit a signed long on Windows,
 # and the cross-compile said so on its first run.
 "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
-  -I "$root/src/runtime" -c "$probe" -o "$output/platform_probe.o"
+  -I "$root/src/runtime" -I "$root/include" -c "$probe" -o "$output/platform_probe.o"
 
-echo "windows platform: the _WIN32 branch of udp_platform.h compiles under $compiler (compiled, not run)"
+# And the whole platform translation unit, which is the stronger claim: udp.c itself, with the address layer and
+# the error classification inside the header. It compiles for Windows now -- and getting there found three more
+# real differences the inventory had not named: `EHOSTDOWN` does not exist there, `inet_ntop` takes a `size_t`
+# rather than a `socklen_t`, and `setsockopt` wants a `const char *` for its option value.
+"$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
+  -I "$root/include" -c "$root/src/runtime/udp.c" -o "$output/udp.o"
+
+echo "windows platform: udp_platform.h's _WIN32 branch and udp.c compile under $compiler (compiled, not run)"

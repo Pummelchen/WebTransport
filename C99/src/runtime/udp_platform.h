@@ -13,19 +13,30 @@
 #ifndef WEBTRANSPORT_RUNTIME_UDP_PLATFORM_H
 #define WEBTRANSPORT_RUNTIME_UDP_PLATFORM_H
 
+#include "webtransport/runtime/udp.h"
+
 #if defined(_WIN32)
 
-/* Not verified: no build in this repository compiles this branch yet. */
+/* Not verified by a RUN, but compiled by `scripts/check-windows-platform.sh` and by the cross-compile of
+ * `src/runtime/udp.c` that the same compiler makes possible. */
+#include <string.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
 typedef SOCKET wt_udp_handle_t;
+/* Windows' socket calls take an `int` length, not a `socklen_t`: naming it here is the whole difference. */
+typedef int wt_udp_socklen_t;
+/* `inet_ntop`'s last argument is a `socklen_t` on POSIX and a `size_t` on Windows: two names for "how much room
+ * is there", and the cross-compile is what noticed the difference. */
+typedef size_t wt_udp_ntop_length_t;
 #define WT_UDP_INVALID_HANDLE INVALID_SOCKET
 
 #else
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -33,9 +44,12 @@ typedef SOCKET wt_udp_handle_t;
 #include <unistd.h>
 
 typedef int wt_udp_handle_t;
+typedef socklen_t wt_udp_socklen_t;
+typedef socklen_t wt_udp_ntop_length_t;
 #define WT_UDP_INVALID_HANDLE (-1)
 
 #endif
+
 
 /* The datagram calls, which differ in more than a name: a platform's way of receiving one datagram WITH its
  * sender and its truncation flag. The structure is hoisted above both branches because it is the shape the two
@@ -133,6 +147,139 @@ static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platfo
   return 0;
 }
 
+/* "IPv6 only", set rather than left to the platform's default. It is a helper because the option VALUE is a
+ * pointer, and the two platforms declare that pointer differently: POSIX takes `const void *`, Windows
+ * `const char *`. The cross-compile reported the incompatibility rather than letting it reach a compiler that
+ * would have called it a warning. */
+static int wt_udp_platform_set_v6_only(wt_udp_handle_t handle, int on) {
+  return setsockopt(handle, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&on, (wt_udp_socklen_t)sizeof(on));
+}
+
+/* The ADDRESS conversions, which are the last place the two platforms disagree about TYPES rather than about
+ * calls: `struct sockaddr_in`, `sockaddr_in6`, `htons`, `ntohs` and `inet_pton` have the same names on both
+ * sides but the libraries that declare them do not, and the length type differs (`socklen_t` against `int`).
+ * Everything below uses this library's own address type, so `udp.c` no longer includes a socket header or
+ * names a constant from one (WT-134). */
+static wt_status_t wt_udp_platform_address_to_storage(const wt_udp_address_t *address,
+                                                      struct sockaddr_storage *out,
+                                                      wt_udp_socklen_t *out_len) {
+  memset(out, 0, sizeof(*out));
+  if (address->family == WT_UDP_IPV4) {
+    struct sockaddr_in *v4 = (struct sockaddr_in *)(void *)out;
+    v4->sin_family = AF_INET;
+    v4->sin_port = htons(address->port);
+    memcpy(&v4->sin_addr, address->bytes, 4U);
+    *out_len = (wt_udp_socklen_t)sizeof(*v4);
+    return WT_OK;
+  }
+  if (address->family == WT_UDP_IPV6) {
+    struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)(void *)out;
+    v6->sin6_family = AF_INET6;
+    v6->sin6_port = htons(address->port);
+    memcpy(&v6->sin6_addr, address->bytes, 16U);
+    v6->sin6_scope_id = address->scope_id;
+    *out_len = (wt_udp_socklen_t)sizeof(*v6);
+    return WT_OK;
+  }
+  return WT_ERR_INVALID_ARGUMENT;
+}
+
+static wt_status_t wt_udp_platform_address_from_storage(const struct sockaddr *from,
+                                                        wt_udp_socklen_t from_len,
+                                                        wt_udp_address_t *out) {
+  if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+  if (from->sa_family == AF_INET) {
+    const struct sockaddr_in *v4 = (const struct sockaddr_in *)(const void *)from;
+    if (from_len < (wt_udp_socklen_t)sizeof(*v4)) return WT_ERR_INVALID_ARGUMENT;
+    out->family = WT_UDP_IPV4;
+    out->port = ntohs(v4->sin_port);
+    memcpy(out->bytes, &v4->sin_addr, 4U);
+    return WT_OK;
+  }
+  if (from->sa_family == AF_INET6) {
+    const struct sockaddr_in6 *v6 = (const struct sockaddr_in6 *)(const void *)from;
+    if (from_len < (wt_udp_socklen_t)sizeof(*v6)) return WT_ERR_INVALID_ARGUMENT;
+    out->family = WT_UDP_IPV6;
+    out->port = ntohs(v6->sin6_port);
+    memcpy(out->bytes, &v6->sin6_addr, 16U);
+    out->scope_id = v6->sin6_scope_id;
+    return WT_OK;
+  }
+  return WT_ERR_UNSUPPORTED;
+}
+
+static int wt_udp_platform_family_domain(wt_udp_family_t family) {
+  return family == WT_UDP_IPV4 ? AF_INET : (family == WT_UDP_IPV6 ? AF_INET6 : -1);
+}
+
+/* `inet_pton` returns 1 for a parsed address, 0 for a malformed one and -1 for a family it does not know, and
+ * the caller needs that distinction: a malformed literal is a caller's typo, an unknown family is a bug. */
+static int wt_udp_platform_parse_address(const char *text, int domain, uint8_t *out_bytes) {
+  return inet_pton(domain, text, out_bytes);
+}
+
+/* The Winsock numbers are a different integer space with the same meaning, and a few POSIX names have no
+ * counterpart at all (`EHOSTDOWN`), which is why this cannot be one mapping with #ifs inside it: the
+ * cross-compile of `udp.c` reported exactly that. */
+static wt_status_t wt_udp_platform_status_of_error(int error) {
+  switch (error) {
+    case WSAEWOULDBLOCK:
+    case WSAEINTR:
+      return WT_ERR_AGAIN;
+    case WSAEMSGSIZE:
+      return WT_ERR_LIMIT;
+    case WSAENOBUFS:
+    case WSA_NOT_ENOUGH_MEMORY:
+      return WT_ERR_OUT_OF_MEMORY;
+    case WSAETIMEDOUT:
+      return WT_ERR_TIMEOUT;
+    case WSAECONNREFUSED:
+    case WSAECONNRESET:
+    case WSAENETUNREACH:
+    case WSAEHOSTUNREACH:
+    case WSAENETDOWN:
+    case WSAEHOSTDOWN:
+      return WT_ERR_CLOSED;
+    case WSAEADDRINUSE:
+    case WSAEADDRNOTAVAIL:
+    case WSAEACCES:
+      return WT_ERR_LIMIT;
+    case WSAEAFNOSUPPORT:
+    case WSAEPROTONOSUPPORT:
+    case WSAEOPNOTSUPP:
+      return WT_ERR_UNSUPPORTED;
+    case WSAEISCONN:
+    case WSAEALREADY:
+    case WSAENOTCONN:
+      return WT_ERR_STATE;
+    case WSAEBADF:
+    case WSAEINVAL:
+    case WSAEDESTADDRREQ:
+      return WT_ERR_INVALID_ARGUMENT;
+    default:
+      return WT_ERR_IO;
+  }
+}
+
+/* The reverse: a printable address, for a log line. `inet_ntop` is the one name both platforms share, so this
+ * exists only because `udp.c` must not include the header that declares it. Returns the text length, or 0 when
+ * the family is not one this library carries. */
+static size_t wt_udp_platform_format_address(int domain, const uint8_t *bytes, char *out, size_t capacity) {
+  const char *written;
+  size_t length;
+  if (out == NULL || capacity == 0U) return 0U;
+  out[0] = '\0';
+  written = inet_ntop(domain, bytes, out, (wt_udp_ntop_length_t)capacity);
+  if (written == NULL) {
+    out[0] = '\0';
+    return 0U;
+  }
+  length = strlen(out);
+  return length;
+}
+
+
 #else
 
 /* The POSIX side has nothing to start or stop: the two calls exist so that `udp.c` names one lifetime on
@@ -198,6 +345,144 @@ static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platfo
   return 0;
 }
 
+/* "IPv6 only", set rather than left to the platform's default. It is a helper because the option VALUE is a
+ * pointer, and the two platforms declare that pointer differently: POSIX takes `const void *`, Windows
+ * `const char *`. The cross-compile reported the incompatibility rather than letting it reach a compiler that
+ * would have called it a warning. */
+static int wt_udp_platform_set_v6_only(wt_udp_handle_t handle, int on) {
+  return setsockopt(handle, IPPROTO_IPV6, IPV6_V6ONLY, &on, (wt_udp_socklen_t)sizeof(on));
+}
+
+/* The ADDRESS conversions, which are the last place the two platforms disagree about TYPES rather than about
+ * calls: `struct sockaddr_in`, `sockaddr_in6`, `htons`, `ntohs` and `inet_pton` have the same names on both
+ * sides but the libraries that declare them do not, and the length type differs (`socklen_t` against `int`).
+ * Everything below uses this library's own address type, so `udp.c` no longer includes a socket header or
+ * names a constant from one (WT-134). */
+static wt_status_t wt_udp_platform_address_to_storage(const wt_udp_address_t *address,
+                                                      struct sockaddr_storage *out,
+                                                      wt_udp_socklen_t *out_len) {
+  memset(out, 0, sizeof(*out));
+  if (address->family == WT_UDP_IPV4) {
+    struct sockaddr_in *v4 = (struct sockaddr_in *)(void *)out;
+    v4->sin_family = AF_INET;
+    v4->sin_port = htons(address->port);
+    memcpy(&v4->sin_addr, address->bytes, 4U);
+    *out_len = (wt_udp_socklen_t)sizeof(*v4);
+    return WT_OK;
+  }
+  if (address->family == WT_UDP_IPV6) {
+    struct sockaddr_in6 *v6 = (struct sockaddr_in6 *)(void *)out;
+    v6->sin6_family = AF_INET6;
+    v6->sin6_port = htons(address->port);
+    memcpy(&v6->sin6_addr, address->bytes, 16U);
+    v6->sin6_scope_id = address->scope_id;
+    *out_len = (wt_udp_socklen_t)sizeof(*v6);
+    return WT_OK;
+  }
+  return WT_ERR_INVALID_ARGUMENT;
+}
+
+static wt_status_t wt_udp_platform_address_from_storage(const struct sockaddr *from,
+                                                        wt_udp_socklen_t from_len,
+                                                        wt_udp_address_t *out) {
+  if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+  if (from->sa_family == AF_INET) {
+    const struct sockaddr_in *v4 = (const struct sockaddr_in *)(const void *)from;
+    if (from_len < (wt_udp_socklen_t)sizeof(*v4)) return WT_ERR_INVALID_ARGUMENT;
+    out->family = WT_UDP_IPV4;
+    out->port = ntohs(v4->sin_port);
+    memcpy(out->bytes, &v4->sin_addr, 4U);
+    return WT_OK;
+  }
+  if (from->sa_family == AF_INET6) {
+    const struct sockaddr_in6 *v6 = (const struct sockaddr_in6 *)(const void *)from;
+    if (from_len < (wt_udp_socklen_t)sizeof(*v6)) return WT_ERR_INVALID_ARGUMENT;
+    out->family = WT_UDP_IPV6;
+    out->port = ntohs(v6->sin6_port);
+    memcpy(out->bytes, &v6->sin6_addr, 16U);
+    out->scope_id = v6->sin6_scope_id;
+    return WT_OK;
+  }
+  return WT_ERR_UNSUPPORTED;
+}
+
+static int wt_udp_platform_family_domain(wt_udp_family_t family) {
+  return family == WT_UDP_IPV4 ? AF_INET : (family == WT_UDP_IPV6 ? AF_INET6 : -1);
+}
+
+/* `inet_pton` returns 1 for a parsed address, 0 for a malformed one and -1 for a family it does not know, and
+ * the caller needs that distinction: a malformed literal is a caller's typo, an unknown family is a bug. */
+static int wt_udp_platform_parse_address(const char *text, int domain, uint8_t *out_bytes) {
+  return inet_pton(domain, text, out_bytes);
+}
+
+/* The platform's error NUMBER is not enough: `EAGAIN` and `WSAEWOULDBLOCK` are not the same integer, and the
+ * CLASSES a QUIC runtime branches on -- retry, dead path, limit, unsupported -- are what this file has to
+ * produce. So the classification lives beside the number, one implementation per platform, and `udp.c` names
+ * one call. The mapping stays narrow on purpose: a failure it cannot classify is WT_ERR_IO rather than a guess,
+ * because a caller that reads "limit" or "closed" acts on it. */
+static wt_status_t wt_udp_platform_status_of_error(int error) {
+  switch (error) {
+    case EAGAIN:
+#if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
+    case EWOULDBLOCK:
 #endif
+    case EINTR:
+      return WT_ERR_AGAIN;
+    case EMSGSIZE:
+      return WT_ERR_LIMIT;
+    case ENOBUFS:
+    case ENOMEM:
+      return WT_ERR_OUT_OF_MEMORY;
+    case ETIMEDOUT:
+      return WT_ERR_TIMEOUT;
+    case ECONNREFUSED:
+    case ENETUNREACH:
+    case EHOSTUNREACH:
+    case ENETDOWN:
+    case EHOSTDOWN:
+      return WT_ERR_CLOSED;
+    case EADDRINUSE:
+    case EADDRNOTAVAIL:
+    case EACCES:
+    case EPERM:
+      return WT_ERR_LIMIT;
+    case EAFNOSUPPORT:
+    case EPROTONOSUPPORT:
+    case EOPNOTSUPP:
+      return WT_ERR_UNSUPPORTED;
+    case EISCONN:
+    case EALREADY:
+    case ENOTCONN:
+      return WT_ERR_STATE;
+    case EBADF:
+    case EINVAL:
+    case EDESTADDRREQ:
+      return WT_ERR_INVALID_ARGUMENT;
+    default:
+      return WT_ERR_IO;
+  }
+}
+
+/* The reverse: a printable address, for a log line. `inet_ntop` is the one name both platforms share, so this
+ * exists only because `udp.c` must not include the header that declares it. Returns the text length, or 0 when
+ * the family is not one this library carries. */
+static size_t wt_udp_platform_format_address(int domain, const uint8_t *bytes, char *out, size_t capacity) {
+  const char *written;
+  size_t length;
+  if (out == NULL || capacity == 0U) return 0U;
+  out[0] = '\0';
+  written = inet_ntop(domain, bytes, out, (wt_udp_ntop_length_t)capacity);
+  if (written == NULL) {
+    out[0] = '\0';
+    return 0U;
+  }
+  length = strlen(out);
+  return length;
+}
+
+#endif
+
 
 #endif /* WEBTRANSPORT_RUNTIME_UDP_PLATFORM_H */

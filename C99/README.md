@@ -213,9 +213,13 @@ What is here:
   cross-compiler under the same warnings-as-errors the POSIX build uses — and found a real defect on
   its first run (`FIONBIO` does not fit a signed `long` on Windows). The socket lifetime owns
   `WSAStartup` through a reference count, the public handle is `intptr_t` so a pointer-sized `SOCKET`
-  cannot be truncated, and CMake links `ws2_32` on Windows. What remains is the **address layer**
-  (`sockaddr_storage`, `inet_pton`, `ntohs`, the `AF_INET*` constants — about forty uses still
-  spelled POSIX in `udp.c`) and then the CI leg, which comes after it rather than before.
+  cannot be truncated, CMake links `ws2_32` on Windows, and the **address layer** went behind the
+  same header (`wt_udp_platform_address_*`), so `udp.c` no longer includes a socket header at all —
+  **it now compiles for Windows**, which is the claim that check is measured by. The cross-compile
+  found four real differences the inventory had not named, including `EHOSTDOWN` not existing there
+  (which is why the error *classification*, not just the number, is per platform) and `inet_ntop`'s
+  length type. What remains is the Windows runner (a linked build needs OpenSSL for Windows) and
+  FreeBSD.
   `scripts/check-portability.sh` fails if the library uses a POSIX-only call the inventory does not
   name — it caught `sendto`/`recvfrom` missing on its first run — and CI runs it. FreeBSD is close to
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
