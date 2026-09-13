@@ -224,10 +224,10 @@ What is here:
   not the same as being done: the criteria that are not met are outside the matrix and outside this
   repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
   Windows CI legs need portability work before a job for them would be anything but red. The two
-  partial criteria are conformance scenario breadth (forty-one scenarios, two of them end-to-end
-  sessions over real sockets, against the Swift tools' 40-scenario suite -- four of its five interop
-  matrices now have a counterpart, and its malformed-flow matrix and two release checks do not) and those
-  CI legs. What is met: the CLIs run local IPv4 **and IPv6**
+  partial criteria are conformance scenario breadth (forty-two scenarios, two of them end-to-end
+  sessions over real sockets, against the Swift tools' 40-scenario suite -- all five of its interop
+  matrices now have a counterpart; what does not is its two release checks, which assert packaging files
+  and belong in `scripts/check-package.sh` rather than in a scenario) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
   sessions, sanitizers and static checks are clean, the public API is documented, nothing
   placeholder-shaped is exposed as production, and the matrix itself exists and is checked.
 
@@ -244,7 +244,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **forty-one scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **forty-two scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -274,7 +274,12 @@ What is here:
   datagram, GOAWAY/close/drain and CONNECT -- the last with nine cases: the server's authority and path
   compared exactly, another protocol token, a server without `WT_ENABLED`, DATA before HEADERS,
   HEADERS then DATA, a request ended before its HEADERS, an untracked stream, and a client receiving a
-  request stream), and the two **real sessions** over IPv4 and IPv6. The
+  request stream), **five interop matrices** (stream, datagram, GOAWAY/close/drain, CONNECT and
+  malformed/flow-control -- the last with nine cases: a capsule over the caller's bound and one that has
+  not arrived, the control stream's three rules, a field section needing a table nobody advertised, a
+  four-byte limit accepting four and refusing the fifth with the draft's own flow-control code, a
+  one-stream limit, and a session with flow control disabled enforcing nothing), and the two **real
+  sessions** over IPv4 and IPv6. The
   reserved-SETTINGS scenario is what **found** a real spec violation in this tree's own parser, and
   the fix is in — see `IMPLEMENTATION_PLAN.md`. Registered with CTest.
 - **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
