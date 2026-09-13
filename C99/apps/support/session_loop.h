@@ -42,6 +42,12 @@ typedef struct wt_loop_result {
   size_t received_bytes;   /* what the peer sent, in either mode */
   int received_datagram;
   uint16_t bound_port;     /* the server's actual port, which the caller may need to print or use */
+  /* The first error the runtime recorded while RECEIVING, and how many there were. The status a failed run
+   * returns is the tool's own ("timeout"), which says the handshake did not finish and nothing about why; this
+   * is the layer that knows -- and without it a peer that answers with something this endpoint rejects looks
+   * exactly like a peer that never answered (WT-135). */
+  wt_status_t first_receive_error;
+  unsigned receive_errors;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */

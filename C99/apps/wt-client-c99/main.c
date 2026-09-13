@@ -136,14 +136,22 @@ int main(int argc, char **argv) {
     status = wt_loop_run_client(&loop, &result);
     if (options.json != 0) {
       printf("{\"role\":\"client\",\"status\":\"%s\",\"established\":%s,\"connectAccepted\":%s,"
-             "\"responseStatus\":%u,\"receivedBytes\":%llu,\"receivedDatagram\":%s}\n",
+             "\"responseStatus\":%u,\"receivedBytes\":%llu,\"receivedDatagram\":%s,"
+             "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
-             (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false");
+             (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
+             wt_status_name(result.first_receive_error), result.receive_errors);
     } else {
       printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.status, (unsigned long long)result.received_bytes,
              result.received_datagram != 0 ? " as a datagram" : " on a stream");
+      /* The status above is the TOOL's ("timeout"); this is the layer's, and it is the difference between "the
+       * peer never answered" and "the peer answered with something this endpoint refused". */
+      if (result.receive_errors > 0U) {
+        printf("client: the runtime recorded %u receive error(s), the first being %s\n", result.receive_errors,
+               wt_status_name(result.first_receive_error));
+      }
     }
     return status == WT_OK ? 0 : 1;
   }
