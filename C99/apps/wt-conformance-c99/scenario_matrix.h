@@ -21,6 +21,9 @@ void wt_scenario_matrix_run(wt_cli_report_t *report);
 /* Add the datagram interop matrix to the report. */
 void wt_scenario_datagram_matrix(wt_cli_report_t *report);
 
+/* Add the malformed-input and flow-control interop matrix to the report. */
+void wt_scenario_malformed_flow_matrix(wt_cli_report_t *report);
+
 /* Add the CONNECT interop matrix to the report. */
 void wt_scenario_connect_matrix(wt_cli_report_t *report);
 

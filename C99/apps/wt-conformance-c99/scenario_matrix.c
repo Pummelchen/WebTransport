@@ -5,8 +5,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "webtransport/api/flow.h"
+#include "webtransport/api/session.h"
 #include "webtransport/cursor.h"
 #include "webtransport/http3/driver.h"
+#include "webtransport/http3/control.h"
 #include "webtransport/http3/endpoint.h"
 #include "webtransport/http3/goaway.h"
 #include "webtransport/http3/role.h"
@@ -675,4 +678,172 @@ void wt_scenario_connect_matrix(wt_cli_report_t *report) {
   }
 
   report_matrix(report, "interop-connect-matrix", "CONNECT interop cases", rows, count);
+}
+
+void wt_scenario_malformed_flow_matrix(wt_cli_report_t *report) {
+  matrix_row_t rows[WT_MATRIX_MAX_CASES];
+  unsigned count = 0U;
+
+  /* The malformed inputs a peer can send, each refused with a code rather than a shrug: a capsule that claims
+   * more than this endpoint will buffer, and one that has not arrived at all -- which on a stream is a WAIT,
+   * and is the only one of these that is. */
+  {
+    static const uint8_t value[20] = {0};
+    uint8_t bytes[64];
+    wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
+    wt_webtransport_capsule_t capsule;
+    wt_cursor_t c;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    int ok = wt_webtransport_capsule_encode(
+                 &w, &(wt_webtransport_capsule_t){WT_CAPSULE_MAX_DATA, value, sizeof(value), 0U}) == WT_OK;
+    c = wt_cursor_init(bytes, wt_writer_offset(&w));
+    memset(&capsule, 0, sizeof(capsule));
+    ok = ok && wt_webtransport_capsule_decode(&c, 8U, &capsule, &error) == WT_ERR_LIMIT;
+    rows[count].name = "a capsule over the caller's bound is WT_ERR_LIMIT";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_webtransport_capsule_t capsule;
+    wt_cursor_t c = wt_cursor_init(NULL, 0U);
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    memset(&capsule, 0, sizeof(capsule));
+    int ok = wt_webtransport_capsule_decode(&c, 64U, &capsule, &error) == WT_ERR_TRUNCATED;
+    rows[count].name = "a capsule that has not arrived is a wait";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The control stream's three rules, which are the ones a peer breaks first. */
+  {
+    wt_http3_control_stream_t control;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    wt_http3_control_init(&control);
+    int ok = wt_http3_control_peer_opened(&control, &error) == WT_OK;
+    error = WT_HTTP3_NO_ERROR;
+    ok = ok && wt_http3_control_peer_opened(&control, &error) != WT_OK &&
+         error == WT_HTTP3_STREAM_CREATION_ERROR;
+    rows[count].name = "a second control stream is H3_STREAM_CREATION_ERROR";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_http3_control_stream_t control;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    wt_http3_control_init(&control);
+    (void)wt_http3_control_peer_opened(&control, &error);
+    error = WT_HTTP3_NO_ERROR;
+    (void)wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS, &error);
+    error = WT_HTTP3_NO_ERROR;
+    int ok = wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_HEADERS, &error) != WT_OK &&
+             error == WT_HTTP3_FRAME_UNEXPECTED;
+    rows[count].name = "a HEADERS frame on the control stream is H3_FRAME_UNEXPECTED";
+    rows[count].held = ok;
+    count++;
+  }
+  {
+    wt_http3_control_stream_t control;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    wt_http3_control_init(&control);
+    (void)wt_http3_control_peer_opened(&control, &error);
+    error = WT_HTTP3_NO_ERROR;
+    (void)wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS, &error);
+    error = WT_HTTP3_NO_ERROR;
+    /* DATA is the frame a stream carryies, so it is exactly as out of place here as HEADERS. */
+    int ok = wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_DATA, &error) != WT_OK &&
+             error == WT_HTTP3_FRAME_UNEXPECTED;
+    rows[count].name = "a DATA frame on the control stream is H3_FRAME_UNEXPECTED";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* A field section that cannot be decoded: a dynamic-table reference with no table, refused rather than read
+   * as empty. */
+  {
+    static const uint8_t section[] = {0x01U, 0x00U};
+    uint8_t scratch[64];
+    wt_http3_message_t message;
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    memset(&message, 0, sizeof(message));
+    int ok = wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, section, sizeof(section), NULL, 0U, 0U,
+                                     scratch, sizeof(scratch), &error) != WT_OK;
+    rows[count].name = "a field section needing a table that was never advertised is refused";
+    rows[count].held = ok;
+    count++;
+  }
+
+  /* The flow control the draft puts on the session itself: a limit of four bytes accepts four and refuses the
+   * fifth, and the refusal is the draft's flow-control code rather than a shrug. */
+  {
+    wt_session_config_t config = wt_session_config_default();
+    wt_session_t *session = NULL;
+    int ok;
+    config.authority = "example.com";
+    config.path = "/flow";
+    config.session_id = 0U;
+    ok = wt_session_create(&config, NULL, &session) == WT_OK && session != NULL;
+    ok = ok && wt_session_flow_configure(session, 1, 4U, 1U, 0U) == WT_OK;
+    {
+      wt_session_flow_state_t state = wt_session_flow_snapshot(session);
+      ok = ok && state.enabled == 1 && state.max_data_state == WT_SESSION_LIMIT_LIMITED && state.max_data == 4U &&
+           state.used_data == 0U;
+    }
+    ok = ok && wt_session_flow_record_data(session, 4U) == WT_OK;
+    {
+      wt_session_flow_state_t state = wt_session_flow_snapshot(session);
+      ok = ok && state.used_data == 4U && wt_session_flow_data_allowance(session) == 0U;
+    }
+    ok = ok && wt_session_flow_record_data(session, 1U) != WT_OK;
+    {
+      wt_session_error_t error = wt_session_last_error(session);
+      ok = ok && error.code == WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
+    }
+    rows[count].name = "a session limit of four bytes accepts four and refuses the fifth";
+    rows[count].held = ok;
+    if (session != NULL) wt_session_destroy(session, NULL);
+    count++;
+  }
+
+  /* The stream count is a limit of its own, in each direction. */
+  {
+    wt_session_config_t config = wt_session_config_default();
+    wt_session_t *session = NULL;
+    int ok;
+    config.authority = "example.com";
+    config.path = "/flow";
+    config.session_id = 4U;
+    ok = wt_session_create(&config, NULL, &session) == WT_OK && session != NULL;
+    ok = ok && wt_session_flow_configure(session, 1, 100U, 1U, 0U) == WT_OK;
+    ok = ok && wt_session_flow_register_stream(session, 0) == WT_OK &&
+         wt_session_flow_register_stream(session, 0) != WT_OK;
+    rows[count].name = "one bidirectional stream is allowed and a second is not";
+    rows[count].held = ok;
+    if (session != NULL) wt_session_destroy(session, NULL);
+    count++;
+  }
+
+  /* And the case that keeps the limit from being read as a wall: a session that agreed NO flow control sends
+   * without one. */
+  {
+    wt_session_config_t config = wt_session_config_default();
+    wt_session_t *session = NULL;
+    int ok;
+    config.authority = "example.com";
+    config.path = "/flow";
+    config.session_id = 8U;
+    ok = wt_session_create(&config, NULL, &session) == WT_OK && session != NULL;
+    ok = ok && wt_session_flow_configure(session, 0, 0U, 0U, 0U) == WT_OK;
+    ok = ok && wt_session_flow_record_data(session, 1000000U) == WT_OK &&
+         wt_session_flow_data_allowance(session) == UINT64_MAX;
+    {
+      wt_session_flow_state_t state = wt_session_flow_snapshot(session);
+      ok = ok && state.enabled == 0 && state.max_data_state == WT_SESSION_LIMIT_DISABLED;
+    }
+    rows[count].name = "a session with flow control disabled enforces no limit";
+    rows[count].held = ok;
+    if (session != NULL) wt_session_destroy(session, NULL);
+    count++;
+  }
+
+  report_matrix(report, "interop-malformed-flow-matrix", "malformed and flow-control cases", rows, count);
 }
