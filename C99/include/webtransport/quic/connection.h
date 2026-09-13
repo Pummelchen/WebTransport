@@ -93,6 +93,19 @@ typedef struct wt_quic_peer_limits {
   int set;                          /* whether a parameter list has been parsed at all */
 } wt_quic_peer_limits_t;
 
+/* A connection ID the PEER issued, with the stateless reset token that goes with it (RFC 9000 section
+ * 19.15). Bounded by the `active_connection_id_limit` this endpoint advertised, because the peer may only
+ * send as many as that and anything beyond it is the CONNECTION_ID_LIMIT_ERROR of section 5.1.1. */
+typedef struct wt_quic_peer_connection_id {
+  int in_use;
+  uint64_t sequence;
+  uint8_t id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  size_t length;
+  uint8_t reset_token[16];
+} wt_quic_peer_connection_id_t;
+
+#define WT_QUIC_PEER_CONNECTION_IDS_MAX 8U
+
 typedef struct wt_quic_connection_config {
   wt_quic_role_t role;
   uint32_t version;
@@ -114,6 +127,11 @@ typedef struct wt_quic_connection_config {
    * 13.2.1), which is what arms the acknowledgement timer. */
   uint64_t max_ack_delay;
   uint64_t local_max_ack_delay;
+  /* How many connection IDs THIS endpoint is willing to store from the peer, which is what it advertised
+   * in its own `active_connection_id_limit`: RFC 9000 section 5.1.1 counts the handshake's ID among them,
+   * and a peer that sends more is the CONNECTION_ID_LIMIT_ERROR of that section. Two -- the RFC's own
+   * default -- is the smallest useful value and the one used when this is zero. */
+  uint64_t local_active_connection_id_limit;
   /* The largest amount of stream data this endpoint will receive on ONE stream before raising the
    * limit: the receive-side counterpart of the peer's initial_max_stream_data_*, and zero -- which
    * grants nothing -- until a caller that knows what it can buffer sets it. */
@@ -198,6 +216,9 @@ typedef struct wt_quic_connection {
    * an endpoint that issued them without a bound would be growing on its own instructions. */
   wt_quic_issued_connection_id_t issued_ids[WT_QUIC_CONNECTION_IDS_MAX];
   size_t issued_count;
+  /* And the ones the peer has issued to this endpoint. */
+  wt_quic_peer_connection_id_t peer_ids[WT_QUIC_PEER_CONNECTION_IDS_MAX];
+  size_t peer_id_count;
   /* The streams this connection has, bounded by the table. */
   wt_quic_stream_table_t streams;
   /* The CONNECTION-level flow control, both directions: what this endpoint has granted and received,

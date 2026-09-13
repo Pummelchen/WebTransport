@@ -1144,6 +1144,18 @@ The duplicate check comes before the limit check, and the test caught that: a ca
 twice has made a mistake whether or not there is room, and "you already issued that" is a different answer
 from "the peer will not store another".
 
+**Thirty-third part done: the peer's connection IDs are stored.** A received NEW_CONNECTION_ID is kept with
+its stateless reset token, and the section's own errors are raised rather than ignored: a connection ID
+whose length is not 1..20 and a `retire_prior_to` above the sequence it arrives with are both
+FRAME_ENCODING_ERRORs (RFC 9000 section 19.15), a sequence that arrives twice with a DIFFERENT connection
+ID or token is a PROTOCOL_VIOLATION (the same one twice is merely a duplicate), and more IDs than this
+endpoint advertised it would store is the CONNECTION_ID_LIMIT_ERROR of section 5.1.1. A `retire_prior_to`
+retires what is below it, which is how a peer asks for its old IDs back.
+
+One finding was the kind that hides until a default is exercised: a configuration field left at zero meant
+"store nothing" rather than "the RFC's default", so the first NEW_CONNECTION_ID closed the connection with a
+limit error. Zero now means the RFC's two, and that is the documented meaning of the field.
+
 Implement the production network state machine.
 
 Tasks:

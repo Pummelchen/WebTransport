@@ -671,6 +671,77 @@ static uint64_t frame_stream_id(const wt_quic_frame_t *frame) {
   return 0U;
 }
 
+/* A NEW_CONNECTION_ID from the peer (RFC 9000 section 19.15): store it, bounded by what this endpoint
+ * said it would store, and refuse what the section makes an error rather than something to ignore. */
+static wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
+                                            const wt_quic_frame_t *frame, uint64_t now) {
+  const uint8_t *id = frame->as.new_connection_id.connection_id;
+  size_t length = frame->as.new_connection_id.connection_id_length;
+  uint64_t sequence = frame->as.new_connection_id.sequence;
+  size_t slot = WT_QUIC_PEER_CONNECTION_IDS_MAX;
+  size_t i;
+  uint64_t allowed;
+
+  /* A length outside 1..20 is a FRAME_ENCODING_ERROR, and a retire_prior_to above the sequence it
+   * arrives with is one too (section 19.15). */
+  if (length == 0U || length > WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
+    return close_with(connection, WT_QUIC_FRAME_ENCODING_ERROR,
+                      WT_QUIC_FRAME_NEW_CONNECTION_ID, now);
+  }
+  if (frame->as.new_connection_id.retire_prior_to > sequence) {
+    return close_with(connection, WT_QUIC_FRAME_ENCODING_ERROR,
+                      WT_QUIC_FRAME_NEW_CONNECTION_ID, now);
+  }
+
+  for (i = 0U; i < WT_QUIC_PEER_CONNECTION_IDS_MAX; i++) {
+    const wt_quic_peer_connection_id_t *known = &connection->peer_ids[i];
+    if (!known->in_use) {
+      if (slot == WT_QUIC_PEER_CONNECTION_IDS_MAX) slot = i;
+      continue;
+    }
+    if (known->sequence == sequence) {
+      /* The same sequence twice: the section makes a DIFFERENT connection ID or token for it a
+       * PROTOCOL_VIOLATION, and the same one again merely a duplicate. */
+      if (known->length != length || memcmp(known->id, id, length) != 0 ||
+          memcmp(known->reset_token, frame->as.new_connection_id.stateless_reset_token, 16U) != 0) {
+        return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION,
+                          WT_QUIC_FRAME_NEW_CONNECTION_ID, now);
+      }
+      return WT_OK;
+    }
+    /* A retire_prior_to retires everything below it, which is how a peer asks for the old ones back. */
+    if (known->sequence < frame->as.new_connection_id.retire_prior_to) {
+      connection->peer_ids[i].in_use = 0;
+      connection->peer_id_count--;
+    }
+  }
+  if (slot == WT_QUIC_PEER_CONNECTION_IDS_MAX) {
+    /* Every slot is taken by an ID that is still active, which is more than this endpoint said it would
+     * store: section 5.1.1 makes that a CONNECTION_ID_LIMIT_ERROR. */
+    return close_with(connection, WT_QUIC_CONNECTION_ID_LIMIT_ERROR,
+                      WT_QUIC_FRAME_NEW_CONNECTION_ID, now);
+  }
+  allowed = connection->config.local_active_connection_id_limit;
+  /* Zero means a caller that did not say, and the RFC's own default is two -- counting the handshake's
+   * ID, which leaves room for one spare. A limit of zero would otherwise refuse every NEW_CONNECTION_ID,
+   * which is a policy no caller asked for. */
+  if (allowed == 0U) allowed = 2U;
+  allowed -= 1U;
+  if ((uint64_t)connection->peer_id_count >= allowed) {
+    return close_with(connection, WT_QUIC_CONNECTION_ID_LIMIT_ERROR,
+                      WT_QUIC_FRAME_NEW_CONNECTION_ID, now);
+  }
+
+  connection->peer_ids[slot].in_use = 1;
+  connection->peer_ids[slot].sequence = sequence;
+  memcpy(connection->peer_ids[slot].id, id, length);
+  connection->peer_ids[slot].length = length;
+  memcpy(connection->peer_ids[slot].reset_token,
+         frame->as.new_connection_id.stateless_reset_token, 16U);
+  connection->peer_id_count++;
+  return WT_OK;
+}
+
 /* Hand one frame to the caller's handler, which is where everything this layer does not own goes. A
  * handler that refuses a frame is refusing the connection, and the code it named -- if it named one --
  * is what the peer is told. */
@@ -850,12 +921,13 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
       }
       return deliver_to_handler(connection, visit, frame);
     }
+    case WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID:
+      return handle_new_connection_id(connection, frame, visit->now);
     case WT_QUIC_FRAME_KIND_PING:
     case WT_QUIC_FRAME_KIND_CRYPTO:
     case WT_QUIC_FRAME_KIND_NEW_TOKEN:
     case WT_QUIC_FRAME_KIND_DATA_BLOCKED:
     case WT_QUIC_FRAME_KIND_STREAMS_BLOCKED:
-    case WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID:
     case WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID:
     case WT_QUIC_FRAME_KIND_PATH_CHALLENGE:
     case WT_QUIC_FRAME_KIND_PATH_RESPONSE:

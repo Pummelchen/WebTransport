@@ -1411,6 +1411,105 @@ static void test_issue_connection_id(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 section 19.15: a NEW_CONNECTION_ID from the peer is stored, bounded by what this endpoint
+ * advertised it would store, and the section's own errors are raised rather than ignored. */
+static void send_application_frame(const connection_pair_t *pair, const wt_quic_frame_t *frame,
+                                   const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
+  uint8_t payload[128];
+  uint8_t datagram[256];
+  wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+  size_t len;
+  size_t datagram_len = 0U;
+  wt_quic_packet_build_t build;
+
+  WT_EXPECT_OK("the frame encodes", wt_quic_frame_encode(&w, frame));
+  len = wt_writer_offset(&w);
+  memset(&build, 0, sizeof(build));
+  build.short_header = 1;
+  build.version = WT_QUIC_VERSION_1;
+  build.destination_connection_id = k_dcid;
+  build.destination_connection_id_len = sizeof(k_dcid);
+  build.packet_number = packet_number;
+  build.packet_number_length = 1U;
+  build.payload = payload;
+  build.payload_len = len;
+  build.keys = keys;
+  WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("and is sent", wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
+}
+
+static void test_peer_connection_ids(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  uint8_t secret[WT_SHA256_LEN];
+  static const uint8_t id_a[6] = {1U, 2U, 3U, 4U, 5U, 6U};
+  static const uint8_t id_b[6] = {7U, 8U, 9U, 10U, 11U, 12U};
+  uint8_t token_a[16];
+  uint8_t token_b[16];
+  uint64_t now = 104000000U;
+  size_t i;
+
+  memset(token_a, 0x11, sizeof(token_a));
+  memset(token_b, 0x22, sizeof(token_b));
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x30U + i);
+  WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID);
+  frame.as.new_connection_id.sequence = 1U;
+  frame.as.new_connection_id.retire_prior_to = 0U;
+  frame.as.new_connection_id.connection_id = id_a;
+  frame.as.new_connection_id.connection_id_length = sizeof(id_a);
+  frame.as.new_connection_id.stateless_reset_token = token_a;
+  send_application_frame(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("the server is not closed by it", 0, wt_quic_connection_is_closed(&pair.server));
+  {
+    size_t found = 0U;
+    for (i = 0U; i < WT_QUIC_PEER_CONNECTION_IDS_MAX; i++) {
+      if (pair.server.peer_ids[i].in_use && pair.server.peer_ids[i].sequence == 1U) {
+        found = 1U;
+        WT_EXPECT_U64("and it is stored with its length", (uint64_t)sizeof(id_a),
+                      (uint64_t)pair.server.peer_ids[i].length);
+        WT_EXPECT_BYTES("and its bytes", id_a, pair.server.peer_ids[i].id, sizeof(id_a));
+      }
+    }
+    WT_EXPECT_U64("which the table holds", 1U, (uint64_t)found);
+  }
+
+  /* The same sequence with a different token is the PROTOCOL_VIOLATION the section names. */
+  frame.as.new_connection_id.stateless_reset_token = token_b;
+  send_application_frame(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 1U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("a changed token for a known sequence closes it", 1,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("with a protocol violation", (uint64_t)WT_QUIC_PROTOCOL_VIOLATION,
+                pair.server.close.error_code);
+  close_pair(&pair);
+
+  /* A length outside 1..20 is a FRAME_ENCODING_ERROR. */
+  open_pair(WT_UDP_IPV4, &pair);
+  WT_EXPECT_OK("the client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID);
+  frame.as.new_connection_id.sequence = 2U;
+  frame.as.new_connection_id.retire_prior_to = 3U;   /* above the sequence: an encoding error */
+  frame.as.new_connection_id.connection_id = id_b;
+  frame.as.new_connection_id.connection_id_length = sizeof(id_b);
+  frame.as.new_connection_id.stateless_reset_token = token_b;
+  send_application_frame(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_U64("a retire_prior_to above the sequence is an encoding error",
+                (uint64_t)WT_QUIC_FRAME_ENCODING_ERROR, pair.server.close.error_code);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1433,5 +1532,6 @@ int main(void) {
   test_stream_retransmit_descriptor();
   test_stop_sending_send();
   test_issue_connection_id();
+  test_peer_connection_ids();
   WT_TEST_MAIN_END("wt_quic_connection");
 }
