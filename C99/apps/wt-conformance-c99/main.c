@@ -16,6 +16,7 @@
 
 #include "scenario_session.h"
 #include "scenario_refusals.h"
+#include "scenario_refusal_wire.h"
 #include "scenario_control.h"
 #include "scenario_headers.h"
 #include "scenario_isolation.h"
@@ -224,6 +225,12 @@ int main(int argc, char **argv) {
      * identity, running the whole exchange -- handshake, CONNECT, response, a stream message and a datagram.
      * IPv6 reports `unsupported` with its reason on a machine that has no IPv6 loopback, because that is a
      * fact about the machine rather than a failure of the code. */
+    /* The same refusals over a REAL connection: the driver refuses a frame the peer sent and the runtime states
+     * that refusal as an application close, which is asserted on the side that refused AND on the side that is
+     * told. One family is enough here: what is under test is the refusal path, and the pair's IPv6 path is
+     * already exercised above. */
+    wt_scenario_refusal_wire_run(&report);
+
     {
       static char ipv4_detail[WT_CLI_SCENARIO_DETAIL_MAX];
       static char ipv6_detail[WT_CLI_SCENARIO_DETAIL_MAX];

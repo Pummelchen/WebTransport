@@ -260,7 +260,7 @@ What is here:
   `WT-145`) and `quiche` (no handshake: `WT-146`) are measured to a named point, and the VPS matrix's
   five implementations still need a host. The conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
-  forty-six C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
+  forty-eight C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
   product list is the three tools and nothing that tests them), and every remaining entry mapped to
   the unit suite that covers it. The walk found one real gap, `protocol-structured-fields`, which is
@@ -281,7 +281,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **forty-six scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **forty-eight scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -289,8 +289,11 @@ What is here:
   never advertised is refused with a code, the session keeps the **first** close's code, a drain stops
   new streams, a capsule over the bound is excessive load, a peer stream past the bound is
   `WT_ERR_LIMIT` with **no** error code because the bound is ours, and an empty datagram is malformed
-  rather than short), the positive edge this project earned the hard way (half a prefix decides nothing
-  until it is whole), **thirteen connection-control scenarios** (GOAWAY identifiers that must not
+  rather than short), **two refusals over a real connection** (a frame cut off by the end of its stream
+  closes the connection as an *application* close with `H3_FRAME_ERROR`, asserted on the end that refused
+  **and** on the end that is told -- a decision is a different claim from what a peer receives, and both
+  halves are read rather than inferred), the positive edge this project earned the hard way (half a prefix
+  decides nothing until it is whole), **thirteen connection-control scenarios** (GOAWAY identifiers that must not
   increase and must name a client stream, the reject-at-or-above boundary, one control stream per
   connection, a request frame refused on it, SETTINGS that must come first, a closed critical stream,
   the QPACK static table's exact bound and a dynamic capacity of zero, the session-stream predicate,
