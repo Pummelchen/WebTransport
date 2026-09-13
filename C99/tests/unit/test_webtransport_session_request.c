@@ -164,9 +164,63 @@ static void test_the_settings_a_webtransport_endpoint_advertises(void) {
                    wt_webtransport_settings_apply(NULL, 0));
 }
 
+/* An authority a real client sends carries the port, and a policy names a HOST: RFC 9114 section 4.3.1 makes
+ * `:authority` the target URI's authority, and a URI on a non-default port has `localhost:8443` there. Comparing
+ * the whole string refused every third-party client -- pywebtransport connected to `https://127.0.0.1:54070/` and
+ * this server answered "not this authority" -- while this tree's own two tools never noticed, because both sent
+ * the bare host (WT-153). A bracketed IPv6 literal is the case that makes the port rule interesting: it is full of
+ * colons that are not separators. */
+static void test_an_authority_may_name_the_port_it_is_talking_to(void) {
+  wt_http3_message_t message;
+  wt_webtransport_request_policy_t policy;
+  wt_webtransport_session_request_t request;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  memset(&policy, 0, sizeof(policy));
+  policy.authority = "localhost";
+  policy.path = "/wt";
+  policy.wt_enabled = 1;
+
+  make_request(&message, "CONNECT", "webtransport", "https", "localhost:54070", "/wt");
+  WT_EXPECT_OK("a port on the authority is decided",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as an acceptance for the host the policy names", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT,
+                (int)request.outcome);
+
+  /* The port is not part of the comparison, so a DIFFERENT host is still refused with one. */
+  make_request(&message, "CONNECT", "webtransport", "https", "elsewhere:54070", "/wt");
+  WT_EXPECT_OK("another host with a port is decided",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
+
+  /* An IPv6 literal keeps its colons and drops only the port after the bracket. */
+  policy.authority = "[::1]";
+  make_request(&message, "CONNECT", "webtransport", "https", "[::1]:54070", "/wt");
+  WT_EXPECT_OK("a bracketed IPv6 literal with a port is decided",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
+
+  /* And the bare literal, with no port at all, is the same host. */
+  make_request(&message, "CONNECT", "webtransport", "https", "[::1]", "/wt");
+  WT_EXPECT_OK("as is the same literal alone",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("which is accepted too", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
+
+  /* A policy that names no authority serves any, which is the honest default for a listener: the transport has
+   * already proved the client reached this port. The path, when one is named, is still compared exactly. */
+  memset(&policy, 0, sizeof(policy));
+  policy.path = NULL;
+  policy.wt_enabled = 1;
+  make_request(&message, "CONNECT", "webtransport", "https", "anything:1234", "/anything");
+  WT_EXPECT_OK("a policy with no authority and no path accepts any",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
+}
+
 int main(void) {
   test_accepted_and_not_ours();
   test_rejections();
   test_the_settings_a_webtransport_endpoint_advertises();
+  test_an_authority_may_name_the_port_it_is_talking_to();
   WT_TEST_MAIN_END("wt_webtransport_session_request");
 }

@@ -685,6 +685,23 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     wt_udp_close(&loop.socket);
     return WT_ERR_TIMEOUT;
   }
+  /* A DIAGNOSTIC, gated by WT_HTTP3_SECTION_LOG: the request's field section exactly as it arrived, so that a
+   * decoder disagreement with a third-party encoder can be settled by decoding the same bytes twice instead of by
+   * reading either decoder (WT-153). */
+  {
+    const char *section_log_path = getenv("WT_HTTP3_SECTION_LOG");
+    if (section_log_path != NULL) {
+      FILE *section_log = fopen(section_log_path, "a");
+      if (section_log != NULL) {
+        size_t index;
+        for (index = 0U; index < loop.side.section_length; index++) {
+          fprintf(section_log, "%02x", loop.side.section[index]);
+        }
+        fprintf(section_log, "\n");
+        (void)fclose(section_log);
+      }
+    }
+  }
   {
     wt_status_t status = wt_http3_endpoint_on_request_headers(
         &loop.side.endpoint, loop.side.request_stream_id, loop.side.section, loop.side.section_length,
@@ -701,13 +718,47 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   policy.authority = config->authority;
   policy.path = config->path;
   policy.wt_enabled = 1;
-  if (wt_webtransport_session_request_validate(&request, &policy, &decision, &h3_error) != WT_OK ||
-      decision.outcome != WT_WEBTRANSPORT_REQUEST_ACCEPT) {
-    record_oracle(&loop, out);
+  {
+    wt_status_t validated = wt_webtransport_session_request_validate(&request, &policy, &decision, &h3_error);
+    /* The four pseudo-headers a WebTransport CONNECT is made of, in one line, for the report. */
+    {
+      size_t used = 0U;
+      struct {
+        const uint8_t *bytes;
+        size_t length;
+      } parts[4];
+      size_t part;
+      parts[0].bytes = request.method;
+      parts[0].length = request.method_length;
+      parts[1].bytes = request.protocol;
+      parts[1].length = request.protocol_length;
+      parts[2].bytes = request.authority;
+      parts[2].length = request.authority_length;
+      parts[3].bytes = request.path;
+      parts[3].length = request.path_length;
+      out->request_line[0] = '\0';
+      for (part = 0U; part < 4U; part++) {
+        size_t index;
+        if (part != 0U && used + 1U < sizeof(out->request_line)) out->request_line[used++] = ' ';
+        for (index = 0U; index < parts[part].length && used + 1U < sizeof(out->request_line); index++) {
+          uint8_t byte = parts[part].bytes[index];
+          out->request_line[used++] = (byte >= 0x20U && byte < 0x7fU) ? (char)byte : '?';
+        }
+      }
+      out->request_line[used] = '\0';
+    }
+    out->request_outcome = (unsigned)decision.outcome;
+    out->request_status = (uint64_t)decision.status;
+    out->h3_error = (uint64_t)h3_error;
+    if (validated == WT_OK && decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT) {
+      /* The decision is kept and the exchange continues below. */
+    } else {
+      record_oracle(&loop, out);
     record_oracle(&loop, out);
   wt_runtime_session_clear(&loop.session);
-    wt_udp_close(&loop.socket);
-    return WT_ERR_PROTOCOL;
+      wt_udp_close(&loop.socket);
+      return WT_ERR_PROTOCOL;
+    }
   }
   out->connect_accepted = 1;
   out->status = 200U;

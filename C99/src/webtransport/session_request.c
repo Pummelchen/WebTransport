@@ -9,6 +9,41 @@ static int token_is(const uint8_t *bytes, size_t length, const char *text) {
   return length == text_length && memcmp(bytes, text, text_length) == 0;
 }
 
+/* Whether a request's `:authority` names the host this server serves.
+ *
+ * RFC 9114 section 4.3.1 makes `:authority` the authority of the target URI, and an authority carries the port
+ * whenever it is not the scheme's default -- `localhost:54070`, `[::1]:8443`. The policy names a HOST, because
+ * that is what a server can know about itself; comparing the whole authority refused every real client that named
+ * the port it was actually talking to, which is every real client (WT-153). A NULL or empty policy means this
+ * server serves any authority, which is the honest default for a listener: the transport has already proved the
+ * client reached this port.
+ *
+ * The port is found from the END, and only outside a bracketed IPv6 literal, because `::1` is full of colons that
+ * are not port separators. */
+static int authority_matches(const uint8_t *bytes, size_t length, const char *expected) {
+  size_t host_length = length;
+  size_t i;
+  size_t bracket = 0U;
+  int has_bracket = 0;
+
+  if (expected == NULL || expected[0] == '\0') return 1;
+  for (i = length; i > 0U; i--) {
+    if (bytes[i - 1U] == ']') {
+      bracket = i - 1U;
+      has_bracket = 1;
+      break;
+    }
+  }
+  for (i = length; i > 0U; i--) {
+    if (bytes[i - 1U] == ':') {
+      /* A colon after the closing bracket is the port; inside one it is part of the address. */
+      if (!has_bracket || (i - 1U) > bracket) host_length = i - 1U;
+      break;
+    }
+  }
+  return token_is(bytes, host_length, expected);
+}
+
 wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is_server) {
   wt_status_t status;
 
@@ -93,8 +128,9 @@ wt_status_t wt_webtransport_session_request_validate(
     return WT_OK;
   }
 
-  if (!token_is(message->authority, message->authority_length, policy->authority) ||
-      !token_is(message->path, message->path_length, policy->path)) {
+  if (!authority_matches(message->authority, message->authority_length, policy->authority) ||
+      (policy->path != NULL && policy->path[0] != '\0' &&
+       !token_is(message->path, message->path_length, policy->path))) {
     out->outcome = WT_WEBTRANSPORT_REQUEST_REJECT;
     out->status = WT_WEBTRANSPORT_REJECT_NOT_FOUND;
     return WT_OK;

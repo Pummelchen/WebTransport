@@ -65,6 +65,17 @@ typedef struct wt_loop_result {
    * leaves and the connection clears once used, so it reads as zero whether or not a close was sent; this is the
    * close itself -- kind, code and frame type -- plus the status of the handler that refused. A run that ended
    * with this endpoint having closed did NOT end well, whatever the exchange counters say (WT-144). */
+  /* Why a CONNECT was refused: the outcome the session layer decided and the HTTP/3 error it named. The tool
+   * returned a bare WT_ERR_PROTOCOL for every refusal before -- "not WebTransport", "not this authority", "no
+   * WT_ENABLED" and "missing :scheme" all looked alike, and a third-party client's request was diagnosed by
+   * reading the validator rather than by running the server (WT-153). */
+  /* What the CONNECT asked for, as the server decoded it: "METHOD PROTOCOL AUTHORITY PATH". A refusal says
+   * "not WebTransport" or "not this authority" and nothing about the request that produced it, so a third-party
+   * client's CONNECT could only be diagnosed by reading the validator (WT-153). */
+  char request_line[192];
+  unsigned request_outcome;
+  unsigned long long request_status;
+  unsigned long long h3_error;
   unsigned close_kind;
   uint64_t close_sent_error_code;
   uint64_t close_sent_frame_type;

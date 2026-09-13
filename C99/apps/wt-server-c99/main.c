@@ -156,8 +156,11 @@ int main(int argc, char **argv) {
        * appended to a `"}` that had already closed both -- which produced `"pin":"..."closeKind":0` and a report
        * that no JSON parser would read. Every assertion here matched a substring, so nothing said so; the check
        * script validates the report as JSON now, which is what a caller parsing it does (WT-144). */
-      printf("\",\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,\"closeCause\":\"%s\","
+      printf("\",\"request\":\"%s\",\"requestOutcome\":%u,\"requestStatus\":%llu,\"h3Error\":%llu,"
+             "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,\"closeCause\":\"%s\","
              "\"closeSent\":%s}\n",
+             result.request_line, result.request_outcome, (unsigned long long)result.request_status,
+             (unsigned long long)result.h3_error,
              result.close_kind, (unsigned long long)result.close_sent_error_code,
              (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
              result.close_was_sent != 0 ? "true" : "false");
