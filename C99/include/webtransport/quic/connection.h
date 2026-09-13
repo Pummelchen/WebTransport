@@ -179,6 +179,10 @@ typedef struct wt_quic_connection {
   int local_max_data_set;
   /* The streams this connection has, bounded by the table. */
   wt_quic_stream_table_t streams;
+  /* The CONNECTION-level flow control, both directions: what this endpoint has granted and received,
+   * and what the peer granted. The per-stream limits live on the streams; these are the sum the RFC
+   * checks first (RFC 9000 section 4.1). */
+  wt_quic_flow_t flow;
   uint64_t local_max_streams[2]; /* indexed by wt_quic_stream_direction_t */
   int local_max_streams_set[2];
   /* The datagrams that have arrived and not been read, bounded and with the newest discarded when it

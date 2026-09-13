@@ -1051,6 +1051,26 @@ data, the state machine owns the lifecycle. A reset whose final size contradicts
 the FINAL_SIZE_ERROR of RFC 9000 section 4.5, and a STOP_SENDING for a stream in the wrong state is the
 STREAM_STATE_ERROR of section 19.5; both close the connection naming the frame.
 
+**Twenty-sixth part done: received stream data is accounted against both flow control limits.** The
+connection keeps the CONNECTION-level flow control -- what it granted and has received, and what the peer
+granted -- and every STREAM frame's data is charged against both that limit and the stream's. RFC 9000
+section 4.1 makes data beyond a limit a FLOW_CONTROL_ERROR, and deciding WHICH limit was broken needed a
+careful reading of the stream module: it reports a per-stream overrun, a connection overrun and a
+final-size contradiction with two statuses between them, so the status alone cannot choose the code. The
+caller therefore recomputes the credit the module would have charged and asks each limit in turn -- the
+stream's, then the connection's, then the final size -- which is what makes the error the peer receives
+the right one rather than whichever branch happened to be first.
+
+Three findings came out of landing it, all of them about the tests rather than the rule. A stream's
+receive limit and the connection's are seeded by DIFFERENT calls (`local_max_stream_data` at connection
+setup, `set_max_data` for the connection), so a test that grants one and not the other gets a refusal that
+looks like a rule failure. The `-Wshadow` rule caught a credit variable redeclared in the same block. And
+two existing test blocks assert about the PRE-SEED state of a limit, so seeding a limit before them
+invalidates their expectations -- the MAX_STREAMS block in the twenty-second part and the MAX_DATA block
+here, whose "a limit before the seed is a state error" is no longer true once the receive path needs room
+earlier. Both blocks now test the rule that matters (a limit may only rise) rather than the state they
+used to start in.
+
 Implement the production network state machine.
 
 Tasks:

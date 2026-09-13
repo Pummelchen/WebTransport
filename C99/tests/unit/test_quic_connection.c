@@ -151,7 +151,11 @@ static void open_pair(wt_udp_family_t family, connection_pair_t *pair) {
   server_config.max_datagram_size = WT_QUIC_MAX_PACKET;
 
   WT_EXPECT_OK("the client initialises", wt_quic_connection_init(&pair->client, &client_config));
+  /* Stream data is only accepted once this endpoint has granted room for it. */
+  pair->client.config.local_max_stream_data = 1024U;
   WT_EXPECT_OK("the server initialises", wt_quic_connection_init(&pair->server, &server_config));
+  /* Stream data is only accepted once this endpoint has granted room for it. */
+  pair->server.config.local_max_stream_data = 1024U;
   WT_EXPECT_OK("the client borrows its socket",
                wt_quic_connection_attach(&pair->client, &pair->client_socket, &pair->server_address));
   WT_EXPECT_OK("the server borrows its socket",
@@ -948,6 +952,8 @@ static void test_peer_opens_stream(void) {
   /* This endpoint grants two bidirectional streams, which is what the peer may open. */
   WT_EXPECT_OK("a grant of two",
                wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
+  WT_EXPECT_OK("and room for the data it will receive",
+               wt_quic_connection_set_max_data(&pair.server, 1024U));
 
   /* Stream 0 is the peer's first bidirectional stream, and the frame creates it. */
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);

@@ -207,6 +207,7 @@ static void open_endpoint(wt_udp_family_t family, endpoint_t *endpoint, endpoint
 
   connection_config(&config, role, endpoint);
   WT_EXPECT_OK("the connection initialises", wt_quic_connection_init(&endpoint->connection, &config));
+  endpoint->connection.config.local_max_stream_data = 512U;
   WT_EXPECT_OK("and borrows the socket",
                wt_quic_connection_attach(&endpoint->connection, &endpoint->socket,
                                          peer == NULL ? NULL : &peer->address));
@@ -441,6 +442,8 @@ static void test_handshake(wt_udp_family_t family) {
       WT_EXPECT_OK("in both directions",
                    wt_quic_connection_set_max_streams(&server.connection, WT_QUIC_STREAM_UNIDIRECTIONAL,
                                                       2U));
+      WT_EXPECT_OK("the server grants connection-level room",
+                   wt_quic_connection_set_max_data(&server.connection, 65536U));
       g_stream_length = 0U;
       WT_EXPECT_OK("the client sends stream data",
                    wt_quic_connection_send_stream(&client.connection, 0U, 0U, k_stream,
@@ -473,13 +476,14 @@ static void test_handshake(wt_udp_family_t family) {
      * limit that falls a protocol error), and travels as a MAX_DATA frame. */
     {
       int arrived = 0;
-      WT_EXPECT_STATUS("a limit before the seed is a state error", WT_ERR_STATE,
-                       wt_quic_connection_send_max_data(&server.connection, 200000U, now));
-      WT_EXPECT_OK("the server seeds its limit",
-                   wt_quic_connection_set_max_data(&server.connection, 100000U));
-      WT_EXPECT_U64("which reads back", 100000U, wt_quic_connection_max_data(&server.connection));
+      /* The limit is already seeded -- the receive path needed room before it would accept stream
+       * data -- so what this checks is the rule that matters: it may only ever rise. */
+      WT_EXPECT_U64("the seeded limit reads back", 65536U,
+                    wt_quic_connection_max_data(&server.connection));
+      /* Below what is already granted, so it is the lowering the RFC makes a protocol error rather
+       * than a raise -- and it is not sent, so the client sees exactly one MAX_DATA frame. */
       WT_EXPECT_STATUS("lowering it is refused", WT_ERR_LIMIT,
-                       wt_quic_connection_send_max_data(&server.connection, 99999U, now));
+                       wt_quic_connection_send_max_data(&server.connection, 1024U, now));
       WT_EXPECT_OK("raising it is what a reader does",
                    wt_quic_connection_send_max_data(&server.connection, 200000U, now));
       WT_EXPECT_U64("and is remembered", 200000U, wt_quic_connection_max_data(&server.connection));

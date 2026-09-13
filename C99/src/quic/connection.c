@@ -111,6 +111,7 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   limits.max_datagram_frame_size = parameter_or(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 0U);
   limits.set = 1;
   connection->peer_limits = limits;
+  connection->flow.peer_max_data = limits.initial_max_data;
   return WT_OK;
 }
 
@@ -785,6 +786,33 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
           return close_with(connection, WT_QUIC_STREAM_STATE_ERROR, wire_type_of(frame->kind),
                             visit->now);
         }
+      } else if (frame->kind == WT_QUIC_FRAME_KIND_STREAM && stream != NULL) {
+        /* The bytes are accounted against BOTH limits. WHICH limit an overrun broke is decided from the
+         * limits rather than from the status: the module reports a per-stream overrun, a connection
+         * overrun and a final-size contradiction with two statuses between them, so the caller
+         * recomputes the credit the module would have charged and asks each limit in turn -- section 4.1
+         * for flow control, section 4.5 for the final size. */
+        uint64_t credit = 0U;
+        int in_order = 0;
+        status = wt_quic_stream_on_data(stream, &connection->flow, frame->as.stream.offset,
+                                        frame->as.stream.length, frame->as.stream.fin, &credit,
+                                        &in_order);
+        if (status != WT_OK) {
+          uint64_t code;
+          if (frame->as.stream.offset > UINT64_MAX - frame->as.stream.length) {
+            code = WT_QUIC_FRAME_ENCODING_ERROR;
+          } else {
+            uint64_t end = frame->as.stream.offset + frame->as.stream.length;
+            uint64_t needed = end > stream->recv_highest ? end - stream->recv_highest : 0U;
+            if (end > stream->max_stream_data ||
+                connection->flow.data_received + needed > connection->flow.max_data) {
+              code = WT_QUIC_FLOW_CONTROL_ERROR;
+            } else {
+              code = WT_QUIC_FINAL_SIZE_ERROR;
+            }
+          }
+          return close_with(connection, code, wire_type_of(frame->kind), visit->now);
+        }
       } else if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA && stream != NULL) {
         status = wt_quic_stream_on_max_stream_data(stream, frame->as.max_stream_data.maximum);
         if (status != WT_OK) {
@@ -865,6 +893,9 @@ wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
   wt_quic_loss_init(&connection->loss);
   wt_quic_datagram_queue_init(&connection->datagrams);
   wt_quic_stream_table_init(&connection->streams);
+  /* Both limits are zero until a caller that knows what it can buffer grants them: an endpoint that
+   * advertises nothing cannot receive (RFC 9000 section 4.1), which is the honest default. */
+  wt_quic_flow_init(&connection->flow, 0U, 0U);
   wt_quic_congestion_init(&connection->congestion, (uint64_t)config->max_datagram_size);
   wt_quic_close_state_init(&connection->close);
   return WT_OK;
@@ -938,6 +969,8 @@ wt_status_t wt_quic_connection_set_max_data(wt_quic_connection_t *connection, ui
   if (connection->local_max_data_set && maximum < connection->local_max_data) return WT_ERR_LIMIT;
   connection->local_max_data = maximum;
   connection->local_max_data_set = 1;
+  connection->flow.max_data = maximum;
+  connection->flow.window = maximum;
   return WT_OK;
 }
 
