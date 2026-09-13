@@ -233,6 +233,55 @@ wt_status_t wt_qpack_dynamic_entry(const wt_qpack_dynamic_table_t *table, uint64
                                    const uint8_t **out_name, size_t *out_name_length,
                                    const uint8_t **out_value, size_t *out_value_length);
 
+/* One of the three QPACK error codes, for the two stream kinds and for a header
+ * block that does not decompress (RFC 9204 section 8). */
+typedef enum wt_qpack_error {
+  /* Named apart from the raw codes above because those are macros: an enumerator
+   * with the same name would be replaced by its own macro before the compiler saw
+   * it. The values are the same codes. */
+  WT_QPACK_ERROR_NONE = 0,
+  WT_QPACK_ERROR_DECOMPRESSION_FAILED = 0x0200,
+  WT_QPACK_ERROR_ENCODER_STREAM = 0x0201,
+  WT_QPACK_ERROR_DECODER_STREAM = 0x0202
+} wt_qpack_error_t;
+
+/* --------------------------------------- RFC 9204 section 4.3's encoder stream */
+
+/* The four instructions an encoder sends on its encoder stream, applied in order:
+ * the capacity, an insertion whose name comes from a table, an insertion whose
+ * name is written out, and a duplication of an existing entry.
+ *
+ * Every error here is QPACK_ENCODER_STREAM_ERROR (section 4.3), and the interesting
+ * ones are the two the table alone cannot catch: a capacity above the limit this
+ * endpoint advertised, and an index that names an entry the table has already
+ * evicted. */
+typedef struct wt_qpack_encoder_stream {
+  /* The table the instructions drive, owned by the caller. */
+  wt_qpack_dynamic_table_t *table;
+  /* The capacity this endpoint advertised in SETTINGS: an instruction above it is
+   * an error, because a peer may not use more than it was granted. */
+  size_t max_capacity;
+} wt_qpack_encoder_stream_t;
+
+void wt_qpack_encoder_stream_init(wt_qpack_encoder_stream_t *stream,
+                                  wt_qpack_dynamic_table_t *table, size_t max_capacity);
+
+/* Apply one instruction, advancing the cursor past it. */
+wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_cursor_t *c,
+                                          wt_qpack_error_t *out_error);
+
+/* Write each instruction, for the encoder side of this implementation. Refuses what
+ * the decoder above would refuse, so this build cannot emit an instruction it could
+ * not read back. */
+wt_status_t wt_qpack_encoder_stream_write_capacity(wt_writer_t *w, size_t capacity);
+wt_status_t wt_qpack_encoder_stream_write_insert_name_reference(wt_writer_t *w, int from_static,
+                                                               uint64_t index, const uint8_t *value,
+                                                               size_t value_length);
+wt_status_t wt_qpack_encoder_stream_write_insert_literal(wt_writer_t *w, const uint8_t *name,
+                                                        size_t name_length, const uint8_t *value,
+                                                        size_t value_length);
+wt_status_t wt_qpack_encoder_stream_write_duplicate(wt_writer_t *w, uint64_t relative_index);
+
 #ifdef __cplusplus
 }
 #endif

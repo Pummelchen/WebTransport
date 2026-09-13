@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 50 unit test files and 78,478 checks, run by `ctest` and again under
+- 51 unit test files and 78,533 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -429,6 +429,11 @@ What is here:
   change meaning, so a reference to an evicted entry is reported as such rather than resolved to whatever now
   occupies its place. It is bounded like every other peer-driven table here: 32 entries, a 4 KiB arena, and an
   entry larger than the capacity refused rather than truncated.
+- **The encoder stream instructions** (Phase 5/6, seventh part): `qpack_encoder_stream.c` applies RFC 9204
+  section 4.3's four instructions -- the capacity, a name from a table, a name written out, a duplication --
+  to the dynamic table, and writes them from this implementation's own encoder. Both errors only visible at
+  this layer are enforced: a capacity above what SETTINGS granted this peer, and an index naming an entry the
+  table has already evicted, are QPACK_ENCODER_STREAM_ERROR rather than a clamp or a guess.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

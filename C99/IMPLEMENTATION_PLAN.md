@@ -1543,7 +1543,25 @@ had been entry one's value -- a wrong name read out of a well-formed table, whic
 QPACK to produce a different header section. Both the fix and the reason are in the code.
 
 Implement dynamic table.
-- Implement encoder and decoder streams.
+- **Seventh part done: the encoder stream instructions.** `src/http3/qpack_encoder_stream.c` applies RFC
+9204 section 4.3's four instructions to the dynamic table -- Set Dynamic Table Capacity, Insert With Name
+Reference (static or dynamic), Insert With Literal Name and Duplicate -- and writes each of them from this
+implementation's own side, so the writers and the reader are checked against each other on the wire. A
+relative index resolves against the CURRENT insert count (section 3.2.3), which is what makes the arithmetic
+survive evictions.
+
+Two errors are only visible here rather than in the table: a capacity above the SETTINGS limit this endpoint
+advertised, which section 4.3.1 makes QPACK_ENCODER_STREAM_ERROR rather than a clamp, and an index that names
+an entry the table has already evicted, which is the case a decoder cannot guess its way out of. The
+Huffman-coded case is refused explicitly (WT_ERR_STATE) rather than decoded into a buffer this function does
+not have: the encoder stream stores DECODED bytes, so a coded name or value needs a decoder buffer that
+belongs with the part that owns the insertion path end to end.
+
+One C detail worth recording: the error enum's members cannot be named after the error codes, because those
+are macros -- an enumerator sharing a macro's name is replaced before the compiler sees it, and the header
+fails to parse for every translation unit that includes it.
+
+Implement encoder and decoder streams.
 - Implement Base and post-Base dynamic references.
 - Enforce table capacity and malformed reference handling.
 

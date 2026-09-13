@@ -57,6 +57,7 @@ set(WT_UNIT_TESTS
   test_qpack_huffman_encode
   test_qpack_field
   test_qpack_dynamic
+  test_qpack_encoder_stream
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
