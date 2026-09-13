@@ -50,6 +50,9 @@ typedef struct loop {
   /* The transport the driver sends through, kept here because the lost-frame handler needs it: a report of a
    * lost frame arrives long after the call that built the transport returned (WT-135). */
   wt_http3_driver_transport_t transport;
+  /* How many times a lost-frame report was answered by sending the request again: the counter that says whether
+   * the retransmission path RAN, which reading the code cannot (WT-135). */
+  unsigned resends;
   uint64_t now;
 } loop_t;
 
@@ -179,7 +182,9 @@ static void client_on_lost_frame(void *context, const wt_quic_tx_frame_t *frame)
   if (loop == NULL || frame == NULL) return;
   if (frame->is_crypto) return; /* the handshake retransmits its own */
   if (frame->stream_id != loop->side.request_stream_id) return;
-  (void)wt_http3_driver_resend_request(&loop->side.driver, &loop->transport, loop->now);
+  if (wt_http3_driver_resend_request(&loop->side.driver, &loop->transport, loop->now) == WT_OK) {
+    loop->resends++;
+  }
 }
 
 /* Whether this endpoint may SPEAK: the handshake is DONE and the peer's transport parameters are IN FORCE.
@@ -209,6 +214,7 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->has_handshake_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
   out->has_application_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
   out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop->session.handshake));
+  out->resends = loop->resends;
 }
 
 static void pump_once(loop_t *loop) {

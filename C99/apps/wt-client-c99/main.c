@@ -141,7 +141,7 @@ int main(int argc, char **argv) {
              "\"lastReceive\":\"%s\",\"closeCodeSet\":%s,\"closeCode\":%llu,"
              "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
              "\"packetsDiscarded\":%llu,\"keys\":{\"initial\":%s,\"handshake\":%s,"
-             "\"application\":%s},\"handshakeState\":\"%s\"}\n",
+             "\"application\":%s},\"handshakeState\":\"%s\",\"resends\":%u}\n",
              wt_loop_status_name(status), result.established != 0 ? "true" : "false",
              result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
              (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
@@ -152,7 +152,7 @@ int main(int argc, char **argv) {
              (unsigned long long)result.packets_discarded, result.has_initial_keys != 0 ? "true" : "false",
              result.has_handshake_keys != 0 ? "true" : "false",
              result.has_application_keys != 0 ? "true" : "false",
-             result.handshake_state != NULL ? result.handshake_state : "unknown");
+             result.handshake_state != NULL ? result.handshake_state : "unknown", result.resends);
     } else {
       printf("client: %s, response %u, received %llu byte(s)%s\n", wt_loop_status_name(status),
              (unsigned)result.status, (unsigned long long)result.received_bytes,
@@ -171,6 +171,9 @@ int main(int argc, char **argv) {
                result.has_initial_keys != 0 ? "yes" : "no", result.has_handshake_keys != 0 ? "yes" : "no",
                result.has_application_keys != 0 ? "yes" : "no",
                result.handshake_state != NULL ? result.handshake_state : "unknown");
+        if (result.resends > 0U) {
+          printf("client: answered %u lost-frame report(s) by resending the request\n", result.resends);
+        }
         if (result.close_code_set != 0) {
           printf("client: this endpoint refused with code 0x%llx, blaming frame type %llu\n",
                  (unsigned long long)result.close_code, (unsigned long long)result.close_frame_type);

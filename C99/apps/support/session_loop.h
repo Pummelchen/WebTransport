@@ -76,6 +76,8 @@ typedef struct wt_loop_result {
   /* What the handshake's own state machine says. Keys installed and the state not CONNECTED is the shape of a
    * flight that was READ but not completed -- and the two facts together are what a diagnosis needs (WT-135). */
   const char *handshake_state;
+  /* How many lost-frame reports were answered by resending the request (WT-135). */
+  unsigned resends;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */
