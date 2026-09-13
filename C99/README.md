@@ -224,7 +224,7 @@ What is here:
   not the same as being done: the criteria that are not met are outside the matrix and outside this
   repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
   Windows CI legs need portability work before a job for them would be anything but red. The two
-  partial criteria are conformance scenario breadth (forty-two scenarios, two of them end-to-end
+  partial criteria are conformance scenario breadth (forty-three scenarios, two of them end-to-end
   sessions over real sockets, against the Swift tools' 40-scenario suite -- all five of its interop
   matrices now have a counterpart, and its two release checks are mirrored where they belong:
   `scripts/check-package.sh` installs the tree and asserts that the product list is the three tools and
@@ -245,7 +245,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **forty-two scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **forty-three scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -279,7 +279,10 @@ What is here:
   malformed/flow-control -- the last with nine cases: a capsule over the caller's bound and one that has
   not arrived, the control stream's three rules, a field section needing a table nobody advertised, a
   four-byte limit accepting four and refusing the fifth with the draft's own flow-control code, a
-  one-stream limit, and a session with flow control disabled enforcing nothing), and the two **real
+  one-stream limit, and a session with flow control disabled enforcing nothing), and **the flow-control
+  matrix** (seven cases: a granted limit must strictly increase, so a repeat or a decrease is
+  `WT_FLOW_CONTROL_ERROR` and neither moves the limit; an explicit zero allows nothing rather than
+  everything; and one session's disabled flow control does not loosen another's), and the two **real
   sessions** over IPv4 and IPv6. The
   reserved-SETTINGS scenario is what **found** a real spec violation in this tree's own parser, and
   the fix is in — see `IMPLEMENTATION_PLAN.md`. Registered with CTest.
