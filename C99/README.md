@@ -224,7 +224,7 @@ What is here:
   not the same as being done: the criteria that are not met are outside the matrix and outside this
   repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
   Windows CI legs need portability work before a job for them would be anything but red. The two
-  partial criteria are conformance scenario breadth (thirty-five scenarios, two of them end-to-end
+  partial criteria are conformance scenario breadth (thirty-seven scenarios, two of them end-to-end
   sessions over real sockets, against the Swift tools' 40-scenario suite) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
   sessions, sanitizers and static checks are clean, the public API is documented, nothing
   placeholder-shaped is exposed as production, and the matrix itself exists and is checked.
@@ -242,7 +242,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **thirty-five scenarios,
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **thirty-seven scenarios,
   all passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -258,7 +258,9 @@ What is here:
   and the datagram's quarter-id round trip), **five header and QPACK scenarios** (an extended CONNECT
   and a 200 response round-tripped through a field section, `:path /` as static entry 1, a literal
   line whose whole representation is consumed, and a Huffman-coded line that is shorter than the plain
-  one and keeps its H bits), and the two **real sessions** over IPv4 and IPv6. The
+  one and keeps its H bits), **two isolation scenarios** (two sessions in one connection whose state
+  does not cross, and a datagram for a session this endpoint does not have being dropped rather than
+  delivered to a neighbour), and the two **real sessions** over IPv4 and IPv6. The
   reserved-SETTINGS scenario is what **found** a real spec violation in this tree's own parser, and
   the fix is in — see `IMPLEMENTATION_PLAN.md`. Registered with CTest.
 - **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
