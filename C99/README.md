@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 82 test programs and 82,490 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
+- 83 test programs and 91,248 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -250,7 +250,7 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **26 of 26 draft-16 requirements in
+  `scripts/score-matrix.sh` rather than from memory: **30 of 30 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 7 of the plan's 9 completion
   criteria are met, with 2 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
   which is not the same as being done. The two partial criteria are outside the matrix: the FreeBSD
@@ -631,6 +631,21 @@ What is here:
   dropped and counted) and drained when the ID becomes known, with the ones naming this session delivered and the
   rest dropped rather than refused, because they were never an error at the time they arrived. A datagram that
   arrives once the ID IS known and names another session is refused, which is what the hostile act measures.
+- **The draft's error codes, and the mapping §4.4 requires** (WT-181): two error spaces, and the difference is a
+  MUST. A WebTransport **application** error is a 32-bit integer the application chose, and section 4.4 requires it
+  to be remapped into the `WT_APPLICATION_ERROR` range 0x52e4a40fa8db..0x52e5ac983162 -- **skipping** the
+  codepoints of the form `0x1f * N + 0x21` that RFC 9114 section 8.1 reserves -- with the section's own pseudocode
+  as the definition both ways. The draft's **protocol** codes (`WT_SESSION_GONE` 0x170d7b68,
+  `WT_BUFFERED_STREAM_REJECTED` 0x3994bd84, `WT_FLOW_CONTROL_ERROR` 0x045d4487, `WT_ALPN_ERROR` 0x0817b3dd,
+  `WT_REQUIREMENTS_NOT_MET` 0x212c0d48) are HTTP/3 error codes and travel **unmapped**, which is why
+  `webtransport/error.h` defines all five in one place and exports the range test separately: a tree that ran them
+  through the application mapping would name a code no peer recognises. `test_webtransport_error` checks the two
+  ends of the range as literals from the section, compares the mapping against the section's pseudocode computed a
+  second way (an oracle, not a second reading), and asserts that no application error maps to a reserved
+  codepoint and that a reserved one is refused in the other direction. What is NOT yet done with them: the two
+  MUSTs that use them -- section 6's "reset the session's streams with WT_SESSION_GONE" (WT-182) and section 4.6's
+  `WT_BUFFERED_STREAM_REJECTED` for a buffered stream over the bound (WT-180) -- because nothing in this tree
+  resets a WebTransport data stream yet.
 - **Shutdown and cancellation are safe at every point** (WT-178): the Swift suite tests its server's shutdown path
   from the operator's point of view -- refuse at once, return promptly with nothing served, survive being run
   twice -- and those assertions are about a server object this tree does not have. What they are about

@@ -82,9 +82,12 @@ wt_status_t wt_webtransport_drain_session_write(wt_writer_t *w);
  * for the per-stream and blocked capsules, which name a stream as well -- and a
  * capsule whose value is not exactly that is malformed rather than short. */
 
-/* The draft's error code for a flow-control violation, which is what an endpoint sends
- * when a limit goes backwards. */
-#define WT_WEBTRANSPORT_FLOW_CONTROL_ERROR ((uint64_t)0x045d4487)
+/* The draft's error code for a flow-control violation, which is what an endpoint sends when a limit goes
+ * backwards. It is defined in `webtransport/error.h` with the rest of the draft's registered codes -- one owner
+ * for the five numbers, so that a second copy cannot drift from the registry (WT-181) -- and this name stays
+ * because it is the one this file's callers use. */
+#include "webtransport/webtransport/error.h"
+#define WT_WEBTRANSPORT_FLOW_CONTROL_ERROR WT_WEBTRANSPORT_ERROR_FLOW_CONTROL
 
 /* The draft's ceiling on a stream-count limit: a limit above it is a flow-control error
  * rather than a number to remember, because the stream ID space it would describe does

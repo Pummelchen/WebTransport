@@ -145,6 +145,7 @@ list(APPEND WT_CORE_SOURCES ${WT_API_SOURCES})
 set(WT_WEBTRANSPORT_SOURCES
   src/webtransport/session_request.c
   src/webtransport/capsule.c
+  src/webtransport/error.c
   src/webtransport/protocol.c
   src/webtransport/session.c
   src/webtransport/framing.c

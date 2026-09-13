@@ -59,6 +59,7 @@ set(WT_UNIT_TESTS
   test_webtransport_flow
   test_webtransport_session
   test_webtransport_framing
+  test_webtransport_error
   test_public_api
   test_api_endpoint
   test_cli_endpoint
