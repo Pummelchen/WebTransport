@@ -141,6 +141,7 @@ set(WT_HTTP3_SOURCES
   src/http3/control.c
   src/http3/driver.c
   src/http3/endpoint.c
+  src/http3/quic_transport.c
   src/http3/goaway.c
   src/http3/streams.c
   src/http3/request.c

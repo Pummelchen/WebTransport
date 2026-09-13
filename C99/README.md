@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 70 unit test files and 79,581 checks, run by `ctest` and again under
+- 70 unit test files and 79,589 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -127,7 +127,13 @@ What is here:
     against a recording transport instead of a live handshake. Each stream is BUILT
     before it is opened, which puts the once-per-connection rules ahead of the open and
     means a refused start cannot orphan a stream the peer would see and this endpoint
-    could not explain.
+    could not explain. `wt_http3_driver_quic_transport` binds that table to a real
+    connection, and it reads the send offset from the CONNECTION's own stream state
+    (`stream->send_offset`) rather than keeping its own — an adapter with its own counter
+    would be a second opinion about a number the connection already owns, which is how two
+    layers come to disagree about where a stream is. A stream the connection does not know
+    is refused by this layer as the caller's error, and everything else is passed through
+    unchanged: congestion and connection state are the connection's to report.
   - `http3/endpoint.h` — the HTTP/3 endpoint's own streams, which is the lifecycle a
     consumer never sees: our control stream (`0x00`) and QPACK streams (`0x02`/`0x03`)
     exist once each, the peer's unidirectional streams are classified by their type

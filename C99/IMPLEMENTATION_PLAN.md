@@ -2153,6 +2153,27 @@ stays under half the buffer -- a bound the SETTINGS encoder's own limit enforces
 nicely. A transport that cannot open a stream right now (congestion, `WT_ERR_AGAIN`) passes its refusal straight
 through, because that is a connection condition and not an HTTP/3 one.
 
+### Phase 9's tenth part: the transport bound to a real connection
+
+`wt_http3_driver_quic_transport` fills the three-call table with adapters onto
+`wt_quic_connection_open_stream`, `wt_quic_connection_send_stream` and
+`wt_quic_connection_send_datagram`, so the transport seam is closed end to end: the HTTP/3 layer produces
+bytes, the connection moves them, and neither has to know the other's internals.
+
+The one design decision worth recording is where the SEND OFFSET comes from. The adapter reads it from the
+connection's own stream state (`stream->send_offset`, which the stream advances when data is sent) rather than
+counting for itself. An adapter with its own counter would be a second opinion about a number the connection
+already owns -- and the two would disagree the first time a send was retried after a loss, which on this
+transport is not an exceptional event but the normal one. A stream the connection does not know is refused by
+this layer as the caller's error, because only the connection's own open call can bring one into existence; a
+datagram has no stream state at all and is passed straight through, which is why QUIC's DATAGRAM frame has no
+retransmission either.
+
+The test checks the adapter by FORWARDING rather than by a session: a freshly initialised connection has no
+keys and no room, so it refuses, and the assertion is that the adapter returns exactly what the connection
+returns rather than inventing a status of its own. That is the only part of a thin layer that can be wrong
+without a handshake, and the only part worth a unit test.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

@@ -238,6 +238,19 @@ wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,
                                           const wt_http3_driver_transport_t *transport,
                                           const uint8_t *data, size_t length);
 
+/* The transport table bound to a QUIC connection: the three adapters that turn this layer's
+ * three calls into `wt_quic_connection_open_stream`, `wt_quic_connection_send_stream` and
+ * `wt_quic_connection_send_datagram`.
+ *
+ * The offset a send goes at is read from the connection's own stream state
+ * (`stream->send_offset`, advanced by the stream when data is sent), so this adapter keeps no
+ * bookkeeping of its own and cannot drift from the connection's idea of where the stream is.
+ * A stream the connection does not know, or one it cannot send on yet, is refused by the
+ * connection and that refusal is passed through unchanged: congestion and state are the
+ * connection's to report, not this layer's to reinterpret. */
+void wt_http3_driver_quic_transport(wt_quic_connection_t *connection,
+                                    wt_http3_driver_transport_t *out_transport);
+
 /* Start this endpoint's control stream: the type prefix, then the SETTINGS frame built from
  * `settings`. The bytes go into the caller's writer, which is the stream the connection
  * opened for them.

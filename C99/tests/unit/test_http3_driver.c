@@ -12,6 +12,7 @@
 
 #include "webtransport/http3/driver.h"
 #include "webtransport/http3/settings.h"
+#include "webtransport/quic/connection.h"
 #include "webtransport/webtransport/session_request.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
@@ -733,6 +734,60 @@ static void test_the_outbound_half_sends_what_it_should(void) {
   }
 }
 
+/* The adapter to a real connection, checked by FORWARDING rather than by a session: a fresh
+ * connection has no keys and no room, so it refuses, and the point of the test is that the
+ * adapter returns exactly what the connection returns rather than inventing a status of its
+ * own. That is what a thin layer has to get right, and it is the only part of it this test can
+ * check without standing up a handshake. */
+static void test_the_quic_transport_forwards(void) {
+  static const uint8_t k_dcid[8] = {0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U};
+  wt_quic_connection_config_t config;
+  wt_quic_connection_t connection;
+  wt_http3_driver_transport_t transport;
+  uint64_t stream_id = 0U;
+  uint64_t now = 1000U;
+  wt_status_t direct;
+
+  memset(&config, 0, sizeof(config));
+  memset(&connection, 0, sizeof(connection));
+  config.role = WT_QUIC_ROLE_CLIENT;
+  config.version = WT_QUIC_VERSION_1;
+  config.local_connection_id = k_dcid;
+  config.local_connection_id_length = sizeof(k_dcid);
+  config.peer_connection_id = k_dcid;
+  config.peer_connection_id_length = sizeof(k_dcid);
+  config.aead = WT_AEAD_AES_128_GCM;
+  config.max_ack_delay = 25000U;
+  config.local_max_ack_delay = 25000U;
+  config.idle_timeout = 30000000U;
+  config.max_datagram_size = 1200U;
+
+  WT_EXPECT_OK("a connection is initialised", wt_quic_connection_init(&connection, &config));
+  wt_http3_driver_quic_transport(&connection, &transport);
+  WT_EXPECT_TRUE("the transport has an opener", transport.open_stream != NULL);
+  WT_EXPECT_TRUE("a sender", transport.send_stream != NULL);
+  WT_EXPECT_TRUE("and a datagram sender", transport.send_datagram != NULL);
+  WT_EXPECT_TRUE("bound to the connection", transport.context == &connection);
+
+  /* The opener's answer IS the connection's answer, whatever it is: a fresh connection has no
+   * peer limits yet, so this is a refusal rather than a success, and either way the two must
+   * agree. */
+  direct = wt_quic_connection_open_stream(&connection, 0, &stream_id);
+  WT_EXPECT_STATUS("the opener forwards the connection's answer", direct,
+                   transport.open_stream(transport.context, 0, &stream_id, now));
+
+  /* A stream the connection does not know is the caller's accounting: this layer says so
+   * itself rather than letting a NULL reach the connection. */
+  WT_EXPECT_STATUS("sending on an unknown stream is a state error", WT_ERR_STATE,
+                   transport.send_stream(transport.context, 8U, (const uint8_t *)"x", 1U, 0, now));
+
+  /* A datagram is forwarded, and its refusal is the connection's too. */
+  direct = wt_quic_connection_send_datagram(&connection, (const uint8_t *)"x", 1U, 0U);
+  WT_EXPECT_STATUS("a datagram forwards the connection's answer", direct,
+                   transport.send_datagram(transport.context, (const uint8_t *)"x", 1U));
+  wt_quic_connection_clear(&connection);
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
@@ -741,6 +796,7 @@ int main(void) {
   test_frame_boundaries_on_a_stream();
   test_a_connection_frame_is_routed();
   test_the_outbound_half_sends_what_it_should();
+  test_the_quic_transport_forwards();
   test_the_pending_table_is_bounded();
   WT_TEST_MAIN_END("wt_http3_driver");
 }
