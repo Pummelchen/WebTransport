@@ -1,0 +1,228 @@
+/* The HTTP/3 endpoint's own streams (Phase 9). */
+
+#include "webtransport/http3/endpoint.h"
+
+#include "webtransport/quic/varint.h"
+#include "webtransport/webtransport/framing.h"
+
+void wt_http3_endpoint_init(wt_http3_endpoint_t *endpoint, wt_http3_role_t role) {
+  size_t i;
+
+  if (endpoint == NULL) return;
+  endpoint->role = role;
+  wt_http3_control_init(&endpoint->peer_control);
+  endpoint->peer_qpack_encoder_seen = 0;
+  endpoint->peer_qpack_decoder_seen = 0;
+  endpoint->peer_webtransport_streams_seen = 0;
+  endpoint->control_sent = 0;
+  endpoint->qpack_encoder_sent = 0;
+  endpoint->qpack_decoder_sent = 0;
+  endpoint->stream_count = 0U;
+  for (i = 0U; i < WT_HTTP3_ENDPOINT_STREAMS_MAX; i++) {
+    endpoint->streams[i].stream_id = 0U;
+    endpoint->streams[i].kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+    endpoint->streams[i].type = 0U;
+  }
+}
+
+static wt_status_t write_type_prefix(uint64_t type, wt_writer_t *w) {
+  uint8_t encoded[8];
+  size_t length = wt_quic_varint_encode(type, encoded, sizeof(encoded));
+
+  if (length == 0U) return WT_ERR_LIMIT;
+  wt_writer_bytes(w, encoded, length);
+  return WT_OK;
+}
+
+wt_status_t wt_http3_endpoint_write_prefix(wt_http3_endpoint_t *endpoint,
+                                           wt_http3_endpoint_stream_kind_t kind, wt_writer_t *w) {
+  if (endpoint == NULL || w == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  switch (kind) {
+    case WT_HTTP3_ENDPOINT_STREAM_CONTROL:
+      if (endpoint->control_sent != 0) return WT_ERR_STATE;
+      endpoint->control_sent = 1;
+      return write_type_prefix(WT_HTTP3_STREAM_CONTROL, w);
+    case WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER:
+      if (endpoint->qpack_encoder_sent != 0) return WT_ERR_STATE;
+      endpoint->qpack_encoder_sent = 1;
+      return write_type_prefix(WT_HTTP3_STREAM_QPACK_ENCODER, w);
+    case WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER:
+      if (endpoint->qpack_decoder_sent != 0) return WT_ERR_STATE;
+      endpoint->qpack_decoder_sent = 1;
+      return write_type_prefix(WT_HTTP3_STREAM_QPACK_DECODER, w);
+    case WT_HTTP3_ENDPOINT_STREAM_PUSH:
+    case WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT:
+    case WT_HTTP3_ENDPOINT_STREAM_UNKNOWN:
+      break;
+  }
+  /* A push stream is not something this endpoint opens, and a WebTransport stream is opened
+   * by the session layer with its own prefix (which names the session), not here. */
+  return WT_ERR_INVALID_ARGUMENT;
+}
+
+static wt_http3_endpoint_stream_t *find_stream(wt_http3_endpoint_t *endpoint, uint64_t stream_id) {
+  size_t i;
+  for (i = 0U; i < endpoint->stream_count; i++) {
+    if (endpoint->streams[i].stream_id == stream_id) return &endpoint->streams[i];
+  }
+  return NULL;
+}
+
+static void forget_stream(wt_http3_endpoint_t *endpoint, uint64_t stream_id) {
+  size_t i;
+  for (i = 0U; i < endpoint->stream_count; i++) {
+    if (endpoint->streams[i].stream_id == stream_id) {
+      /* Unordered on purpose: the table is a set of live streams, not a sequence. */
+      endpoint->streams[i] = endpoint->streams[endpoint->stream_count - 1U];
+      endpoint->stream_count--;
+      return;
+    }
+  }
+}
+
+size_t wt_http3_endpoint_stream_count(const wt_http3_endpoint_t *endpoint) {
+  if (endpoint == NULL) return 0U;
+  return endpoint->stream_count;
+}
+
+wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(
+    const wt_http3_endpoint_t *endpoint, uint64_t stream_id) {
+  size_t i;
+
+  if (endpoint == NULL) return WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+  for (i = 0U; i < endpoint->stream_count; i++) {
+    if (endpoint->streams[i].stream_id == stream_id) return endpoint->streams[i].kind;
+  }
+  return WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+}
+
+static wt_status_t refuse(wt_status_t status, wt_http3_error_t code, wt_http3_error_t *out_error) {
+  if (out_error != NULL) *out_error = code;
+  return status;
+}
+
+wt_status_t wt_http3_endpoint_on_uni_stream(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                            const uint8_t *bytes, size_t length,
+                                            size_t *out_consumed,
+                                            wt_http3_endpoint_stream_kind_t *out_kind,
+                                            wt_http3_error_t *out_error) {
+  wt_cursor_t cursor;
+  uint64_t type = 0U;
+  wt_http3_endpoint_stream_kind_t kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+  wt_http3_endpoint_stream_t *slot;
+  size_t consumed;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (out_consumed != NULL) *out_consumed = 0U;
+  if (out_kind != NULL) *out_kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+  if (endpoint == NULL || bytes == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (find_stream(endpoint, stream_id) != NULL) {
+    /* The caller classified this stream already. Re-reading its prefix would mean the
+     * caller lost its place, which is a bug on this side of the wire. */
+    return WT_ERR_STATE;
+  }
+
+  cursor = wt_cursor_init(bytes, length);
+  if (wt_quic_varint_decode(&cursor, &type) != WT_OK) {
+    /* A stream's type prefix is a varint: one that has not fully arrived is incomplete, and
+     * incomplete is not malformed on a stream. The connection is not committed to anything
+     * yet, and the caller comes back with more bytes. */
+    return WT_ERR_TRUNCATED;
+  }
+  consumed = length - wt_cursor_remaining(&cursor);
+  if (out_consumed != NULL) *out_consumed = consumed;
+
+  /* The draft's WebTransport stream first: it is not HTTP/3's to interpret, and the HTTP/3
+   * classifier would call it unknown and have the caller ignore it, which would lose a
+   * session's streams one by one. */
+  if (type == WT_WEBTRANSPORT_STREAM_UNI) {
+    kind = WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT;
+    endpoint->peer_webtransport_streams_seen = 1;
+  } else if (type == WT_HTTP3_STREAM_CONTROL) {
+    kind = WT_HTTP3_ENDPOINT_STREAM_CONTROL;
+    {
+      wt_status_t status = wt_http3_control_peer_opened(&endpoint->peer_control, out_error);
+      if (status != WT_OK) return status;
+    }
+  } else if (type == WT_HTTP3_STREAM_QPACK_ENCODER) {
+    if (endpoint->peer_qpack_encoder_seen != 0) {
+      /* QPACK section 4.2: one encoder stream per connection. */
+      return refuse(WT_ERR_PROTOCOL, WT_HTTP3_STREAM_CREATION_ERROR, out_error);
+    }
+    endpoint->peer_qpack_encoder_seen = 1;
+    kind = WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER;
+  } else if (type == WT_HTTP3_STREAM_QPACK_DECODER) {
+    if (endpoint->peer_qpack_decoder_seen != 0) {
+      return refuse(WT_ERR_PROTOCOL, WT_HTTP3_STREAM_CREATION_ERROR, out_error);
+    }
+    endpoint->peer_qpack_decoder_seen = 1;
+    kind = WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER;
+  } else if (type == WT_HTTP3_STREAM_PUSH) {
+    /* A push stream is refused deterministically rather than ignored: this build has no
+     * MAX_PUSH_ID and WebTransport does not use push, so a client that did not ask for one
+     * is H3_ID_ERROR, and a client may not send one at all. Ignoring it would leave a
+     * stream the peer believes is delivering a response. */
+    endpoint->streams[endpoint->stream_count].stream_id = stream_id;
+    endpoint->streams[endpoint->stream_count].kind = WT_HTTP3_ENDPOINT_STREAM_PUSH;
+    endpoint->streams[endpoint->stream_count].type = type;
+    endpoint->stream_count++;
+    if (endpoint->role == WT_HTTP3_ROLE_CLIENT) {
+      return refuse(WT_ERR_PROTOCOL, WT_HTTP3_ID_ERROR, out_error);
+    }
+    return refuse(WT_ERR_PROTOCOL, WT_HTTP3_STREAM_CREATION_ERROR, out_error);
+  } else {
+    /* Section 6.2.1: an unknown type is not an error. The caller is told so it can stop
+     * reading the stream, which is what the RFC asks for. */
+    kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+  }
+
+  if (kind == WT_HTTP3_ENDPOINT_STREAM_UNKNOWN) {
+    if (out_kind != NULL) *out_kind = kind;
+    return WT_OK;
+  }
+
+  if (endpoint->stream_count >= WT_HTTP3_ENDPOINT_STREAMS_MAX) {
+    /* This endpoint's bound, not the peer's mistake: WT_ERR_LIMIT with no error code, so a
+     * caller cannot mistake it for something the peer did. */
+    return WT_ERR_LIMIT;
+  }
+  slot = &endpoint->streams[endpoint->stream_count];
+  slot->stream_id = stream_id;
+  slot->kind = kind;
+  slot->type = type;
+  endpoint->stream_count++;
+
+  if (out_kind != NULL) *out_kind = kind;
+  return WT_OK;
+}
+
+wt_status_t wt_http3_endpoint_on_control_frame(wt_http3_endpoint_t *endpoint, uint64_t type,
+                                               wt_http3_error_t *out_error) {
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  return wt_http3_control_on_frame(&endpoint->peer_control, type, out_error);
+}
+
+wt_status_t wt_http3_endpoint_on_uni_stream_end(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                                wt_http3_error_t *out_error) {
+  wt_http3_endpoint_stream_kind_t kind;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  kind = wt_http3_endpoint_stream_kind(endpoint, stream_id);
+  if (kind == WT_HTTP3_ENDPOINT_STREAM_UNKNOWN) {
+    /* Either a stream this endpoint never classified, or one it deliberately does not
+     * track (an unknown type it was told to ignore). Neither is an error. */
+    return WT_OK;
+  }
+  if (kind == WT_HTTP3_ENDPOINT_STREAM_CONTROL) {
+    /* Section 6.2.1: closing the control stream is the error, whether or not SETTINGS had
+     * arrived. The control machine owns that judgement. */
+    wt_status_t status = wt_http3_control_on_closed(&endpoint->peer_control, out_error);
+    forget_stream(endpoint, stream_id);
+    return status;
+  }
+  forget_stream(endpoint, stream_id);
+  return WT_OK;
+}

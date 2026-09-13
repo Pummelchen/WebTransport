@@ -1967,6 +1967,27 @@ Completion criteria:
 - CLI tools produce stable machine-readable scenario output.
 - Unsupported or unsafe modes are rejected deterministically.
 
+### Phase 9's first part: the HTTP/3 endpoint's own streams
+
+`http3/endpoint.h` is the layer that OWNS the per-connection HTTP/3 state machines for one connection,
+and it is the piece Phase 5 deliberately left out: that phase wrote a state machine per concern, and
+something has to hold them. It tracks our control stream (`0x00`) and QPACK streams (`0x02`/`0x03`) as sent
+once each, classifies the peer's unidirectional streams by their type prefix, forwards control frames to the
+control machine, and applies the endpoint's own rules -- which are the RFC's and are worth stating because
+they are asymmetric: an UNKNOWN stream type is NOT an error (section 6.2.1 leaves unknown types for future
+revisions, so the caller is told and stops reading), while a second control stream, a second QPACK stream
+(QPACK section 4.2), and a push stream this build never asked for each commit the connection to the error the
+RFC names.
+
+The draft's WebTransport stream type (`0x54`) is the reason the layer exists at all rather than a plain call
+to `wt_http3_stream_kind_for_type`: to the HTTP/3 core it is an unknown type, which the core correctly tells
+the caller to ignore -- and a session's streams would then vanish one at a time, silently, with the core
+behaving exactly as specified. The endpoint claims it for the layer above instead.
+
+The peer-stream table is fixed (`WT_HTTP3_ENDPOINT_STREAMS_MAX`) and running into it is `WT_ERR_LIMIT` with NO
+error code: it is this endpoint's bound, and inventing a peer-facing code for it would blame the peer for this
+implementation's table.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

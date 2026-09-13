@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 68 unit test files and 79,263 checks, run by `ctest` and again under
+- 69 unit test files and 79,350 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -91,6 +91,16 @@ What is here:
     `wt_session_config_default()` returns every bound at its default, because a C
     caller that forgot a field would otherwise pass whatever its stack held into a
     bound.
+  - `http3/endpoint.h` — the HTTP/3 endpoint's own streams, which is the lifecycle a
+    consumer never sees: our control stream (`0x00`) and QPACK streams (`0x02`/`0x03`)
+    exist once each, the peer's unidirectional streams are classified by their type
+    prefix, an UNKNOWN type is ignored rather than failed (section 6.2.1) while a
+    second control stream, a second QPACK stream and an unrequested push stream each
+    commit the connection to the error the RFC names, and the draft's WebTransport
+    stream (`0x54`) is recognised as the session layer's rather than mistaken for an
+    unknown one -- which would lose a session's streams one at a time. The peer-stream
+    table is fixed, so running into it is `WT_ERR_LIMIT` with no error code: this
+    endpoint's bound, not the peer's mistake.
   - `api/endpoint.h` — which side this program is, the name the peer's certificate
     must be valid for, and how it is judged, so a trust misconfiguration is a return
     value before any packet rather than a handshake failure afterwards. The
