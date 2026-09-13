@@ -27,6 +27,7 @@
 #include <stdint.h>
 
 #include "webtransport/http3/endpoint.h"
+#include "webtransport/http3/settings.h"
 #include "webtransport/status.h"
 
 #ifdef __cplusplus
@@ -83,6 +84,26 @@ wt_status_t wt_http3_driver_on_uni_stream_end(wt_http3_driver_t *driver, uint64_
 /* How many opening streams are waiting for the rest of their prefix, for a caller that logs
  * occupancy or bounds its own buffering. */
 size_t wt_http3_driver_pending_count(const wt_http3_driver_t *driver);
+
+/* Start this endpoint's control stream: the type prefix, then the SETTINGS frame built from
+ * `settings`. The bytes go into the caller's writer, which is the stream the connection
+ * opened for them.
+ *
+ * The frame can only be written once its length is known, so the SETTINGS payload is
+ * measured into `scratch` first -- the same measure-then-write rule every length on this wire
+ * follows. A payload that does not fit the scratch is WT_ERR_LIMIT with no error code: it is
+ * this endpoint's buffer and its own choice of settings, not anything a peer did.
+ *
+ * Sending a second control stream is refused by the endpoint's own one-per-connection rule
+ * (WT_ERR_STATE), so this is safe to call on a session that may already have started one. */
+wt_status_t wt_http3_driver_start_control(wt_http3_driver_t *driver, const wt_http3_settings_t *settings,
+                                          uint8_t *scratch, size_t scratch_capacity, wt_writer_t *w);
+
+/* Start one of this endpoint's QPACK streams: the type prefix alone, because what follows on
+ * it is the QPACK layer's to write. `encoder` selects the encoder stream (0x02) or the
+ * decoder stream (0x03), and a second one of either is WT_ERR_STATE. */
+wt_status_t wt_http3_driver_start_qpack_stream(wt_http3_driver_t *driver, int encoder,
+                                               wt_writer_t *w);
 
 #ifdef __cplusplus
 }

@@ -21,6 +21,45 @@ size_t wt_http3_driver_pending_count(const wt_http3_driver_t *driver) {
   return driver->pending_count;
 }
 
+wt_status_t wt_http3_driver_start_control(wt_http3_driver_t *driver,
+                                          const wt_http3_settings_t *settings, uint8_t *scratch,
+                                          size_t scratch_capacity, wt_writer_t *w) {
+  wt_writer_t payload;
+  wt_http3_frame_t frame;
+  wt_status_t status;
+
+  if (driver == NULL || driver->endpoint == NULL || settings == NULL || scratch == NULL ||
+      w == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+
+  /* The prefix first, through the endpoint's once-only rule: a caller that starts a second
+   * control stream should find out before any bytes go out. */
+  status = wt_http3_endpoint_write_prefix(driver->endpoint, WT_HTTP3_ENDPOINT_STREAM_CONTROL, w);
+  if (status != WT_OK) return status;
+
+  /* Pass one: measure the SETTINGS payload into the caller's scratch. */
+  payload = wt_writer_init(scratch, scratch_capacity);
+  status = wt_http3_settings_encode_payload(&payload, settings);
+  if (status != WT_OK) return status;
+  if (!wt_writer_ok(&payload)) return WT_ERR_LIMIT;
+
+  /* Pass two: the frame around it, now that its length is known rather than guessed. */
+  frame = wt_http3_frame_make(WT_HTTP3_FRAME_SETTINGS);
+  frame.payload = scratch;
+  frame.length = wt_writer_offset(&payload);
+  return wt_http3_frame_encode(w, &frame);
+}
+
+wt_status_t wt_http3_driver_start_qpack_stream(wt_http3_driver_t *driver, int encoder,
+                                               wt_writer_t *w) {
+  if (driver == NULL || driver->endpoint == NULL || w == NULL) return WT_ERR_INVALID_ARGUMENT;
+  return wt_http3_endpoint_write_prefix(
+      driver->endpoint,
+      encoder != 0 ? WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER : WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER,
+      w);
+}
+
 static wt_http3_driver_pending_t *find_pending(wt_http3_driver_t *driver, uint64_t stream_id) {
   size_t i;
   for (i = 0U; i < driver->pending_count; i++) {

@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 70 unit test files and 79,485 checks, run by `ctest` and again under
+- 70 unit test files and 79,505 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -100,7 +100,12 @@ What is here:
     is a heap exhaustion path with the peer's name on it. A prefix that does not start
     at offset zero, or a stream resumed out of order, is the caller's accounting rather
     than the peer's, and the payload after the prefix is a view into the frame that
-    completed it, so nothing is copied.
+    completed it, so nothing is copied. The same header starts this endpoint's OWN
+    streams: the control stream is its `0x00` prefix followed by a SETTINGS frame built
+    from the caller's settings, measured into scratch before the frame is written — the
+    same measure-then-write rule as everywhere else — and the QPACK streams are their
+    prefixes alone, with the endpoint's once-per-connection rule refusing a second one
+    before any bytes go out.
   - `http3/endpoint.h` — the HTTP/3 endpoint's own streams, which is the lifecycle a
     consumer never sees: our control stream (`0x00`) and QPACK streams (`0x02`/`0x03`)
     exist once each, the peer's unidirectional streams are classified by their type

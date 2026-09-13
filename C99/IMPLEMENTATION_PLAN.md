@@ -2074,6 +2074,23 @@ TWO-byte prefix on the wire (`0x40 0x54`). A test that wrote it as one byte was 
 stream type at all; the driver read the real two-byte value and classified it as unknown, which is exactly
 right. Lengths and prefixes are MEASURED on this wire, never transcribed.
 
+### Phase 9's sixth part: starting an endpoint's own streams
+
+A connection is only usable once the endpoint has opened the streams HTTP/3 requires of it, so the driver can
+now start them: `wt_http3_driver_start_control` writes the control stream's `0x00` prefix and the SETTINGS
+frame built from the caller's settings, and `wt_http3_driver_start_qpack_stream` writes the `0x02` or `0x03`
+prefix. The SETTINGS payload is measured into the caller's scratch before the frame is written around it,
+which is the same measure-then-write rule every length on this wire follows -- a frame's length is a varint
+whose width depends on its value, so a length computed from a guess lands one byte out and the peer either
+reads a short frame or refuses the stream.
+
+The endpoint's once-per-connection rules are applied BEFORE any bytes go out, so a caller that starts a second
+control stream finds out from a return value rather than from a peer's connection error; the test asserts that
+nothing was written in that case. The one failure that does leave bytes behind -- a SETTINGS payload that does
+not fit the caller's scratch -- is WT_ERR_LIMIT with no error code, and the test asserts the prefix is already
+out when it happens, because a caller that cannot tell "nothing happened" from "half of it happened" cannot
+recover.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

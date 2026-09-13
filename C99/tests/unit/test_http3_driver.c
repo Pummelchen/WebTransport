@@ -11,6 +11,8 @@
 #include "wt_test.h"
 
 #include "webtransport/http3/driver.h"
+#include "webtransport/http3/settings.h"
+#include "webtransport/webtransport/session_request.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
 
@@ -215,10 +217,93 @@ static void test_the_pending_table_is_bounded(void) {
                                                   &payload_length, &consumed, &error));
 }
 
+static void test_starting_our_own_streams(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_settings_t settings;
+  uint8_t wire[256];
+  uint8_t scratch[256];
+  uint8_t read_scratch[256];
+  size_t length;
+  wt_writer_t w;
+  wt_cursor_t cursor;
+  wt_http3_frame_t frame;
+  wt_http3_settings_t read_back;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  size_t i;
+
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_CLIENT);
+  wt_http3_driver_init(&driver, &endpoint);
+
+  /* A SETTINGS frame with something in it, so the payload is not trivially empty. */
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("a setting is set",
+               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_OK("and another",
+               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, 4096U));
+
+  /* The control stream is the type prefix and then the frame: the reader finds both, which
+   * is what makes this a stream rather than a bag of bytes. */
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_OK("the control stream starts",
+               wt_http3_driver_start_control(&driver, &settings, scratch, sizeof(scratch), &w));
+  length = wt_writer_offset(&w);
+  WT_EXPECT_TRUE("with bytes", length > 0U);
+  WT_EXPECT_U64("the first byte being the control type", WT_HTTP3_STREAM_CONTROL, (uint64_t)wire[0]);
+
+  cursor = wt_cursor_init(wire + 1U, length - 1U);
+  WT_EXPECT_OK("and the rest decoding as a frame", wt_http3_frame_decode(&cursor, &frame, &error));
+  WT_EXPECT_U64("of type SETTINGS", WT_HTTP3_FRAME_SETTINGS, frame.type);
+  WT_EXPECT_OK("whose payload parses",
+               wt_http3_settings_parse(frame.payload, frame.length, &read_back, &error));
+  WT_EXPECT_U64("with the first setting back", 1U,
+                wt_http3_settings_get(&read_back, WT_HTTP3_SETTING_WT_ENABLED, NULL));
+  WT_EXPECT_U64("and the second", 4096U,
+                wt_http3_settings_get(&read_back, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, NULL));
+  WT_EXPECT_U64("with nothing left over", 0U, (uint64_t)wt_cursor_remaining(&cursor));
+
+  /* A second control stream is the endpoint's one-per-connection rule, and it is refused
+   * before any bytes are written. */
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_STATUS("a second control stream is refused", WT_ERR_STATE,
+                   wt_http3_driver_start_control(&driver, &settings, scratch, sizeof(scratch), &w));
+  WT_EXPECT_U64("with nothing written", 0U, (uint64_t)wt_writer_offset(&w));
+
+  /* The QPACK streams, each once. */
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_OK("the encoder stream starts", wt_http3_driver_start_qpack_stream(&driver, 1, &w));
+  WT_EXPECT_U64("as its type", WT_HTTP3_STREAM_QPACK_ENCODER, (uint64_t)wire[0]);
+  WT_EXPECT_STATUS("and not twice", WT_ERR_STATE,
+                   wt_http3_driver_start_qpack_stream(&driver, 1, &w));
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_OK("the decoder stream starts", wt_http3_driver_start_qpack_stream(&driver, 0, &w));
+  WT_EXPECT_U64("as its type", WT_HTTP3_STREAM_QPACK_DECODER, (uint64_t)wire[0]);
+
+  /* A payload that does not fit the caller's scratch is this endpoint's bound, and the
+   * prefix is already out by then: the caller must know it. */
+  {
+    wt_http3_settings_t big;
+    wt_http3_endpoint_t other;
+    wt_http3_driver_t other_driver;
+    wt_http3_endpoint_init(&other, WT_HTTP3_ROLE_SERVER);
+    wt_http3_driver_init(&other_driver, &other);
+    wt_http3_settings_init(&big);
+    for (i = 0U; i < 8U; i++) {
+      (void)wt_http3_settings_set(&big, 0x21U + (uint64_t)i * 0x1fU, 1U);
+    }
+    w = wt_writer_init(wire, sizeof(wire));
+    WT_EXPECT_STATUS("a settings payload that does not fit is limited", WT_ERR_LIMIT,
+                     wt_http3_driver_start_control(&other_driver, &big, scratch, 2U, &w));
+    WT_EXPECT_U64("after the prefix went out", 1U, (uint64_t)wt_writer_offset(&w));
+  }
+  (void)read_scratch;
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
   test_control_and_qpack_reach_the_endpoint();
+  test_starting_our_own_streams();
   test_the_pending_table_is_bounded();
   WT_TEST_MAIN_END("wt_http3_driver");
 }
