@@ -38,7 +38,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 38 unit test files and 75,820 checks, run by `ctest` and again under
+- 38 unit test files and 75,848 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -267,6 +267,10 @@ What is here:
   peer-initiated stream this endpoint has never seen opens it (RFC 9000 section 3.2), bounded by the count
   it granted -- beyond which is STREAM_LIMIT_ERROR, and a frame for an unopened number of its own is
   STREAM_STATE_ERROR. MAX_STREAM_DATA raises one stream's send allowance.
+- **RESET_STREAM and STOP_SENDING reach their state machines** (Phase 4, twenty-fifth part): the two
+  frames that change a stream's lifecycle rather than carrying data are applied by the connection as they
+  arrive, before the caller's handler sees them, with FINAL_SIZE_ERROR and STREAM_STATE_ERROR for the
+  states RFC 9000 sections 4.5 and 19.5 make errors.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

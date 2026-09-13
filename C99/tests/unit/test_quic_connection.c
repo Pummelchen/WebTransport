@@ -1008,6 +1008,75 @@ static void test_peer_opens_stream(void) {
   close_pair(&pair);
 }
 
+/* RFC 9000 sections 19.4 and 19.5: a RESET_STREAM ends the receive half with the peer's final size, and
+ * a STOP_SENDING asks this endpoint to stop sending. Both are facts about the STREAM, so the connection
+ * hands them to the state machine before the caller sees the frame -- which is what this checks, through
+ * the state the machine keeps. */
+static void test_reset_and_stop(void) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  uint8_t secret[WT_SHA256_LEN];
+  uint64_t now = 95000000U;
+  size_t i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x60U + i);
+  WT_EXPECT_OK("application keys derive",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the client sends with them",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads with them",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("the server grants two bidirectional streams",
+               wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
+
+  /* A RESET_STREAM for the peer's first bidirectional stream. */
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_RESET_STREAM);
+  frame.as.reset_stream.id = 0U;
+  frame.as.reset_stream.application_error_code = 0x1234U;
+  frame.as.reset_stream.final_size = 0U;
+  {
+    uint8_t payload[128];
+    uint8_t datagram[256];
+    wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+    size_t len;
+    size_t datagram_len = 0U;
+    wt_quic_packet_build_t build;
+
+    WT_EXPECT_OK("the reset encodes", wt_quic_frame_encode(&w, &frame));
+    len = wt_writer_offset(&w);
+    memset(&build, 0, sizeof(build));
+    build.short_header = 1;
+    build.version = WT_QUIC_VERSION_1;
+    build.destination_connection_id = k_dcid;
+    build.destination_connection_id_len = sizeof(k_dcid);
+    build.packet_number = 0U;
+    build.packet_number_length = 1U;
+    build.payload = payload;
+    build.payload_len = len;
+    build.keys = &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION];
+    WT_EXPECT_OK("the packet builds",
+                 wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+    WT_EXPECT_OK("and is sent",
+                 wt_udp_send(&pair.client_socket, &pair.server_address, datagram, datagram_len));
+  }
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+  WT_EXPECT_INT("the server is not closed by it", 0, wt_quic_connection_is_closed(&pair.server));
+  {
+    wt_quic_stream_t *stream = wt_quic_connection_stream(&pair.server, 0U);
+    WT_EXPECT_TRUE("the stream exists", stream != NULL);
+    if (stream != NULL) {
+      WT_EXPECT_INT("with the peer's reset recorded", 1, stream->peer_reset);
+      WT_EXPECT_U64("and its error code", 0x1234U, stream->peer_error_code);
+    }
+  }
+
+  wt_quic_packet_keys_clear(&keys);
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -1024,5 +1093,6 @@ int main(void) {
 
   test_open_stream();
   test_peer_opens_stream();
+  test_reset_and_stop();
   WT_TEST_MAIN_END("wt_quic_connection");
 }

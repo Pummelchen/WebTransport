@@ -1042,6 +1042,15 @@ applies rather than merely checks.
 peer's and bidirectional, the limit error with the frame named, the state error for an unopened local
 number, and the allowance moving.
 
+**Twenty-fifth part done: RESET_STREAM and STOP_SENDING reach their state machines.** The two frames that
+change a stream's state rather than carrying its data are now applied by the connection as they arrive: a
+RESET_STREAM ends the receive half with the peer's error code and final size, and a STOP_SENDING tells the
+send half that the peer wants no more. They are the stream's own facts rather than the application's, which
+is why the connection applies them before the caller's handler sees the frame -- the handler observes the
+data, the state machine owns the lifecycle. A reset whose final size contradicts what already arrived is
+the FINAL_SIZE_ERROR of RFC 9000 section 4.5, and a STOP_SENDING for a stream in the wrong state is the
+STREAM_STATE_ERROR of section 19.5; both close the connection naming the frame.
+
 Implement the production network state machine.
 
 Tasks:

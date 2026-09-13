@@ -764,7 +764,28 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
       wt_status_t status = ensure_peer_stream(connection, frame_stream_id(frame),
                                               wire_type_of(frame->kind), visit->now, &stream);
       if (status != WT_OK) return status;
-      if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA && stream != NULL) {
+      /* The frames that change a stream's state are handed to its machine here, before the caller
+       * sees them: a RESET_STREAM ends the receive half with the peer's final size, and a STOP_SENDING
+       * asks this endpoint to stop sending -- both are facts about the stream rather than about the
+       * application's data, which is why the state machine owns them and the handler only observes. */
+      if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM && stream != NULL) {
+        status = wt_quic_stream_on_reset_received(stream,
+                                                  frame->as.reset_stream.application_error_code,
+                                                  frame->as.reset_stream.final_size);
+        if (status != WT_OK) {
+          /* A reset whose final size contradicts what arrived is the FINAL_SIZE_ERROR of RFC 9000
+           * section 4.5. */
+          return close_with(connection, WT_QUIC_FINAL_SIZE_ERROR, wire_type_of(frame->kind),
+                            visit->now);
+        }
+      } else if (frame->kind == WT_QUIC_FRAME_KIND_STOP_SENDING && stream != NULL) {
+        status = wt_quic_stream_on_stop_sending(stream,
+                                               frame->as.stop_sending.application_error_code);
+        if (status != WT_OK) {
+          return close_with(connection, WT_QUIC_STREAM_STATE_ERROR, wire_type_of(frame->kind),
+                            visit->now);
+        }
+      } else if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA && stream != NULL) {
         status = wt_quic_stream_on_max_stream_data(stream, frame->as.max_stream_data.maximum);
         if (status != WT_OK) {
           return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION,
