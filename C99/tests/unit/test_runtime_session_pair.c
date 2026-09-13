@@ -22,6 +22,7 @@
 #include "webtransport/http3/settings.h"
 #include "webtransport/quic/transport_parameters.h"
 #include "webtransport/runtime/session.h"
+#include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
 #include "webtransport/writer.h"
 
@@ -108,6 +109,11 @@ typedef struct http3_side {
   unsigned frames_seen;
   unsigned control_frames;
   uint64_t last_control_type;
+  /* The session's own bytes, which arrive on a WebTransport stream rather than as HTTP/3 frames: the draft's
+   * stream types are the layer above's, and the unidirectional path is the one that already classifies them. */
+  uint8_t stream_data[64];
+  size_t stream_bytes;
+  uint64_t last_stream_id;
 } http3_side_t;
 
 typedef struct pair {
@@ -126,6 +132,8 @@ typedef struct pair {
 static wt_status_t side_on_frame_payload(void *context_side, uint64_t stream_id, uint64_t type,
                                         const uint8_t *payload, size_t length, int last);
 static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);
+static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
+                                       size_t length, int fin);
 
 static void open_socket(wt_udp_socket_t *socket, wt_udp_address_t *address) {
   wt_udp_address_t local;
@@ -289,12 +297,26 @@ static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_
   return wt_http3_driver_on_quic_frame(&side->driver, space, frame, &side->sink, 8192U);
 }
 
+/* The session's bytes, as the driver reports them once a stream is known to be a WebTransport one. */
+static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
+                                       size_t length, int fin) {
+  http3_side_t *side = context;
+  (void)fin;
+  if (side->stream_bytes + length <= sizeof(side->stream_data)) {
+    if (length > 0U) memcpy(side->stream_data + side->stream_bytes, data, length);
+    side->stream_bytes += length;
+  }
+  side->last_stream_id = stream_id;
+  return WT_OK;
+}
+
 static void init_side(http3_side_t *side, wt_http3_role_t role) {
   memset(side, 0, sizeof(*side));
   wt_http3_endpoint_init(&side->endpoint, role);
   wt_http3_driver_init(&side->driver, &side->endpoint);
   side->sink.context = side;
   side->sink.on_frame_payload = side_on_frame_payload;
+  side->sink.on_stream_data = side_on_stream_data;
 }
 
 /* ---- the tests ------------------------------------------------------------------------------- */
@@ -451,6 +473,39 @@ static void test_a_connect_and_its_response_cross_the_connection(void) {
                                                            client.section, client.section_length,
                                                            scratch, sizeof(scratch), &response_message,
                                                            &h3_error));
+  }
+
+  /* A MESSAGE ON A WEBTRANSPORT STREAM, which is what `--exchange stream` means: a unidirectional stream whose
+   * first bytes are the draft's `0x54` prefix and the session ID, then the session's own data. The driver's
+   * unidirectional path already classifies that type, so nothing new is needed to carry it -- and the bytes
+   * arrive at the session sink rather than being parsed as HTTP/3 frames. */
+  {
+    uint8_t message[64];
+    wt_writer_t w = wt_writer_init(message, sizeof(message));
+    uint64_t stream_id = 0U;
+
+    WT_EXPECT_OK("the client opens a unidirectional stream",
+                 client_transport.open_stream(client_transport.context, 0, &stream_id, pair.now));
+    WT_EXPECT_OK("and writes the WebTransport prefix",
+                 wt_webtransport_stream_prefix_write(&w, 1, request_stream_id));
+    wt_writer_bytes(&w, "message", 7U);
+    WT_EXPECT_OK("then the message",
+                 client_transport.send_stream(client_transport.context, stream_id, message,
+                                              wt_writer_offset(&w), 0, pair.now));
+    {
+      unsigned round;
+      for (round = 0U; round < 400U && server.stream_bytes == 0U; round++) {
+        (void)wt_udp_wait(&pair.server_socket, 2000U);
+        (void)wt_udp_wait(&pair.client_socket, 2000U);
+        if (wt_runtime_session_pump(&pair.server, pair.now) != WT_OK) break;
+        if (wt_runtime_session_pump(&pair.client, pair.now) != WT_OK) break;
+        pair.now += 1000U;
+      }
+    }
+    WT_EXPECT_U64("the server received the message", 7U, (uint64_t)server.stream_bytes);
+    WT_EXPECT_BYTES("as the bytes that were sent", (const uint8_t *)"message", server.stream_data,
+                    server.stream_bytes);
+    WT_EXPECT_U64("on the stream it was sent on", stream_id, server.last_stream_id);
   }
 
   wt_runtime_session_clear(&pair.client);

@@ -83,6 +83,9 @@ static void test_a_complete_prefix_in_one_frame(void) {
    * its top bits set, so it is a TWO-byte varint, and a test that wrote it as one byte would
    * be testing the wrong stream type. */
   frame_length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_UNI, frame, sizeof(frame));
+  /* The draft's prefix is the TYPE and then the session ID, so the payload starts after both: a test that
+   * omitted the session ID would be asserting that a byte of it is session data. */
+  frame_length += wt_quic_varint_encode(0U, frame + frame_length, sizeof(frame) - frame_length);
   frame[frame_length] = 0x11U;
   frame[frame_length + 1U] = 0x22U;
   frame[frame_length + 2U] = 0x33U;
@@ -93,9 +96,10 @@ static void test_a_complete_prefix_in_one_frame(void) {
                                                   &payload, &payload_length, &consumed, &error));
   WT_EXPECT_INT("as the session layer's stream",
                 (int)WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT, (int)kind);
-  WT_EXPECT_U64("with the prefix's two bytes taken", 2U, (uint64_t)consumed);
+  WT_EXPECT_U64("with the type's two bytes and the session ID's one accounted for", 3U,
+                (uint64_t)consumed);
   WT_EXPECT_U64("and three of payload", 3U, (uint64_t)payload_length);
-  WT_EXPECT_TRUE("viewed in place", payload == frame + 2U);
+  WT_EXPECT_TRUE("viewed in place, after both parts of the prefix", payload == frame + 3U);
 
   /* A second WebTransport stream is allowed: the draft bounds them by the session's own
    * stream table, not by "one per connection". */
@@ -513,6 +517,9 @@ static void test_a_connection_frame_is_routed(void) {
   /* The draft's WebTransport stream: the prefix, then session bytes that are NOT HTTP/3
    * log.frames. They go to the session sink, and the frame sink must not see them. */
   prefix_length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_UNI, prefix, sizeof(prefix));
+  /* The session ID is part of the draft's prefix, so a frame that stops after the type is TRUNCATED rather
+   * than a stream whose payload begins with its own session ID. */
+  prefix_length += wt_quic_varint_encode(0U, prefix + prefix_length, sizeof(prefix) - prefix_length);
   for (i = 0U; i < sizeof(body); i++) body[i] = (uint8_t)(0x10U + i);
   frame.kind = WT_QUIC_FRAME_KIND_STREAM;
   frame.as.stream.id = 2U; /* client-initiated unidirectional: low bit clear */

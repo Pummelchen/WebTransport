@@ -2522,6 +2522,25 @@ measurements have produced -- each previous one eliminated rather than argued aw
 The test asserts only what is true today (the CONNECT goes out, the client records and tracks its request
 stream), and WT-110 carries the measurement and the next step.
 
+### Phase 9's twenty-seventh part: a message on a WebTransport stream, and the session ID in the prefix
+
+`--exchange stream` works end to end: after the exchange's response, the client opens a unidirectional
+WebTransport stream -- the draft's `0x54` type AND the session ID, then the session's own bytes -- and the
+server's session sink receives exactly the message, on the stream it was sent on. It uses the classification the
+unidirectional path already had, which is why this piece needed no new routing.
+
+It needed one detail of the draft's own prefix, and the failure it produced is worth recording because it was so
+quiet: the type classifier reads only the TYPE, so the SESSION ID was passed along as the first byte of session
+data, and the server received eight bytes where the client sent seven -- a leading byte nobody could explain. The
+session ID is part of the prefix and is consumed before the session sees anything; a frame that stops after the
+type is `WT_ERR_TRUNCATED`, which is the honest answer until the pending table reassembles a split varint. The
+`out_prefix_consumed` the caller continues with is the WHOLE prefix -- type and session ID -- because that is the
+number it needs.
+
+This is also where WT-120's release-build rule paid for itself: the change was small, and it was checked in
+debug, release AND ASan+UBSan before it was committed. The unit expectations that had to change with it are part
+of the same edit, and two of them were found by that check rather than later by a user.
+
 ### Phase 9's twenty-sixth part: a change that was REVERTED, and why that is the right outcome
 
 The next piece is the `--exchange stream` behaviour: a WebTransport BIDIRECTIONAL stream is a peer-initiated

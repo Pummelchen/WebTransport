@@ -183,6 +183,31 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
   if (pending != NULL) forget_pending(driver, stream_id);
   if (status != WT_OK) return status;
 
+  /* A WEBTRANSPORT stream's prefix is the TYPE and then the session ID (draft-16 section 4.2), and the type
+   * classifier above reads only the type. The session ID is part of the prefix, so the bytes the session is
+   * handed must start AFTER it -- the first version of this path passed it along as data, which arrived as one
+   * leading byte nobody could explain. It must arrive in the same frame as the type here: a session ID split
+   * across frames would need the pending table's reassembly for a varint, and the honest answer until then is
+   * WT_ERR_TRUNCATED rather than a byte of somebody's session ID in the payload. */
+  if (out_kind != NULL && *out_kind == WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT) {
+    wt_cursor_t session_cursor;
+    uint64_t session_id = 0U;
+    size_t session_bytes;
+
+    if (take >= length) {
+      /* The type used the whole frame: the session ID has not arrived. */
+      return WT_ERR_TRUNCATED;
+    }
+    session_cursor = wt_cursor_init(data + take, length - take);
+    if (wt_quic_varint_decode(&session_cursor, &session_id) != WT_OK) return WT_ERR_TRUNCATED;
+    session_bytes = (length - take) - wt_cursor_remaining(&session_cursor);
+    take += session_bytes;
+    /* The caller is told how much of ITS frame went to the whole prefix -- type and session ID -- because
+     * that is the number it needs to continue at the right offset. */
+    if (out_prefix_consumed != NULL) *out_prefix_consumed = take;
+    (void)session_id;
+  }
+
   if (out_payload != NULL) *out_payload = data + take;
   if (out_payload_length != NULL) *out_payload_length = length - take;
   return WT_OK;

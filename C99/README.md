@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 75 unit test files and 79,922 checks, run by `ctest` and again under
+- 75 unit test files and 79,928 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -100,6 +100,14 @@ What is here:
   contract: arming, a bounded pump with an empty socket, an unstarted session refusing to
   pump, clearing twice (an error path that unwinds must not double free), and a server with no
   certificate being refused at start rather than at the first ClientHello.
+- **A message on a WebTransport stream** (Phase 9): `--exchange stream` end to end. After the
+  exchange's response, the client opens a unidirectional WebTransport stream — the draft's `0x54`
+  type **and the session ID**, then the session's own bytes — and the server's session sink
+  receives exactly the message. The fix this needed is one of the draft's own details: the type
+  classifier reads only the TYPE, so the session ID is part of the prefix that must be consumed
+  before the session sees any data. Passing it through as data arrived as one leading byte nobody
+  could explain, and a prefix that stops after the type is `WT_ERR_TRUNCATED` rather than a stream
+  whose payload begins with its own session ID.
 - **A self-signed identity for local development** (Phase 9): `tls/self_signed.h` generates the
   pair a local server needs *in memory* — an ECDSA P-256 key and a certificate for the loopback
   names — and returns its SHA-256 fingerprint. The pin is the point: a self-signed certificate is
