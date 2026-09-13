@@ -256,9 +256,11 @@ What is here:
   which is not the same as being done. The two partial criteria are outside the matrix: the FreeBSD
   and Windows CI legs need portability work before a job for them would be anything but red, and the
   interop matrix now **runs** — `scripts/run-container-interop.sh` completes a whole session and the
-  message exchange against `pywebtransport`/`aioquic`, while `quinn` (handshake, no session:
-  `WT-145`) and `quiche` (no handshake: `WT-146`) are measured to a named point, and the VPS matrix's
-  five implementations still need a host. The conformance-coverage criterion is **met**, and the
+  message exchange against **every** peer this repository can start: `pywebtransport`/`aioquic`,
+  `quinn`/`web-transport` and `quiche`. The last of the three was `WT-146`, and it was not a handshake
+  defect at all: quiche's server sends a **Retry**, which this connection used to discard by name, and
+  answering one (WT-166) is what closed it. What keeps the criterion partial is the VPS matrix's five
+  implementations, which still need a host. The conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
   fifty-two C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
