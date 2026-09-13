@@ -12,6 +12,9 @@ wt_status_t wt_quic_packet_build(const wt_quic_packet_build_t *params, uint8_t *
   wt_writer_t w;
   size_t header_len;
   size_t ciphertext_len;
+  const uint8_t *plaintext = NULL;
+  size_t plaintext_len = 0U;
+  uint8_t padding[WT_QUIC_HP_SAMPLE_OFFSET];
   wt_status_t status;
 
   if (params == NULL || out == NULL || out_len == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -24,9 +27,38 @@ wt_status_t wt_quic_packet_build(const wt_quic_packet_build_t *params, uint8_t *
     return WT_ERR_INVALID_ARGUMENT;
   }
 
+  /* RFC 9001 section 5.4.2 takes the header protection sample from the sixteen bytes starting four
+   * bytes into the packet number field, and a packet too short to hold one cannot be protected -- so a
+   * sender cannot put a two-byte frame such as RETIRE_CONNECTION_ID or PING on the wire on its own.
+   * The header's own length cancels out of the sum, because the sample starts after the packet number
+   * rather than after the header: what a packet needs is `offset + sample` bytes from the start of the
+   * packet number, of which the tag supplies `WT_AEAD_TAG_LEN` and the packet number the rest. The
+   * shortfall is at most three bytes and PADDING frames are what fills it (RFC 9000 section 19.1): they
+   * carry nothing and every receiver ignores them.
+   *
+   * Padding here rather than at each caller is what makes the builder's contract honest -- a caller
+   * that can encode a frame can send it -- and it is the same reason the receiver already tolerates
+   * PADDING anywhere in a packet. */
+  plaintext = params->payload;
+  plaintext_len = params->payload_len;
+  if (plaintext_len + params->packet_number_length + WT_AEAD_TAG_LEN <
+      WT_QUIC_HP_SAMPLE_OFFSET + WT_QUIC_HP_SAMPLE_LENGTH) {
+    size_t padded_len = WT_QUIC_HP_SAMPLE_OFFSET + WT_QUIC_HP_SAMPLE_LENGTH - WT_AEAD_TAG_LEN -
+                        params->packet_number_length;
+    /* `padded_len` is at most WT_QUIC_HP_SAMPLE_OFFSET-1 because the packet number contributes at
+     * least one byte; the guard states that rather than assuming it. */
+    if (padded_len > sizeof(padding)) return WT_ERR_STATE;
+    memset(padding, 0, sizeof(padding));
+    if (plaintext_len != 0U) {
+      memcpy(padding, params->payload, plaintext_len);
+    }
+    plaintext = padding;
+    plaintext_len = padded_len;
+  }
+
   /* The ciphertext is the payload plus the tag, and its length is what the Length field covers. */
-  if (params->payload_len > SIZE_MAX - WT_AEAD_TAG_LEN) return WT_ERR_OVERFLOW;
-  ciphertext_len = params->payload_len + WT_AEAD_TAG_LEN;
+  if (plaintext_len > SIZE_MAX - WT_AEAD_TAG_LEN) return WT_ERR_OVERFLOW;
+  ciphertext_len = plaintext_len + WT_AEAD_TAG_LEN;
   if (capacity < ciphertext_len) return WT_ERR_LIMIT;
 
   /* The header first: the AEAD authenticates it. */
@@ -55,7 +87,7 @@ wt_status_t wt_quic_packet_build(const wt_quic_packet_build_t *params, uint8_t *
 
   /* The payload, sealed with the header as associated data. */
   status = wt_quic_protect_frames(params->keys, params->packet_number, out, header_len,
-                                  params->payload, params->payload_len, out + header_len,
+                                  plaintext, plaintext_len, out + header_len,
                                   capacity - header_len, &ciphertext_len);
   if (status != WT_OK) {
     memset(out, 0, header_len);

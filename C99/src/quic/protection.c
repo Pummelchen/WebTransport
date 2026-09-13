@@ -149,14 +149,15 @@ wt_status_t wt_quic_header_protection_sample(size_t pn_offset,
    * packet number field. Four rather than zero because the packet number is at
    * most four bytes, so the sample never overlaps it -- which is what lets the
    * header be unmasked without knowing the packet number length. */
-  if (pn_offset > SIZE_MAX - 4U) return WT_ERR_OVERFLOW;
-  sample_offset = pn_offset + 4U;
-  if (sample_offset > packet_len || packet_len - sample_offset < 16U) {
+  if (pn_offset > SIZE_MAX - WT_QUIC_HP_SAMPLE_OFFSET) return WT_ERR_OVERFLOW;
+  sample_offset = pn_offset + WT_QUIC_HP_SAMPLE_OFFSET;
+  if (sample_offset > packet_len || packet_len - sample_offset < WT_QUIC_HP_SAMPLE_LENGTH) {
     /* A packet too short to sample cannot be protected. QUIC requires a minimum
-     * datagram size partly for this reason (RFC 9000 section 14.1). */
+     * datagram size partly for this reason (RFC 9000 section 14.1); a SENDER pads
+     * its plaintext instead, which `wt_quic_packet_build` does. */
     return WT_ERR_TRUNCATED;
   }
-  memcpy(sample, packet + sample_offset, 16U);
+  memcpy(sample, packet + sample_offset, WT_QUIC_HP_SAMPLE_LENGTH);
   return WT_OK;
 }
 

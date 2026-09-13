@@ -113,7 +113,14 @@ wt_status_t wt_quic_packet_nonce(const uint8_t iv[WT_AEAD_IV_LEN],
  * past the start of the packet number field. The sample is sixteen bytes from
  * there, so a packet whose payload is shorter than that cannot be protected at
  * all -- which is why QUIC requires a minimum packet size and why this refuses
- * rather than reading past the end. */
+ * rather than reading past the end.
+ *
+ * Both numbers are named because the sender needs them too: a packet builder
+ * pads its own plaintext with PADDING frames when the payload would leave the
+ * packet too short to sample, which is the only way a small frame -- PING, or
+ * RETIRE_CONNECTION_ID at two bytes -- can be sent on its own. */
+#define WT_QUIC_HP_SAMPLE_OFFSET 4U
+#define WT_QUIC_HP_SAMPLE_LENGTH 16U
 wt_status_t wt_quic_header_protection_sample(size_t pn_offset,
                                              const uint8_t *packet,
                                              size_t packet_len,

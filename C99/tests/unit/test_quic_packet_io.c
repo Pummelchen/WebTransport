@@ -499,24 +499,71 @@ static void test_empty_payload(void) {
   build.payload = NULL;
   build.payload_len = 0U;
   build.keys = &keys;
-  /* 1 + 8 + 1 + 16 = 26 bytes, and the sample would run to byte 29. */
-  WT_EXPECT_STATUS("an empty payload in the shortest packet cannot carry a sample",
-                   WT_ERR_TRUNCATED,
-                   wt_quic_packet_build(&build, packet, sizeof(packet), &packet_len));
-  WT_EXPECT_U64("and nothing was written", 0U, (uint64_t)packet_len);
-
-  build.packet_number_length = 4U;
-  WT_EXPECT_OK("with the full packet number it builds",
+  /* 1 + 8 + 1 + 16 = 26 bytes, and the sample would run to byte 29, so the builder pads the plaintext
+   * with three PADDING frames rather than refusing to encode a packet it could send (RFC 9000 section
+   * 19.1). A packet with no frames at all is legal for the same reason: PADDING is a frame. */
+  WT_EXPECT_OK("an empty payload is padded until the packet can carry a sample",
                wt_quic_packet_build(&build, packet, sizeof(packet), &packet_len));
-  WT_EXPECT_U64("as a header and a tag", 1U + sizeof(k_dcid) + 4U + WT_AEAD_TAG_LEN,
+  WT_EXPECT_U64("to exactly the sample's reach", 1U + sizeof(k_dcid) + 1U + 3U + WT_AEAD_TAG_LEN,
                 (uint64_t)packet_len);
 
   memset(&received, 0, sizeof(received));
   WT_EXPECT_OK("and reads back",
                wt_quic_packet_read(packet, packet_len, &keys, 0U, sizeof(k_dcid), &received));
-  WT_EXPECT_U64("with no payload", 0U, (uint64_t)received.payload_len);
-  WT_EXPECT_U64("and its packet number", 3U, received.packet_number);
+  WT_EXPECT_U64("as the padding the sender added", 3U, (uint64_t)received.payload_len);
+  WT_EXPECT_U64("with its packet number", 3U, received.packet_number);
+  wt_quic_packet_keys_clear(&keys);
+}
 
+/* RFC 9001 section 5.4.2: a packet that cannot be sampled cannot be protected, so a sender whose frame
+ * is shorter than the sample pads the plaintext. This is what lets a two-byte frame such as
+ * RETIRE_CONNECTION_ID or PING travel on its own, and it is checked here with the frame bytes a caller
+ * would hand over rather than with an empty payload. */
+static void test_short_payload_is_padded(void) {
+  wt_quic_packet_keys_t keys;
+  uint8_t packet[64];
+  size_t packet_len = 0U;
+  wt_quic_packet_build_t build;
+  wt_quic_received_packet_t received;
+  /* RETIRE_CONNECTION_ID for sequence 1: the frame type then the sequence. */
+  static const uint8_t retire_sequence_one[2] = {0x19U, 0x01U};
+
+  make_keys(11U, &keys);
+  memset(&build, 0, sizeof(build));
+  build.short_header = 1;
+  build.destination_connection_id = k_dcid;
+  build.destination_connection_id_len = sizeof(k_dcid);
+  build.packet_number = 0U;
+  build.packet_number_length = 1U;
+  build.payload = retire_sequence_one;
+  build.payload_len = sizeof(retire_sequence_one);
+  build.keys = &keys;
+  WT_EXPECT_OK("a two-byte frame builds",
+               wt_quic_packet_build(&build, packet, sizeof(packet), &packet_len));
+  WT_EXPECT_U64("in a packet padded to the sample's reach",
+                1U + sizeof(k_dcid) + 1U + 3U + WT_AEAD_TAG_LEN, (uint64_t)packet_len);
+
+  memset(&received, 0, sizeof(received));
+  WT_EXPECT_OK("and reads back",
+               wt_quic_packet_read(packet, packet_len, &keys, 0U, sizeof(k_dcid), &received));
+  WT_EXPECT_U64("with the frame and its padding", 3U, (uint64_t)received.payload_len);
+  WT_EXPECT_BYTES("keeping the frame's bytes", retire_sequence_one, received.payload,
+                  sizeof(retire_sequence_one));
+  WT_EXPECT_U64("and filling the rest with PADDING", 0U, (uint64_t)received.payload[2]);
+
+  /* A four-byte packet number already provides the four bytes the sample starts past, so no padding is
+   * added and the packet carries the frame alone. */
+  build.packet_number_length = 4U;
+  WT_EXPECT_OK("a full packet number needs no padding",
+               wt_quic_packet_build(&build, packet, sizeof(packet), &packet_len));
+  WT_EXPECT_U64("so the packet is header, frame and tag",
+                1U + sizeof(k_dcid) + 4U + sizeof(retire_sequence_one) + WT_AEAD_TAG_LEN,
+                (uint64_t)packet_len);
+  memset(&received, 0, sizeof(received));
+  WT_EXPECT_OK("and reads back",
+               wt_quic_packet_read(packet, packet_len, &keys, 0U, sizeof(k_dcid), &received));
+  WT_EXPECT_U64("with just the frame", (uint64_t)sizeof(retire_sequence_one),
+                (uint64_t)received.payload_len);
   wt_quic_packet_keys_clear(&keys);
 }
 
@@ -531,6 +578,7 @@ int main(void) {
   test_truncated_is_refused();
   test_build_rejects_bad_arguments();
   test_empty_payload();
+  test_short_payload_is_padded();
 
   WT_TEST_MAIN_END("wt_quic_packet_io");
 }
