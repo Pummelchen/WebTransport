@@ -85,6 +85,7 @@
 
 /* HTTP/3, including QPACK. */
 #include "webtransport/http3/control.h"
+#include "webtransport/http3/driver.h"
 #include "webtransport/http3/endpoint.h"
 #include "webtransport/http3/frame.h"
 #include "webtransport/http3/goaway.h"

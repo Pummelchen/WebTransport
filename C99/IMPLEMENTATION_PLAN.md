@@ -2051,6 +2051,29 @@ The test is a ROUND TRIP rather than hand-written bytes: the client's extended C
 decoded by a server's endpoint, and handed to `wt_webtransport_session_request_validate`, so the encode and
 decode directions cannot disagree without a test failing.
 
+### Phase 9's fifth part: reassembling a stream's type prefix
+
+`http3/driver.h` is the seam between a connection and the endpoint, and it exists for one fact: a stream's
+type prefix is a QUIC varint, and a varint can be SPLIT across frames. A peer may open a stream and send one
+byte of a two-byte type in its first packet; the endpoint's classifier -- correctly -- wants the whole prefix,
+because deciding a stream's type from half a varint is how an implementation ends up reading someone else's
+stream. The driver holds at most the first eight bytes of each opening stream (the longest prefix a varint can
+be) in a FIXED table, classifies when they add up, and hands back the rest of the completing frame as a view
+into the caller's own buffer, so nothing is copied.
+
+The error taxonomy came out of the same reasoning as the rest of this phase: a prefix that does not start at
+offset zero, or a stream resumed at an offset that does not continue what was held, is the CALLER's accounting
+and is `WT_ERR_STATE`; a stream that ends before its prefix is complete is dropped without ever becoming a
+stream of any type; and the pending table is this endpoint's bound, so running into it is `WT_ERR_LIMIT` with
+no error code. The table is about CONCURRENCY rather than a lifetime total, which the test checks by ending a
+waiting stream and watching its slot come free.
+
+The test also caught a mistake worth recording, because this tracker has now recorded it three times in three
+phases: `WT_WEBTRANSPORT_STREAM_UNI` is `0x54`, and `0x54` as a varint has its top bits set, so it is a
+TWO-byte prefix on the wire (`0x40 0x54`). A test that wrote it as one byte was not testing the WebTransport
+stream type at all; the driver read the real two-byte value and classified it as unknown, which is exactly
+right. Lengths and prefixes are MEASURED on this wire, never transcribed.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

@@ -60,6 +60,7 @@ set(WT_UNIT_TESTS
   test_webtransport_framing
   test_public_api
   test_api_endpoint
+  test_http3_driver
   test_http3_endpoint
   test_api_events
   test_api_flow

@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 69 unit test files and 79,435 checks, run by `ctest` and again under
+- 70 unit test files and 79,485 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -91,6 +91,16 @@ What is here:
     `wt_session_config_default()` returns every bound at its default, because a C
     caller that forgot a field would otherwise pass whatever its stack held into a
     bound.
+  - `http3/driver.h` — the seam between a connection and the endpoint: it turns a
+    stream's opening bytes into a classified stream, and it exists because a stream's
+    type prefix is a varint that a peer may SPLIT across frames. Deciding a type from
+    half a varint is how an implementation reads someone else's stream, so the driver
+    holds at most the first eight bytes of each opening stream until they add up to a
+    prefix — in a fixed table, because a buffer that grows with a peer's stream count
+    is a heap exhaustion path with the peer's name on it. A prefix that does not start
+    at offset zero, or a stream resumed out of order, is the caller's accounting rather
+    than the peer's, and the payload after the prefix is a view into the frame that
+    completed it, so nothing is copied.
   - `http3/endpoint.h` — the HTTP/3 endpoint's own streams, which is the lifecycle a
     consumer never sees: our control stream (`0x00`) and QPACK streams (`0x02`/`0x03`)
     exist once each, the peer's unidirectional streams are classified by their type
