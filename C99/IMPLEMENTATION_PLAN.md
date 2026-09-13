@@ -2238,6 +2238,29 @@ machine without an IPv6 loopback is a test about the machine rather than about t
 passed through as the system's own status rather than translated, for the reason the transport adapter gives in
 WT-104: a layer that renames a system refusal hides the reason for it.
 
+### Phase 9's fourteenth part: the packet session driver
+
+`runtime/session.h` is the one place where the socket, the QUIC connection and the TLS handshake meet. Each
+already existed and none knew about the others: the connection needs somewhere to send, the handshake needs a
+connection carrying Initial keys, and the socket needs a caller to pump it.
+
+Three of its rules are the ones that are invisible when they are wrong. The Initial keys come from the
+DESTINATION CONNECTION ID in both directions, with the `from_server` flag OPPOSITE for the receive direction --
+backwards, the connection encrypts and decrypts nothing, which presents as a peer that never answers rather
+than as a key schedule mistake. The handshake's frame handler is CHAINED rather than replaced, which is why the
+handshake driver returns WT_OK for frames that are not its business; a session that installed its own handler
+instead would stop the walk before the layer behind it saw anything, and the HTTP/3 driver is the layer behind
+it. And a pump NEVER WAITS: it reads what is there, flushes what is owed and returns, because a tool that
+waited inside a library call could not honour its own `--timeout-ms` or be interrupted -- the caller owns the
+clock and passes `now`.
+
+Its test covers the session's own contract rather than the handshake's (that has its own suite with the trust
+fixtures): arming an endpoint, a bounded pump with an empty socket (which is the ordinary case in a
+two-endpoint loop, so it must not be an error), an unstarted session refusing to pump, clearing twice because
+an error path that unwinds would otherwise double free, and a server with NO CERTIFICATE being refused at start
+rather than at the first ClientHello, where the reason is much harder to see. The two-endpoint handshake over
+loopback is the next part, and it belongs beside the fixtures it needs.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

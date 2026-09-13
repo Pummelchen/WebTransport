@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 73 unit test files and 79,779 checks, run by `ctest` and again under
+- 74 unit test files and 79,805 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -69,6 +69,19 @@ What is here:
   with stable field names, and the parser is a library function rather than argv walking
   inside each `main`, which is what lets all of this be a failing check rather than a
   manual attempt.
+- **A packet session driver** (Phase 9): `runtime/session.h` is the only place where the
+  socket, the QUIC connection and the TLS handshake meet — the connection needs somewhere to
+  send, the handshake needs a connection with Initial keys, and the socket needs a caller to
+  pump it. It encodes the rules that are hard to see afterwards: the Initial keys come from
+  the destination connection ID in **both** directions with the `from_server` flag *opposite*
+  for the receive direction (get that backwards and the connection encrypts nothing, which
+  looks like a peer that never answers); the handshake's frame handler is **chained rather
+  than replaced**, so the HTTP/3 layer can be installed behind it; and a **pump never waits** —
+  it reads what is there, flushes what is owed and returns, because a tool that waited inside
+  a library call could not honour its own `--timeout-ms`. The test covers the session's own
+  contract: arming, a bounded pump with an empty socket, an unstarted session refusing to
+  pump, clearing twice (an error path that unwinds must not double free), and a server with no
+  certificate being refused at start rather than at the first ClientHello.
 - **The tools' local socket** (Phase 9): `cli/endpoint.h` turns a `host:port` into a bound or
   targeted UDP endpoint, and both tools open theirs and report it in the `--json` output. The
   FAMILY comes from the address rather than a flag — an IPv4 address on an IPv6 socket is not

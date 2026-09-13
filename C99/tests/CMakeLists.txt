@@ -61,6 +61,7 @@ set(WT_UNIT_TESTS
   test_public_api
   test_api_endpoint
   test_cli_endpoint
+  test_runtime_session
   test_cli_options
   test_cli_report
   test_http3_driver

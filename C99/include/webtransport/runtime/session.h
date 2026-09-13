@@ -1,0 +1,105 @@
+/* A packet session: a socket, a QUIC connection and a TLS handshake, driven together (Phase 9).
+ *
+ * Every piece of a WebTransport client or server already exists in this library and none of them knows
+ * about the others: the connection needs somewhere to send, the handshake needs a connection with
+ * Initial keys, the socket needs a caller to pump it. This is that caller, and it is deliberately the
+ * ONLY place where the three meet -- so a test can stand up two of them over loopback, and so a caller
+ * that wants to drive the layers itself still can.
+ *
+ * The rules it encodes are the ones that are easy to get wrong once and hard to see afterwards:
+ *
+ *   - THE INITIAL KEYS COME FROM THE DESTINATION CONNECTION ID, both directions, and the `from_server`
+ *     flag is the OPPOSITE for this endpoint's receive direction. Getting that backwards produces a
+ *     connection that encrypts and decrypts nothing, which looks like a peer that never answers.
+ *
+ *   - THE HANDSHAKE HANDLER IS CHAINED, not replaced: it returns WT_OK for every frame that is not its
+ *     business, so the HTTP/3 layer's handler can be installed behind it. This session installs only the
+ *     handshake for now, and `wt_runtime_session_set_frame_handler` is how the next layer joins it.
+ *
+ *   - A PUMP IS BOUNDED. `wt_runtime_session_pump` reads what is there, flushes what is owed and
+ *     returns; it never waits, because a tool that waited inside a library call could not honour its own
+ *     `--timeout-ms` and could not be interrupted. The caller owns the clock and passes `now`.
+ */
+
+#ifndef WEBTRANSPORT_RUNTIME_SESSION_H
+#define WEBTRANSPORT_RUNTIME_SESSION_H
+
+#include <stdint.h>
+
+#include "webtransport/quic/connection.h"
+#include "webtransport/quic/handshake.h"
+#include "webtransport/runtime/udp.h"
+#include "webtransport/status.h"
+#include "webtransport/tls/session.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct wt_runtime_session {
+  wt_quic_connection_t connection;
+  wt_quic_handshake_t handshake;
+  /* Borrowed: the caller owns the socket and the address, because a test binds them and a tool closes
+   * them, and an object that owned them would have to decide when. */
+  const wt_udp_socket_t *socket;
+  wt_udp_address_t peer;
+  int is_client;
+  int started;
+  /* What the pump has seen, for a caller that logs or asserts: packets that were there to read and
+   * rounds in which something was flushed. */
+  unsigned packets_seen;
+  unsigned flushes;
+  /* The layer behind the handshake, if one was installed: a function pointer and its context, because
+   * the only thing that varies between "no next layer yet" and the HTTP/3 driver is which function. */
+  wt_status_t (*next_handler)(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);
+  void *next_context;
+} wt_runtime_session_t;
+
+/* A further frame handler installed behind the handshake's, with its own context. */
+typedef wt_status_t (*wt_runtime_frame_handler_fn)(void *context, wt_quic_space_t space,
+                                                   const wt_quic_frame_t *frame);
+
+/* Start a client: the connection is initialised, attached to its socket and peer, given its Initial
+ * keys in both directions, and the TLS ClientHello is built into the Initial space. The peer's address
+ * must be the one the packets go to; the socket's own family decides the wire. */
+wt_status_t wt_runtime_session_start_client(wt_runtime_session_t *session,
+                                            const wt_udp_socket_t *socket,
+                                            const wt_udp_address_t *peer,
+                                            const uint8_t *initial_connection_id,
+                                            size_t initial_connection_id_length,
+                                            const wt_quic_connection_config_t *connection_config,
+                                            const wt_tls_client_config_t *tls_config, uint64_t now);
+
+/* Start a server. Nothing is sent until a ClientHello arrives, so this only arms the endpoint. */
+wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
+                                            const wt_udp_socket_t *socket,
+                                            const wt_udp_address_t *peer,
+                                            const uint8_t *initial_connection_id,
+                                            size_t initial_connection_id_length,
+                                            const wt_quic_connection_config_t *connection_config,
+                                            const wt_tls_server_config_t *tls_config, uint64_t now);
+
+/* Install a handler behind the handshake's, for the layer that owns frames it does not. */
+wt_status_t wt_runtime_session_set_frame_handler(wt_runtime_session_t *session,
+                                                 wt_runtime_frame_handler_fn handler,
+                                                 void *context);
+
+/* Read what is there, drive the handshake and flush what is owed. Never blocks. Returns WT_OK when the
+ * round completed, whatever it contained. */
+wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now);
+
+/* Whether the handshake is confirmed, and why it failed if it did. */
+int wt_runtime_session_established(const wt_runtime_session_t *session);
+wt_status_t wt_runtime_session_failure(const wt_runtime_session_t *session);
+
+/* The application keys, once the handshake has them, so a caller can protect data traffic. WT_ERR_STATE
+ * before then, which is the difference between "not yet" and "never". */
+int wt_runtime_session_keys_ready(const wt_runtime_session_t *session);
+
+void wt_runtime_session_clear(wt_runtime_session_t *session);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* WEBTRANSPORT_RUNTIME_SESSION_H */

@@ -119,6 +119,11 @@ list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 # same reason the QUIC wire core is: a consumer links the library as a unit, and a
 # test must not be able to link a different build of HTTP/3 than the one that
 # ships.
+set(WT_RUNTIME_SOURCES
+  src/runtime/session.c
+)
+list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
+
 set(WT_CLI_SOURCES
   src/cli/endpoint.c
   src/cli/options.c
@@ -228,6 +233,7 @@ set(WT_PUBLIC_HEADERS
   include/webtransport/tls/keyshare.h
   include/webtransport/tls/trust.h
   include/webtransport/tls/session.h
+  include/webtransport/runtime/session.h
   include/webtransport/runtime/udp.h
 )
 
