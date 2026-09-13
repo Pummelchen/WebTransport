@@ -147,6 +147,11 @@ typedef struct wt_loop_result {
   int peer_drained;
   int peer_close_code_set;
   uint32_t peer_close_code;
+  /* How many capsules this endpoint REFUSED, and the HTTP/3 code it closed the connection over when it did. A
+   * capsule the peer sent that this endpoint could not accept is a fact about the run, and without the code the
+   * refusal reads as an unexplained INTERNAL_ERROR (WT-165). */
+  unsigned capsules_refused;
+  uint64_t capsule_error;
 } wt_loop_result_t;
 
 /* Wait for one session, accept its CONNECT, answer it, and exchange one message. */

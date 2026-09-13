@@ -49,23 +49,35 @@ typedef struct wt_cli_scenario {
 typedef struct wt_cli_report {
   wt_cli_scenario_t scenarios[WT_CLI_REPORT_MAX];
   size_t count;
+  /* How many rows the report REFUSED, because a name or a detail was longer than it can hold or because it was
+   * full. Counted rather than dropped in silence, and the exit status fails on it: the tool's whole contract is
+   * that a scenario which did not run is not a scenario that passed, and a name two bytes too long is exactly how
+   * a row disappeared from a report while the run still read as green (WT-165). */
+  size_t rejected;
 } wt_cli_report_t;
 
 void wt_cli_report_init(wt_cli_report_t *report);
 
 /* Record one scenario. A name longer than the table holds is refused rather than truncated: a
- * truncated name is a different scenario. Returns WT_ERR_LIMIT when the report is full. */
+ * truncated name is a different scenario. Returns WT_ERR_LIMIT when the report is full.
+ *
+ * A refusal is COUNTED in `rejected`, and the exit status fails on it, so a caller that ignores this status -- and
+ * the tool's own scenario helpers do, because there is nothing useful to do at the point of adding a row -- still
+ * cannot publish a report that quietly lost one. */
 wt_status_t wt_cli_report_add(wt_cli_report_t *report, const char *scenario, wt_cli_result_t result,
                               const char *detail);
 
 size_t wt_cli_report_count(const wt_cli_report_t *report);
+
+/* How many rows were refused. Non-zero means the report is INCOMPLETE, whatever its rows say. */
+size_t wt_cli_report_rejected(const wt_cli_report_t *report);
 size_t wt_cli_report_count_of(const wt_cli_report_t *report, wt_cli_result_t result);
 
 /* The names are stable and are what a script matches on. */
 const char *wt_cli_result_name(wt_cli_result_t result);
 
-/* The exit status the report implies: 0 when everything passed, 1 when anything failed, 3 when
- * something was not attempted and nothing failed. */
+/* The exit status the report implies: 0 when everything passed, 1 when anything failed or a row was
+ * refused, 3 when something was not attempted and nothing failed. */
 int wt_cli_report_exit_status(const wt_cli_report_t *report);
 
 /* One JSON object: {"scenarios":[{"name":...,"result":...,"detail":...}],"summary":{...}}. */

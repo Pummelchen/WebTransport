@@ -51,6 +51,16 @@ typedef struct loop_side {
    * walking and the byte-keeping are `apps/support/capsule_stream.c`, shared with the conformance tool so that
    * "the session's capsules" means one thing in both. */
   wt_capsule_stream_t capsules;
+  /* What a refused capsule is stated TO. The sink runs inside the driver's routing, so a refusal has to be
+   * expressed while it is being made: an HTTP/3 error goes to the connection, a session error into a close capsule
+   * on `request_stream_id`, which is why the transport is here as well (WT-165). Both are set once by the side's
+   * own setup, because the loop they belong to is created after this struct is. */
+  const wt_http3_driver_transport_t *transport;
+  wt_quic_connection_t *connection;
+  uint64_t now_for_close;
+  /* The HTTP/3 code of the last capsule refusal, for the report: a run that closed the connection should say which
+   * rule it closed it over (WT-165). */
+  uint64_t capsule_error;
 } loop_side_t;
 
 typedef struct loop {
@@ -123,12 +133,27 @@ static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint
 static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
                                        size_t length, int fin) {
   loop_side_t *side = context;
+  wt_status_t status;
 
   /* The CONNECT stream is the session's, not a data stream's: its bytes after the one HEADERS frame are capsules
    * (draft-16 section 5), and the driver routes them here rather than framing them (WT-164). */
   if (stream_id == side->request_stream_id) {
-    return wt_capsule_stream_on_bytes(&side->capsules, data, length, fin, wt_capsule_stream_apply_flow,
-                                      &side->capsules.peer_limits);
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+    status = wt_capsule_stream_on_bytes(&side->capsules, data, length, fin, wt_capsule_stream_apply_flow,
+                                        &side->capsules, &error);
+    if (status != WT_OK) {
+      /* A refusal the peer has to be told about, in whichever error space it belongs to. The status is still
+       * returned, because a hint is not a close: the QUIC layer closes when the handler that refused says so. */
+      side->capsule_error = (uint64_t)error;
+      if (wt_capsule_stream_refuse(&side->capsules, side->transport, side->request_stream_id, side->connection,
+                                   side->now_for_close, error) == WT_CAPSULE_REFUSAL_SESSION) {
+        /* The session is closed and the peer has been told in the capsule itself: the connection stays up, so this
+         * failure must NOT reach the transport (section 5.1, WT-165). */
+        return WT_OK;
+      }
+    }
+    return status;
   }
   if (side->data_bytes + length <= sizeof(side->data)) {
     if (length > 0U) memcpy(side->data + side->data_bytes, data, length);
@@ -323,11 +348,15 @@ static void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->peer_close_code_set = loop->side.capsules.session.close_received != 0 &&
                              loop->side.capsules.session.close_error_set != 0;
   out->peer_close_code = loop->side.capsules.session.close_error_code;
+  out->capsules_refused = loop->side.capsules.refused;
+  out->capsule_error = loop->side.capsule_error;
 }
 
 static void pump_once(loop_t *loop) {
   (void)wt_udp_wait(&loop->socket, WT_LOOP_WAIT_MICROS);
   (void)wt_runtime_session_pump(&loop->session, loop->now);
+  /* The capsule path may have to send a close, and a close is a frame with a time (WT-165). */
+  loop->side.now_for_close = loop->now;
   loop->now += 1000U;
 }
 
@@ -447,6 +476,10 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   init_side(&loop.side, WT_HTTP3_ROLE_CLIENT);
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &loop.transport);
+  /* What a refused capsule is stated to (WT-165), and the clock it is stated at. */
+  loop.side.transport = &loop.transport;
+  loop.side.connection = &loop.session.connection;
+  loop.side.now_for_close = loop.now;
   /* Bound so that a refusal with an HTTP/3 error reaches the peer as an application close (WT-159). */
   wt_http3_driver_bind_connection(&loop.side.driver, &loop.session.connection);
   (void)wt_runtime_session_set_lost_frame_handler(&loop.session, client_on_lost_frame, &loop);
@@ -687,6 +720,10 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   init_side(&loop.side, WT_HTTP3_ROLE_SERVER);
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &loop.transport);
+  /* What a refused capsule is stated to (WT-165), and the clock it is stated at. */
+  loop.side.transport = &loop.transport;
+  loop.side.connection = &loop.session.connection;
+  loop.side.now_for_close = loop.now;
   /* Bound so that a refusal with an HTTP/3 error reaches the peer as an application close (WT-159). */
   wt_http3_driver_bind_connection(&loop.side.driver, &loop.session.connection);
 

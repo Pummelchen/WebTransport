@@ -46,8 +46,21 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
   /* The CONNECT stream is the session's: its bytes after the one HEADERS frame are capsules, which the driver
    * routes here rather than framing (WT-164). A scenario that sends one asserts what this applied. */
   if (stream_id == side->request_stream_id) {
-    return wt_capsule_stream_on_bytes(&side->capsules, data, length, fin, wt_capsule_stream_apply_flow,
-                                      &side->capsules.peer_limits);
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    wt_status_t status = wt_capsule_stream_on_bytes(&side->capsules, data, length, fin,
+                                                    wt_capsule_stream_apply_flow, &side->capsules, &error);
+    if (status != WT_OK) {
+      /* A refused capsule is stated to the peer in its own error space: an HTTP/3 code to the connection, a
+       * session code into a close capsule, which is what the scenario below asserts (WT-165). */
+      side->capsule_error = (uint64_t)error;
+      if (wt_capsule_stream_refuse(&side->capsules, side->transport, side->request_stream_id, side->connection,
+                                   side->now, error) == WT_CAPSULE_REFUSAL_SESSION) {
+        /* The session is closed and the peer has been told in the capsule itself: the connection stays up, so this
+         * failure must NOT reach the transport (section 5.1, WT-165). */
+        return WT_OK;
+      }
+    }
+    return status;
   }
   if (side->stream_bytes + length <= sizeof(side->stream_data)) {
     if (length > 0U) memcpy(side->stream_data + side->stream_bytes, data, length);
@@ -122,6 +135,9 @@ void scenario_pump_once(scenario_pair_t *pair) {
   (void)wt_udp_wait(&pair->server_socket, WT_SCENARIO_WAIT_MICROS);
   (void)wt_runtime_session_pump(&pair->client, pair->now);
   (void)wt_runtime_session_pump(&pair->server, pair->now);
+  /* Each side's own clock, because a refusal sends a frame and a frame has a time (WT-165). */
+  pair->client_side.now = pair->now;
+  pair->server_side.now = pair->now;
   pair->now += 1000U;
 }
 
@@ -284,5 +300,13 @@ wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail
    * (RFC 9114 section 8) rather than as the transport's INTERNAL_ERROR (WT-159). */
   wt_http3_driver_bind_connection(&pair->client_side.driver, &pair->client.connection);
   wt_http3_driver_bind_connection(&pair->server_side.driver, &pair->server.connection);
+  /* And where a REFUSED capsule is stated to this side's peer: the transport that carries a close capsule, the
+   * connection an HTTP/3 code is refused to, and the clock both need (WT-165). */
+  pair->client_side.transport = &pair->client_transport;
+  pair->client_side.connection = &pair->client.connection;
+  pair->client_side.now = pair->now;
+  pair->server_side.transport = &pair->server_transport;
+  pair->server_side.connection = &pair->server.connection;
+  pair->server_side.now = pair->now;
   return WT_CLI_RESULT_PASSED;
 }

@@ -58,7 +58,7 @@ static void test_an_unattempted_scenario_is_not_a_pass(void) {
     WT_EXPECT_TRUE("a result", strstr(buffer, "\"result\":\"passed\"") != NULL);
     WT_EXPECT_TRUE("a detail", strstr(buffer, "\"detail\":\"all forms\"") != NULL);
     WT_EXPECT_TRUE("and a summary", strstr(buffer, "\"summary\":{\"total\":3,\"passed\":1,"
-                                                   "\"failed\":1,\"unsupported\":1}") != NULL);
+                                                   "\"failed\":1,\"unsupported\":1,\"rejected\":0}") != NULL);
   }
 
   /* Without a failure, an unattempted scenario is still not success: the status says so. */
@@ -88,6 +88,7 @@ static void test_the_report_refuses_rather_than_drops(void) {
   WT_EXPECT_STATUS("and so is a detail", WT_ERR_LIMIT,
                    wt_cli_report_add(&report, "ok", WT_CLI_RESULT_PASSED, long_detail));
   WT_EXPECT_U64("with nothing recorded", 0U, (uint64_t)wt_cli_report_count(&report));
+  WT_EXPECT_U64("and both refusals counted", 2U, (uint64_t)wt_cli_report_rejected(&report));
 
   /* The table is fixed: a report that silently dropped the scenarios past the bound would show a
    * short, clean run. */
@@ -98,6 +99,35 @@ static void test_the_report_refuses_rather_than_drops(void) {
                    wt_cli_report_add(&report, "s", WT_CLI_RESULT_PASSED, ""));
   WT_EXPECT_U64("with the table still full rather than short", (uint64_t)WT_CLI_REPORT_MAX,
                 (uint64_t)wt_cli_report_count(&report));
+
+  /* A refused row is COUNTED and the exit status fails on it, because the tool's helpers ignore the status a row
+   * is added with -- and a name two bytes too long was exactly how a row disappeared from a report while the run
+   * still read as green (WT-165). */
+  wt_cli_report_init(&report);
+  WT_EXPECT_U64("a fresh report has refused nothing", 0U, (uint64_t)wt_cli_report_rejected(&report));
+  WT_EXPECT_OK("a pass is recorded", wt_cli_report_add(&report, "ok", WT_CLI_RESULT_PASSED, "fine"));
+  WT_EXPECT_INT("and the run is clean", 0, wt_cli_report_exit_status(&report));
+  WT_EXPECT_STATUS("a name past the table is refused", WT_ERR_LIMIT,
+                   wt_cli_report_add(&report, long_name, WT_CLI_RESULT_PASSED, "fine"));
+  WT_EXPECT_U64("counted rather than dropped", 1U, (uint64_t)wt_cli_report_rejected(&report));
+  WT_EXPECT_U64("with the rows that landed still there", 1U, (uint64_t)wt_cli_report_count(&report));
+  WT_EXPECT_INT("and the run FAILS on it, whatever the rows say", 1, wt_cli_report_exit_status(&report));
+  {
+    FILE *stream = tmpfile();
+    char buffer[512];
+    size_t read_length;
+
+    WT_EXPECT_TRUE("a stream opens", stream != NULL);
+    if (stream != NULL) {
+      wt_cli_report_write_text(&report, stream);
+      rewind(stream);
+      read_length = fread(buffer, 1U, sizeof(buffer) - 1U, stream);
+      buffer[read_length] = '\0';
+      fclose(stream);
+      WT_EXPECT_TRUE("and the text report says a row was refused",
+                     strstr(buffer, "REFUSED") != NULL);
+    }
+  }
 }
 
 static void test_the_text_report_says_the_same(void) {

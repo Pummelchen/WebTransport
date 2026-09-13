@@ -14,7 +14,11 @@
 #include "scenario_capsules.h"
 
 #include "scenario_pair.h"
+#include "webtransport/http3/frame.h"
 #include "webtransport/http3/settings.h"
+#include "webtransport/quic/close.h"
+#include "webtransport/quic/connection.h"
+#include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/session_request.h"
 #include "webtransport/writer.h"
 
@@ -103,12 +107,139 @@ static wt_status_t capsules_send(scenario_pair_t *pair, int from_client, const u
   return transport->send_stream(transport->context, stream_id, bytes, length, 0, pair->now);
 }
 
+/* The two refusals a capsule can earn, each on its own pair because each ENDS something: a capsule whose declared
+ * length is past what the receiver will buffer is an HTTP/3 error, so the CONNECTION closes naming it; a grant that
+ * does not strictly increase is the draft's own flow-control error, so the SESSION closes with that code and the
+ * connection stays up. The second is the case a flag would have got wrong -- returning the failure to the transport
+ * would have closed the connection over the session's own error (WT-165). */
+static void capsules_run_refusals(wt_cli_report_t *report) {
+  static const char *const k_bound = "draft16-a-capsule-past-the-bound-is-named";
+  static const char *const k_flow = "draft16-a-decreasing-grant-closes-the-session";
+  scenario_pair_t pair;
+  char detail[WT_CLI_SCENARIO_DETAIL_MAX];
+  char opened[WT_CLI_SCENARIO_DETAIL_MAX];
+  uint8_t framed[64];
+  wt_writer_t w;
+  unsigned round;
+  wt_cli_result_t result;
+
+  opened[0] = '\0';
+  result = scenario_pair_open(&pair, 0, opened, sizeof(opened));
+  if (result != WT_CLI_RESULT_PASSED) {
+    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %s", opened);
+    capsules_add(report, k_bound, result == WT_CLI_RESULT_PASSED, detail);
+    capsules_add(report, k_flow, result == WT_CLI_RESULT_PASSED, detail);
+    return;
+  }
+  if (capsules_open_session(&pair, detail, sizeof(detail)) == 0) {
+    capsules_add(report, k_bound, 0, detail);
+    capsules_add(report, k_flow, 0, detail);
+    scenario_pair_close(&pair);
+    return;
+  }
+
+  /* A capsule declaration whose length is past the receiver's bound. Only the HEADER is sent: the receiver knows
+   * its own bound from the length alone, and waiting for 2000 bytes to prove it would be a buffer it refuses to
+   * allocate. */
+  {
+    uint8_t header[8];
+    size_t header_length = wt_quic_varint_encode(WT_CAPSULE_MAX_DATA, header, sizeof(header));
+
+    header_length += wt_quic_varint_encode(2000U, header + header_length, sizeof(header) - header_length);
+    if (capsules_send(&pair, 1, header, header_length) != WT_OK) {
+      capsules_add(report, k_bound, 0, "the oversized capsule could not be sent");
+      capsules_add(report, k_flow, 0, "the oversized capsule could not be sent");
+      scenario_pair_close(&pair);
+      return;
+    }
+    for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {
+      if (wt_quic_connection_is_closed(&pair.server.connection) != 0) break;
+      scenario_pump_once(&pair);
+    }
+    for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {
+      if (pair.client.connection.peer_closed != 0) break;
+      scenario_pump_once(&pair);
+    }
+    {
+      const wt_quic_close_state_t *state = wt_quic_connection_close_state(&pair.server.connection);
+      int passed = pair.server_side.capsules.refused > 0 &&
+                   pair.server_side.capsule_error == (uint64_t)WT_HTTP3_EXCESSIVE_LOAD && state != NULL &&
+                   state->kind == WT_QUIC_CLOSE_APPLICATION &&
+                   state->error_code == (uint64_t)WT_HTTP3_EXCESSIVE_LOAD &&
+                   pair.client.connection.peer_closed != 0 &&
+                   pair.client.connection.peer_close_kind == WT_QUIC_CLOSE_APPLICATION &&
+                   pair.client.connection.peer_error_code == (uint64_t)WT_HTTP3_EXCESSIVE_LOAD;
+      (void)snprintf(detail, sizeof(detail),
+                     passed != 0 ? "a capsule declaring 2000 bytes closed the connection as an application close "
+                                   "with H3_EXCESSIVE_LOAD, and the peer read that code"
+                                 : "the bound was not named (refused=%u, code=0x%llx, close=%d/0x%llx, peer=%d)",
+                     pair.server_side.capsules.refused,
+                     (unsigned long long)pair.server_side.capsule_error, state != NULL ? (int)state->kind : -1,
+                     state != NULL ? (unsigned long long)state->error_code : 0ULL,
+                     (int)pair.client.connection.peer_closed);
+      capsules_add(report, k_bound, passed, detail);
+    }
+  }
+  scenario_pair_close(&pair);
+
+  /* The flow-control row, on a pair of its own: the grant is accepted and then repeated, and a repeat is what the
+   * draft refuses as a limit that does not strictly increase. */
+  opened[0] = '\0';
+  result = scenario_pair_open(&pair, 0, opened, sizeof(opened));
+  if (result != WT_CLI_RESULT_PASSED) {
+    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %s", opened);
+    capsules_add(report, k_flow, result == WT_CLI_RESULT_PASSED, detail);
+    return;
+  }
+  if (capsules_open_session(&pair, detail, sizeof(detail)) == 0) {
+    capsules_add(report, k_flow, 0, detail);
+    scenario_pair_close(&pair);
+    return;
+  }
+  {
+    int sent = 1;
+    unsigned grant;
+
+    for (grant = 0U; grant < 2U; grant++) {
+      w = wt_writer_init(framed, sizeof(framed));
+      if (wt_webtransport_max_data_write(&w, grant == 0U ? 4096U : 4096U) != WT_OK ||
+          capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
+        sent = 0;
+      }
+      for (round = 0U; round < 40U; round++) scenario_pump_once(&pair);
+    }
+    for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {
+      if (pair.client_side.capsules.session.close_received != 0) break;
+      scenario_pump_once(&pair);
+    }
+    {
+      int passed = sent != 0 && pair.client_side.capsules.session.close_received != 0 &&
+                   pair.client_side.capsules.session.close_error_set != 0 &&
+                   pair.client_side.capsules.session.close_error_code ==
+                       (uint32_t)WT_WEBTRANSPORT_FLOW_CONTROL_ERROR &&
+                   wt_quic_connection_is_closed(&pair.client.connection) == 0 &&
+                   wt_quic_connection_is_closed(&pair.server.connection) == 0;
+      (void)snprintf(detail, sizeof(detail),
+                     passed != 0 ? "a repeated grant closed the SESSION with the draft's flow-control code "
+                                   "(0x45d4487) and left both connections up"
+                                 : "the session was not closed as the draft says (received=%d, codeSet=%d, code=0x%x, "
+                                   "clientClosed=%d)",
+                     (int)pair.client_side.capsules.session.close_received,
+                     (int)pair.client_side.capsules.session.close_error_set,
+                     pair.client_side.capsules.session.close_error_code,
+                     (int)wt_quic_connection_is_closed(&pair.client.connection));
+      capsules_add(report, k_flow, passed, detail);
+    }
+  }
+  scenario_pair_close(&pair);
+}
+
 void wt_scenario_capsules_run(wt_cli_report_t *report) {
   static const char *const k_grant = "draft16-a-sessions-grant-moves-the-limit-the-peer-enforces";
   static const char *const k_ends = "draft16-a-drain-and-a-close-capsule-end-the-session";
   scenario_pair_t pair;
-  char detail[200];
-  char opened[160];
+  char detail[WT_CLI_SCENARIO_DETAIL_MAX];
+  char opened[WT_CLI_SCENARIO_DETAIL_MAX];
   uint8_t framed[64];
   wt_writer_t w;
   unsigned round;
@@ -202,4 +333,6 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
     capsules_add(report, k_ends, passed, detail);
   }
   scenario_pair_close(&pair);
+
+  capsules_run_refusals(report);
 }

@@ -49,6 +49,12 @@ typedef struct scenario_side {
    * walking is `apps/support/capsule_stream.c`, shared with both CLI tools so that the scenario is asserting the
    * same code path a tool runs rather than a second copy of it. */
   wt_capsule_stream_t capsules;
+  /* Where a refused capsule is stated: this side's transport, its connection, and the clock. Set by
+   * `scenario_pair_open`, because the sink runs inside the driver's routing and a refusal is made there (WT-165). */
+  const wt_http3_driver_transport_t *transport;
+  wt_quic_connection_t *connection;
+  uint64_t now;
+  uint64_t capsule_error;
 } scenario_side_t;
 
 typedef struct scenario_pair {

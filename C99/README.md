@@ -260,7 +260,7 @@ What is here:
   `WT-145`) and `quiche` (no handshake: `WT-146`) are measured to a named point, and the VPS matrix's
   five implementations still need a host. The conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
-  fifty C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
+  fifty-two C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
   product list is the three tools and nothing that tests them), and every remaining entry mapped to
   the unit suite that covers it. The walk found one real gap, `protocol-structured-fields`, which is
@@ -281,7 +281,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-two scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -295,7 +295,11 @@ What is here:
   halves are read rather than inferred), **two capsule scenarios** (a `MAX_DATA` capsule the client sends on
   the CONNECT stream moving the limit the server enforces, and a drain plus a close ending the session with
   the peer's application code while the connection stays up -- before WT-164 the first was silently skipped
-  as an unknown HTTP/3 frame and the other two were parsed as frames and refused), the positive edge this project earned the hard way (half a prefix
+  as an unknown HTTP/3 frame and the other two were parsed as frames and refused), **two capsule refusals**
+  (a capsule declaring more than the receiver will buffer closing the *connection* with `H3_EXCESSIVE_LOAD` and
+  the peer reading that code, and a repeated grant closing the *session* with the draft's own
+  `WT_WEBTRANSPORT_FLOW_CONTROL_ERROR` while both connections stay up -- the second is the case where returning
+  the failure to the transport would have closed the connection over the session's own error), the positive edge this project earned the hard way (half a prefix
   decides nothing until it is whole), **thirteen connection-control scenarios** (GOAWAY identifiers that must not
   increase and must name a client stream, the reject-at-or-above boundary, one control stream per
   connection, a request frame refused on it, SETTINGS that must come first, a closed critical stream,
