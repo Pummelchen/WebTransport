@@ -16,6 +16,8 @@
 
 #include "webtransport/quic/connection.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "webtransport/quic/frame.h"
@@ -388,6 +390,23 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
      * function's ordering cannot prevent -- the count was checked above, and a concurrent change to it
      * is impossible in a single-threaded runtime -- so it is reported rather than hidden. */
     return status;
+  }
+
+  /* A DIAGNOSTIC, gated by WT_QUIC_PACKET_LOG: what this endpoint ACTUALLY sent, byte for byte, because a
+   * third-party peer that holds the right keys still could not read our Handshake packets (WT-135). The type
+   * bits of a long header are NOT covered by header protection (RFC 9001 section 5.4.1), so the first byte says
+   * which packet this is even after it is protected. */
+  {
+    const char *packet_log_path = getenv("WT_QUIC_PACKET_LOG");
+    if (packet_log_path != NULL && packet_length > 0U) {
+      FILE *packet_log = fopen(packet_log_path, "a");
+      if (packet_log != NULL) {
+        fprintf(packet_log, "sent space=%d type_bits=%u first=0x%02x length=%zu pn=%llu\n", (int)space,
+                (unsigned)((packet[0] >> 4) & 0x03U), (unsigned)packet[0], packet_length,
+                (unsigned long long)packet_number);
+        (void)fclose(packet_log);
+      }
+    }
   }
 
   connection->packets_sent++;
