@@ -145,21 +145,13 @@ jobs:
         # heuristics report a library's public API as static-able and another unit's reads as unread -- and the
         # script says so. A runner without cppcheck reports "unsupported" rather than passing quietly.
         run: C99/scripts/check-cppcheck.sh
-      - name: Compile the Windows platform branch
-        # The _WIN32 branch of udp_platform.h was written from the inventory. A cross-compiler is enough to say
-        # it compiles -- and it found FIONBIO not fitting a signed long on its first run. A machine without a
-        # cross-compiler reports "unsupported" with that reason instead of failing.
-        run: C99/scripts/check-windows-platform.sh
-      - name: Link the whole tree for Windows
-        # The stronger claim: every test and app becomes a PE32+ executable, which is what a Windows runner
-        # needs before it is worth adding. It needs a WINDOWS OpenSSL, and the MSYS2 package provides one as a
-        # plain tarball -- no MSYS2 installation, no Windows runner, and the compiler that checks it is the same
-        # one the compile step uses. Pinned so the job does not move under the project's feet.
-        #
-        # ENFORCED, and Linux-only. It was `continue-on-error` while nobody had seen it finish; it has now been
-        # run to completion by hand -- 85 PE32+ executables and a shared library -- so a failure here is a real
-        # one. zstd is installed because the pinned package is a zstd tarball and the runner image has no zstd,
-        # which is the only reason the step was ever allowed to fail.
+      - name: Fetch a Windows OpenSSL
+        # Before the two Windows checks rather than only before the link, because the compile check wants the
+        # TARGET's OpenSSL headers: on a Linux runner the only other ones are the host's, and a cross-compile
+        # handed `-I /usr/include` resolves `stdint.h` to the host's copy and then asks for
+        # `bits/libc-header-start.h`, which a Windows target does not have. The script falls back to host headers
+        # searched after the target's (`-idirafter`) on a machine without this prefix. Pinned so the job does not
+        # move under the project's feet.
         if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y zstd
@@ -167,7 +159,20 @@ jobs:
             https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-openssl-3.6.4-1-any.pkg.tar.zst
           zstd -d -f /tmp/mingw-openssl.pkg.tar.zst -o /tmp/mingw-openssl.tar
           mkdir -p /tmp/windows-openssl && tar -xf /tmp/mingw-openssl.tar -C /tmp/windows-openssl
-          WT_WINDOWS_OPENSSL=/tmp/windows-openssl/mingw64 C99/scripts/check-windows-build.sh
+      - name: Compile the Windows platform branch
+        # The _WIN32 branch of udp_platform.h was written from the inventory. A cross-compiler is enough to say
+        # it compiles -- and it found FIONBIO not fitting a signed long on its first run. A machine without a
+        # cross-compiler reports "unsupported" with that reason instead of failing.
+        run: C99/scripts/check-windows-platform.sh
+      - name: Link the whole tree for Windows
+        # The stronger claim: every test and app becomes a PE32+ executable, which is what a Windows runner
+        # needs before it is worth adding. It uses the Windows OpenSSL the step above unpacked -- no MSYS2
+        # installation, no Windows runner, and the compiler that checks it is the same one the compile step uses.
+        #
+        # ENFORCED, and Linux-only. It was `continue-on-error` while nobody had seen it finish; it has now been
+        # run to completion -- 89 PE32+ executables and a shared library -- so a failure here is a real one.
+        if: runner.os == 'Linux'
+        run: WT_WINDOWS_OPENSSL=/tmp/windows-openssl/mingw64 C99/scripts/check-windows-build.sh
 
       - name: CLI smoke
         run: |

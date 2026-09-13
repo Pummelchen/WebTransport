@@ -46,23 +46,57 @@ trap 'rm -rf "$output"' EXIT
 # And then the whole library, which is the claim a Windows port would need before a runner is worth adding. The
 # OpenSSL headers are only needed to COMPILE the crypto and TLS sources; a machine without them still checks
 # everything else and says how many it skipped, rather than reporting a pass it did not earn.
-openssl_include=""
-for candidate in /opt/homebrew/opt/openssl@3/include /opt/homebrew/include /usr/local/include /usr/include; do
+#
+# WHERE those headers come from matters for a cross-compile. A Windows OpenSSL (unpacked from the MSYS2
+# tarball) is searched with `-I`, because it is the target's own headers. A HOST installation -- Homebrew's, or
+# the distribution's `libssl-dev` -- is searched with `-idirafter` instead: `-I /usr/include` on a cross-compile
+# puts the host's glibc headers in FRONT of the target's, which is exactly how this check failed on the Linux
+# runner. `#include <stdint.h>` resolved to the host's copy and then wanted `bits/libc-header-start.h`, which a
+# Windows target does not have. `-idirafter` searches that directory after every target directory, so the
+# standard headers stay the target's and only OpenSSL's own come from the host.
+openssl_flags=""
+openssl_origin=""
+# WT_WINDOWS_OPENSSL is the prefix `check-windows-build.sh` takes, so a CI job that has already unpacked the
+# MSYS2 package points both checks at the same headers with the same variable.
+for candidate in "${WT_WINDOWS_OPENSSL_INCLUDE:-}" \
+                 "${WT_WINDOWS_OPENSSL:+$WT_WINDOWS_OPENSSL/include}" \
+                 /tmp/windows-openssl/mingw64/include; do
+  [ -n "$candidate" ] || continue
   if [ -f "$candidate/openssl/ssl.h" ]; then
-    openssl_include="$candidate"
+    openssl_flags="-I $candidate"
+    openssl_origin="$candidate (target headers)"
     break
   fi
 done
+if [ -z "$openssl_flags" ]; then
+  for candidate in /opt/homebrew/opt/openssl@3/include /opt/homebrew/include \
+                   /usr/local/include /usr/include; do
+    if [ -f "$candidate/openssl/ssl.h" ]; then
+      openssl_flags="-idirafter $candidate"
+      openssl_origin="$candidate (host headers, searched after the target's)"
+      # Debian and Ubuntu split the host's OpenSSL headers: `openssl/ssl.h` is in /usr/include and
+      # `openssl/opensslconf.h` is in the multiarch directory, so both have to be searched or the host fallback
+      # does not compile at all.
+      for extra in /usr/include/*-linux-gnu; do
+        if [ -f "$extra/openssl/opensslconf.h" ]; then
+          openssl_flags="$openssl_flags -idirafter $extra"
+        fi
+      done
+      break
+    fi
+  done
+fi
 
 checked=0
 skipped=0
 for source in $(find "$root/src" -name '*.c' | sort); do
-  if [ -z "$openssl_include" ] && grep -q '#include <openssl' "$source"; then
+  if [ -z "$openssl_flags" ] && grep -q '#include <openssl' "$source"; then
     skipped=$((skipped + 1))
     continue
   fi
+  # shellcheck disable=SC2086 # the flags are a list on purpose: one word or two, never a path with spaces.
   "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
-    -I "$root/include" -I "$openssl_include" -c "$source" -o "$output/library.o"
+    -I "$root/include" $openssl_flags -c "$source" -o "$output/library.o"
   checked=$((checked + 1))
 done
 
@@ -75,17 +109,21 @@ for source in $(find "$root/tests" "$root/apps" -name '*.c' | sort); do
   case "$source" in
     */windows/platform_probe.c) continue ;;
   esac
-  if [ -z "$openssl_include" ] && grep -q '#include <openssl' "$source"; then
+  if [ -z "$openssl_flags" ] && grep -q '#include <openssl' "$source"; then
     skipped_tree=$((skipped_tree + 1))
     continue
   fi
+  # shellcheck disable=SC2086 # the flags are a list on purpose: one word or two, never a path with spaces.
   "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
     -DWT_TRUST_FIXTURE_DIR='"'"'""'"'"' \
-    -I "$root/include" -I "$openssl_include" -I "$root/tests" -I "$root/tests/unit" \
+    -I "$root/include" $openssl_flags -I "$root/tests" -I "$root/tests/unit" \
     -I "$root/tests/vectors" -I "$root/apps/support" -c "$source" -o "$output/tree.o"
   checked_tree=$((checked_tree + 1))
 done
 
+if [ -n "$openssl_origin" ]; then
+  echo "windows platform: OpenSSL headers from $openssl_origin"
+fi
 if [ "$skipped" -gt 0 ]; then
   echo "windows platform: $checked of the library's sources compile under $compiler; $skipped need OpenSSL headers this machine does not have"
 else
