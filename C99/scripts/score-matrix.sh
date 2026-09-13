@@ -37,7 +37,7 @@ ROWS
 
 echo "compliance matrix: $draft_tested of $draft_total draft-16 requirements exercised by a test in this tree"
 echo "compliance matrix: $draft_partial of $draft_total partial, and $layer_total row(s) describing lower layers"
-echo "definition of done: 5 of 9 criteria met, 2 partial, 2 not met"
+echo "definition of done: 6 of 9 criteria met, 2 partial, 1 not met"
 echo "  met:     CLI local IPv4/IPv6 sessions; sanitizers and static checks; public API documented; no"
 echo "           placeholder exposed as production; the draft-16 matrix itself"
 echo "  partial: conformance scenario breadth (WT-133); FreeBSD and Windows CI legs (WT-134)"
