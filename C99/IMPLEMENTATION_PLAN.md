@@ -2599,6 +2599,29 @@ TRUST LAYER accept it, checks that a different pin is refused, that no pin at al
 generations differ -- because a generator tested against its own output proves nothing about whether anything can
 trust it.
 
+### Phase 9's twenty-ninth part: the completion criteria are met
+
+**The conformance tool runs local IPv4 and IPv6 packet sessions and produces stable machine-readable output.**
+`wt-conformance-c99 --scenario all` stands up two endpoints in ONE process over loopback -- a generated, pinned
+identity, a real TLS 1.3 handshake inside QUIC, an extended CONNECT accepted by the draft-16 layer, the
+response, an 11-byte message on a WebTransport stream and a message as a datagram -- and reports:
+
+    {"summary":{"total":5,"passed":5,"failed":0,"unsupported":0}}   exit 0
+
+with the two session scenarios that were `unsupported` in Phase 8's report now genuinely run. IPv6 reports
+`unsupported` WITH ITS REASON on a machine that has no IPv6 loopback, because that is a fact about the machine
+rather than a failure of the code -- which is the distinction the report's design was built around (WT-106).
+
+Three things make this a criterion rather than a demo. The tool is run by **CTest**, so the claim is checked on
+every build. The identity is GENERATED and PINNED rather than taken from the repository's test fixtures, so the
+scenario is runnable where the tool is. And the exchange is the whole one: a handshake, a CONNECT accepted by
+the draft-16 validator, a response, a stream message and a datagram -- the same path the library's pair test
+proves, now reachable from a command line.
+
+Phase 9's remaining work is the CLIENT and SERVER tools' own loops (`--listen`/`--connect`, `--message`,
+`--timeout-ms`), which reuse exactly the pieces this scenario is built from: the runtime session, the HTTP/3
+driver, the self-signed identity and the report.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.

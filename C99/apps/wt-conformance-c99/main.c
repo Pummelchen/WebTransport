@@ -13,6 +13,8 @@
 
 #include "webtransport/cli/options.h"
 #include "webtransport/cli/report.h"
+
+#include "scenario_session.h"
 #include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/capsule.h"
@@ -173,10 +175,18 @@ int main(int argc, char **argv) {
       (void)w;
     }
 
-    (void)wt_cli_report_add(&report, "session-over-ipv4", WT_CLI_RESULT_UNSUPPORTED,
-                            "needs the packet-session wiring (rest of Phase 9)");
-    (void)wt_cli_report_add(&report, "session-over-ipv6", WT_CLI_RESULT_UNSUPPORTED,
-                            "needs the packet-session wiring (rest of Phase 9)");
+    /* The two session scenarios: two endpoints in ONE process over loopback, with a generated and pinned
+     * identity, running the whole exchange -- handshake, CONNECT, response, a stream message and a datagram.
+     * IPv6 reports `unsupported` with its reason on a machine that has no IPv6 loopback, because that is a
+     * fact about the machine rather than a failure of the code. */
+    {
+      static char ipv4_detail[WT_CLI_SCENARIO_DETAIL_MAX];
+      static char ipv6_detail[WT_CLI_SCENARIO_DETAIL_MAX];
+      (void)wt_cli_report_add(&report, "session-over-ipv4",
+                              wt_scenario_session_run(0, ipv4_detail, sizeof(ipv4_detail)), ipv4_detail);
+      (void)wt_cli_report_add(&report, "session-over-ipv6",
+                              wt_scenario_session_run(1, ipv6_detail, sizeof(ipv6_detail)), ipv6_detail);
+    }
 
     if (options.json != 0) {
       wt_cli_report_write_json(&report, stdout);

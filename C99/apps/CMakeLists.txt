@@ -5,7 +5,13 @@
 # that a script cannot mistake a stub for a working tool.
 
 foreach(app wt-client-c99 wt-server-c99 wt-conformance-c99)
-  add_executable(${app} ${app}/main.c)
+  set(WT_APP_EXTRA_SOURCES)
+  if(app STREQUAL "wt-conformance-c99")
+    # The session scenarios: two endpoints in one process, over loopback. They need the self-signed identity
+    # generator and the runtime session driver, so they are the tool's own code rather than a copy of a test.
+    set(WT_APP_EXTRA_SOURCES ${app}/scenario_session.c)
+  endif()
+  add_executable(${app} ${app}/main.c ${WT_APP_EXTRA_SOURCES})
   wt_set_c99(${app})
   wt_apply_warnings(${app})
   target_link_libraries(${app} PRIVATE ${WT_LINK_TARGET})
@@ -33,4 +39,9 @@ endif()
 # silently.
 if(WEBTRANSPORT_C99_BUILD_TESTS)
   add_test(NAME wt_api_sample COMMAND wt-api-sample)
+  # The conformance tool's own scenarios, including the two print sessions over loopback: registered so that
+  # "the tools run local IPv4 and IPv6 packet sessions" is CHECKED rather than demonstrated by hand. The
+  # machine-readable report is the contract, so the test asserts the tool's exit status -- 0 only when every
+  # scenario passed.
+  add_test(NAME wt_conformance_scenarios COMMAND wt-conformance-c99 --scenario all --json)
 endif()

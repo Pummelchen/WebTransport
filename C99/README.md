@@ -136,6 +136,15 @@ What is here:
   runtime refuses to make it rather than inventing one. IPv4 is asserted unconditionally and
   IPv6 is available-or-skipped, because a test that fails without an IPv6 loopback is a test
   about the machine.
+- **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
+  stands up two endpoints in **one process** over loopback — a generated, pinned identity, a real
+  TLS 1.3 handshake inside QUIC, an extended CONNECT accepted by the draft-16 layer, the response,
+  an 11-byte message on a WebTransport stream and a message as a datagram — on **IPv4 and IPv6**,
+  and reports all five scenarios as `passed` in its machine-readable output
+  (`{"summary":{"total":5,"passed":5,"failed":0,"unsupported":0}}`, exit 0). IPv6 reports
+  `unsupported` with its reason on a machine with no IPv6 loopback, because that is a fact about
+  the machine rather than a failure of the code. The tool is run by CTest, so the plan's criterion
+  is checked rather than demonstrated by hand.
 - **The conformance tool's report** (Phase 9): `cli/report.h` is the machine-readable product
   of a conformance run, and its three rules are all about not lying — a scenario that did not
   run is `unsupported` with a reason and never a pass, the report is ordered and named by the
