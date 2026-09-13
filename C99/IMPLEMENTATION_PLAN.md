@@ -2749,6 +2749,28 @@ The count assertions are the ones that matter, and the reason is worth keeping: 
 entry past its bound would show a short, clean run, and "the peer opened one more stream than we allow" is
 exactly the case where a silent drop and a refusal look identical from the outside.
 
+### Phase 10's eighth part: the split bidirectional prefix, attempted and reverted
+
+The narrow edge WT-120 left open -- a WebTransport bidirectional prefix that arrives in PIECES -- was attempted
+and is REVERTED. The design was to hold the first bytes in the same pending table the unidirectional path uses,
+re-run the proven classifier when more arrive, and then either deliver what follows the prefix to the session or
+REPLAY the held bytes into the HTTP/3 request path (which must see a stream's first bytes, not the middle of
+them). The prefix table's bound was raised from eight bytes to sixteen at the same time, because a draft-16
+prefix is the TYPE plus the session ID and each may be a varint of up to eight bytes -- a table sized for the
+type alone would refuse a legal prefix.
+
+It did not work, and the measurement is the useful part: the SECOND frame of a split prefix came back as
+`WT_ERR_LIMIT` and nothing was delivered, while the existing 174 checks stayed green. That says the assembly
+path itself refused before it could decide -- but the round had no budget left to find where, and a frame path
+is not a place to guess. The tree is back to the last verified state (82 CTest tests, green in debug, release and
+ASan+UBSan) and nothing half-working was committed.
+
+The next attempt starts from the measurement rather than from the design: put a counter at each refusal in the
+assembly path (the pending-table bound, the classifier's status, `on_stream_bytes`'s frame table) and see which
+one fires on the second frame. The design above is sound; it is the plumbing that was not verified, and the
+lesson this phase keeps re-learning applies here too: **a frame path is changed with a counter in it, not with a
+theory about it.**
+
 ### Phase 10's seventh part: the tools' test covers both exchange modes
 
 The CLI session test ran `--exchange stream` only, which left the plan's `--exchange stream|datagram` half
