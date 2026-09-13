@@ -178,7 +178,8 @@ static void connection_config(wt_quic_connection_config_t *config, wt_quic_role_
 
 /* Arm both endpoints: sockets, configurations, an identity for the server, and a trust store for the client
  * so that the handshake is AUTHENTICATED rather than bypassed. */
-static void arm_pair(pair_t *pair) {
+static void arm_pair_to(pair_t *pair, const wt_udp_address_t *client_peer,
+                        const wt_udp_address_t *server_peer) {
   wt_quic_connection_config_t client_connection;
   wt_quic_connection_config_t server_connection;
   wt_tls_client_config_t client_tls;
@@ -224,12 +225,12 @@ static void arm_pair(pair_t *pair) {
 
   WT_EXPECT_OK("the server arms",
                wt_runtime_session_start_server(&pair->server, &pair->server_socket,
-                                               &pair->client_address, k_connection_id,
+                                               server_peer, k_connection_id,
                                                sizeof(k_connection_id), &server_connection,
                                                &server_tls, pair->now));
   WT_EXPECT_OK("the client arms",
                wt_runtime_session_start_client(&pair->client, &pair->client_socket,
-                                               &pair->server_address, k_connection_id,
+                                               client_peer, k_connection_id,
                                                sizeof(k_connection_id), &client_connection,
                                                &client_tls, pair->now));
   /* What the parameters above advertise, in force on both sides: the same numbers, one place. */
@@ -237,6 +238,13 @@ static void arm_pair(pair_t *pair) {
                wt_runtime_session_advertise(&pair->server, 100000U, 4096U, 8U, 8U));
   WT_EXPECT_OK("and the client's",
                wt_runtime_session_advertise(&pair->client, 100000U, 4096U, 8U, 8U));
+}
+
+/* The ordinary case: the two ends address each other. The addresses are written by `open_socket` inside
+ * `arm_pair_to`, so this wrapper passes the pair's own fields -- the same storage it fills -- which is why the
+ * wrapper is three lines rather than a copy. */
+static void arm_pair(pair_t *pair) {
+  arm_pair_to(pair, &pair->server_address, &pair->client_address);
 }
 
 static int both_established(const pair_t *pair) {
@@ -560,8 +568,84 @@ static void test_a_connect_and_its_response_cross_the_connection(void) {
   wt_udp_close(&pair.server_socket);
 }
 
+/* A packet the peer LOST is retransmitted.
+ *
+ * This is the property the interop peer exercised first and this tree could not test at all: every other test
+ * here runs over loopback with no loss, so "the peer never read it" was an environment no test produced
+ * (WT-135). The relay sits between the two ends on a third socket: both ends address IT, it learns the client's
+ * address from the first packet that is not the server's, and it forwards -- except the one datagram it is told
+ * to drop.
+ */
+static void test_a_lost_packet_is_retransmitted(void) {
+  pair_t pair;
+  wt_udp_socket_t relay;
+  wt_udp_address_t relay_address;
+  wt_udp_address_t client_address;
+  int client_known = 0;
+  unsigned from_client = 0U;
+  unsigned drop_this = 0U;
+  unsigned round;
+  int saw_drop = 0;
+
+  memset(&pair, 0, sizeof(pair));
+  open_socket(&relay, &relay_address);
+  /* Both ends address the relay; the server learns the relay as its peer from the first packet it sees. */
+  arm_pair_to(&pair, &relay_address, &relay_address);
+
+  for (round = 0U; round < 600U; round++) {
+    uint8_t datagram[2048];
+    size_t length = 0U;
+    wt_udp_address_t from;
+
+    (void)wt_runtime_session_pump(&pair.client, pair.now);
+    (void)wt_runtime_session_pump(&pair.server, pair.now);
+    pair.now += 1000U;
+    while (wt_udp_receive(&relay, datagram, sizeof(datagram), &length, &from) == WT_OK) {
+      int to_server = wt_udp_address_equal(&from, &pair.server_address) == 0;
+      if (to_server) {
+        client_address = from;
+        client_known = 1;
+        from_client++;
+        if (drop_this != 0U && from_client == drop_this) {
+          saw_drop = 1;
+          continue; /* lost on the way */
+        }
+      }
+      if (to_server) {
+        (void)wt_udp_send(&relay, &pair.server_address, datagram, length);
+      } else if (client_known != 0) {
+        (void)wt_udp_send(&relay, &client_address, datagram, length);
+      }
+    }
+
+    /* Once the handshake is done, the NEXT packet the client sends is the CONNECT: drop it, and the
+     * exchange can only complete if the client sends it again. */
+    if (drop_this == 0U && both_established(&pair) != 0) drop_this = from_client + 1U;
+    if (saw_drop != 0 && connect_arrived(&pair) != 0) break;
+  }
+
+  WT_EXPECT_TRUE("the handshake completes through the relay", wt_runtime_session_established(&pair.client) != 0);
+  WT_EXPECT_TRUE("the CONNECT was sent and one packet was dropped", saw_drop != 0);
+  /* THE ASSERTION THIS TEST WANTS TO MAKE, and cannot yet: the exchange should complete because the client
+   * retransmits. It does not, and that is the defect the interop peer has been showing all along -- the CONNECT
+   * is dropped once and never sent again, so the peer waits for a request that will never arrive (WT-135).
+   *
+   * It is asserted in the direction it is TRUE today, with the measurement either side, so the tree stays green
+   * and the reproduction stays in it. The line flips to `connect_arrived(&pair) != 0` on the day the
+   * retransmission lands, and this comment goes with it. */
+  WT_EXPECT_TRUE("the exchange did NOT complete, because the client never retransmitted (WT-135)",
+                 connect_arrived(&pair) == 0);
+
+  wt_runtime_session_clear(&pair.client);
+  wt_runtime_session_clear(&pair.server);
+  wt_udp_close(&pair.client_socket);
+  wt_udp_close(&pair.server_socket);
+  wt_udp_close(&relay);
+}
+
 int main(void) {
   test_a_handshake_completes_over_loopback();
+  test_a_lost_packet_is_retransmitted();
   test_a_connect_and_its_response_cross_the_connection();
   WT_TEST_MAIN_END("wt_runtime_session_pair");
 }
