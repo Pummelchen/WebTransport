@@ -330,6 +330,10 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
   (void)wt_runtime_session_set_frame_handler(&pair.server, side_on_frame, &pair.server_side);
   wt_http3_driver_quic_transport(&pair.client.connection, &client_transport);
   wt_http3_driver_quic_transport(&pair.server.connection, &server_transport);
+  /* Bound so that a refusal with an HTTP/3 error reaches the peer as an APPLICATION close carrying the HTTP/3
+   * code (RFC 9114 section 8) rather than as the transport's INTERNAL_ERROR (WT-159). */
+  wt_http3_driver_bind_connection(&pair.client_side.driver, &pair.client.connection);
+  wt_http3_driver_bind_connection(&pair.server_side.driver, &pair.server.connection);
 
   wt_http3_settings_init(&settings);
   (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);

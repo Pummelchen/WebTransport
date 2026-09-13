@@ -696,8 +696,76 @@ static void test_a_lost_packet_is_retransmitted(void) {
   wt_udp_close(&relay);
 }
 
+/* A peer that breaks a rule is told WHICH rule, in the frame RFC 9114 requires (WT-159).
+ *
+ * The chain is three layers long: the frame arrives through the connection, the HTTP/3 driver refuses it with an
+ * HTTP/3 error code, and the driver -- bound to the connection -- states that refusal as an APPLICATION close, so
+ * the peer reads a CONNECTION_CLOSE of type 0x1d whose code is H3_FRAME_ERROR. Nothing in this tree drove that
+ * chain before, which is why the layer that did the reporting could be the wrong one twice. */
+static void test_a_refusal_reaches_the_peer_as_an_application_close(void) {
+  pair_t pair;
+  http3_side_t client;
+  http3_side_t server;
+  wt_http3_driver_transport_t server_transport;
+  wt_quic_frame_t frame;
+  /* A HEADERS frame (0x01) whose declared length never arrives: the stream ends before the frame does, which
+   * RFC 9114 makes a connection error of type H3_FRAME_ERROR. */
+  static const uint8_t k_truncated[] = {0x01U, 0x40U};
+  unsigned rounds;
+
+  memset(&pair, 0, sizeof(pair));
+  arm_pair(&pair);
+  init_side(&client, WT_HTTP3_ROLE_CLIENT);
+  init_side(&server, WT_HTTP3_ROLE_SERVER);
+  pair.server_side = &server;
+  WT_EXPECT_OK("the server's HTTP/3 layer joins",
+               wt_runtime_session_set_frame_handler(&pair.server, side_on_frame, &server));
+  wt_http3_driver_quic_transport(&pair.server.connection, &server_transport);
+  /* The binding is what makes the driver state its own refusals: without it the driver reports the status and the
+   * connection closes the TRANSPORT with INTERNAL_ERROR, which names no HTTP/3 rule at all. */
+  wt_http3_driver_bind_connection(&server.driver, &pair.server.connection);
+
+  rounds = pump_pair(&pair, 400U, both_established);
+  WT_EXPECT_TRUE("the handshake completes", rounds < 400U);
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
+  frame.as.stream.id = 0U;
+  frame.as.stream.offset = 0U;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = k_truncated;
+  frame.as.stream.length = sizeof(k_truncated);
+  frame.as.stream.fin = 1;
+  WT_EXPECT_OK("the truncated frame is sent",
+               wt_quic_connection_send_frame(&pair.client.connection, WT_QUIC_SPACE_APPLICATION, &frame, 1,
+                                             pair.now));
+
+  /* A few rounds: the frame crosses, the server refuses, and its close crosses back. */
+  (void)pump_pair(&pair, 20U, NULL);
+  {
+    const wt_quic_close_state_t *close_state = wt_quic_connection_close_state(&pair.server.connection);
+    WT_EXPECT_U64("the server closed the connection", (uint64_t)WT_QUIC_CLOSE_APPLICATION,
+                  (uint64_t)close_state->kind);
+    WT_EXPECT_U64("with H3_FRAME_ERROR", (uint64_t)WT_HTTP3_FRAME_ERROR, close_state->error_code);
+    /* The application form has no frame-type field, which is what distinguishes it from the transport form on
+     * the wire (RFC 9000 section 19.19). */
+    WT_EXPECT_U64("and the application form names no frame", 0U, close_state->frame_type);
+  }
+  /* And the PEER knows: the code it reads is the HTTP/3 one, in the application form that can carry it. */
+  WT_EXPECT_INT("the peer was told", 1, pair.client.connection.peer_closed);
+  WT_EXPECT_U64("with the same HTTP/3 code", (uint64_t)WT_HTTP3_FRAME_ERROR,
+                pair.client.connection.peer_error_code);
+  WT_EXPECT_U64("and in the application form", (uint64_t)WT_QUIC_CLOSE_APPLICATION,
+                (uint64_t)pair.client.connection.peer_close_kind);
+
+  wt_runtime_session_clear(&pair.client);
+  wt_runtime_session_clear(&pair.server);
+  wt_udp_close(&pair.client_socket);
+  wt_udp_close(&pair.server_socket);
+}
+
 int main(void) {
   test_a_handshake_completes_over_loopback();
+  test_a_refusal_reaches_the_peer_as_an_application_close();
   test_a_lost_packet_is_retransmitted();
   test_a_connect_and_its_response_cross_the_connection();
   WT_TEST_MAIN_END("wt_runtime_session_pair");
