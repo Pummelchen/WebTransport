@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 64 unit test files and 79,046 checks, run by `ctest` and again under
+- 65 unit test files and 79,083 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -58,6 +58,23 @@ What is here:
   deadline arithmetic does not wrap near the counter's top. Note that Darwin has
   no LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by
   a local run on this machine; that is how the first one was found.
+- **The public API** (Phase 8), which is what a consumer outside this repository
+  builds against:
+  - `webtransport.h` — the one header a consumer includes, carrying the three rules
+    that hold across every layer: a bound is this endpoint's and the code says so
+    rather than blaming the peer, incomplete is not malformed on a stream (a
+    datagram is the deliberate exception, because a datagram is the unit), and a
+    refusal keeps the peer's code.
+  - `api/session.h` — the opaque session handle: `wt_session_create`/`wt_session_destroy`
+    take the allocator the object was made with, so a session created from a pool
+    returns to that pool; the state a consumer reads is this header's own enum,
+    mapped member by member rather than cast, so a renumbering of the internal
+    machine is a compile error and not a silent contract change; and
+    `wt_session_last_error` reports a stable status NAME and the peer's CODE, never
+    a peer's text. The two bounds the API owns are the session's own: an authority
+    too long for the handle's copy is refused rather than truncated (a truncated
+    authority names a different session) and a capsule value over
+    `max_capsule_bytes` is refused as excessive load rather than buffered.
 - **The QUIC wire core** (Phase 1), which is everything QUIC needs before there
   is a connection:
   - `quic/varint.h` — variable-length integers, encoding shortest and decoding

@@ -119,6 +119,11 @@ list(APPEND WT_CORE_SOURCES ${WT_RUNTIME_SOURCES})
 # same reason the QUIC wire core is: a consumer links the library as a unit, and a
 # test must not be able to link a different build of HTTP/3 than the one that
 # ships.
+set(WT_API_SOURCES
+  src/api/session.c
+)
+list(APPEND WT_CORE_SOURCES ${WT_API_SOURCES})
+
 set(WT_WEBTRANSPORT_SOURCES
   src/webtransport/session_request.c
   src/webtransport/capsule.c
@@ -152,6 +157,7 @@ list(APPEND WT_CORE_SOURCES ${WT_HTTP3_SOURCES})
 
 set(WT_PUBLIC_HEADERS
   include/webtransport/status.h
+  include/webtransport/api/session.h
   include/webtransport/webtransport.h
   include/webtransport/checked.h
   include/webtransport/endian.h

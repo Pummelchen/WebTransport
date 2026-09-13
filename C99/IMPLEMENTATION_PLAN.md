@@ -1827,6 +1827,24 @@ The test is deliberately a compile-time one: it includes ONLY the umbrella heade
 every layer, so a module missing from the umbrella, a header that does not include what it uses, or a
 declaration that moved fails to build here rather than in a consumer's project.
 
+**Second part done: the opaque session handle.** `include/webtransport/api/session.h` is the shape the
+rest of the API follows, and the choices in it are the ones that are expensive to change later. The type is
+opaque, so the layout can move between releases; construction and destruction are paired and both take the
+ALLOCATOR, because an object made from a pool must return to that pool and a `destroy` that guessed the
+allocator would leak or corrupt; and the error surface is sanitized by construction rather than by discipline:
+`wt_session_error_t` holds a status and a `uint64_t` code and has no room for a string, so a peer's text cannot
+reach a log even by accident, while the peer's application code does reach the caller -- a refusal keeps the
+peer's code at every layer, including this one.
+
+The state a consumer reads is a separate published enum, mapped from the machine's with a full `switch` rather
+than a cast. The cast would have worked today and would have silently renumbered the API the day the internal
+enum changed; with `-Wswitch-enum` the omission is a compile error, and the test asserts the mapping.
+
+The two bounds in this part are this endpoint's. An authority or path longer than the handle's copy is refused
+with `WT_ERR_LIMIT` instead of being truncated, because a truncated authority names a different session. A
+capsule value larger than `max_capsule_bytes` is refused with `WT_ERR_LIMIT` and the H3 excessive-load code,
+which is a statement about this endpoint's buffer and not about the peer's encoding.
+
 Design the public API after the protocol core is stable.
 
 API requirements:
