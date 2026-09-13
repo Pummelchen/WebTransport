@@ -2361,6 +2361,22 @@ granted. Reproducing that in isolation (set 8, open peer streams, read the grant
 carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
 saw STREAM frames, and it walked frames at all.
 
+### Phase 9's twentieth part: the response path, and the stream the server does not have
+
+The response side of the exchange now exists in the library -- `wt_http3_endpoint_on_response_headers` decodes a
+response with the RESPONSE pseudo-header rules and its own once-per-stream rule, and
+`wt_http3_driver_send_response` sends a status -- and the reason it is a separate call from the request path is
+worth keeping: RFC 9114 section 4.1 gives the two DIRECTIONS of one exchange their own HEADERS frames on the
+same stream, so the response is neither the request line nor a trailer. Decoding it with the request rules (as
+this endpoint did before the call existed) refuses a perfectly good `:status` as a pseudo-header in a trailer.
+
+Sending it over a live connection does NOT work yet, and the measurement is precise: the client's CONNECT
+arrives and decodes (the milestone assertions pass), but
+`wt_quic_connection_stream(&server.connection, request_stream_id)` is **NULL** -- the server has no QUIC stream
+to answer on, while the frame walk demonstrably delivered that stream's STREAM frame to this layer. A frame
+walked for a stream the connection does not have is the next thing to explain, and it is the last thing between
+this phase and a session a caller can actually use. WT-115 carries it.
+
 ### Phase 9's nineteenth part: the client's opening sequence in one call
 
 `wt_http3_driver_start_session` does what every WebTransport client does, in the order the protocol fixes: start

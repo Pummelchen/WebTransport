@@ -207,6 +207,33 @@ wt_status_t wt_http3_endpoint_write_headers(wt_http3_endpoint_t *endpoint,
   return status;
 }
 
+wt_status_t wt_http3_endpoint_on_response_headers(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                                  const uint8_t *payload, size_t length,
+                                                  uint8_t *scratch, size_t scratch_capacity,
+                                                  wt_http3_message_t *out_message,
+                                                  wt_http3_error_t *out_error) {
+  wt_http3_endpoint_request_t *request;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (endpoint == NULL || out_message == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (payload == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+
+  request = find_request(endpoint, stream_id);
+  if (request == NULL) return WT_ERR_STATE;
+  if (request->request.ended != 0) return WT_ERR_STATE;
+  if (request->response_seen != 0) {
+    /* The exchange has one response. A second HEADERS frame here is a trailer, which the request path
+     * handles, or a peer that has lost track of the stream -- and neither is a second response. */
+    return WT_ERR_STATE;
+  }
+  request->response_seen = 1;
+  return wt_http3_message_decode(out_message, WT_HTTP3_HEADER_RESPONSE, payload, length,
+                                 &endpoint->decoder_table,
+                                 wt_qpack_max_entries(endpoint->decoder_table.capacity),
+                                 endpoint->decoder_insert_count, scratch, scratch_capacity,
+                                 out_error);
+}
+
 wt_status_t wt_http3_endpoint_on_request_frame(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
                                                uint64_t type, wt_http3_error_t *out_error) {
   wt_http3_endpoint_request_t *request;

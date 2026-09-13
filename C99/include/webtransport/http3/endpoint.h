@@ -80,6 +80,9 @@ typedef struct wt_http3_endpoint_request {
   /* Whether THIS endpoint opened it, which decides who may send what next: the initiator
    * sends the request, the peer answers with the response. */
   int locally_opened;
+  /* Whether the response's HEADERS have arrived. One response per request stream: a second one is not a
+   * trailer, it is a peer that lost track of the exchange. */
+  int response_seen;
   wt_http3_request_stream_t request;
 } wt_http3_endpoint_request_t;
 
@@ -191,6 +194,20 @@ wt_status_t wt_http3_endpoint_open_request(wt_http3_endpoint_t *endpoint, uint64
  * H3_STREAM_CREATION_ERROR. */
 wt_status_t wt_http3_endpoint_on_request_stream(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
                                                 wt_http3_error_t *out_error);
+
+/* A HEADERS frame carrying the RESPONSE on a tracked request stream.
+ *
+ * It is NOT the request machine's business, and that is the reason this call exists rather than a flag on
+ * `wt_http3_endpoint_on_request_headers`: RFC 9114 section 4.1 gives the two directions of one exchange their
+ * own HEADERS frames on the same stream, so the response is neither the request line nor a trailer -- it is
+ * the other half of the conversation, with its own pseudo-header rules (`:status`) and its own once-only
+ * rule. Decoding it with the request rules would refuse a perfectly good `:status` as a pseudo-header in a
+ * trailer, which is what this endpoint did before the call existed. */
+wt_status_t wt_http3_endpoint_on_response_headers(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
+                                                  const uint8_t *payload, size_t length,
+                                                  uint8_t *scratch, size_t scratch_capacity,
+                                                  wt_http3_message_t *out_message,
+                                                  wt_http3_error_t *out_error);
 
 /* One frame arrived on a tracked request stream. */
 wt_status_t wt_http3_endpoint_on_request_frame(wt_http3_endpoint_t *endpoint, uint64_t stream_id,

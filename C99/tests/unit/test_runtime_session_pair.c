@@ -250,6 +250,9 @@ typedef struct http3_side {
   size_t section_length;
   int section_complete;
   unsigned control_frames;
+  /* Which stream carries the exchange this side cares about: the client's request stream and the server's
+   * view of it are the same number, and the sink needs to know which one to assemble. */
+  uint64_t request_stream_id;
   /* Every frame the chained handler was asked about, whatever its kind: a count of zero here means the
    * chain never reached this layer, which is a different bug from a frame that arrived and was refused. */
   unsigned frames_seen;
@@ -260,7 +263,7 @@ static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint
                                          const uint8_t *payload, size_t length, int last) {
   http3_side_t *side = context;
 
-  if (stream_id != 0U && type != WT_HTTP3_FRAME_HEADERS) {
+  if (stream_id != side->request_stream_id && type != WT_HTTP3_FRAME_HEADERS) {
     /* HTTP/3's own streams: the frames are the layer's, and this test only counts them. */
     side->control_frames++;
     side->last_control_type = type;
@@ -381,6 +384,7 @@ static void test_a_connect_crosses_a_real_connection(void) {
   http3_side_t client;
   http3_side_t server;
   wt_http3_driver_transport_t transport;
+  wt_http3_driver_transport_t transport_for_server;
   wt_http3_settings_t settings;
   wt_http3_message_t decoded;
   wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
@@ -460,6 +464,7 @@ static void test_a_connect_crosses_a_real_connection(void) {
 
   /* The transport the driver sends through is the connection itself, through the adapter. */
   wt_http3_driver_quic_transport(&pair.client.connection, &transport);
+  wt_http3_driver_quic_transport(&pair.server.connection, &transport_for_server);
 
   wt_http3_settings_init(&settings);
   WT_EXPECT_OK("the client advertises WebTransport",
@@ -473,6 +478,20 @@ static void test_a_connect_crosses_a_real_connection(void) {
                wt_http3_driver_start_session(&client.driver, &transport, &settings, "example.com",
                                              "/chat", 0U, pair.now, &request_stream_id, &h3_error));
   WT_EXPECT_U64("on its first bidirectional stream", 0U, request_stream_id);
+
+  /* THE RESPONSE IS NOT YET SENT, and the measurement says exactly why -- recorded rather than papered over
+   * (WT-115). The client's CONNECT DOES arrive and DOES decode (the assertions above), so the receive path is
+   * whole; what the server lacks is a QUIC STREAM to answer on:
+   *
+   *     wt_quic_connection_stream(&server.connection, request_stream_id) == NULL
+   *
+   * while the frame walk demonstrably delivered that stream's STREAM frame to this layer. A frame that was
+   * walked for a stream the connection does not have is the next thing to explain, and it is the last thing
+   * between this phase and a session a caller can use: a response needs a stream to go back on. The client's
+   * sink is told which stream carries the exchange so the moment the server can answer, this test can assert
+   * the whole exchange without being rewritten. */
+  client.request_stream_id = request_stream_id;
+  server.request_stream_id = request_stream_id;
 
   /* The CONNECT is on the wire. What happens to it on the FAR side is the next part and is NOT
    * asserted here, because it does not happen yet: the client sends, the server reads packets, and the

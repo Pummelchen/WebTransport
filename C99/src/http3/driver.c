@@ -625,6 +625,21 @@ wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
   return WT_OK;
 }
 
+wt_status_t wt_http3_driver_send_response(wt_http3_driver_t *driver,
+                                          const wt_http3_driver_transport_t *transport,
+                                          uint64_t stream_id, uint32_t status, uint64_t peer_max_entries,
+                                          int fin, uint64_t now) {
+  wt_http3_message_t response;
+
+  if (driver == NULL || driver->endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  memset(&response, 0, sizeof(response));
+  response.type = WT_HTTP3_HEADER_RESPONSE;
+  response.status = (uint64_t)status;
+  response.has_status = 1;
+  return wt_http3_driver_send_message(driver, transport, stream_id, &response, peer_max_entries, fin,
+                                      now);
+}
+
 wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,
                                           const wt_http3_driver_transport_t *transport,
                                           const uint8_t *data, size_t length) {

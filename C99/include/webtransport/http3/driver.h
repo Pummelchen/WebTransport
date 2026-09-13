@@ -255,6 +255,13 @@ wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
                                          uint64_t stream_id, const wt_http3_message_t *message,
                                          uint64_t peer_max_entries, int fin, uint64_t now);
 
+/* Answer a request with a status: the response's HEADERS on the stream that carried the request. One per
+ * stream, because a second response is not a status an HTTP/3 peer can be given. */
+wt_status_t wt_http3_driver_send_response(wt_http3_driver_t *driver,
+                                          const wt_http3_driver_transport_t *transport,
+                                          uint64_t stream_id, uint32_t status, uint64_t peer_max_entries,
+                                          int fin, uint64_t now);
+
 /* Send a datagram: the payload is the session's, and this layer passes it through. */
 wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,
                                           const wt_http3_driver_transport_t *transport,
