@@ -5,6 +5,12 @@
 # CMake project that does nothing but find_package(webtransport_c99) and link,
 # so a missing header, a target without its include directory, or a config file
 # that exports the wrong namespace fails here rather than in a user's build.
+#
+# Every step's output goes to a log file and is printed only when that step
+# fails. The first version of this script discarded the output entirely, which
+# turned a Linux-only failure in this exact check into "exit code 1" with no
+# cause in the CI log -- the opposite of what a check whose whole job is to
+# diagnose the install tree should do.
 
 set -eu
 
@@ -21,21 +27,53 @@ esac
 build_dir="$c99_root/out/$platform/package-check"
 prefix="$build_dir/prefix"
 consumer_dir="$build_dir/consumer"
+log_dir="$build_dir/logs"
 
 rm -rf "$build_dir"
+mkdir -p "$log_dir"
 
-cmake -S "$c99_root" -B "$build_dir/library" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$prefix" \
-  -DWEBTRANSPORT_C99_BUILD_APPS=OFF \
-  -DWEBTRANSPORT_C99_BUILD_TESTS=OFF >/dev/null
-cmake --build "$build_dir/library" >/dev/null
-cmake --install "$build_dir/library" >/dev/null
+# Run one step with its output captured. On failure the log is printed and the
+# script stops, so the reason is in the CI log next to the step that produced it.
+run() {
+  description=$1
+  log=$2
+  shift 2
+  if "$@" >"$log" 2>&1; then
+    return 0
+  fi
+  echo "webtransport-c99: $description failed; output follows" >&2
+  cat "$log" >&2
+  exit 1
+}
 
-cmake -S "$c99_root/tests/package" -B "$consumer_dir" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="$prefix" >/dev/null
-cmake --build "$consumer_dir" >/dev/null
+run "configuring the library" "$log_dir/configure-library.log" \
+  cmake -S "$c99_root" -B "$build_dir/library" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$prefix" \
+    -DWEBTRANSPORT_C99_BUILD_APPS=OFF \
+    -DWEBTRANSPORT_C99_BUILD_TESTS=OFF
+run "building the library" "$log_dir/build-library.log" \
+  cmake --build "$build_dir/library"
+run "installing the library" "$log_dir/install-library.log" \
+  cmake --install "$build_dir/library"
 
-"$consumer_dir/consumer"
+# The config file is what find_package needs, and its location is part of what
+# this check verifies: a package that installs everything except discoverable
+# metadata is a package nobody can find.
+if [ ! -f "$prefix/lib/cmake/webtransport_c99/webtransport_c99Config.cmake" ] &&
+   [ ! -f "$prefix/share/cmake/webtransport_c99/webtransport_c99Config.cmake" ]; then
+  echo "webtransport-c99: the installed package has no config file under $prefix" >&2
+  find "$prefix" -name '*.cmake' -print >&2
+  exit 1
+fi
+
+run "configuring a consumer of the installed package" "$log_dir/configure-consumer.log" \
+  cmake -S "$c99_root/tests/package" -B "$consumer_dir" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="$prefix"
+run "building the consumer" "$log_dir/build-consumer.log" \
+  cmake --build "$consumer_dir"
+run "running the consumer" "$log_dir/run-consumer.log" \
+  "$consumer_dir/consumer"
+
 echo "webtransport-c99: the installed package builds a consumer"

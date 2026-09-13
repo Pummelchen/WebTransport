@@ -380,7 +380,12 @@ wt_status_t wt_quic_retry_integrity_tag(const uint8_t *original_destination_conn
                                         const uint8_t *retry_packet_without_tag, size_t length,
                                         uint8_t out[WT_AEAD_TAG_LEN]) {
   uint8_t pseudo[WT_QUIC_RETRY_PSEUDO_MAX];
-  uint8_t scratch[1];
+  /* A zero-length message has no bytes to point at, but the AEAD wrapper refuses a NULL buffer in
+   * either direction, so this is the one byte it may read (nothing) and write (nothing) through.
+   * Initializing it is not cosmetic: gcc's -Wmaybe-uninitialized cannot prove that a zero-length
+   * plaintext is never read, and it is right that a backend which did read the buffer would be
+   * reading uninitialized memory. The release build on Linux fails on that warning. */
+  uint8_t empty[1] = {0U};
   size_t total;
   wt_status_t status;
 
@@ -400,7 +405,7 @@ wt_status_t wt_quic_retry_integrity_tag(const uint8_t *original_destination_conn
   memcpy(pseudo + 1U + original_destination_connection_id_len, retry_packet_without_tag, length);
 
   status = wt_aead_seal(WT_AEAD_AES_128_GCM, WT_QUIC_RETRY_KEY, WT_QUIC_RETRY_NONCE, pseudo, total,
-                        scratch, 0U, scratch, out);
+                        empty, 0U, empty, out);
   wt_secure_zero(pseudo, sizeof(pseudo));
   return status;
 }
