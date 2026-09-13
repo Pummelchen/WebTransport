@@ -48,6 +48,13 @@ static void build_parameters(void) {
   WT_EXPECT_OK("initial_max_stream_data_bidi_local",
                wt_quic_transport_parameters_add_integer(
                    &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, 4096U));
+  /* And the REMOTE half, which is the credit for a stream the PEER opens -- the one a request stream and a
+   * WebTransport data stream both use. Its absence was a real defect in the library's own builder (WT-145) and it
+   * was still absent HERE, which is why the reliable-reset round trip below was refused with FLOW_CONTROL_ERROR
+   * before it could be applied (WT-162). */
+  WT_EXPECT_OK("initial_max_stream_data_bidi_remote",
+               wt_quic_transport_parameters_add_integer(
+                   &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, 4096U));
   WT_EXPECT_OK("initial_max_stream_data_uni",
                wt_quic_transport_parameters_add_integer(
                    &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI, 4096U));

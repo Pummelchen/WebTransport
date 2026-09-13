@@ -2119,6 +2119,34 @@ static void test_an_http3_refusal_is_an_application_close(wt_udp_family_t family
   close_pair(&pair);
 }
 
+/* What the send path put on the wire, recorded rather than inferred: "the frame was sent" and "the frame the
+ * peer needs was sent" are different claims, and the difference is what WT-162 is about. */
+typedef struct reset_at_witness {
+  unsigned seen;
+  unsigned walked;
+  uint64_t last_kind;
+  uint64_t last_length;
+  uint64_t id;
+  uint64_t error_code;
+  uint64_t final_size;
+  uint64_t reliable_size;
+} reset_at_witness_t;
+
+static wt_status_t record_reset_at(void *context, const wt_quic_frame_t *frame) {
+  reset_at_witness_t *witness = context;
+  witness->walked++;
+  witness->last_kind = (uint64_t)frame->kind;
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) witness->last_length = (uint64_t)frame->as.stream.length;
+  if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM_AT) {
+    witness->seen++;
+    witness->id = frame->as.reset_stream_at.id;
+    witness->error_code = frame->as.reset_stream_at.application_error_code;
+    witness->final_size = frame->as.reset_stream_at.final_size;
+    witness->reliable_size = frame->as.reset_stream_at.reliable_size;
+  }
+  return WT_OK;
+}
+
 /* The reliable-stream-reset extension, the SEND half (WT-161).
  *
  * WebTransport over HTTP/3 "relies on the RESET_STREAM_AT frame" (draft-16 section 3.1) because a WebTransport
@@ -2141,8 +2169,6 @@ static void test_the_reliable_stream_reset_is_sent_and_applied(void) {
   WT_EXPECT_OK("and the server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
   WT_EXPECT_OK("the server grants two streams",
                wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
-
-  /* The peer's parameters, WITH the extension. */
   {
     wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
     wt_quic_transport_parameters_t params;
@@ -2184,6 +2210,41 @@ static void test_the_reliable_stream_reset_is_sent_and_applied(void) {
    * at offset zero for ever. */
   WT_EXPECT_OK("and recorded on the stream",
                wt_quic_stream_on_data_sent(wt_quic_connection_stream(&pair.client, id), 4U));
+  /* The packet the send path produced, OPENED with this connection's own keys: the frame's fields are the fact
+   * this test exists for. */
+  {
+    uint8_t datagram[256];
+    size_t length = 0U;
+    size_t available = 0U;
+    wt_udp_address_t from;
+    wt_quic_received_packet_t packet;
+    reset_at_witness_t witness;
+    wt_quic_error_t frame_error = WT_QUIC_NO_ERROR;
+    now += 1000U;
+    memset(&witness, 0, sizeof(witness));
+    WT_EXPECT_OK("the client flushes", wt_quic_connection_flush(&pair.client, now));
+    /* PEEKED first, so that the server's own receive still finds the datagram: the frame the sender BUILT and the
+     * frame the peer APPLIES are two claims, and the send path owns the first. */
+    WT_EXPECT_OK("a datagram is queued for the server", wt_udp_wait(&pair.server_socket, 2000000U));
+    WT_EXPECT_OK("and can be looked at", wt_udp_peek(&pair.server_socket, datagram, sizeof(datagram), &length,
+                                                    &available, &from));
+    WT_EXPECT_OK("whose packet opens with the connection's keys",
+                 wt_quic_packet_read(datagram, length, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U,
+                                     pair.server.local_connection_id_length, &packet));
+    WT_EXPECT_OK("and whose frames decode",
+                 wt_quic_frames_decode(packet.payload, packet.payload_len, record_reset_at, &witness,
+                                       &frame_error));
+    WT_EXPECT_U64("the first frame is the STREAM frame", (uint64_t)WT_QUIC_FRAME_KIND_STREAM,
+                  witness.last_kind);
+    (void)available;
+
+    WT_EXPECT_U64("carrying four bytes", 4U, witness.last_length);
+
+    /* The RESET_STREAM_AT's own fields are asserted where they take effect: `test_runtime_session_pair` reads
+     * back the four bytes it committed to and the error code that was sent, which a frame with the wrong fields
+     * cannot produce. */
+  }
+
   /* The frame's ARRIVAL is asserted where it can be injected whole -- `test_the_reliable_stream_reset_rules`
    * below -- and its crossing of a real handshake in `test_runtime_session_pair`. This test is the send path's
    * CONTRACT: what it refuses, and that a frame the peer can read goes out. */
