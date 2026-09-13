@@ -16,6 +16,7 @@ import sys
 
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
+from aioquic.quic.logger import QuicFileLogger
 
 
 class Quiet(QuicConnectionProtocol):
@@ -34,6 +35,12 @@ async def main() -> None:
     configuration.load_cert_chain(os.path.join(cert_dir, "cert.pem"), os.path.join(cert_dir, "key.pem"))
     # The whole reason this peer exists.
     configuration.secrets_log_file = open(keylog_path, "a")
+    # And a qlog, which is the peer's own account of what it did with each packet -- including the ones it could
+    # not read. It is the only artefact in this investigation that says WHY a packet was dropped rather than that
+    # it was (WT-135).
+    qlog_dir = os.path.join(os.path.dirname(keylog_path), "qlog")
+    os.makedirs(qlog_dir, exist_ok=True)  # aioquic refuses a directory that does not exist, and says so
+    configuration.quic_logger = QuicFileLogger(qlog_dir)
 
     await serve("0.0.0.0", port, configuration=configuration, create_protocol=Quiet)
     print(f"aioquic peer listening on {port}, keylog at {keylog_path}", flush=True)
