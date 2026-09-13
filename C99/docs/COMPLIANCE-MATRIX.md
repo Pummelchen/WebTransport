@@ -38,6 +38,7 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | -- | HTTP/3 the session runs on | `http3/` (frames, SETTINGS, control, request, QPACK, GOAWAY, driver) | `test_http3_*` | tested |
 | -- | TLS the session runs on | `tls/` (RFC 8446 schedule, messages, X25519, trust, self-signed) | `test_tls13_*`, `test_tls_self_signed` | tested |
 | -- | Server push | -- | -- | -- |
+| -- | 0-RTT and resumption | -- | -- | -- |
 | -- | Session under a connection that changes its connection ID | -- | -- | partial |
 
 ## The two partial rows, stated plainly
@@ -45,6 +46,12 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 - **Server push**: the draft does not use it, and HTTP/3 push is refused deterministically by the endpoint
   (`WT_HTTP3_ID_ERROR` for a client, `WT_HTTP3_STREAM_CREATION_ERROR` for a server) rather than ignored. That is
   a deliberate refusal, not a missing feature.
+- **0-RTT and resumption**: the `early_data` and `pre_shared_key` extensions are NOT implemented and not
+  exported -- `tls/extension.h` says so, because they need the ticket machinery this tree does not have. The
+  draft's rule that a server must refuse REMEMBERED 0-RTT settings that reduce WebTransport capacity therefore
+  has nothing to apply to here: there are no remembered settings, and a peer cannot 0-RTT into a session. That
+  is a deliberate absence rather than a gap in an implemented feature, and the Swift scenario that asserts the
+  rule (`zero-rtt-settings`) is mirrored by it not being reachable.
 - **Connection ID changes during a handshake**: the tests use the SAME connection ID at both ends, which is what
   makes the Initial keys -- derived from it -- identical on both sides. A peer that replaces its connection ID
   during the handshake would not be tracked, and this is recorded as the transport gap it is (the tracker's

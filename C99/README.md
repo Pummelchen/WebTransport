@@ -219,16 +219,18 @@ What is here:
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
   `scripts/score-matrix.sh` rather than from memory: **25 of 25 draft-16 requirements in
-  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 6 of the plan's 9 completion
-  criteria are met, 2 partial and 1 not met.** The matrix coverage is 100% *of the matrix*, which is
+  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 7 of the plan's 9 completion
+  criteria are met, 1 partial and 1 not met.** The matrix coverage is 100% *of the matrix*, which is
   not the same as being done: the criteria that are not met are outside the matrix and outside this
   repository's reach — the five-implementation interop matrix needs a host, and the FreeBSD and
-  Windows CI legs need portability work before a job for them would be anything but red. The two
-  partial criteria are conformance scenario breadth (forty-six scenarios, two of them end-to-end
-  sessions over real sockets, against the Swift tools' 40-scenario suite -- all five of its interop
-  matrices now have a counterpart, and its two release checks are mirrored where they belong:
-  `scripts/check-package.sh` installs the tree and asserts that the product list is the three tools and
-  that nothing which exists to test the library came with them) and those CI legs. What is met: the CLIs run local IPv4 **and IPv6**
+  Windows CI legs need portability work before a job for them would be anything but red. The one
+  partial criterion is those CI legs. The conformance-coverage criterion is now **met**, and the
+  evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
+  forty-six C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
+  release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
+  product list is the three tools and nothing that tests them), and every remaining entry mapped to
+  the unit suite that covers it. The walk found one real gap, `protocol-structured-fields`, which is
+  implemented and exercised end to end. What is met: the CLIs run local IPv4 **and IPv6**
   sessions, sanitizers and static checks are clean, the public API is documented, nothing
   placeholder-shaped is exposed as production, and the matrix itself exists and is checked.
 
