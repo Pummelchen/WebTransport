@@ -1156,6 +1156,38 @@ One finding was the kind that hides until a default is exercised: a configuratio
 "store nothing" rather than "the RFC's default", so the first NEW_CONNECTION_ID closed the connection with a
 limit error. Zero now means the RFC's two, and that is the documented meaning of the field.
 
+**Thirty-fourth part done: a short packet is padded until it can be sampled.** RFC 9001 section 5.4.2 takes
+the header protection sample from the sixteen bytes starting four bytes into the packet number field, and an
+endpoint must discard a packet too short to contain one -- so a sender cannot protect one either. That made
+a two-byte frame impossible to send on its own: `RETIRE_CONNECTION_ID`, `PING`, and any small
+acknowledgement came back from `wt_quic_packet_build` as a truncation error and never left the process. It
+was found by writing the RETIRE_CONNECTION_ID tests below, which is the second time the frame layer has been
+where a rule the packet layer owns shows up.
+
+The header's own length cancels out of the requirement, because the sample starts after the packet number
+rather than after the header: a packet needs `offset + sample` bytes from the start of the packet number,
+the tag supplies sixteen and the packet number the rest, so the shortfall is at most three bytes. The
+builder now fills it with PADDING frames (RFC 9000 section 19.1), which carry nothing and are ignored by
+every receiver, and the two numbers are named in `protection.h` so the sampler and the builder cannot drift
+apart. The empty-payload test used to assert the refusal; it now asserts the padding, and a new test sends
+the two-byte retire frame and checks that the receiver sees the frame with the padding behind it.
+
+**Thirty-fifth part done: RETIRE_CONNECTION_ID retires an issued ID.** RFC 9000 section 19.16 makes two
+sequences a PROTOCOL_VIOLATION -- one that was never issued, and the one the peer used as the Destination
+Connection ID of the packet that carried the frame -- and the connection handled neither, because the frame
+was simply handed to the caller. Retiring an ID now frees its slot and the peer's `active_connection_id_limit`
+budget, so a peer that retires an ID can be given a replacement; a repeat of a sequence already retired is
+tolerated, because RETIRE_CONNECTION_ID is retransmitted when it is lost and the second copy describes a
+state the endpoint is already in. This endpoint accepts packets only on the ID the handshake used, which
+section 5.1.1 numbers 0, so sequence 0 is always the ID of the carrying packet here. Replacing a retired ID
+needs a fresh ID and stateless reset token, which only the caller can produce, so the frame still reaches the
+handler.
+
+Writing that test exposed a defect that had been there since the IDs were first issued: the first ID this
+endpoint announced was numbered 0, colliding with the handshake's own connection ID, and a peer retiring
+either would have been ambiguous. Sequences now start at 1 and are never reused, which is what makes a
+RETIRE_CONNECTION_ID naming a sequence mean one thing.
+
 Implement the production network state machine.
 
 Tasks:
