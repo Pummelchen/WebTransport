@@ -1631,6 +1631,22 @@ The test now writes the coded line with this build's encoder AND keeps the hand-
 part: the first says the two sides agree, the second says the reader is not merely reading its own writer's
 dialect.
 
+**Twelfth part done: whole field sections.** `src/http3/qpack_field_section_codec.c` writes a section --
+the prefix, then one line per field -- and reads one back through a small stack state, which is the shape the
+HTTP/3 header codec will use. The rule worth the part is the BLOCKED case: a section whose Required Insert
+Count is above the insertions this decoder has received is not malformed, it is EARLY, and RFC 9204 section
+2.1.2 lets a decoder wait for the encoder stream to catch up. So `begin` reports WT_ERR_AGAIN with no error
+code, and only the caller that gives up -- because the stream ended, or because it will not wait -- turns that
+into a connection error. A decoder that treated "not yet" as "no" would close a connection over an
+instruction that is still in flight, which is the third time this project has had to make that distinction
+(the stream instruction parsers and the truncated frames being the other two).
+
+The other decision is where the reference tracking lives. Deciding the Required Insert Count and the Base,
+and which entries a section referenced so they cannot be evicted, is the ENCODER's bookkeeping: it depends on
+what this endpoint has sent and what the peer has acknowledged, not on the bytes. The codec therefore takes
+the prefix as an argument and writes what it is given, and the tracking belongs with the encoder that owns
+those sections.
+
 Enforce table capacity and malformed reference handling.
 
 Completion criteria:

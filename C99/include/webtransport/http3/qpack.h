@@ -395,6 +395,46 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
                                         size_t scratch_capacity, wt_qpack_resolved_field_t *out,
                                         wt_qpack_error_t *out_error);
 
+/* A whole field section: the prefix, then lines until the bytes run out. The state
+ * is small enough to live on the caller's stack, and `begin` is separate from `next`
+ * because the prefix carries the one decision a caller has to make before it can read
+ * anything -- whether this section is BLOCKED.
+ *
+ * RFC 9204 section 2.1.2: a section whose Required Insert Count is above the number of
+ * insertions received so far can still be decoded, once the encoder stream catches up,
+ * so `begin` reports WT_ERR_AGAIN (with no error code) rather than a decompression
+ * failure. A decoder that treated "not yet" as "no" would close a connection over an
+ * instruction that is merely in flight. */
+typedef struct wt_qpack_field_section_decoder {
+  wt_qpack_header_prefix_t prefix;
+  const wt_qpack_dynamic_table_t *table;
+  wt_cursor_t cursor;
+} wt_qpack_field_section_decoder_t;
+
+/* Read the section's prefix. `known_insert_count` is how many insertions this endpoint
+ * has received. WT_ERR_AGAIN means blocked: the section is well formed but needs
+ * insertions that have not arrived. */
+wt_status_t wt_qpack_field_section_begin(wt_qpack_field_section_decoder_t *decoder,
+                                         const wt_qpack_dynamic_table_t *table, uint64_t max_entries,
+                                         const uint8_t *bytes, size_t length,
+                                         uint64_t known_insert_count, wt_qpack_error_t *out_error);
+
+/* The next field, or WT_ERR_CLOSED when the section is finished. */
+wt_status_t wt_qpack_field_section_decoder_next(wt_qpack_field_section_decoder_t *decoder,
+                                                uint8_t *scratch, size_t scratch_capacity,
+                                                wt_qpack_resolved_field_t *out,
+                                                wt_qpack_error_t *out_error);
+
+/* Write a whole section: the prefix, then one line per field. The lines carry their own
+ * kinds and indices, so the caller decides what is indexed and what is literal; the
+ * reference tracking that decides the Required Insert Count and Base is the encoder's,
+ * and it is what the caller passes in. Strings are coded into `scratch` when the line
+ * asks for it. */
+wt_status_t wt_qpack_field_section_encode(wt_writer_t *w, const wt_qpack_header_prefix_t *prefix,
+                                         uint64_t max_entries,
+                                         const wt_qpack_field_line_t *lines, size_t line_count,
+                                         uint8_t *scratch, size_t scratch_capacity);
+
 #ifdef __cplusplus
 }
 #endif

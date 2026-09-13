@@ -44,7 +44,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 54 unit test files and 78,673 checks, run by `ctest` and again under
+- 55 unit test files and 78,700 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -457,6 +457,11 @@ What is here:
   value. The plain `wt_qpack_field_line_encode` now REFUSES a line whose flags ask for coding rather than
   writing it plainly: the flags are part of the representation, so a plain string with the H bit clear is a
   different line.
+- **Whole field sections** (Phase 6, twelfth part): `qpack_field_section_codec.c` writes a section -- prefix,
+  then lines -- and reads one back, with the section's BLOCKED case kept apart from a decompression failure:
+  RFC 9204 section 2.1.2 lets a decoder wait for the encoder stream when a section needs insertions that have
+  not arrived, so that is `WT_ERR_AGAIN` with no error code rather than a connection error over an
+  instruction still in flight.
 - The vectors are RFC 9001 appendix A and RFC 8448 section 3, extracted from the RFC
   text rather than
   transcribed: `tests/vectors/extract_rfc9001_keys.py` re-derives every value it

@@ -61,6 +61,7 @@ set(WT_UNIT_TESTS
   test_qpack_decoder_stream
   test_qpack_header_prefix
   test_qpack_field_section
+  test_qpack_field_section_codec
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
