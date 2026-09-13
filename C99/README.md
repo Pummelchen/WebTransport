@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 69 unit test files and 79,411 checks, run by `ctest` and again under
+- 69 unit test files and 79,435 checks, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -118,6 +118,17 @@ What is here:
     MUST NOT contain pseudo-header fields" is enforced here, because the message
     decoder has one request shape and one response shape and cannot tell a trailer from
     a request on its own.
+  - the encode side of that same header: `wt_http3_message_encode` writes a field
+    section for a request or a response, and
+    `wt_http3_endpoint_write_headers` writes the HEADERS frame around it. The section
+    is encoded into the caller's scratch FIRST because a frame's length prefix is a
+    varint whose width depends on the length — the frame can only be written once the
+    section has been measured, which is the rule this library follows everywhere a
+    length is written. The lines are literal (always valid, never needing a dynamic
+    table, larger on the wire than a static-table reference would be), and the round
+    trip is the test: what a client writes is fed to a server's decode path and then to
+    the draft-16 validator, so the two directions cannot disagree without a test
+    failing.
   - `api/endpoint.h` — which side this program is, the name the peer's certificate
     must be valid for, and how it is judged, so a trust misconfiguration is a return
     value before any packet rather than a handshake failure afterwards. The

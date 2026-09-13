@@ -489,6 +489,140 @@ static void test_request_headers_are_decoded(void) {
   (void)unused;
 }
 
+/* The encode side, which is the decode path read backwards: a client writes the extended
+ * CONNECT it wants, and the section it produces is exactly what a server's decode path
+ * reads. The test closes that loop rather than asserting against hand-written bytes, because
+ * a round trip through both directions is what makes the two agree by construction. */
+static void test_a_client_writes_the_request_it_means(void) {
+  wt_http3_endpoint_t client;
+  wt_http3_endpoint_t server;
+  wt_http3_message_t outgoing;
+  wt_http3_message_t decoded;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  uint8_t wire[512];
+  uint8_t section[256];
+  uint8_t scratch[256];
+  size_t length = 0U;
+  wt_writer_t w;
+  wt_cursor_t cursor;
+  wt_http3_frame_t frame;
+  wt_webtransport_request_policy_t policy;
+  wt_webtransport_session_request_t decision;
+
+  wt_http3_endpoint_init(&client, WT_HTTP3_ROLE_CLIENT);
+  wt_http3_endpoint_init(&server, WT_HTTP3_ROLE_SERVER);
+  WT_EXPECT_OK("the server receives a request stream",
+               wt_http3_endpoint_on_request_stream(&server, 0U, &error));
+
+  /* What the draft-16 layer wants to send: an extended CONNECT for a WebTransport session.
+   * The endpoint does not build these fields -- the layer that knows what a WebTransport
+   * request is does -- and that separation is the point of the split. */
+  outgoing.type = WT_HTTP3_HEADER_REQUEST;
+  outgoing.method = (const uint8_t *)"CONNECT";
+  outgoing.method_length = 7U;
+  outgoing.scheme = (const uint8_t *)"https";
+  outgoing.scheme_length = 5U;
+  outgoing.authority = (const uint8_t *)"example.com";
+  outgoing.authority_length = 11U;
+  outgoing.path = (const uint8_t *)"/chat";
+  outgoing.path_length = 5U;
+  outgoing.protocol = (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN;
+  outgoing.protocol_length = strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN);
+  outgoing.status = 0U;
+  outgoing.has_status = 0;
+
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_OK("the client writes its request",
+               wt_http3_endpoint_write_headers(&client, &outgoing, 0U, section, sizeof(section), &w,
+                                               &error));
+  length = wt_writer_offset(&w);
+  WT_EXPECT_TRUE("producing bytes", length > 0U);
+
+  /* The frame is a HEADERS frame, and its length prefix MEASURES the section: the reader
+   * finds the section exactly where the writer put it. */
+  cursor = wt_cursor_init(wire, length);
+  WT_EXPECT_OK("and they decode as a frame", wt_http3_frame_decode(&cursor, &frame, &error));
+  WT_EXPECT_U64("which is HEADERS", WT_HTTP3_FRAME_HEADERS, frame.type);
+  WT_EXPECT_U64("with no bytes left over", 0U, (uint64_t)wt_cursor_remaining(&cursor));
+
+  /* The server reads it with its own decoder state and gets back what the client meant. */
+  WT_EXPECT_OK("the server decodes it",
+               wt_http3_endpoint_on_request_headers(&server, 0U, frame.payload, frame.length,
+                                                    scratch, sizeof(scratch), &decoded, &error));
+  WT_EXPECT_BYTES("the method", (const uint8_t *)"CONNECT", decoded.method, decoded.method_length);
+  WT_EXPECT_BYTES("the scheme", (const uint8_t *)"https", decoded.scheme, decoded.scheme_length);
+  WT_EXPECT_BYTES("the authority", (const uint8_t *)"example.com", decoded.authority,
+                  decoded.authority_length);
+  WT_EXPECT_BYTES("the path", (const uint8_t *)"/chat", decoded.path, decoded.path_length);
+  WT_EXPECT_BYTES("and the protocol", (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN,
+                  decoded.protocol, decoded.protocol_length);
+
+  /* And the draft-16 layer accepts what came out of the round trip. */
+  policy.authority = "example.com";
+  policy.path = "/chat";
+  policy.wt_enabled = 1;
+  WT_EXPECT_OK("the session layer accepts the round trip",
+               wt_webtransport_session_request_validate(&decoded, &policy, &decision, &error));
+  WT_EXPECT_INT("as a WebTransport request", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT,
+                (int)decision.outcome);
+
+  /* A response, which is the other shape this encoder writes. */
+  {
+    wt_http3_message_t response;
+    wt_http3_message_t read_back;
+    response.type = WT_HTTP3_HEADER_RESPONSE;
+    response.method = NULL;
+    response.method_length = 0U;
+    response.scheme = NULL;
+    response.scheme_length = 0U;
+    response.authority = NULL;
+    response.authority_length = 0U;
+    response.path = NULL;
+    response.path_length = 0U;
+    response.protocol = NULL;
+    response.protocol_length = 0U;
+    response.status = 200U;
+    response.has_status = 1;
+
+    w = wt_writer_init(wire, sizeof(wire));
+    WT_EXPECT_OK("a response writes",
+                 wt_http3_endpoint_write_headers(&client, &response, 0U, section, sizeof(section),
+                                                 &w, &error));
+    cursor = wt_cursor_init(wire, wt_writer_offset(&w));
+    WT_EXPECT_OK("and decodes as a frame", wt_http3_frame_decode(&cursor, &frame, &error));
+    WT_EXPECT_OK("whose section reads back",
+                 wt_http3_message_decode(&read_back, WT_HTTP3_HEADER_RESPONSE, frame.payload,
+                                         frame.length, NULL, 0U, 0U, scratch, sizeof(scratch),
+                                         &error));
+    WT_EXPECT_INT("with the status", 1, read_back.has_status);
+    WT_EXPECT_U64("the response carried", 200U, read_back.status);
+
+    /* A response with no status is not a response. */
+    response.has_status = 0;
+    w = wt_writer_init(wire, sizeof(wire));
+    WT_EXPECT_STATUS("a response without a status is refused", WT_ERR_INVALID_ARGUMENT,
+                     wt_http3_endpoint_write_headers(&client, &response, 0U, section,
+                                                     sizeof(section), &w, &error));
+  }
+
+  /* A request with no method is not a request either. */
+  outgoing.method = NULL;
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_STATUS("a request without a method is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_http3_endpoint_write_headers(&client, &outgoing, 0U, section, sizeof(section),
+                                                   &w, &error));
+  outgoing.method = (const uint8_t *)"CONNECT";
+
+  /* The caller's scratch is a bound, and running into it is WT_ERR_LIMIT with no error code:
+   * it is this endpoint's buffer, not anything the peer did. */
+  w = wt_writer_init(wire, sizeof(wire));
+  WT_EXPECT_STATUS("a section that does not fit the scratch is limited", WT_ERR_LIMIT,
+                   wt_http3_endpoint_write_headers(&client, &outgoing, 0U, section, 4U, &w,
+                                                   &error));
+  WT_EXPECT_U64("with no error code", (uint64_t)WT_HTTP3_NO_ERROR, (uint64_t)error);
+  WT_EXPECT_U64("and nothing written", 0U, (uint64_t)wt_writer_offset(&w));
+}
+
 int main(void) {
   test_our_own_streams_exist_once();
   test_peer_streams_are_classified();
@@ -496,5 +630,6 @@ int main(void) {
   test_the_peer_table_is_bounded();
   test_request_streams_follow_the_roles();
   test_request_headers_are_decoded();
+  test_a_client_writes_the_request_it_means();
   WT_TEST_MAIN_END("wt_http3_endpoint");
 }

@@ -128,6 +128,22 @@ wt_status_t wt_http3_endpoint_on_uni_stream(wt_http3_endpoint_t *endpoint, uint6
                                             wt_http3_endpoint_stream_kind_t *out_kind,
                                             wt_http3_error_t *out_error);
 
+/* Write a HEADERS frame carrying a field section, which is how a request, a response and a
+ * trailer are sent. The section is encoded into the caller's `scratch` first, because a
+ * frame's length prefix is a varint whose width depends on the length: the frame can only be
+ * written once the section has been MEASURED, which is the rule this library follows
+ * everywhere a length is written. A section that does not fit the scratch is WT_ERR_LIMIT
+ * with no error code -- the caller's buffer, not the peer's doing.
+ *
+ * `peer_max_entries` is the peer's advertised dynamic-table capacity in units of 32, from
+ * its SETTINGS; the section's prefix is encoded against that number. Nothing this encoder
+ * writes references the dynamic table, so a peer that advertised none can read it. */
+wt_status_t wt_http3_endpoint_write_headers(wt_http3_endpoint_t *endpoint,
+                                            const wt_http3_message_t *message,
+                                            uint64_t peer_max_entries, uint8_t *scratch,
+                                            size_t scratch_capacity, wt_writer_t *w,
+                                            wt_http3_error_t *out_error);
+
 /* A frame arrived on the peer's control stream: the endpoint forwards it to the control
  * machine, which is where the "SETTINGS first, and only once" rule lives. WT_ERR_STATE when
  * the stream was never opened. */

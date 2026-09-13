@@ -64,6 +64,28 @@ wt_status_t wt_http3_message_decode(wt_http3_message_t *message, wt_http3_header
                                     uint64_t known_insert_count, uint8_t *scratch,
                                     size_t scratch_capacity, wt_http3_error_t *out_error);
 
+/* Encode one field section: the prefix, then one literal line per field this message
+ * carries, for a caller that is building a request or a response rather than reading one.
+ *
+ * `max_entries` is the PEER's advertised dynamic-table capacity in units of 32, exactly as
+ * the decoder's is this endpoint's: the prefix's Required Insert Count and Base are encoded
+ * against the peer's number, not against anything this endpoint chose. A message that
+ * references no dynamic entry encodes a Required Insert Count of zero, which every peer can
+ * read whatever table it advertised.
+ *
+ * The lines are LITERAL -- the name and the value are spelled out rather than indexed --
+ * which is always valid and never needs the dynamic table, and which is why this encoder can
+ * be used before a dynamic table exists on either side. It is larger on the wire than a
+ * static-table reference would be; that is a compression decision with a correct simple
+ * answer here and an upgrade path, rather than a protocol one. Strings are written as they
+ * are given, never Huffman-coded, so the bytes are readable and the size is predictable.
+ *
+ * The message's fields are written in the order a request must present them: the
+ * pseudo-headers first. A message that names neither a method (a request) nor a status (a
+ * response) is refused rather than written as a section nothing can decode. */
+wt_status_t wt_http3_message_encode(wt_writer_t *w, const wt_http3_message_t *message,
+                                    uint64_t max_entries, wt_http3_error_t *out_error);
+
 #ifdef __cplusplus
 }
 #endif

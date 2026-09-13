@@ -174,6 +174,39 @@ wt_status_t wt_http3_endpoint_on_request_headers(wt_http3_endpoint_t *endpoint, 
   }
 }
 
+wt_status_t wt_http3_endpoint_write_headers(wt_http3_endpoint_t *endpoint,
+                                            const wt_http3_message_t *message,
+                                            uint64_t peer_max_entries, uint8_t *scratch,
+                                            size_t scratch_capacity, wt_writer_t *w,
+                                            wt_http3_error_t *out_error) {
+  wt_writer_t section;
+  wt_http3_frame_t frame;
+  wt_status_t status;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (endpoint == NULL || message == NULL || scratch == NULL || w == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+
+  /* Pass one: measure the section into the caller's scratch. */
+  section = wt_writer_init(scratch, scratch_capacity);
+  status = wt_http3_message_encode(&section, message, peer_max_entries, out_error);
+  if (status != WT_OK) return status;
+  if (!wt_writer_ok(&section)) {
+    /* The section did not fit: this endpoint's buffer, so no error code and no blame. */
+    if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+    return WT_ERR_LIMIT;
+  }
+
+  /* Pass two: the frame, now that its length is known rather than guessed. */
+  frame = wt_http3_frame_make(WT_HTTP3_FRAME_HEADERS);
+  frame.payload = scratch;
+  frame.length = wt_writer_offset(&section);
+  status = wt_http3_frame_encode(w, &frame);
+  if (status != WT_OK && out_error != NULL) *out_error = WT_HTTP3_FRAME_ERROR;
+  return status;
+}
+
 wt_status_t wt_http3_endpoint_on_request_frame(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
                                                uint64_t type, wt_http3_error_t *out_error) {
   wt_http3_endpoint_request_t *request;

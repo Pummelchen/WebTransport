@@ -2027,6 +2027,30 @@ The test also pins down a boundary that is easy to get wrong in the other direct
 only regular fields has no request line, and the message layer refuses it. The endpoint does not second-guess
 that, and the test asserts the refusal rather than a hand-built section passing.
 
+### Phase 9's fourth part: writing the request and the response
+
+`wt_http3_message_encode` is the decode path read backwards -- a request's or a response's pseudo-headers out
+as a QPACK field section -- and `wt_http3_endpoint_write_headers` puts the HEADERS frame around it. The frame
+can only be written once the section has been MEASURED, because the frame's length prefix is a varint whose
+width depends on the length; so the section goes into the caller's scratch first and the frame second, which is
+the same measure-then-write rule the rest of this library follows.
+
+The lines are LITERAL: the names and values are spelled out rather than indexed against the static table. That
+is always valid, never needs a dynamic table on either side, and is therefore usable before either endpoint has
+one -- at the cost of bytes on the wire. That is a compression decision with a correct simple answer here and a
+clear upgrade path, and the header says exactly that rather than implying the encoder is as small as it could
+be. The prefix names Required Insert Count 0 and Base 0, which every peer can read whatever table it advertised.
+
+A failure in the encoder carries NO error code, and that is deliberate: a message that has no method or no
+status is refused with H3_MESSAGE_ERROR because that is a wire-shaped mistake, but a section that does not fit
+the caller's scratch is the CALLER's buffer, and inventing a peer-facing code for it would tell a peer's story
+about a local mistake. The first draft of the code did attach one, and the test caught it by asserting the exact
+code (H3_MESSAGE_ERROR, 270) where none belonged.
+
+The test is a ROUND TRIP rather than hand-written bytes: the client's extended CONNECT is written, framed,
+decoded by a server's endpoint, and handed to `wt_webtransport_session_request_validate`, so the encode and
+decode directions cannot disagree without a test failing.
+
 ## Phase 10: Test Port
 
 Mirror Swift tests into C99.
