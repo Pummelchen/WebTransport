@@ -36,6 +36,9 @@ typedef struct loop_side {
   wt_http3_endpoint_t endpoint;
   wt_http3_driver_t driver;
   wt_http3_driver_sink_t sink;
+  /* The connection this side refuses TO. An HTTP/3 refusal has to reach the peer as an application close carrying
+   * the HTTP/3 code, so the boundary between the two layers is where the code is translated (WT-158). */
+  wt_quic_connection_t *connection;
   uint8_t section[2048];
   size_t section_length;
   int section_complete;
@@ -148,8 +151,20 @@ static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t l
 
 static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
   loop_side_t *side = context;
+  wt_status_t status;
+
   side->frames_seen++;
-  return wt_http3_driver_on_quic_frame(&side->driver, space, frame, &side->sink, 16384U);
+  status = wt_http3_driver_on_quic_frame(&side->driver, space, frame, &side->sink, 16384U);
+  if (status != WT_OK && side->connection != NULL) {
+    /* RFC 9114 section 8: an HTTP/3 error is carried by a CONNECTION_CLOSE of type 0x1d whose code is the HTTP/3
+     * error code. A refusal WITHOUT one -- a caller's own bound, WT_ERR_LIMIT -- is not an HTTP/3 error, and the
+     * connection's own default stays in force for it. */
+    wt_http3_error_t h3_error = wt_http3_driver_last_error(&side->driver);
+    if (h3_error != WT_HTTP3_NO_ERROR) {
+      wt_quic_connection_refuse_application(side->connection, (uint64_t)h3_error, 0U);
+    }
+  }
+  return status;
 }
 
 /* The endpoint's transport parameters, built by the LIBRARY: the mandatory connection-ID parameters live in
@@ -419,6 +434,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   /* The advertised limits, in force: the promise and the enforcement in one place. */
   (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
   init_side(&loop.side, WT_HTTP3_ROLE_CLIENT);
+  loop.side.connection = &loop.session.connection;
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &loop.transport);
   (void)wt_runtime_session_set_lost_frame_handler(&loop.session, client_on_lost_frame, &loop);
@@ -653,6 +669,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   /* The advertised limits, in force: the promise and the enforcement in one place. */
   (void)wt_runtime_session_advertise(&loop.session, 100000U, 4096U, 8U, 8U);
   init_side(&loop.side, WT_HTTP3_ROLE_SERVER);
+  loop.side.connection = &loop.session.connection;
   (void)wt_runtime_session_set_frame_handler(&loop.session, side_on_frame, &loop.side);
   wt_http3_driver_quic_transport(&loop.session.connection, &loop.transport);
 

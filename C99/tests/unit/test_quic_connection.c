@@ -2054,6 +2054,71 @@ static void test_a_server_answers_to_the_clients_chosen_id(void) {
   close_pair(&pair);
 }
 
+/* An HTTP/3 refusal reaches the peer as an APPLICATION close (WT-158).
+ *
+ * RFC 9114 section 8 carries every HTTP/3 error in a CONNECTION_CLOSE of type 0x1d whose code is the HTTP/3 error
+ * code -- H3_FRAME_ERROR for a frame that ends part way through, H3_SETTINGS_ERROR for a bad setting. A handler
+ * that could only return a status closed the TRANSPORT with INTERNAL_ERROR instead: a different frame, a
+ * different code, and a peer that cannot tell which rule it broke. */
+static wt_status_t refuse_with_h3_error(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
+  wt_quic_connection_t *connection = context;
+  (void)space;
+  (void)frame;
+  /* The HTTP/3 error space: H3_FRAME_ERROR is 0x107. */
+  wt_quic_connection_refuse_application(connection, (uint64_t)0x107U, 0U);
+  return WT_ERR_PROTOCOL;
+}
+
+static void test_an_http3_refusal_is_an_application_close(wt_udp_family_t family) {
+  connection_pair_t pair;
+  wt_quic_packet_keys_t keys;
+  wt_quic_frame_t frame;
+  uint8_t secret[WT_SHA256_LEN];
+  const wt_quic_close_state_t *close_state;
+  uint64_t now = 97000000U;
+  size_t i;
+
+  open_pair(family, &pair);
+  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x70U + i);
+  WT_EXPECT_OK("application keys derive",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the client sends with them",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads with them",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  wt_quic_connection_set_handlers(&pair.server, refuse_with_h3_error, &pair.server, record_lost,
+                                  &pair.server_witness);
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+  send_frame_to(&pair, &frame, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U, now);
+  now += 1000U;
+  receive_on(&pair.server, &pair.server_socket, now);
+
+  close_state = wt_quic_connection_close_state(&pair.server);
+  WT_EXPECT_U64("the close is of the APPLICATION kind", (uint64_t)WT_QUIC_CLOSE_APPLICATION,
+                (uint64_t)close_state->kind);
+  WT_EXPECT_U64("carrying the HTTP/3 code the handler named", 0x107U, close_state->error_code);
+  WT_EXPECT_U64("and the cause is still the status", (uint64_t)WT_ERR_PROTOCOL,
+                (uint64_t)wt_quic_connection_close_cause(&pair.server));
+
+  /* And the frame the peer is SENT is the application form: the transport form carries a frame-type field, and a
+   * peer that read the HTTP/3 code as a transport code would blame a rule that does not exist. Asserted through
+   * the encoder rather than by opening the packet, because the encoder is what writes the bytes. */
+  {
+    wt_quic_frame_t close_frame;
+    memset(&close_frame, 0, sizeof(close_frame));
+    WT_EXPECT_OK("the close encodes", wt_quic_close_frame(&pair.server.close, &close_frame));
+    WT_EXPECT_U64("as a CONNECTION_CLOSE of the application form",
+                  (uint64_t)WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION, (uint64_t)close_frame.kind);
+    WT_EXPECT_U64("whose code is the HTTP/3 one", 0x107U, close_frame.as.connection_close.error_code);
+    WT_EXPECT_INT("and which has no frame-type field", 0, close_frame.as.connection_close.has_frame_type);
+  }
+  WT_EXPECT_OK("the server flushes its close", wt_quic_connection_flush(&pair.server, now));
+  WT_EXPECT_INT("which was sent", 1, wt_quic_connection_close_was_sent(&pair.server));
+
+  close_pair(&pair);
+}
+
 int main(void) {
   test_frame_permission();
   test_handshake_done_role();
@@ -2084,6 +2149,7 @@ int main(void) {
   test_issue_connection_id();
   test_peer_connection_ids();
   test_a_server_answers_to_the_clients_chosen_id();
+  test_an_http3_refusal_is_an_application_close(WT_UDP_IPV4);
   test_retire_connection_id();
   test_retire_handshake_connection_id();
   test_new_connection_id_retire_prior_to_is_refused();

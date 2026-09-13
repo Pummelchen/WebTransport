@@ -350,9 +350,55 @@ static void test_a_data_stream_the_peer_splits_across_frames(void) {
   WT_EXPECT_INT("with the peer's end of stream", 1, sink_log.fin);
 }
 
+/* A frame that ends part way through at FIN is H3_FRAME_ERROR, and the driver has to SAY so (WT-158).
+ *
+ * RFC 9114 makes the truncated final frame a connection error of type H3_FRAME_ERROR, so closing the connection is
+ * right -- but the code the peer is told must be the HTTP/3 one, and only the layer that knows it can say it. The
+ * driver records it, and the connection turns that into an application close. */
+static void test_a_frame_that_ends_at_fin_names_the_http3_error(void) {
+  static const uint8_t k_partial[] = {0x01U, 0x40U}; /* a HEADERS frame whose declared length never arrives */
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  data_stream_sink_t sink_log;
+  wt_http3_driver_sink_t sink;
+  wt_quic_frame_t frame;
+
+  memset(&sink_log, 0, sizeof(sink_log));
+  memset(&sink, 0, sizeof(sink));
+  sink.context = &sink_log;
+  sink.on_stream_data = data_stream_on_data;
+
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_driver_set_session_id(&driver, 0U);
+  WT_EXPECT_U64("a fresh driver has no error to report", (uint64_t)WT_HTTP3_NO_ERROR,
+                (uint64_t)wt_http3_driver_last_error(&driver));
+
+  frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
+  frame.as.stream.id = 0U;
+  frame.as.stream.offset = 0U;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = k_partial;
+  frame.as.stream.length = sizeof(k_partial);
+  frame.as.stream.fin = 1;
+  WT_EXPECT_STATUS("a frame cut off by FIN is refused", WT_ERR_TRUNCATED,
+                   wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_U64("and the refusal names H3_FRAME_ERROR", (uint64_t)WT_HTTP3_FRAME_ERROR,
+                (uint64_t)wt_http3_driver_last_error(&driver));
+
+  /* A frame that is merely INCOMPLETE is not an error at all: more bytes are coming, and the driver waits. Its
+   * last error stays clear, so a connection is never closed over a frame that has not ended. */
+  frame.as.stream.fin = 0;
+  WT_EXPECT_OK("an incomplete frame is held rather than refused",
+               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_U64("with no error to report", (uint64_t)WT_HTTP3_NO_ERROR,
+                (uint64_t)wt_http3_driver_last_error(&driver));
+}
+
 int main(void) {
   test_the_streams_a_session_start_opens();
   test_a_data_stream_this_endpoint_opened();
   test_a_data_stream_the_peer_splits_across_frames();
+  test_a_frame_that_ends_at_fin_names_the_http3_error();
   WT_TEST_MAIN_END("wt_http3_driver_streams");
 }

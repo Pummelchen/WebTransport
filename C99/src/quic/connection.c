@@ -582,6 +582,15 @@ static wt_status_t close_with(wt_quic_connection_t *connection, uint64_t error_c
   return wt_quic_connection_close(connection, error_code, frame_type, NULL, 0U, now);
 }
 
+void wt_quic_connection_refuse_application(wt_quic_connection_t *connection, uint64_t error_code,
+                                           uint64_t frame_type) {
+  if (connection == NULL) return;
+  connection->close_code = error_code;
+  connection->close_frame_type = frame_type;
+  connection->close_code_set = 1;
+  connection->close_code_application = 1;
+}
+
 /* An acknowledgement. Everything this endpoint has in flight is checked against the frame's ranges --
  * the sent list is walked rather than the ranges, because a range is a peer's number and iterating one
  * would let a peer choose how much work this endpoint does. */
@@ -891,15 +900,23 @@ static wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_
   status = connection->handler(connection->handler_context, visit->space, frame);
   if (status == WT_OK) return WT_OK;
   {
+    int application = connection->close_code_set ? connection->close_code_application : 0;
     uint64_t code = connection->close_code_set ? connection->close_code : WT_QUIC_INTERNAL_ERROR;
     uint64_t type = connection->close_code_set ? connection->close_frame_type : 0U;
     connection->close_code_set = 0;
+    connection->close_code_application = 0;
     /* Kept, because the hint above is about to be cleared and "why did this endpoint close" is not answerable
      * from a cleared hint: a caller that asked got `WT_OK` and `close_code_set == 0`, which reads exactly like a
      * connection that never closed (WT-144). */
     connection->close_cause = status;
     connection->close_cause_frame = wire_type_of(frame->kind);
-    (void)close_with(connection, code, type, visit->now);
+    if (application != 0) {
+      /* An application close, so the peer is told the code this layer was refused WITH -- an HTTP/3 error code in
+       * the application's space -- rather than a transport code invented here (WT-158). */
+      (void)wt_quic_close_application(&connection->close, code, NULL, 0U, visit->now, pto_of(connection));
+    } else {
+      (void)close_with(connection, code, type, visit->now);
+    }
   }
   return status;
 }

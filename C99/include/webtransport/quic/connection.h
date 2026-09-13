@@ -261,6 +261,12 @@ typedef struct wt_quic_connection {
   uint64_t close_code;
   uint64_t close_frame_type;
   int close_code_set;
+  /* Whether that code is an APPLICATION error code rather than a transport one, which decides the kind of
+   * CONNECTION_CLOSE the peer is sent. RFC 9114 section 8 carries every HTTP/3 error in the application form
+   * (type 0x1d) with the HTTP/3 code, so a layer above whose refusal IS an HTTP/3 error says so here -- a handler
+   * that only returns a status would otherwise close the TRANSPORT with INTERNAL_ERROR, which names a different
+   * rule in a different frame (WT-158). */
+  int close_code_application;
   /* Why THIS endpoint closed, as the status of the handler that refused the frame. It is kept after the close
    * because `close_code` above is a HINT that is cleared once it has been used, so a caller reading it to ask
    * "what did we actually send" reads nothing -- which is how a tool reported a successful session after the
@@ -593,6 +599,12 @@ int wt_quic_connection_is_closed(const wt_quic_connection_t *connection);
  * it has been used (WT-144). The state is owned by the connection and the reason phrase is a view into the
  * caller's bytes, so it lives as long as whatever passed them to `wt_quic_connection_close`. */
 const wt_quic_close_state_t *wt_quic_connection_close_state(const wt_quic_connection_t *connection);
+
+/* Refuse with an APPLICATION error code, which is how an HTTP/3 error reaches the peer (RFC 9114 section 8).
+ * The hint is used by the next refusal, exactly as `close_code` is, and it decides the KIND of the close: the
+ * transport form names a frame type and the application form has none. */
+void wt_quic_connection_refuse_application(wt_quic_connection_t *connection, uint64_t error_code,
+                                           uint64_t frame_type);
 
 /* Tell a SERVER which connection ID the client used as the destination of its first Initial, so that the
  * packets which carry it are this connection's rather than another's. A client chooses that value arbitrarily

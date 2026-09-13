@@ -21,6 +21,11 @@ void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoi
    * Zeroing the struct makes a forgotten field impossible, and the one field that is not zero is named here. */
   memset(driver, 0, sizeof(*driver));
   driver->endpoint = endpoint;
+  /* Named rather than left zeroed, because "no error" is NOT zero in the HTTP/3 error space: WT_HTTP3_NO_ERROR is
+   * 0x100, so a zeroed field would read as a refusal with code 0 and the caller would report one. This is the same
+   * trap the connection-ID work hit from the other side -- a memset is right for everything whose zero is the
+   * default, and wrong for a value whose zero means something else (WT-158). */
+  driver->last_error = WT_HTTP3_NO_ERROR;
 }
 
 /* Remember a stream whose prefix is settled: this endpoint opened it, or the peer did and the prefix said
@@ -417,16 +422,32 @@ static int stream_is_ours(const wt_http3_endpoint_t *endpoint, uint64_t stream_i
   return endpoint->role == WT_HTTP3_ROLE_CLIENT ? from_client : !from_client;
 }
 
+static wt_status_t route_quic_frame(wt_http3_driver_t *driver, wt_quic_space_t space,
+                                    const wt_quic_frame_t *frame, const wt_http3_driver_sink_t *sink,
+                                    uint64_t max_frame_bytes, wt_http3_error_t *out_error);
+
 wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
                                           const wt_quic_frame_t *frame,
                                           const wt_http3_driver_sink_t *sink,
                                           uint64_t max_frame_bytes) {
   wt_http3_driver_t *driver = context;
-  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  if (driver == NULL || driver->endpoint == NULL || frame == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* Cleared first, so that the code below is this frame's refusal rather than an older one's: the caller reads it
+   * only when the status is a failure, and a stale code would name a rule the peer did not break. */
+  driver->last_error = WT_HTTP3_NO_ERROR;
+  return route_quic_frame(driver, space, frame, sink, max_frame_bytes, &driver->last_error);
+}
+
+/* The routing itself, with the HTTP/3 error code OUT so that the caller can record it: a refusal is reported to
+ * the connection with this code, and an HTTP/3 error is an APPLICATION close (RFC 9114 section 8), which is a
+ * different frame from the transport close a bare status would otherwise produce (WT-158). */
+static wt_status_t route_quic_frame(wt_http3_driver_t *driver, wt_quic_space_t space,
+                                    const wt_quic_frame_t *frame, const wt_http3_driver_sink_t *sink,
+                                    uint64_t max_frame_bytes, wt_http3_error_t *out_error) {
   wt_status_t status;
 
   (void)space;
-  if (driver == NULL || driver->endpoint == NULL || frame == NULL) return WT_ERR_INVALID_ARGUMENT;
 
   /* An if-chain rather than a switch, and the reason is the compiler: -Wswitch-enum requires
    * every enumerator of a switch to be named, and this handler deliberately acts on two of
@@ -568,12 +589,12 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
         }
 
         if (!tracked) {
-          status = wt_http3_endpoint_on_request_stream(driver->endpoint, stream_id, &error);
+          status = wt_http3_endpoint_on_request_stream(driver->endpoint, stream_id, out_error);
           if (status != WT_OK) return status;
         }
         return wt_http3_driver_on_stream_bytes(driver, stream_id, frame->as.stream.data,
                                                frame->as.stream.length, frame->as.stream.fin,
-                                               max_frame_bytes, sink, &error);
+                                               max_frame_bytes, sink, out_error);
       }
 
       /* A peer-initiated unidirectional stream: its type prefix first, then whichever of the
@@ -595,7 +616,7 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
           status = wt_http3_driver_on_uni_stream_data(driver, stream_id, frame->as.stream.offset,
                                                       frame->as.stream.data, frame->as.stream.length,
                                                       &kind, &payload, &payload_length, &consumed,
-                                                      &error);
+                                                      out_error);
           if (status != WT_OK) return status;
           if (kind == WT_HTTP3_ENDPOINT_STREAM_UNKNOWN) {
             /* The prefix is still not complete: the bytes are held, and nothing is routed. */
@@ -616,7 +637,7 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
           /* A stream type this build does not know: section 6.2.1 says stop reading it, so its
            * bytes are dropped and its end is still reported to the endpoint. */
           if (frame->as.stream.fin != 0) {
-            return wt_http3_driver_on_uni_stream_end(driver, stream_id, &error);
+            return wt_http3_driver_on_uni_stream_end(driver, stream_id, out_error);
           }
           return WT_OK;
         }
@@ -626,11 +647,11 @@ wt_status_t wt_http3_driver_on_quic_frame(void *context, wt_quic_space_t space,
         if (payload_length > 0U || frame->as.stream.fin != 0) {
           status = wt_http3_driver_on_stream_bytes(driver, stream_id, payload, payload_length,
                                                    frame->as.stream.fin, max_frame_bytes, sink,
-                                                   &error);
+                                                   out_error);
           if (status != WT_OK) return status;
         }
         if (frame->as.stream.fin != 0) {
-          return wt_http3_driver_on_uni_stream_end(driver, stream_id, &error);
+          return wt_http3_driver_on_uni_stream_end(driver, stream_id, out_error);
         }
         return WT_OK;
       }
@@ -787,6 +808,11 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
   if (status != WT_OK) return status;
   if (out_stream_id != NULL) *out_stream_id = stream_id;
   return WT_OK;
+}
+
+wt_http3_error_t wt_http3_driver_last_error(const wt_http3_driver_t *driver) {
+  if (driver == NULL) return WT_HTTP3_NO_ERROR;
+  return driver->last_error;
 }
 
 int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id) {
