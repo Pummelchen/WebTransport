@@ -132,7 +132,15 @@ wt_status_t wt_runtime_session_set_frame_handler(wt_runtime_session_t *session,
  * round completed, whatever it contained. */
 wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now);
 
-/* Whether the handshake is confirmed, and why it failed if it did. */
+/* Whether the handshake is DONE -- the two ends have exchanged their Finished messages and this endpoint holds
+ * 1-RTT keys -- and whether it is CONFIRMED, with why it failed if it did.
+ *
+ * They are not the same state, and conflating them cost the interop round several measurements: a QUIC client
+ * may send 1-RTT data as soon as its handshake is DONE, while CONFIRMATION is the server's HANDSHAKE_DONE and
+ * matters for discarding the Handshake keys (RFC 9000 section 7). A caller that waits for confirmation before
+ * speaking can stall a session that is entirely able to proceed, which is exactly what happened against a
+ * third-party peer (WT-142). */
+int wt_runtime_session_handshake_done(const wt_runtime_session_t *session);
 int wt_runtime_session_established(const wt_runtime_session_t *session);
 wt_status_t wt_runtime_session_failure(const wt_runtime_session_t *session);
 

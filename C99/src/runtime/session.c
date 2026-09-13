@@ -205,6 +205,14 @@ wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now)
   return WT_OK;
 }
 
+int wt_runtime_session_handshake_done(const wt_runtime_session_t *session) {
+  if (session == NULL) return 0;
+  /* The handshake's own CONNECTED state: both Finished messages are in, and 1-RTT keys are installed. A client
+   * may send 1-RTT data from here; CONFIRMED (below) is the server's HANDSHAKE_DONE and matters for discarding
+   * the Handshake keys (RFC 9000 section 7). */
+  return wt_quic_handshake_is_connected(&session->handshake);
+}
+
 int wt_runtime_session_established(const wt_runtime_session_t *session) {
   if (session == NULL || session->started == 0) return 0;
   return session->handshake.confirmed;

@@ -342,6 +342,11 @@ static void test_a_handshake_completes_over_loopback(void) {
   WT_EXPECT_STATUS("nor the server's", WT_OK, wt_runtime_session_failure(&pair.server));
   WT_EXPECT_INT("the client's handshake is confirmed", 1,
                 wt_runtime_session_established(&pair.client));
+  /* DONE and CONFIRMED are separate states (WT-142). This pair reaches both -- the server sends the
+   * HANDSHAKE_DONE that confirms the client -- and the accessor exists so a caller can tell which it has: a
+   * client may speak once its handshake is DONE, and waiting for CONFIRMED is what stalled the interop run. */
+  WT_EXPECT_INT("the client's handshake is DONE", 1, wt_runtime_session_handshake_done(&pair.client));
+  WT_EXPECT_INT("and so is the server's", 1, wt_runtime_session_handshake_done(&pair.server));
   WT_EXPECT_INT("and the server's too", 1, wt_runtime_session_established(&pair.server));
   WT_EXPECT_INT("with application keys on the client", 1,
                 wt_runtime_session_keys_ready(&pair.client));
