@@ -232,6 +232,26 @@ wt_status_t wt_runtime_session_failure(const wt_runtime_session_t *session);
  * before then, which is the difference between "not yet" and "never". */
 int wt_runtime_session_keys_ready(const wt_runtime_session_t *session);
 
+/* Release what the session holds and leave it ready to be STARTED again.
+ *
+ * THIS IS THE SHUTDOWN PATH, so what it does and does not do matters as much as the release itself:
+ *
+ *   - It zeroes the traffic keys and the handshake secrets (`wt_quic_connection_clear`,
+ *     `wt_quic_handshake_clear`), forgets the peer, drops both handlers and marks the session not started. The
+ *     first thing a key-holding structure must do when a connection ends is forget its keys, and the two clears
+ *     are what do it -- the same two a connection calls when a peer closes.
+ *   - It does NOT close the socket, which the caller owns and may be sharing with other connections (the header
+ *     of `quic/connection.h` states the rule for the layer below), and it does NOT tell the peer anything: a
+ *     caller that wants the peer told calls `wt_quic_connection_close` and pumps the flush BEFORE clearing, or
+ *     the peer learns of the end by timing out -- which is the difference between a shutdown and a drop.
+ *   - It is IDEMPOTENT, and safe on a session that was never started (a zeroed struct): a signal handler or a
+ *     deployment script routinely runs the shutdown path twice, and a second call that freed a pointer again
+ *     would turn the safety net into the crash. The tests drive it twice, on a live session, on a session that
+ *     never started, and in the middle of a handshake.
+ *   - The session may be STARTED AGAIN afterwards on the same struct: every start zeroes it before it configures
+ *     anything, which is why a caller reusing one does not have to clear it between tries. The SOCKET is the
+ *     caller's business either way -- a socket that still holds datagrams from the abandoned attempt hands them
+ *     to the next session, so a caller that restarts on the same socket drains it first or accepts that. */
 void wt_runtime_session_clear(wt_runtime_session_t *session);
 
 #ifdef __cplusplus

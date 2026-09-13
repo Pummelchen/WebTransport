@@ -37,7 +37,7 @@ sessions**: the conformance tool stands up both endpoints in one process over IP
 `C99/scripts/run-container-interop.sh` completes a whole session **and the message exchange** against
 an independent implementation (`pywebtransport`/`aioquic`) in a container -- the peer logs
 `stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. 82 test programs
-and 82,350 checks pass (plus a 200,000-input parser fuzz run and a Clang Static Analyzer pass over all 92 sources), and every suite runs again under AddressSanitizer and
+and 82,490 checks pass (plus a 200,000-input parser fuzz run and a Clang Static Analyzer pass over all 92 sources), and every suite runs again under AddressSanitizer and
 UndefinedBehaviorSanitizer, on macOS and Linux in CI. Of the plan's nine completion criteria 7 are met
 and 2 partial (the FreeBSD/Windows CI legs, and the interop matrix, which is end to end in both
 directions with `pywebtransport`/`aioquic` and, in the client direction, with `quinn` and `quiche` as

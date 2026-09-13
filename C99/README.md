@@ -46,7 +46,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 82 test programs and 82,350 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
+- 82 test programs and 82,490 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
@@ -614,6 +614,17 @@ What is here:
   kept pumping until `--timeout-ms` after the transport was already closed, reporting `timeout` for a refusal that
   had already arrived; every wait now stops when the connection closes and names what happened
   (`protocol`, or `closed` for a peer that ended it).
+- **Shutdown and cancellation are safe at every point** (WT-178): the Swift suite tests its server's shutdown path
+  from the operator's point of view -- refuse at once, return promptly with nothing served, survive being run
+  twice -- and those assertions are about a server object this tree does not have. What they are about
+  BEHAVIOURALLY is the release path every layer has, and `wt_runtime_session_clear` now states its contract in the
+  header and is tested against it: it zeroes the traffic keys and handshake secrets, drops both handlers, does
+  **not** close the caller's socket and does **not** tell the peer (the difference between a shutdown and a drop),
+  is **idempotent**, is safe on a session that never started, and leaves the struct ready to **start again** --
+  every start clears it first, which is what makes a retry loop possible. Four tests drive it: twice on a live
+  session and again on the same struct with a second handshake, on a zeroed struct, in the MIDDLE of a handshake,
+  and with the PEER closing while this endpoint waits -- which must be seen without waiting out the clock (the
+  WT-147 fix as an assertion).
 - **Static analysis, run over every source** (WT-176): the Definition of Done's "sanitizers and static checks are
   clean" criterion was carried by warnings-as-errors, and the plan's Phase 13 asks for static analysis by name.
   `scripts/check-static-analysis.sh` runs the **Clang Static Analyzer** (`clang --analyze`) over all **92 sources**
