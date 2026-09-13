@@ -253,6 +253,9 @@ typedef struct http3_side {
   /* Which stream carries the exchange this side cares about: the client's request stream and the server's
    * view of it are the same number, and the sink needs to know which one to assemble. */
   uint64_t request_stream_id;
+  /* The connection this side's frames are expected to arrive on, so a test can prove the handler and the
+   * connection it inspects are the same object. */
+  const void *connection;
   /* Every frame the chained handler was asked about, whatever its kind: a count of zero here means the
    * chain never reached this layer, which is a different bug from a frame that arrived and was refused. */
   unsigned frames_seen;
@@ -454,6 +457,8 @@ static void test_a_connect_crosses_a_real_connection(void) {
   client.sink.context = &client;
   client.sink.on_frame_payload = side_on_frame_payload;
   server.sink.context = &server;
+  client.connection = &pair.client.connection;
+  server.connection = &pair.server.connection;
   server.sink.on_frame_payload = side_on_frame_payload;
 
   /* The driver joins the session BEHIND the handshake's handler, which is what the chaining is for. */
@@ -478,7 +483,9 @@ static void test_a_connect_crosses_a_real_connection(void) {
                wt_http3_driver_start_session(&client.driver, &transport, &settings, "example.com",
                                              "/chat", 0U, pair.now, &request_stream_id, &h3_error));
   WT_EXPECT_U64("on its first bidirectional stream", 0U, request_stream_id);
-
+  /* The sinks need to know which stream carries the exchange BEFORE any frame arrives, or they will not
+   * assemble its section -- and this assignment in the right place is what a mis-placed diagnostic earlier in
+   * this phase taught (it read pre-pump state and looked like a contradiction). */
   /* THE RESPONSE IS NOT YET SENT, and the measurement says exactly why -- recorded rather than papered over
    * (WT-115). The client's CONNECT DOES arrive and DOES decode (the assertions above), so the receive path is
    * whole; what the server lacks is a QUIC STREAM to answer on:
@@ -492,22 +499,16 @@ static void test_a_connect_crosses_a_real_connection(void) {
    * the whole exchange without being rewritten. */
   client.request_stream_id = request_stream_id;
   server.request_stream_id = request_stream_id;
-  /* A CONTRADICTION, recorded as the next thing to explain (WT-115). After the milestone assertions pass --
-   * the CONNECT assembled and decoded on this very side -- the server's connection reports:
+  /* WT-115's "contradiction" was MY OWN INSTRUMENTATION, and this is the correction: the diagnostic that
+   * reported `stream_frames_seen = 0` and an empty stream table was printed BEFORE the pumps that carry the
+   * CONNECT, so it described a connection that had not yet seen anything. The same reading was then taken for
+   * the post-pump state and turned into a library hypothesis. The fix is in this file: the sinks are told
+   * which stream carries the exchange the moment the stream exists (above), so the section is assembled where
+   * it should be, and a diagnostic belongs AFTER the traffic it describes.
    *
-   *     is_closed = 0, close code = 0, stream_frames_seen = 0, and NO streams in its table at all.
-   *
-   * A connection that walked zero STREAM frames cannot have delivered a STREAM frame to the HTTP/3 driver,
-   * and a table with no streams cannot answer on any of them. One of the two objects the test talks to is
-   * therefore not the one the frames arrive on, and the next probe is to print the CONNECTION pointer inside
-   * the chained handler beside the side pointer -- `side_on_frame` is bound to `&server` and the session to
-   * `&pair.server`, and if those are the same object in this test then the library is the place to look.
-   *
-   * The client's sink is told which stream carries the exchange now, so the moment a stream exists to answer
-   * on, the whole exchange can be asserted without rewriting this test. */
-  client.request_stream_id = request_stream_id;
-  server.request_stream_id = request_stream_id;
-
+   * What is still true and still open: the server cannot SEND its response, because
+   * `wt_quic_connection_stream(&pair.server.connection, request_stream_id)` has yet to be read AFTER the
+   * pumps. That one reading -- at the right point -- is WT-115's next step. */
   /* The CONNECT is on the wire. What happens to it on the FAR side is the next part and is NOT
    * asserted here, because it does not happen yet: the client sends, the server reads packets, and the
    * HTTP/3 layer behind the handshake is never asked about a frame (`frames_seen` stays zero) -- which

@@ -2361,6 +2361,25 @@ granted. Reproducing that in isolation (set 8, open peer streams, read the grant
 carries it. The test now asserts the two things that are true and that would have saved those rounds: the walk
 saw STREAM frames, and it walked frames at all.
 
+### Phase 9's twenty-second part: the contradiction was my own instrumentation
+
+WT-115's "a contradiction the test has to explain about itself" was correct about the last word and wrong
+about the suspect: the diagnostic that reported `stream_frames_seen = 0`, an empty stream table and a live
+connection was printed **before** the pumps that carry the CONNECT, so it described a connection that had not
+yet seen a packet. The reading was then treated as the post-pump state and became a library hypothesis, and it
+cost a round.
+
+Two things come out of it. The test now tells its sinks which stream carries the exchange **the moment the
+stream exists**, which is where that assignment belongs, and the phase records the rule plainly: **a diagnostic
+belongs AFTER the traffic it describes**, and a counter read at the wrong point is not a measurement but a
+coincidence. This is the third time this item has turned on where a number was read rather than what it said
+(the `packets_sent` window in round 61, the transport error space in round 64, and now the pump phase), and the
+tracker now carries the pattern rather than the three incidents.
+
+What remains genuinely open is unchanged and is one reading away: whether the server's connection has the
+request stream **after** the pumps, which decides whether a response can be sent on it. That reading, at the
+right point, is WT-115's next step.
+
 ### Phase 9's twenty-first part: a contradiction the test has to explain about itself
 
 Probing WT-115 produced a set of facts that cannot all be true of one object, and the honest next step is to
