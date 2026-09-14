@@ -34,8 +34,20 @@
 extern "C" {
 #endif
 
-/* The `:protocol` value that makes a CONNECT a WebTransport request (section 3.1). */
+/* The `:protocol` value that makes a CONNECT a WebTransport request (draft-16 section 3.2). */
 #define WT_WEBTRANSPORT_PROTOCOL_TOKEN "webtransport"
+
+/* The PRE-DRAFT token draft-16 renamed away from. This endpoint ACCEPTS it as well as the draft-16 one, and that
+ * acceptance is not a courtesy: four of the five independent implementations this tree interoperates with were
+ * written against the earlier drafts, and a server that refused the old token would refuse every one of them --
+ * the same split the Swift reference calls its interoperable mode. SENDING the draft-16 token by default is
+ * `WT-215`, which is a separate decision with its own evidence to reproduce (see the tracker). */
+#define WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY "webtransport"
+
+/* Where a CLIENT offers its sub-protocols (draft-16 section 3.3). `wt-protocol` -- the name in protocol.h -- is
+ * the RESPONSE field that names the one the server selected (section 9.7); the pre-draft shape used `wt-protocol`
+ * for both, which is why this constant exists next to the parser that only knows the value. */
+#define WT_WEBTRANSPORT_AVAILABLE_PROTOCOLS_HEADER "wt-available-protocols"
 
 /* The draft-16 setting a server advertises to say it can serve WebTransport at all. */
 #define WT_HTTP3_SETTING_WT_ENABLED ((uint64_t)0x2c7cf000)

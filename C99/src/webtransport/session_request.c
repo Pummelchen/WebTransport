@@ -100,8 +100,13 @@ wt_status_t wt_webtransport_session_request_validate(
 
   /* A CONNECT with no :protocol is RFC 9114's plain CONNECT -- a tunnel, not a
    * session -- and a :protocol naming something else belongs to whoever defined it. */
+  /* BOTH tokens name a WebTransport request. Draft-16 section 3.2 defines `webtransport-h3` and the drafts before
+   * it used `webtransport`; refusing either one makes this server unreachable from a conforming peer of the other
+   * era -- the Swift implementation and the browsers send the draft-16 token, and four of this tree's five
+   * interop peers send the older one. Accepting both is what "interoperable" has to mean at a server. */
   if (message->protocol_length == 0U ||
-      !token_is(message->protocol, message->protocol_length, WT_WEBTRANSPORT_PROTOCOL_TOKEN)) {
+      !(token_is(message->protocol, message->protocol_length, WT_WEBTRANSPORT_PROTOCOL_TOKEN) ||
+        token_is(message->protocol, message->protocol_length, WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY))) {
     out->outcome = WT_WEBTRANSPORT_REQUEST_NOT_WEBTRANSPORT;
     return WT_OK;
   }

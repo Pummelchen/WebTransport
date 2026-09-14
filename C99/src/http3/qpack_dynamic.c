@@ -68,6 +68,11 @@ wt_status_t wt_qpack_dynamic_insert(wt_qpack_dynamic_table_t *table, const uint8
                                     uint64_t *out_absolute_index) {
   size_t entry_size;
   size_t needed;
+  /* Declared HERE, in the function's outermost block, so that its lifetime covers the copies below: the first
+   * version declared it inside the `if` that tests for aliasing, so `name`/`value` pointed at an array whose
+   * scope had ended by the time they were read -- which is UB, and which ASan reported as
+   * `stack-use-after-scope` in the memcpy. The CI sanitizer leg found it, which is what that leg is for. */
+  uint8_t staged[WT_QPACK_DYNAMIC_MAX_BYTES];
 
   if (table == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (name == NULL && name_length != 0U) return WT_ERR_INVALID_ARGUMENT;
@@ -94,10 +99,8 @@ wt_status_t wt_qpack_dynamic_insert(wt_qpack_dynamic_table_t *table, const uint8
    * A view that points into the arena is therefore STAGED first. The buffer is the arena's own size and `needed`
    * is already bounded by it (the check above), so staging can never truncate what the caller named. */
   if (aliases_arena(table, name, name_length) || aliases_arena(table, value, value_length)) {
-    /* On the STACK rather than `static`: a file-scope staging buffer would make this function share state
-     * between two handles on two threads, which the library's contract does not allow and does not need to. Four
-     * kilobytes beside a table the same size is the honest price of a correct copy. */
-    uint8_t staged[WT_QPACK_DYNAMIC_MAX_BYTES];
+    /* On the STACK rather than `static` (a file-scope buffer would make two handles on two threads share it),
+     * and declared with the function's other locals, above. */
     if (name_length != 0U) memcpy(staged, name, name_length);
     if (value_length != 0U) memcpy(staged + name_length, value, value_length);
     name = staged;

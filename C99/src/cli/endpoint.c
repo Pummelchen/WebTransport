@@ -16,11 +16,12 @@ wt_status_t wt_cli_endpoint_open(wt_cli_endpoint_t *endpoint, const char *host_p
   wt_status_t status;
 
   if (endpoint == NULL || host_port == NULL) return WT_ERR_INVALID_ARGUMENT;
-  /* CLOSED first if it was already open: the memset below used to clear `open` and the descriptor along with
-   * everything else, so a second `wt_cli_endpoint_open` on the same struct leaked the first socket -- the header
-   * names no precondition, and "open twice" is what a caller that reuses a configuration does. `close` is
-   * idempotent and safe on a zeroed struct. */
-  wt_cli_endpoint_close(endpoint);
+  /* The struct is ZEROED here and NOT closed first. Closing first was the obvious fix for the leak a second open
+   * causes, and it is wrong: a caller that declares `wt_cli_endpoint_t endpoint;` and calls open has an
+   * uninitialised struct, and `close` would then read a garbage `open` and a garbage descriptor -- on Wine it
+   * closed a socket this function had not opened, and the test that opens a second listener on the same port
+   * stopped seeing the refusal. The precondition is stated in the header instead: zero the struct, or close it,
+   * before the first open. */
   memset(endpoint, 0, sizeof(*endpoint));
   endpoint->socket.fd = WT_UDP_INVALID_FD;
 

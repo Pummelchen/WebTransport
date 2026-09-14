@@ -34,12 +34,16 @@ typedef struct wt_cli_endpoint {
 } wt_cli_endpoint_t;
 
 /* Open the socket for `host_port` and, for a listener, bind it. A client parses and does not bind:
- * its local port is the system's business. `host_port` may be `host:port`, `[v6]:port`, or a bare
- * `host:port` or `[v6]:port` -- a wildcard is spelled `0.0.0.0:port` or `[::]:port` rather than a bare `:port`,
- * because the address parser refuses an empty host, and this comment claimed otherwise. Port 0 asks the system to
- * choose one, which is what a test
- * wants. Returns the runtime's own statuses unchanged -- a bind that is refused is refused
- * because the system refused it, and translating that would hide the reason. */
+ * its local port is the system's business. `host_port` may be `host:port` or `[v6]:port` -- a wildcard is spelled
+ * `0.0.0.0:port` or `[::]:port` rather than a bare `:port`, because the address parser refuses an empty host, and
+ * an earlier version of this comment claimed otherwise. Port 0 asks the system to choose one, which is what a
+ * test wants. Returns the runtime's own statuses unchanged -- a bind that is refused is refused because the
+ * system refused it, and translating that would hide the reason.
+ *
+ * The struct must be ZERO-INITIALISED (or closed) before the first call: `wt_cli_endpoint_open` clears it and
+ * does not close what was there, because it cannot tell a caller's uninitialised bytes from a live socket --
+ * closing those is how a library closes a descriptor it never opened. Opening an endpoint that is already open
+ * therefore leaks its socket; call `wt_cli_endpoint_close` first. */
 wt_status_t wt_cli_endpoint_open(wt_cli_endpoint_t *endpoint, const char *host_port, int listen);
 
 void wt_cli_endpoint_close(wt_cli_endpoint_t *endpoint);
