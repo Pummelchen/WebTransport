@@ -70,6 +70,18 @@ What is here:
   deadline arithmetic does not wrap near the counter's top. Note that Darwin has
   no LeakSanitizer, so a leak in the tests is found by the Linux CI leg and not by
   a local run on this machine; that is how the first one was found.
+- **Three adversarial audits, and the fix round they produced.** The QUIC/HTTP-3/QPACK and WebTransport
+  layers, the TLS 1.3 and cryptography, and the public API, runtime and portability layers were each read by an
+  independent adversarial pass that had to PROVE what it reported -- harnesses linked against this tree,
+  sanitizer runs, minimal reproductions. Everything confirmed is fixed and has a regression test, a corrected
+  fixture or a measurement behind it: an out-of-bounds array write in the HTTP/3 push path, QPACK reading the
+  bytes that eviction had just moved over, a peer's unidirectional stream naming another session, an inverted
+  reading of RFC 9114's two reserved-value families, quadratic ACK parsing, an overlapping `memcpy` in the
+  message send path, a `Retry` decoder that underflowed a length, peer transport parameters dropped in
+  silence, a Winsock reference count that could never reach its decrement, and a write through a handle a
+  callback had released. Findings that did NOT survive checking are recorded with the reason they were
+  rejected, in the same commit as the fixes (`WT-202` to `WT-214`): an audit is evidence rather than
+  authority, and a defect report nobody verifies is half of one.
 - **The command-line tools' options** (Phase 9): `cli/options.h` is the one parser the
   three tools share, because a flag that means one thing in one tool and another in the
   next is worse than a flag that is missing. Two rules shape it: an UNSUPPORTED mode is

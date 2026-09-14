@@ -22,7 +22,7 @@ Windows is the real work. Every item below is a place where the current code ass
 | Readiness | `poll` | `WSAPoll` (same shape, `pollfd` spelled the same way) |
 | Errors | `errno` | `WSAGetLastError`, and the socket error numbers are a different set |
 | Scatter/gather | `struct iovec`, `recvmsg`/`sendmsg` | `WSABUF`, and `WSARecvMsg` for a receive that carries the sender, the datagram's own length and its truncation, reached through `WSAIoctl(SIO_GET_EXTENSION_FUNCTION_POINTER, WSAID_WSARECVMSG)` |
-| `MSG_PEEK`/`MSG_TRUNC` | `wt_udp_peek` | `MSG_PEEK` exists and travels in `WSAMSG.dwFlags` (the input flag of `WSARecvMsg`, whose prototype is five parameters); a datagram larger than the buffer comes back as the ERROR `WSAEMSGSIZE` with the sender filled, and there is no way to ask for the datagram's own length past the caller's buffer, so the peek needs the receive-then-hold shape instead (the runtime session already has the pending table an implementation would need) |
+| `MSG_PEEK`/`MSG_TRUNC` | `wt_udp_peek` | `MSG_PEEK` exists and travels in `WSAMSG.dwFlags` (the input flag of `WSARecvMsg`, whose prototype is five parameters); a datagram larger than the buffer comes back as the ERROR `WSAEMSGSIZE` with the sender filled, and there is no way to ask for the datagram's own length past the caller's buffer, so the peek needs the receive-then-hold shape instead (the runtime session already has the pending table an implementation would need). **This is not a Windows-only difference**, which is worth saying because this document said it was: `MSG_TRUNC` as an INPUT flag is Linux-specific, so macOS and the BSDs also report the copied count rather than the datagram's own length. `webtransport/runtime/udp.h` states the contract per platform and the POSIX suite asserts the invariants that hold on all of them |
 | Sending and receiving | `sendto`/`recvfrom` in the datagram paths | `WSASendTo` for the send, `WSARecvMsg` for the receive, and `recvfrom` as the fallback for a provider whose `WSARecvMsg` is unusable -- it reports the sender and the truncation correctly, and cannot see past the buffer on a peek |
 | `snprintf` | several | present in MSVC 2015 and later |
 | OpenSSL | `tls/`, `crypto/` | a Windows build of OpenSSL 3, and a decision about which one (vcpkg, the OpenSSL installers, or a vendored build) |
@@ -43,6 +43,11 @@ Windows is the real work. Every item below is a place where the current code ass
    sockets, so the last close is what releases Winsock and a failed open releases it too. The POSIX side has
    the same two calls as no-ops. The public handle is `intptr_t` (`WT_UDP_INVALID_FD` is `(intptr_t)-1`, which
    is both POSIX's `-1` and Windows' `INVALID_SOCKET`) because a `SOCKET` is pointer-sized.
+   **And that paragraph was fiction for a round**: the count was declared `static` inside EACH function, which
+   is two objects, so `release` decremented its own zero and returned early and `WSACleanup` was unreachable
+   while `acquire`'s count grew forever. An adversarial audit found it by replicating the two bodies. The count
+   is at file scope now, and the fix is a reminder that "the last close releases Winsock" is a claim about a
+   VARIABLE, not about a design.
 3. The `wt_udp_peek` difference, which is behavioural rather than syntactic and is now named in the header
    rather than discovered: on Windows a peek cannot see past the caller's buffer, so the `FULL_LENGTH` flag
    cannot be honoured there and a listener must hold the datagram it looked at. The runtime session's pending

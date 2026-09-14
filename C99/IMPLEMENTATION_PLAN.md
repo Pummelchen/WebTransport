@@ -3000,7 +3000,17 @@ The bug the previous round's scenario found is fixed, in the single pass its own
 places that had to move together:
 
 1. **the parser** (`wt_http3_settings_parse`) refuses a reserved identifier (`wt_http3_setting_is_exerciser`,
-   `0x1f * N + 0x21`) with `H3_SETTINGS_ERROR`, which is what RFC 9114 section 7.2.4.1 requires;
+   `0x1f * N + 0x21`) with `H3_SETTINGS_ERROR` -- **AND THAT SENTENCE WAS WRONG**, which an adversarial audit
+   found and this note records rather than deletes, because the way it was wrong is the lesson. RFC 9114
+   section 7.2.4.1 has TWO reserved families one sentence apart: the HTTP/2-derived identifiers `0x02`..`0x05`
+   MUST be H3_SETTINGS_ERROR, and `0x1f * N + 0x21` are "reserved to exercise the requirement that unknown
+   identifiers be ignored ... Endpoints SHOULD include at least one such setting ... Endpoints MUST NOT consider
+   such settings to have any meaning upon receipt". The round that wrote this reversed them, corrected a fixture
+   that had used an exerciser as its example of a legal unknown setting, and added a conformance scenario
+   asserting the reversed rule -- so the code, the test and this document agreed with each other and disagreed
+   with the RFC. The parser ignores exercisers again, the scenario asserts BOTH rules, and the frame-type
+   predicate next door had the same inversion (it reserved the exercise types and accepted PRIORITY, PING,
+   WINDOW_UPDATE and CONTINUATION);
 2. **the setter** refuses it too (`WT_ERR_INVALID_ARGUMENT`), for the reason the HTTP/2 set is already refused
    there: refusing at the setter keeps the encoder from producing a frame the parser would refuse;
 3. **the predicate's comment** no longer claims the opposite of the section;

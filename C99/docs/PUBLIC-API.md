@@ -246,6 +246,25 @@ load code, and the session is left as it was.
 Every one of these is this endpoint's bound. A refusal says which bound was reached and
 never blames the peer for it.
 
+## Threading
+
+**There is no lock, no atomic and no thread-local storage anywhere in this library**, and that is a contract
+rather than an omission: the table below is what a caller may rely on, and it is written from an inventory of
+every piece of shared state rather than from intent. An adversarial audit produced that inventory by walking the
+tree for statics, globals and lazily-initialised tables; the ones it found are named here so that a caller does
+not have to guess.
+
+| What | Safe? |
+| --- | --- |
+| One handle (`wt_session_t`, `wt_runtime_session_t`, `wt_udp_socket_t`, `wt_buf_t`, `wt_cli_*`) used from two threads | **No pair of calls is safe.** Every entry point is a read-modify-write on a plain struct -- `wt_session_create`/`destroy`, `established`, `on_capsule`, `on_stream_*`, `on_datagram`, `set_callbacks`, `flow_*`, `write_drain`/`write_close`, `wt_udp_*`, `wt_buf_*` -- and the accessors race with any writer on the same handle (`wt_session_state`, `last_error`, `stream_count`, `flow_snapshot`, ...). One thread per handle at a time |
+| Distinct handles on POSIX | Safe. The library has no process-wide mutable state, `malloc`, OpenSSL's RAND and `clock_gettime` are thread-safe, and a handle created with a caller's allocator inherits that allocator's thread-safety |
+| Distinct handles on Windows | **Not safe**, because of process-wide state in the platform layer: the Winsock reference count and the latched `WSARecvMsg` provider state in `src/runtime/udp_platform.h` are written by every open and every receive, and `src/core/time.c` caches the performance-counter frequency on first use. A caller that wants concurrent sessions on Windows must serialise the socket layer or use one thread |
+| Callbacks | Run synchronously on the caller's thread, inside the call the caller made. A callback must NOT call back into the session -- including `wt_session_destroy` and `wt_session_set_callbacks`: the library settles its own state before a callback runs and writes nothing after it, but the driver that invoked the feed function still owns the handle when the callback returns. Record the decision and act on it after the driver returns. See `webtransport/api/events.h` |
+| `wt_udp_socket_t.fd` | Public on purpose, so a caller can put it in its own poll set. Its concurrent use is the caller's own synchronisation |
+| Diagnostic logging | Ungated writes to the file named by `WT_HTTP3_*_LOG`-style variables, from whichever thread calls the library. Concurrent logging interleaves; `getenv` concurrent with `setenv` is undefined |
+
+Nothing else in the library is shared: a handle is the unit of both ownership and synchronisation.
+
 ## What is not here yet
 
 - **Blocking helpers.** The plan allows optional blocking wrappers for the CLI tools and
