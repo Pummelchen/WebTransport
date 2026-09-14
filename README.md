@@ -31,7 +31,8 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
 The Swift conformance matrix passes in full. The C99 implementation is **Phases 0
-to 9 complete, with Phase 10 (the test port) under way**: it builds with CMake as a static and shared
+to 9 complete and Phase 11 (the interop matrix) complete, with Phase 10's test port and Phase 12's CI
+legs under way**: it builds with CMake as a static and shared
 library with three CLI tools and carries the whole stack -- the core utilities, a QUIC wire core and
 crypto layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake
 that runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
@@ -40,13 +41,19 @@ sessions**: the conformance tool stands up both endpoints in one process over IP
 `wt-client-c99` and `wt-server-c99` exchange a session in two processes, and
 `C99/scripts/run-container-interop.sh` completes a whole session **and the message exchange** against
 an independent implementation (`pywebtransport`/`aioquic`) in a container -- the peer logs
-`stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. 84 test programs
-and 91,552 checks pass (plus a 200,000-input parser fuzz run and a Clang Static Analyzer pass over all 94 sources), and every suite runs again under AddressSanitizer and
-UndefinedBehaviorSanitizer, on macOS and Linux in CI. Of the plan's nine completion criteria 7 are met
-and 2 partial (the FreeBSD/Windows CI legs, and the interop matrix, which is end to end in both
-directions with `pywebtransport`/`aioquic` and, in the client direction, with `quinn` and `quiche` as
-well — `quiche` was the last, and what it needed was an answer to the Retry its server sends). All 34 of the draft-16
-compliance-matrix rows are exercised by a test. See
+`stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. Outside a
+container, `C99/scripts/run-vps-third-party-interop.sh` completes all seven Phase 11 proofs against
+**five independent implementations** on a routable host with `--trust system`, so the certificate
+chain is validated against the platform trust store and the name is checked rather than bypassed.
+84 test programs and 91,552 checks pass (plus a 200,000-input parser fuzz run and a Clang Static
+Analyzer pass over all 94 sources), and every suite runs again under AddressSanitizer and
+UndefinedBehaviorSanitizer, on macOS and Linux in CI: **97 CTest tests pass on macOS 26 and
+Debian 13**. The tree also compiles, links and **runs** on two platforms GitHub provides no runner
+for -- Windows (85 of 85 test executables under Wine, including a Windows-only test of the datagram
+layer) and FreeBSD 15.1 (the whole suite on a real kernel) -- and running the Windows branch is what
+found and fixed `WT-199` and `WT-200`. Of the plan's nine completion criteria **8 are met and 1 is
+partial** (the CI *job* for the Windows and FreeBSD legs, not the code on them). All 34 of the
+draft-16 compliance-matrix rows are exercised by a test. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).
 
