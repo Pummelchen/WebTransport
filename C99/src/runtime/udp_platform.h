@@ -5,9 +5,10 @@
  * invalid handle, and the datagram calls themselves. The inventory of everything a port needs is `docs/PORTABILITY.md`, and
  * `scripts/check-portability.sh` keeps that document complete.
  *
- * The POSIX side is what this project builds and tests today. The `_WIN32` side is written from the inventory
- * and is NOT verified -- nothing in this repository runs it yet -- so it is marked as such rather than presented
- * as working: a port that claims to be done before it has been built once is the failure this project refuses.
+ * The POSIX side is what this project builds and tests today. The `_WIN32` side is compiled by the cross-compile
+ * in CI and is now RUN: `scripts/check-windows-wine.sh` executes the linked test binaries under Wine, which is
+ * how `WT-199` and `WT-200` were found. It is still not verified on Windows ITSELF -- Wine is a faithful Win32
+ * implementation, not Windows -- so what Wine does not settle is recorded rather than claimed.
  */
 
 #ifndef WEBTRANSPORT_RUNTIME_UDP_PLATFORM_H
@@ -17,11 +18,14 @@
 
 #if defined(_WIN32)
 
-/* Not verified by a RUN, but compiled by `scripts/check-windows-platform.sh` and by the cross-compile of
- * `src/runtime/udp.c` that the same compiler makes possible. */
+/* Compiled by `scripts/check-windows-platform.sh`, and RUN by `scripts/check-windows-wine.sh`. */
 #include <string.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+/* `WSARecvMsg`, its `LPFN_WSARECVMSG` prototype, and the GUID that reaches it: the Windows recvmsg, and the
+ * only call that answers the sender, the datagram's own length and its truncation flag at once. The protection
+ * that stopped a header being written by hand here is `WT-199` -- see the receive function below. */
+#include <mswsock.h>
 
 typedef SOCKET wt_udp_handle_t;
 /* Windows' socket calls take an `int` length, not a `socklen_t`: naming it here is the whole difference. */
@@ -132,18 +136,153 @@ static int wt_udp_platform_send_message(wt_udp_handle_t handle, const struct soc
   return 0;
 }
 
+/* `WSARecvMsg` is the Windows `recvmsg`, and it is the only call that answers all three questions this layer
+ * has to answer at once: who sent the datagram, how long it really was, and whether it was longer than the
+ * buffer.
+ *
+ * IT TAKES FIVE PARAMETERS, and the flags travel in the `WSAMSG` structure:
+ *
+ *   INT WSAAPI WSARecvMsg(SOCKET s, LPWSAMSG lpMsg, LPDWORD lpdwNumberOfBytesRecvd,
+ *                         LPWSAOVERLAPPED lpOverlapped,
+ *                         LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
+ *
+ * `MSG_PEEK` goes IN through `lpMsg->dwFlags`, and `MSG_TRUNC` comes back OUT through the same member. The
+ * first version of this function declared a SIX-parameter signature with an `lpdwFlags` argument -- the shape
+ * `WSASendMsg` has, whose third parameter really is a `dwFlags` -- and called the provider with `&flags` in
+ * the `lpOverlapped` position. Nothing compiled could see it, because the declaration was this file's own; a
+ * RUN is what showed it, and `tests/windows/probe-recvmsg-arity.c` is the measurement -- kept in the tree so
+ * the claim can be re-run rather than believed: against one provider,
+ * the documented call receives 9 bytes with the sender filled, and the six-parameter call fails with
+ * `WSAENOTSOCK` and consumes nothing.
+ *
+ * The lesson is the declaration rather than the arity: `mswsock.h` already declares this function as
+ * `LPFN_WSARECVMSG`, so this file USES that typedef and does not write its own. A hand-copied prototype of
+ * somebody else's ABI is a claim the compiler cannot check -- it only checks that the call matches the copy.
+ *
+ * The function is not exported by name: Windows reaches it through `WSAIoctl` with
+ * `SIO_GET_EXTENSION_FUNCTION_POINTER` and `WSAID_WSARECVMSG`. The pointer is a property of the provider
+ * rather than of the socket, so fetching it once is enough -- and a provider that does not have it is a real
+ * case rather than a hypothetical one, because the extension is optional.
+ * `wt_udp_platform_recvfrom_message` below answers the call there; it is a FALLBACK and not the
+ * implementation, and what it cannot do is written down beside it. */
+static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle, wt_udp_platform_message_t *message);
+
+/* Whether a handle is a live socket. The two failures this layer reads as "this provider has no usable
+ * `WSARecvMsg`" -- an `WSAIoctl` that cannot name the extension, and a `WSARecvMsg` that answers
+ * `WSAENOTSOCK` -- are also exactly what a CLOSED handle answers, and the difference is worth one call: the
+ * first is a property of the provider and is remembered for the process, while the second is the caller's own
+ * error and is reported as it stands. */
+static int wt_udp_platform_handle_is_socket(wt_udp_handle_t handle) {
+  int type = 0;
+  int length = (int)sizeof(type);
+  return getsockopt(handle, SOL_SOCKET, SO_TYPE, (char *)&type, &length) == 0;
+}
+
 static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platform_message_t *message) {
-  int flags = 0;
+  static LPFN_WSARECVMSG receive_message = NULL;
+  /* Latched rather than re-probed per call: the extension belongs to the provider, so one refusal is the answer
+   * for every socket this process opens. The two states are "not looked up yet" (a NULL pointer with `unusable`
+   * clear) and "unusable", and either failure leads to the fallback. */
+  static int unusable = 0;
+  WSABUF buffer;
+  WSAMSG msg;
+  DWORD received = 0;
+  int peek;
+
+  if (!unusable && receive_message == NULL) {
+    GUID guid = WSAID_WSARECVMSG;
+    DWORD bytes = 0;
+    if (WSAIoctl(handle, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, (DWORD)sizeof(guid), &receive_message,
+                 (DWORD)sizeof(receive_message), &bytes, NULL, NULL) == SOCKET_ERROR) {
+      if (!wt_udp_platform_handle_is_socket(handle)) return -1;
+      unusable = 1;
+    }
+  }
+  if (unusable) return wt_udp_platform_recvfrom_message(handle, message);
+
+  peek = (message->flags_in & WT_UDP_PLATFORM_PEEK) != 0;
+  buffer.buf = (char *)message->bytes;
+  buffer.len = (ULONG)message->capacity;
+  memset(&msg, 0, sizeof(msg));
+  msg.name = (struct sockaddr *)(void *)message->address;
+  msg.namelen = (message->address != NULL && message->address_length != NULL)
+                    ? (INT)(*message->address_length)
+                    : (INT)0;
+  msg.lpBuffers = &buffer;
+  msg.dwBufferCount = 1;
+  /* The INPUT flag, in the structure where the documented prototype puts it. There is no `MSG_TRUNC` to ASK
+   * with on this platform: a Windows peek cannot see past the caller's buffer, which is the
+   * `WT_UDP_PLATFORM_FULL_LENGTH` difference `docs/PORTABILITY.md` records. */
+  if (peek) msg.dwFlags = MSG_PEEK;
+
+  if (receive_message(handle, &msg, &received, NULL, NULL) == 0) {
+    if (message->address_length != NULL && msg.namelen > 0) *message->address_length = (int)msg.namelen;
+    message->bytes_out = (size_t)received;
+    message->flags_out = 0;
+    /* The OUTPUT flag is authoritative, and that is what the guess it replaces could not be: a datagram that
+     * exactly FILLS the buffer is not truncated, and `received == capacity` cannot tell the two apart. */
+    if ((msg.dwFlags & MSG_TRUNC) != 0) message->flags_out |= WT_UDP_PLATFORM_TRUNCATED;
+    return 0;
+  }
+
+  /* A datagram that does not fit FAILS here -- `WSAEMSGSIZE` -- rather than reporting a short count, and the
+   * sender is filled on that path. It is the same shape the fallback sees, and it is why the truncation is
+   * REPORTED rather than inferred (`WT-199`). */
+  if (WSAGetLastError() == WSAEMSGSIZE) {
+    if (message->address_length != NULL && msg.namelen > 0) *message->address_length = (int)msg.namelen;
+    message->flags_out = WT_UDP_PLATFORM_TRUNCATED;
+    /* The datagram's own length is not reported, so the buffer's is the honest floor: it filled it. */
+    message->bytes_out = message->capacity;
+    return 0;
+  }
+
+  /* A provider that rejects the CALL is a provider whose extension this layer cannot use, and that is not a
+   * failure of this receive: the fallback answers it instead, and the provider is remembered. Everything else
+   * keeps the platform's own error, because that is the caller's answer -- `WSAEWOULDBLOCK` is the common one,
+   * and reading a timeout as "no extension here" would be the worse mistake. */
+  {
+    int error = WSAGetLastError();
+    if (error != WSAENOTSOCK && error != WSAEOPNOTSUPP) return -1;
+  }
+  if (wt_udp_platform_handle_is_socket(handle)) unusable = 1;
+  return wt_udp_platform_recvfrom_message(handle, message);
+}
+
+/* The fallback for a provider whose `WSARecvMsg` cannot be called, exercised by `tests/windows/test_windows_udp.c`
+ * against a real pair of sockets rather than left to the machines that happen to lack the extension.
+ *
+ * `recvfrom` answers two of the three questions correctly, and the measurement that says so is
+ * `tests/windows/probe-recvfrom.c`, kept in the tree so the claim can be re-run rather than believed: a datagram
+ * that EXACTLY fills the buffer returns its full count with NO error (so a full buffer is not a truncation,
+ * which is the case a "the buffer came back full, so it must have been truncated" guess gets wrong), and a
+ * datagram that does not fit FAILS with `WSAEMSGSIZE` while still naming the sender in `from` and consuming the
+ * datagram. Both halves of the contract therefore survive: the truncation is reported rather than inferred, and
+ * the sender is reported for a datagram that is about to be discarded.
+ *
+ * The third question is the one it cannot answer: a PEEK cannot see past the buffer, so `bytes_out` is what
+ * was copied rather than the datagram's own length and `WT_UDP_PLATFORM_FULL_LENGTH` is not honoured. That is
+ * the documented Windows peek limitation, which is unchanged by this fallback. */
+static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle, wt_udp_platform_message_t *message) {
+  struct sockaddr *from = (struct sockaddr *)(void *)message->address;
+  int from_length = (int)sizeof(struct sockaddr_storage);
+  int flags = (message->flags_in & WT_UDP_PLATFORM_PEEK) != 0 ? MSG_PEEK : 0;
   int received;
-  if ((message->flags_in & WT_UDP_PLATFORM_PEEK) != 0) flags |= MSG_PEEK;
-  received = recvfrom(handle, (char *)message->bytes, (int)message->capacity, flags,
-                      (struct sockaddr *)message->address, message->address_length);
-  if (received == SOCKET_ERROR) return -1;
-  message->bytes_out = (size_t)received;
-  message->flags_out = 0;
-  /* A peek cannot see past the buffer on Windows, so a full buffer is the only signal there is. The caller
-   * holds the datagram rather than looking at it twice -- see the structure's comment above. */
-  if ((size_t)received == message->capacity) message->flags_out |= WT_UDP_PLATFORM_TRUNCATED;
+
+  if (message->address_length != NULL) from_length = (int)(*message->address_length);
+  received = recvfrom(handle, (char *)message->bytes, (int)message->capacity, flags, from, &from_length);
+  if (received == SOCKET_ERROR) {
+    if (WSAGetLastError() != WSAEMSGSIZE) return -1;
+    /* The datagram was longer than the buffer. It has been consumed unless this was a peek, and the sender is
+     * filled either way, so both facts are reported: the caller decides what to do about a short packet. */
+    message->flags_out = WT_UDP_PLATFORM_TRUNCATED;
+    message->bytes_out = message->capacity;
+  } else {
+    message->flags_out = 0;
+    message->bytes_out = (size_t)received;
+  }
+  if (message->address != NULL && message->address_length != NULL && from_length > 0) {
+    *message->address_length = from_length;
+  }
   return 0;
 }
 

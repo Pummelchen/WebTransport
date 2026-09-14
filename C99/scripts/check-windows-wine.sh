@@ -2,9 +2,16 @@
 # RUN the Windows tree under Wine (WT-134).
 #
 # `check-windows-build.sh` compiles and LINKS the whole tree for 64-bit Windows, which is the strongest claim
-# a Linux runner can make without Windows. Its own output says "linked, not run" so nobody reads it as more.
+# a Linux runner can make without Windows, and says "linked, not run here" so nobody reads it as more.
 # This script closes that gap where it can be closed: it RUNS every linked test executable under Wine, so the
 # claim becomes "the tree executes on Windows" rather than "the tree builds for Windows".
+#
+# What it found is why it exists: the first run was 82 of 84, and the two failures were REAL defects in the
+# `_WIN32` receive path -- a truncated datagram reported as a limit error with the sender dropped (`WT-199`), and
+# a Retry path that depended on it (`WT-200`) -- plus, behind them, a `WSARecvMsg` prototype this tree had
+# declared BY HAND with one parameter too many, which no cross-compile could see because the declaration was its
+# own. The run is green now, and `tests/windows/test_windows_udp.c` was added so that the fallback that a working
+# provider never takes is measured rather than assumed.
 #
 # Two things stop this working, and both cost the previous attempt a session:
 #

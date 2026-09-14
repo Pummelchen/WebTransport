@@ -6,8 +6,10 @@
 # compile check does not -- a mingw toolchain and a WINDOWS OpenSSL -- so a machine without them reports
 # `unsupported` with the reason and the one command that would fix it, rather than a failure.
 #
-# What it does NOT do is RUN the binaries: PE32+ executables need Windows or Wine. `cmake --build` succeeding is
-# the claim, and the output says "linked, not run" so nobody reads it as more.
+# What it does NOT do is RUN the binaries: PE32+ executables need Windows or Wine.
+# `scripts/check-windows-wine.sh` is the sibling that runs them, so a machine with Wine gets the behaviour too;
+# this script's own output says "linked, not run here" so nobody reads it as more, and nothing reads it as
+# "nothing runs them".
 #
 # Set WT_WINDOWS_OPENSSL to a Windows OpenSSL prefix (see cmake/toolchains/mingw-w64.cmake for the MSYS2
 # package that provides one). Without it the script looks in the usual places and skips if it finds nothing.
@@ -59,4 +61,4 @@ cmake --build "$build_dir"
 executables=$(find "$build_dir" -name '*.exe' | wc -l | tr -d ' ')
 libraries=$(find "$build_dir" -maxdepth 1 -name '*.dll' | wc -l | tr -d ' ')
 echo "windows build: linked $executables PE32+ executables and $libraries shared library under $compiler"
-echo "               (linked, not run -- running them needs Windows or Wine)"
+echo "               (linked, not run HERE -- scripts/check-windows-wine.sh runs them under Wine)"

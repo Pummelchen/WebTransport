@@ -102,7 +102,9 @@ done
 
 # The TESTS and the APPS too, with the include paths and the one define CMake gives them: a Windows port is only
 # worth a runner if the whole tree compiles, and the sweep is what makes that a measurement. The trust-fixture
-# directory is a path, not a file read, so it needs no fixtures to compile.
+# directory is a path, not a file read, so it needs no fixtures to compile. `src/runtime` is on the include path
+# because the Windows datagram test includes the private platform header directly -- the same header `udp.c`
+# includes -- which is what makes the `_WIN32` branch's behaviour reachable by a test and not only by the library.
 checked_tree=0
 skipped_tree=0
 for source in $(find "$root/tests" "$root/apps" -name '*.c' | sort); do
@@ -117,7 +119,8 @@ for source in $(find "$root/tests" "$root/apps" -name '*.c' | sort); do
   "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
     -DWT_TRUST_FIXTURE_DIR='"'"'""'"'"' \
     -I "$root/include" $openssl_flags -I "$root/tests" -I "$root/tests/unit" \
-    -I "$root/tests/vectors" -I "$root/apps/support" -c "$source" -o "$output/tree.o"
+    -I "$root/tests/vectors" -I "$root/apps/support" -I "$root/src/runtime" \
+    -c "$source" -o "$output/tree.o"
   checked_tree=$((checked_tree + 1))
 done
 

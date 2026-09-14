@@ -3105,10 +3105,12 @@ use the same connection ID at both ends -- the recorded transport gap rather tha
 The inventory's first item was a private header naming the differences so that `udp.c` stops spelling POSIX in a
 dozen places, and it is in: `src/runtime/udp_platform.h` defines the handle type and four operations --
 `wt_udp_platform_close`, `wt_udp_platform_set_nonblocking`, `wt_udp_platform_wait_readable` and
-`wt_udp_platform_last_error` -- with a POSIX branch that is what this project builds and a `_WIN32` branch
-written from the inventory. The Windows branch is NOT verified, and the header says so in its first paragraph:
-nothing in this repository builds it, and a port that claims to be finished before it has been compiled once is
-exactly the failure this project refuses.
+`wt_udp_platform_last_error` -- with a POSIX branch that is what this project builds and a `_WIN32` branch that
+was written from the inventory. That branch is no longer written-and-unverified: it **compiles, links and RUNS**
+(the whole test suite under Wine, with a Windows-only test of the datagram layer on both of its receive paths),
+and the defects running it found are the reason to have a runner at all -- `WT-199` and `WT-200`, described in
+`docs/PORTABILITY.md`, where the first version of this paragraph recorded the branch as unverified and a port
+that claims to be finished before it has been compiled once as exactly the failure this project refuses.
 
 The POSIX path is unchanged in behaviour and green in debug, release and ASan+UBSan, which is the only claim a
 change like this can make from here. The datagram calls have since joined the header too
@@ -3133,9 +3135,13 @@ names a port must replace and fails if one is used without being named in the do
 compliance matrix, for the same reason: an inventory that reads like a plan but has gone out of date is worse
 than no inventory at all. It caught `sendto` and `recvfrom` missing on its first run. CI runs it.
 
-**The adaptation itself is NOT done, and no Windows job is added until it is.** A CI job that cannot pass is
-worse than an absent one, because it teaches everyone to ignore CI -- so the order is: the private platform
-header, `WSAStartup` ownership, the peek difference, then the job.
+**The adaptation itself is DONE; the Windows job is the last step and the tree is ready for it.** The order
+this paragraph used to state as a plan -- the private platform header, `WSAStartup` ownership, the peek
+difference, then the job -- is three of four complete: the header is in and RUN, `WSAStartup` is owned by the
+socket lifetime, the peek difference is measured and documented rather than assumed, and what a job would run is
+`check-windows-build.sh` (91 PE32+ executables) plus `check-windows-wine.sh` (85 of 85 green). A CI job that
+cannot pass teaches everyone to ignore CI, which is why none was added while the branch was unverified; a job
+that runs two scripts known to pass is a different thing.
 
 ### WT-136: the score, measured rather than remembered
 
@@ -3166,18 +3172,19 @@ honest state rather than an aspiration:
 | All Swift-equivalent conformance tests pass in C99 | **met** | Every Swift scenario has a C99 counterpart, and the walk that established it is the audit's evidence rather than a claim: the five interop matrices are mirrored case for case (`interop-stream`, `-datagram`, `-goaway-close-drain`, `-connect`, `-malformed-flow`), the two release checks are mirrored where packaging belongs (`scripts/check-package.sh` asserts the product list), and the rest map to a scenario or to a unit suite -- QPACK post-Base to `test_qpack_field_section`, stream reset and stop-sending to `test_quic_stream`, error mapping to the flow matrices and `test_api_session`, buffering to the split-prefix scenario, the smoke matrix to `multi-session-isolation` plus the two-process CLI tests. `protocol-structured-fields` was the one REAL gap the walk found; it is implemented and exercised end to end (`protocol-negotiation`). `zero-rtt-settings` is the one Swift rule with nothing to apply to: 0-RTT and resumption are not implemented at all, which the matrix records as a deliberate `--` row. Where a Swift assertion lives in its session MANAGER and here in the session OBJECT, the layer differs and the behaviour does not. `WT-133` closed. |
 | C99 client/server CLI passes local IPv4 and IPv6 | **met** | `wt-conformance-c99 --scenario all` runs both families (registered as `wt_conformance_scenarios`), and `wt-client-c99`/`wt-server-c99` exchange a session in two processes on IPv4 (registered as `wt_cli_session_stream`/`_datagram`). The tools themselves have not been driven over IPv6; the conformance tool has. `WT-133` covers extending them. |
 | C99 passes the five-implementation VPS interop matrix | **met** | All seven Phase 11 proofs pass against five independent implementations on a routable host, with `--trust system` so the chain is validated against the platform trust store and the certificate's name is checked: pywebtransport/aioquic (stream), web-transport-quinn (stream and datagram), web-transport-quiche (stream), hyperium/h3-webtransport (datagram) and erlang-webtransport (stream and datagram). Reproduced by two independent full runs with every proof passing on its first attempt, and `scripts/run-vps-third-party-interop.sh` counts the aggregate from the proof files rather than asserting it. Two of the five peers needed a patch to interoperate, both kept under `tests/interop/peer/`. `WT-135`, closed. |
-| CI is green on macOS 26, Debian, FreeBSD and Windows 11 | **partial** | `c99-ci.yml` builds and tests on macOS and Debian (the last completed run was green), with sanitizers, the package consumer and the CLI smoke. FreeBSD and Windows legs are absent, and they are not a YAML edit: Windows needs a sockets/poll adaptation (`WSAPoll`, `ws2_32`) and a toolchain decision before a job for it would be anything but red. `WT-134`. |
+| CI is green on macOS 26, Debian, FreeBSD and Windows 11 | **partial** | `c99-ci.yml` builds and tests on macOS and Debian (the last completed run was green), with sanitizers, the package consumer and the CLI smoke. The FreeBSD and Windows legs are still absent as JOBS, and the portability work they needed is done rather than planned: the `_WIN32` branch compiles and links the whole tree (91 PE32+ executables and one shared library) and RUNS under Wine with its suite green (**85 of 85 test executables, 91,674 checks**), including a Windows-only test that asserts the datagram layer's contract on both of its receive paths; FreeBSD 15.1 builds the tree with its base clang and passes the suite once `python3` is installed, which the first pass found by failing 8 of 96 for that reason alone (`WT-201`, a harness dependency rather than a protocol defect). What remains is a runner GitHub does not provide natively: `WT-134`. |
 | Sanitizers and static checks are clean | **met** | Every round's verification runs debug, release and ASan+UBSan; the build is warnings-as-errors with `-Wconversion -Wsign-conversion -Wcast-qual -Wswitch-enum -Wpedantic -Wshadow` and the rest. The static half is measured now as well: `scripts/check-static-analysis.sh` runs the Clang Static Analyzer over all 94 sources of the library and the tools (WT-176) and the tree is clean after the one finding it made -- a dead store in `wt_sha256_init`. Parser fuzzing is covered by `tests/fuzz/` (WT-175). `clang-tidy` itself has not been run; the analyzer is the path-sensitive half of the same idea, and `cppcheck` -- the other tool Phase 13 names -- runs beside it (`scripts/check-cppcheck.sh`, WT-177), where it found eight real items the analyzer and the compiler both missed. |
 | Public API is documented | **met** | `C99/docs/PUBLIC-API.md` covers trust, endpoints, sessions, streams, datagrams, backpressure, close, drain and ownership, and `apps/wt-api-sample` plus `test_public_api` check that the documented surface compiles and behaves. |
 | No placeholder, facade, deterministic test runtime or spike is exposed as production | **met** | The tools run real sessions; there is no test-only runtime in the library; the `api/`, `cli/`, `http3/`, `runtime/` modules are all reached by real callers. |
 | README status updated from `0%` to the measured final score | **met** | `scripts/score-matrix.sh` prints the score from `docs/COMPLIANCE-MATRIX.md` -- 34 of 34 draft-16 requirements exercised, 8 of the 9 criteria met -- and `C99/README.md` carries that number rather than a guess. That claim was false when it was written: the README's headline still read `Draft-16 score: 0%` and `Phases 6 to 14 are not started` while this row said otherwise, and a public reference library whose first paragraph is wrong is worse than one that says nothing. The headline and the closing "what is not here yet" paragraph now state the measured position. `WT-136` closed. |
 
 **What that means for "100%":** eight criteria are met and **one is partially met; none is unmet**. The
-remaining work is named with numbers, and none of it is blocked by a defect: two CI legs that need portability work
-first (`WT-134`), and the interop matrix, whose runner now exists and which is end to end against one independent
-implementation with the other two measured to a named point (`WT-135`, `WT-145`, `WT-146`). The matrix (`WT-132`),
-the score that follows it (`WT-136`) and the conformance-coverage audit (`WT-133`) have all landed, which is why the
-count moved from four to seven.
+remaining work is named with numbers, and none of it is blocked by a defect: the CI leg that has to run on
+FreeBSD and Windows (`WT-134`, whose portability work is now DONE -- the branch compiles, links and RUNS under
+Wine with its whole suite green, and what is missing is the JOB). The interop matrix is **met**: seven Phase 11
+proofs pass against five independent implementations on a routable host (`WT-135`, closed). The matrix
+(`WT-132`), the score that follows it (`WT-136`) and the conformance-coverage audit (`WT-133`) have all landed,
+which is why the count moved from four to eight.
 
 ## Definition of Done for C99 100%
 

@@ -164,6 +164,31 @@ else()
   message(STATUS "parser fuzzing: the deterministic smoke run only (this compiler cannot link a libFuzzer driver)")
 endif()
 
+# The Windows datagram layer, RUN rather than compiled (WT-199).
+#
+# Every other test above is compilable on POSIX and reaches the socket layer through the public API, which is
+# what makes them portable. This one includes the PRIVATE platform header and drives the `_WIN32` branch's two
+# receive paths directly, because one of them is a FALLBACK that a provider answering `WSARecvMsg` never takes:
+# a fallback no test runs is a fallback nobody has tested, and that is how the six-parameter prototype this
+# branch once declared survived a cross-compile, a link, and a review.
+#
+# It is registered only where WIN32 is true, so the POSIX suite's test list does not change and a machine
+# without a Windows target does not see it. `scripts/check-windows-wine.sh` runs it under Wine, and a Windows
+# runner runs it natively.
+if(WIN32)
+  add_executable(test_windows_udp windows/test_windows_udp.c)
+  wt_set_c99(test_windows_udp)
+  wt_apply_warnings(test_windows_udp)
+  target_include_directories(test_windows_udp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit
+    vectors ${CMAKE_CURRENT_SOURCE_DIR}/../src/runtime)
+  target_link_libraries(test_windows_udp PRIVATE ${WT_LINK_TARGET})
+  if(WT_SANITIZER_FLAGS)
+    target_compile_options(test_windows_udp PRIVATE ${WT_SANITIZER_FLAGS})
+    target_link_options(test_windows_udp PRIVATE ${WT_SANITIZER_FLAGS})
+  endif()
+  add_test(NAME test_windows_udp COMMAND test_windows_udp)
+endif()
+
 # One test validates certificate chains, so it needs the path to the fixtures it validates
 # against. Passed at configure time rather than guessed from the working directory, which
 # differs between ctest and a direct run.

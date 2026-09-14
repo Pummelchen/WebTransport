@@ -21,9 +21,9 @@ Windows is the real work. Every item below is a place where the current code ass
 | Non-blocking mode | `fcntl(fd, F_SETFL, O_NONBLOCK)` | `ioctlsocket(fd, FIONBIO, &one)`, a different function with a different failure mode |
 | Readiness | `poll` | `WSAPoll` (same shape, `pollfd` spelled the same way) |
 | Errors | `errno` | `WSAGetLastError`, and the socket error numbers are a different set |
-| Scatter/gather | `struct iovec`, `recvmsg`/`sendmsg` | `WSABUF`, `WSARecvFrom`/`WSASendTo`, with the same information in different fields |
-| `MSG_PEEK`/`MSG_TRUNC` | `wt_udp_peek` | `MSG_PEEK` exists; `MSG_TRUNC` on a peek does NOT report the datagram's full length, so the peek needs the receive-then-hold shape instead (the runtime session already has the pending table an implementation would need) |
-| Sending and receiving | `sendto`/`recvfrom` in the datagram paths | `WSASendTo`/`WSARecvFrom`, which take the same arguments in a different shape |
+| Scatter/gather | `struct iovec`, `recvmsg`/`sendmsg` | `WSABUF`, and `WSARecvMsg` for a receive that carries the sender, the datagram's own length and its truncation, reached through `WSAIoctl(SIO_GET_EXTENSION_FUNCTION_POINTER, WSAID_WSARECVMSG)` |
+| `MSG_PEEK`/`MSG_TRUNC` | `wt_udp_peek` | `MSG_PEEK` exists and travels in `WSAMSG.dwFlags` (the input flag of `WSARecvMsg`, whose prototype is five parameters); a datagram larger than the buffer comes back as the ERROR `WSAEMSGSIZE` with the sender filled, and there is no way to ask for the datagram's own length past the caller's buffer, so the peek needs the receive-then-hold shape instead (the runtime session already has the pending table an implementation would need) |
+| Sending and receiving | `sendto`/`recvfrom` in the datagram paths | `WSASendTo` for the send, `WSARecvMsg` for the receive, and `recvfrom` as the fallback for a provider whose `WSARecvMsg` is unusable -- it reports the sender and the truncation correctly, and cannot see past the buffer on a peek |
 | `snprintf` | several | present in MSVC 2015 and later |
 | OpenSSL | `tls/`, `crypto/` | a Windows build of OpenSSL 3, and a decision about which one (vcpkg, the OpenSSL installers, or a vendored build) |
 
@@ -46,13 +46,27 @@ Windows is the real work. Every item below is a place where the current code ass
 3. The `wt_udp_peek` difference, which is behavioural rather than syntactic and is now named in the header
    rather than discovered: on Windows a peek cannot see past the caller's buffer, so the `FULL_LENGTH` flag
    cannot be honoured there and a listener must hold the datagram it looked at. The runtime session's pending
-   table is the shape that needs.
+   table is the shape that needs. **Measured, not assumed**: `tests/windows/test_windows_udp.c` asserts the
+   rest of the receive contract on a real pair of loopback sockets, on both receive paths, and deliberately
+   does NOT assert the length past the buffer, because that is the behaviour this platform does not have.
 4. A CMake branch that links `ws2_32` (**DONE**) and finds OpenSSL, and a CI job that builds it.
+5. **DONE** -- the receive itself. Windows has no `recvmsg`, so the datagram-with-sender comes from
+   `WSARecvMsg`, an extension function reached through
+   `WSAIoctl(SIO_GET_EXTENSION_FUNCTION_POINTER, WSAID_WSARECVMSG)`; `sendto` and `WSASendTo` are the same call
+   with the arguments in a different order. The extension is OPTIONAL, so
+   `wt_udp_platform_recvfrom_message` answers the call where a provider has no usable one, and it is a
+   documented degradation rather than a second implementation: same sender, same truncation report, no
+   `FULL_LENGTH`. `WT-199` is the defect that made this item real -- the first version declared the extension's
+   prototype BY HAND, with a sixth `lpdwFlags` parameter that does not exist, so every call through it handed
+   `&flags` to `lpOverlapped`; a cross-compile cannot see that (the declaration was this tree's own) and Wine
+   answered `WSAENOTSOCK` to every receive, which is how it was found. The prototype is now the platform's own
+   `LPFN_WSARECVMSG`, and the flags travel in `WSAMSG.dwFlags` where the documentation puts them.
 
 **Status:** the inventory is complete and mechanically checked; the platform header is done and verified on
 POSIX, where behaviour is unchanged; the socket lifetime and `ws2_32` are done; and the `_WIN32` branch is no
-longer "written from the inventory" but **COMPILED**, which is a smaller claim than "the port works" and a much
-larger one than nothing.
+longer "written from the inventory" but **COMPILED, LINKED and RUN** -- under Wine, with its receive contract
+asserted on both of its paths by its own test. The one claim that is still not made is the one this document
+will not make for Wine: **it has not run on Windows itself.**
 
 `scripts/check-windows-platform.sh` compiles the branch with a mingw cross-compiler -- the same warnings the
 POSIX build turns into errors -- and reports `unsupported` with that reason on a machine that has none. CI
@@ -70,20 +84,24 @@ That is the difference between an inventory and a compiler, and it is the argume
 rather than describing it.
 
 `scripts/check-windows-platform.sh` now sweeps the **whole tree** -- every source in `src/`, `tests/` and
-`apps/` -- with the include paths and the one define CMake gives them, and they all compile for Windows: 75 + 104
-sources. That is the claim a runner needs before it is worth adding, measured rather than hoped for. The sweep
-found two more defects that clang had been silent about: a dead local `wt_webtransport_capsule_t` in
-`src/webtransport/capsule.c` (GCC's `-Wunused-but-set-variable`, which clang does not diagnose) and a unit test
-comparing a platform handle with `-1` rather than the sentinel. It also showed why an ad-hoc loop is not a
-check: eight files "failed" only because the loop omitted the include paths and the trust-fixture define CMake
-supplies.
+`apps/` -- with the include paths and the one define CMake gives them, and they all compile for Windows: **76
+library sources and 108 test, probe and app sources**, which is the script's own count (the compile-only
+`tests/windows/platform_probe.c` is compiled by the earlier step instead). That is the claim a runner needs
+before it is worth adding, measured rather than hoped for. The sweep found two more defects that clang had been
+silent about: a dead local `wt_webtransport_capsule_t` in `src/webtransport/capsule.c` (GCC's
+`-Wunused-but-set-variable`, which clang does not diagnose) and a unit test comparing a platform handle with
+`-1` rather than the sentinel. It also showed why an ad-hoc loop is not a check: eight files "failed" only
+because the loop omitted the include paths and the trust-fixture define CMake supplies.
 
 **The tree also LINKS for Windows.** `scripts/check-windows-build.sh` configures the whole tree with
 `cmake/toolchains/mingw-w64.cmake` and a Windows OpenSSL (the MSYS2 package is a plain tarball, so no Windows
-runner or MSYS2 installation is needed), and builds **89 PE32+ executables** plus `libwebtransport.dll`. CI runs
-it on the Linux leg, where the cross-compiler is, and the step is no longer allowed to fail: it was
-`continue-on-error` while nobody had seen it finish, and it has now been run to completion by hand -- which is
-the only honest reason to enforce a job. Not run -- that needs Windows or Wine -- but linked.
+runner or MSYS2 installation is needed), and builds **91 PE32+ executables** plus `libwebtransport.dll` -- the
+count is the script's own, and the two that are not test or app binaries are CMake's compiler probe and the
+Windows-only datagram test. CI runs it on the Linux leg, where the cross-compiler is, and the step is no longer
+allowed to fail: it was `continue-on-error` while nobody had seen it finish, and it has now been run to
+completion by hand -- which is the only honest reason to enforce a job. It is also no longer only linked:
+`scripts/check-windows-wine.sh` is the sibling that RUNS the result, and the paragraph further down is its
+aggregate.
 
 **The link found a defect the compile could not**, and it is the kind only an optimiser sees: in a Release build
 GCC could not prove that the loop writing `compression_methods[i]` from the peer's compression-methods length
@@ -100,25 +118,50 @@ is a check nobody has tested; this one is on its second real find.
 
 **The tree RUNS for Windows, under Wine.** `scripts/check-windows-wine.sh` executes every linked test binary
 through Wine and reports the aggregate. On the VPS, in an `ubuntu:24.04` container with the mingw cross-build:
-**84 test executables ran, 82 passed, 2 failed, 0 hung, and the reported checks sum to 89,099.** That is the
+**85 test executables ran, 85 passed, 0 failed, 0 hung, and the reported checks sum to 91,674.** That is the
 claim the section above could not make — "linked, not run" — and it is the first time this tree has executed on
-a Windows target at all.
+a Windows target at all. The count moved twice since the first Wine run, and both moves are the point of the
+paragraphs below: **84 → 85** because a new Windows-only test now measures the datagram layer directly, and
+**82 of 84 passing → 85 of 85** because running the tree found real defects.
 
-**And running it found two defects that linking could not.** They are the whole reason a runner is worth having:
+**And running it found three defects that linking could not.** They are the whole reason a runner is worth
+having, and all three are fixed and re-measured rather than recorded:
 
-- **`test_runtime_udp`, 6 of 177 checks.** The datagram-truncation contract of `WT-36` does not hold on the
-  `_WIN32` socket branch: `receiving it into a small buffer is a truncation` wants `truncated` and gets `limit`,
-  the sender is not named where it should be, and a later read wants `ok` and 8 bytes and gets `truncated` and
-  0. This is the surface the table above describes — a peek on Windows cannot see past the caller's buffer — and
-  the branch has now been measured rather than reasoned about.
-- **`test_quic_connection`, 6 of 2276 checks.** The Retry path (`WT-168`) fails two assertions on Windows:
+- **`test_runtime_udp`, 6 of 177 checks** — the datagram-truncation contract of `WT-36` did not hold on the
+  `_WIN32` socket branch: `receiving it into a small buffer is a truncation` wanted `truncated` and got `limit`,
+  the sender was not named where it should be, and a later read wanted `ok` and 8 bytes and got `truncated` and
+  0. `WT-199`.
+- **`test_quic_connection`, 6 of 2276 checks** — the Retry path (`WT-168`) failed two assertions on Windows:
   `the destination is the Retry's Source Connection ID, byte for byte` and `and the TOKEN is on the wire as the
-  peer sent it` are both `expected true`. Four further checks follow from them. Nothing here is endian- or
-  alignment-dependent by construction, so this is a finding to diagnose rather than a known class.
+  peer sent it` were both `expected true`, with four further checks following from them. `WT-200`. Nothing in
+  that path is endian- or alignment-dependent, and the cause turned out to be the same receive path as the item
+  above: a Retry's acceptance depends on reading datagrams the old receive was dropping or mis-reporting.
+- **The extension's prototype, declared by hand.** `WSARecvMsg` has FIVE parameters and carries `MSG_PEEK` and
+  `MSG_TRUNC` in `WSAMSG.dwFlags`. The first version of `wt_udp_platform_receive_message` declared its own
+  six-parameter signature with an `lpdwFlags` argument — the shape `WSASendMsg` has — and called the provider
+  with `&flags` in the `lpOverlapped` position. **The compile sweep could not see it, because the declaration
+  was this tree's own**, and Wine answered `WSAENOTSOCK` to every such receive. It is the clearest case in this
+  document of a claim a compiler cannot check: a hand-copied prototype of somebody else's ABI is only checked
+  against itself. `#include <mswsock.h>` already declares `LPFN_WSARECVMSG`, and the code now calls through
+  `WSAIoctl` with `WSAID_WSARECVMSG` and uses the platform's own typedef.
 
-Both are recorded as `WT-199` and `WT-200` in the [[Project Tracker|Project-Tracker]] rather than fixed here,
-because a fix without a Windows target to re-run it on would be a guess. Wine is a faithful Win32
-implementation, not Windows: both failures are **under Wine** until a Windows runner says otherwise.
+**The three fixes are measured, not asserted.** With the fallback compiled OUT, so that only the `WSARecvMsg`
+path can answer, `test_runtime_udp` passes all 177 checks and `test_quic_connection` all 2276 — which is what
+makes "the documented prototype works" a measurement rather than a reading of the documentation. And the
+fallback itself is covered by the new `tests/windows/test_windows_udp.c`, which drives **both** receive paths
+against a real pair of loopback sockets and asserts the shared contract on each: a datagram that exactly fills
+the buffer is not called truncated, an oversized one is, the sender is named on both paths, and a peek leaves
+the datagram in the queue. It is registered only where `WIN32` is true, so the POSIX suite's list is unchanged.
+`WT-199` and `WT-200` are closed in the [[Project Tracker|Project-Tracker]]; what remains open is the Windows
+RUNNER, because Wine is a faithful Win32 implementation and not Windows: everything here is **under Wine** until
+a Windows machine says otherwise, and the WSARecvMsg path in particular is one Wine happens to answer correctly.
+
+**The measurements themselves are in the tree**, because the code's comments quote them.
+`tests/windows/probe-recvfrom.c` and `tests/windows/probe-recvmsg-arity.c` assert nothing and print what the
+provider answers; they were written in a scratch directory, and a claim that points at a scratch file is a claim
+nobody can re-run. The compile sweep builds them with the same warnings-as-errors as everything else, and
+`scripts/check-windows-wine.sh` does not run them -- they are evidence, not tests, and the tests they support
+are `test_windows_udp` and `test_runtime_udp`.
 
 **Two setup facts cost a session, so they are written down.** `wine64` is not on `PATH` on Ubuntu or Debian —
 the package ships no wrapper and the binary is `/usr/lib/wine/wine64`, so `wine64 --version` is "command not
@@ -144,13 +187,13 @@ same ten tests pass and nothing else changes. That is a real dependency the scri
 and it is recorded as `WT-201` rather than papered over — a check that reports "the protocol is broken" when it
 means "this host has no python3" is the shape of failure this document exists to prevent.
 
-What remains is a **runner this project does not control**. The tree compiles for Windows (75 + 104 sources,
-warnings-as-errors), links for Windows (PE32+ executables and a shared library, enforced in CI), and now
-executes for Windows under Wine; and it builds and passes its whole suite on FreeBSD. What is missing is a CI
-*job* for each, because GitHub provides no FreeBSD runner and the Windows leg can only compile, link and (via
-Wine) run on a Linux runner. A job that cannot pass is worse than an absent one, because it teaches people to
-ignore CI — so the gap is named rather than guessed at, and the evidence that a Windows or FreeBSD runner would
-have something green to run is now in this document rather than in an inventory.
+What remains is a **runner this project does not control**. The tree compiles for Windows (76 + 108 sources,
+warnings-as-errors), links for Windows (91 PE32+ executables and a shared library, enforced in CI), and now
+executes for Windows: **85 of 85 test executables green under Wine**. It builds and passes its whole suite on
+FreeBSD. What is missing is a CI *job* for each, because GitHub provides no FreeBSD runner and the Windows leg
+can only compile, link and (via Wine) run on a Linux runner. A job that cannot pass is worse than an absent one,
+because it teaches people to ignore CI — so the gap is named rather than guessed at, and the evidence that a
+Windows or FreeBSD runner would have something green to run is now in this document rather than in an inventory.
 
 ## The two symbols this document is checked for
 
