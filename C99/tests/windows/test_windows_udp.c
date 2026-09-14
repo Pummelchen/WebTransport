@@ -246,10 +246,16 @@ static void test_path(const char *path, wt_receive_path_t receive) {
                wt_udp_platform_address_from_storage((const struct sockaddr *)(const void *)&from,
                                                     (wt_udp_socklen_t)from_length, &reported));
   WT_EXPECT_INT(label_for(path, "byte for byte"), 1, wt_udp_address_equal(&reported, &expected));
-  /* Consume it, so that each path starts and ends with an empty queue. */
+  /* Consume it, so that each path starts and ends with an empty queue -- with an ADDRESS, because that is how a
+   * caller receives: the check that failed on the native-Windows runner was this call WITHOUT one, and the fix
+   * belongs in the platform layer (a NULL `from` is WSAEFAULT there), not in a test that avoided the shape a
+   * caller uses. */
   memset(&message, 0, sizeof(message));
+  from_length = (int)sizeof(from);
   message.bytes = small;
   message.capacity = sizeof(small);
+  message.address = &from;
+  message.address_length = &from_length;
   WT_EXPECT_INT(label_for(path, "the peeked datagram is then consumed"), 0,
                 receive_now(listener, receive, &message));
 

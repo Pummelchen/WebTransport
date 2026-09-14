@@ -268,12 +268,25 @@ static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platfo
  * was copied rather than the datagram's own length and `WT_UDP_PLATFORM_FULL_LENGTH` is not honoured. That is
  * the documented Windows peek limitation, which is unchanged by this fallback. */
 static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle, wt_udp_platform_message_t *message) {
+  struct sockaddr_storage ignored;
   struct sockaddr *from = (struct sockaddr *)(void *)message->address;
   int from_length = (int)sizeof(struct sockaddr_storage);
   int flags = (message->flags_in & WT_UDP_PLATFORM_PEEK) != 0 ? MSG_PEEK : 0;
   int received;
 
-  if (message->address_length != NULL) from_length = (int)(*message->address_length);
+  /* A caller that wants only the bytes passes no address -- `wt_udp_platform_message_t` allows it and POSIX's
+   * `recvfrom` accepts `from == NULL`. WINDOWS DOES NOT: a NULL `from` with a non-NULL `fromlen` is WSAEFAULT, so
+   * the same call that works on POSIX failed here with an error list that names the buffer rather than the
+   * address. The NULL is replaced with a scratch address instead of being passed through, which is a fact about
+   * the platform rather than about the caller. The native-Windows run found it: `test_windows_udp`'s one failing
+   * check was a consume with no address, and the probe beside it showed the identical call succeeding WITH one. */
+  if (from == NULL) {
+    memset(&ignored, 0, sizeof(ignored));
+    from = (struct sockaddr *)(void *)&ignored;
+    from_length = (int)sizeof(ignored);
+  } else if (message->address_length != NULL) {
+    from_length = (int)(*message->address_length);
+  }
   received = recvfrom(handle, (char *)message->bytes, (int)message->capacity, flags, from, &from_length);
   if (received == SOCKET_ERROR) {
     if (WSAGetLastError() != WSAEMSGSIZE) return -1;
