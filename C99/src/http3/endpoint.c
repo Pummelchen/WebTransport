@@ -482,7 +482,17 @@ wt_status_t wt_http3_endpoint_on_uni_stream(wt_http3_endpoint_t *endpoint, uint6
 
 wt_status_t wt_http3_endpoint_on_control_frame(wt_http3_endpoint_t *endpoint, uint64_t type,
                                                wt_http3_error_t *out_error) {
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
   if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* Section 7.2.7: "A server MUST NOT send a MAX_PUSH_ID frame. A client MUST treat the receipt of a MAX_PUSH_ID
+   * frame as a connection error of type H3_FRAME_UNEXPECTED." The control machine owns the rules that are about
+   * the CONTROL STREAM; this one is about the endpoint's ROLE, which only the endpoint knows -- and it lived in
+   * `wt_http3_frame_allowed`, a table nothing calls, so a client accepted a frame it must refuse. An audit found
+   * it. */
+  if (type == WT_HTTP3_FRAME_MAX_PUSH_ID && endpoint->role == WT_HTTP3_ROLE_CLIENT) {
+    if (out_error != NULL) *out_error = WT_HTTP3_FRAME_UNEXPECTED;
+    return WT_ERR_PROTOCOL;
+  }
   return wt_http3_control_on_frame(&endpoint->peer_control, type, out_error);
 }
 

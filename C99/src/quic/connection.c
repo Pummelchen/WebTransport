@@ -2925,6 +2925,23 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
         space = WT_QUIC_SPACE_APPLICATION;
       } else {
         uint32_t type_bits = (uint32_t)((first >> 4) & 0x03U);
+        /* RFC 9000 section 5.2.2: "an endpoint MUST discard packets with a version it does not support". The type
+         * bits are not version-specific in the two versions this build knows, so a long header carrying version 2
+         * (or anything else) was parsed with version 1's semantics, with the masking, the packet-number encoding
+         * and the key derivation that go with it. Keys still had to match, so this was never exploitable -- it was
+         * a frame from a version this endpoint does not speak being answered in the version it does. Checked here,
+         * before the space is chosen, so nothing downstream sees it. */
+        {
+          uint32_t version = 0U;
+          if (datagram_length - offset >= 5U) {
+            version = ((uint32_t)datagram[offset + 1U] << 24) | ((uint32_t)datagram[offset + 2U] << 16) |
+                      ((uint32_t)datagram[offset + 3U] << 8) | (uint32_t)datagram[offset + 4U];
+          }
+          if (version != connection->config.version) {
+            connection->packets_discarded++;
+            return WT_OK;
+          }
+        }
         if (type_bits == (uint32_t)WT_QUIC_PACKET_INITIAL) {
           space = WT_QUIC_SPACE_INITIAL;
         } else if (type_bits == (uint32_t)WT_QUIC_PACKET_HANDSHAKE) {

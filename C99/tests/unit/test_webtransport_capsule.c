@@ -55,6 +55,53 @@ static void test_drain_and_close(void) {
   WT_EXPECT_U64("to no reason", 0U, (uint64_t)reason_length);
 }
 
+/* Draft-16 section 6: the close REASON is a UTF-8 string. An audit found it unvalidated, so a caller could be
+ * handed bytes it cannot print -- and the check has to reject the forms that are easy to forget: an overlong
+ * encoding, a lone continuation byte, a surrogate half and anything past U+10FFFF. */
+static void test_the_close_reason_is_utf8(void) {
+  uint8_t bytes[64];
+  wt_writer_t w;
+  wt_cursor_t c;
+  wt_webtransport_capsule_t capsule;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  uint32_t code = 0U;
+  size_t reason_length = 0U;
+  static const uint8_t good[] = {0x62U, 0x79U, 0x65U, 0xe2U, 0x82U, 0xacU};      /* "bye" + EURO SIGN */
+  static const uint8_t overlong[] = {0xc0U, 0xafU};                              /* '/' in two bytes */
+  static const uint8_t lone_continuation[] = {0x80U};
+  static const uint8_t surrogate[] = {0xedU, 0xa0U, 0x80U};                      /* U+D800 */
+  static const uint8_t too_high[] = {0xf4U, 0x90U, 0x80U, 0x80U};                /* U+110000 */
+  static const uint8_t truncated[] = {0xe2U, 0x82U};
+
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_OK("a close with a UTF-8 reason writes",
+               wt_webtransport_close_session_write(&w, 7U, good, sizeof(good)));
+  c = wt_cursor_init(bytes, wt_writer_offset(&w));
+  WT_EXPECT_OK("and decodes", wt_webtransport_capsule_decode(&c, 64U, &capsule, &error));
+  WT_EXPECT_OK("and its reason parses",
+               wt_webtransport_close_session_parse(&capsule, &code, NULL, &reason_length, &error));
+  WT_EXPECT_U64("with its length", (uint64_t)sizeof(good), (uint64_t)reason_length);
+
+  {
+    static const uint8_t *const invalid[] = {overlong, lone_continuation, surrogate, too_high, truncated};
+    static const size_t lengths[] = {sizeof(overlong), sizeof(lone_continuation), sizeof(surrogate),
+                                     sizeof(too_high), sizeof(truncated)};
+    size_t i;
+    for (i = 0U; i < 5U; i++) {
+      w = wt_writer_init(bytes, sizeof(bytes));
+      WT_EXPECT_OK("a malformed reason still encodes as bytes",
+                   wt_webtransport_close_session_write(&w, 7U, invalid[i], lengths[i]));
+      c = wt_cursor_init(bytes, wt_writer_offset(&w));
+      WT_EXPECT_OK("and decodes as a capsule",
+                   wt_webtransport_capsule_decode(&c, 64U, &capsule, &error));
+      error = WT_HTTP3_NO_ERROR;
+      WT_EXPECT_STATUS("but its reason is refused", WT_ERR_PROTOCOL,
+                       wt_webtransport_close_session_parse(&capsule, &code, NULL, &reason_length, &error));
+      WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+    }
+  }
+}
+
 static void test_close_edges(void) {
   uint8_t bytes[1200];
   uint8_t reason[WT_CAPSULE_CLOSE_MAX_REASON];
@@ -162,6 +209,7 @@ static void test_incomplete_unknown_and_bounds(void) {
 }
 
 int main(void) {
+  test_the_close_reason_is_utf8();
   test_drain_and_close();
   test_close_edges();
   test_incomplete_unknown_and_bounds();

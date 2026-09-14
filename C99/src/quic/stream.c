@@ -450,7 +450,22 @@ wt_status_t wt_quic_stream_table_open(wt_quic_stream_table_t *table, uint64_t st
       break;
     }
   }
-  if (slot == WT_QUIC_STREAM_TABLE_MAX) return WT_ERR_LIMIT;
+  if (slot == WT_QUIC_STREAM_TABLE_MAX) {
+    /* RECLAIM BEFORE REFUSING. `wt_quic_stream_table_close` requires a stream to be COMPLETE and had no caller
+     * anywhere in the library, so a slot was never reused: a connection that opened and finished 32 streams could
+     * not open a 33rd, and the peer that finished them got `WT_ERR_LIMIT` for traffic it was entitled to send. An
+     * audit found the missing caller. The sweep is here because this is the one place that asks "is there room",
+     * and a stream that is complete by definition is not using its room. */
+    for (i = 0U; i < WT_QUIC_STREAM_TABLE_MAX; i++) {
+      if (table->used[i] && wt_quic_stream_complete(&table->streams[i])) {
+        table->used[i] = 0U;
+        table->count--;
+        (*opened)--;
+        if (slot == WT_QUIC_STREAM_TABLE_MAX) slot = i;
+      }
+    }
+    if (slot == WT_QUIC_STREAM_TABLE_MAX) return WT_ERR_LIMIT;
+  }
 
   wt_quic_stream_init(&table->streams[slot], stream_id, initiated_by_us, bidirectional, 0U, 0U);
   table->used[slot] = 1U;

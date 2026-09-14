@@ -181,6 +181,30 @@ static void test_control_frames_are_forwarded(void) {
                    wt_http3_endpoint_on_control_frame(&endpoint, WT_HTTP3_FRAME_SETTINGS, &error));
   WT_EXPECT_U64("with the unexpected-frame code", WT_HTTP3_FRAME_UNEXPECTED, (uint64_t)error);
 
+  /* RFC 9114 section 7.2.7: a CLIENT that receives MAX_PUSH_ID MUST treat it as H3_FRAME_UNEXPECTED. Only the
+   * ENDPOINT knows its own role, which is why the check belongs here rather than in the control stream -- and the
+   * rule used to live only in a table (`wt_http3_frame_allowed`) that nothing calls, so it was never applied. */
+  WT_EXPECT_STATUS("a client refuses a server's MAX_PUSH_ID", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_control_frame(&endpoint, WT_HTTP3_FRAME_MAX_PUSH_ID, &error));
+  WT_EXPECT_U64("as an unexpected frame", (uint64_t)WT_HTTP3_FRAME_UNEXPECTED, (uint64_t)error);
+  {
+    /* The server side of the same frame: MAX_PUSH_ID is a client's to send, so a server takes it. */
+    wt_http3_endpoint_t server;
+    uint8_t server_bytes[8];
+    size_t server_length = 0U;
+    wt_http3_error_t server_error = WT_HTTP3_NO_ERROR;
+
+    wt_http3_endpoint_init(&server, WT_HTTP3_ROLE_SERVER);
+    write_type(server_bytes, &server_length, WT_HTTP3_STREAM_CONTROL);
+    WT_EXPECT_OK("a server classifies the control stream",
+                 wt_http3_endpoint_on_uni_stream(&server, 3U, server_bytes, server_length, NULL, NULL,
+                                                 &server_error));
+    WT_EXPECT_OK("takes its SETTINGS",
+                 wt_http3_endpoint_on_control_frame(&server, WT_HTTP3_FRAME_SETTINGS, &server_error));
+    WT_EXPECT_OK("and accepts MAX_PUSH_ID from a client",
+                 wt_http3_endpoint_on_control_frame(&server, WT_HTTP3_FRAME_MAX_PUSH_ID, &server_error));
+  }
+
   /* The peer's control stream ending is the error itself, whether or not SETTINGS came. */
   WT_EXPECT_STATUS("closing the control stream is an error", WT_ERR_PROTOCOL,
                    wt_http3_endpoint_on_uni_stream_end(&endpoint, 3U, &error));
