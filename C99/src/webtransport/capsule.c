@@ -75,6 +75,52 @@ wt_status_t wt_webtransport_close_session_write(wt_writer_t *w, uint32_t error_c
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
 
+/* Whether `bytes` is well-formed UTF-8 (RFC 3629).
+ *
+ * Draft-16 section 6 makes the close reason a UTF-8 string, and a decoder that accepts arbitrary bytes hands a
+ * caller something it cannot print or compare. The rules are the short ones: a lead byte fixes the length, every
+ * continuation byte is 10xxxxxx, no overlong form, no surrogate (U+D800..U+DFFF) and nothing above U+10FFFF. */
+static int utf8_is_well_formed(const uint8_t *bytes, size_t length) {
+  size_t i = 0U;
+
+  while (i < length) {
+    uint8_t lead = bytes[i];
+    size_t extra;
+    uint32_t value;
+    size_t j;
+
+    if (lead < 0x80U) {
+      i++;
+      continue;
+    }
+    if ((lead & 0xe0U) == 0xc0U) {
+      extra = 1U;
+      value = (uint32_t)(lead & 0x1fU);
+    } else if ((lead & 0xf0U) == 0xe0U) {
+      extra = 2U;
+      value = (uint32_t)(lead & 0x0fU);
+    } else if ((lead & 0xf8U) == 0xf0U) {
+      extra = 3U;
+      value = (uint32_t)(lead & 0x07U);
+    } else {
+      return 0;
+    }
+    if (length - i < extra + 1U) return 0;
+    for (j = 1U; j <= extra; j++) {
+      if ((bytes[i + j] & 0xc0U) != 0x80U) return 0;
+      value = (value << 6) | (uint32_t)(bytes[i + j] & 0x3fU);
+    }
+    /* The shortest form for the length, and the two ranges the standard excludes. */
+    if (extra == 1U && value < 0x80U) return 0;
+    if (extra == 2U && value < 0x800U) return 0;
+    if (extra == 3U && value < 0x10000U) return 0;
+    if (value >= 0xd800U && value <= 0xdfffU) return 0;
+    if (value > 0x10ffffU) return 0;
+    i += extra + 1U;
+  }
+  return 1;
+}
+
 wt_status_t wt_webtransport_close_session_parse(const wt_webtransport_capsule_t *capsule,
                                                 uint32_t *out_error_code, const uint8_t **out_reason,
                                                 size_t *out_reason_length,
@@ -98,6 +144,12 @@ wt_status_t wt_webtransport_close_session_parse(const wt_webtransport_capsule_t 
   if (out_error_code != NULL) {
     *out_error_code = ((uint32_t)capsule->value[0] << 24) | ((uint32_t)capsule->value[1] << 16) |
                       ((uint32_t)capsule->value[2] << 8) | (uint32_t)capsule->value[3];
+  }
+  /* Section 6 makes the reason a UTF-8 string, so bytes that are not one are a malformed capsule rather than a
+   * string a caller can print. An audit found the reason unvalidated. */
+  if (!utf8_is_well_formed(capsule->value + 4U, capsule->value_length - 4U)) {
+    if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
+    return WT_ERR_PROTOCOL;
   }
   if (out_reason != NULL) *out_reason = capsule->value + 4U;
   if (out_reason_length != NULL) *out_reason_length = capsule->value_length - 4U;

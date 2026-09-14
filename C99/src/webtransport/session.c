@@ -124,6 +124,13 @@ wt_status_t wt_webtransport_session_on_capsule_bytes(wt_webtransport_session_t *
     }
 
     if (capsule.type == WT_CAPSULE_DRAIN_SESSION) {
+      /* Section 5.2 fixes the value at Length=0 -- "the application does not need to send any additional data" --
+       * so a value here is a capsule this layer cannot read rather than one it can ignore. It used to be ignored,
+       * which is a malformed capsule accepted in silence. */
+      if (capsule.value_length != 0U) {
+        if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
+        return WT_ERR_PROTOCOL;
+      }
       /* The peer is going away: no new streams, and the ones in flight may finish (section 5.2). */
       status = wt_webtransport_session_on_drain(session, 0);
       error = WT_HTTP3_NO_ERROR;
@@ -134,6 +141,14 @@ wt_status_t wt_webtransport_session_on_capsule_bytes(wt_webtransport_session_t *
 
       status = wt_webtransport_close_session_parse(&capsule, &code, &reason, &reason_length, &error);
       if (status == WT_OK) status = wt_webtransport_session_on_close(session, 0, code);
+      if (status == WT_OK && wt_cursor_remaining(&ahead) > 0U) {
+        /* Section 5.4: a WT_CLOSE_SESSION capsule is the LAST thing on the CONNECT stream. Bytes after it are
+         * not capsules any more, and this layer used to keep walking them and applying whatever they named --
+         * a peer could close the session and then send another grant, which the endpoint would honour. The
+         * stream's remainder is a message error. */
+        if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
+        return WT_ERR_PROTOCOL;
+      }
     } else if (observe != NULL) {
       error = WT_HTTP3_NO_ERROR;
       status = observe(context, &capsule, &error);

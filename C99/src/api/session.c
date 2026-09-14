@@ -133,6 +133,14 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
     return status;
   }
 
+  if (capsule.type == WT_CAPSULE_MAX_STREAM_DATA || capsule.type == WT_CAPSULE_STREAM_DATA_BLOCKED) {
+    /* Draft-16 section 5.4 PROHIBITS these two: stream-level flow control is WebTransport's own, and a peer that
+     * sends either is telling this endpoint about a limit it must not act on. Receipt is a session error of type
+     * WT_FLOW_CONTROL_ERROR, and the first version let the session layer ignore them as unknown capsules -- a
+     * prohibited instruction accepted in silence, which is the one answer the draft rules out. */
+    wt_session_set_error(session, WT_ERR_PROTOCOL, (uint64_t)WT_WEBTRANSPORT_FLOW_CONTROL_ERROR);
+    return WT_ERR_PROTOCOL;
+  }
   if (capsule.type == WT_CAPSULE_DRAIN_SESSION) {
     status = wt_webtransport_session_on_drain(&session->machine, 0);
     /* The error surface is recorded BEFORE the callback, and the callback is the LAST thing this function does

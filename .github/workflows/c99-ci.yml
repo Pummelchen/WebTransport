@@ -96,20 +96,6 @@ jobs:
             -DWEBTRANSPORT_C99_BUILD_APPS=ON
           cmake --build C99/out/ci/build
 
-      - name: Measure what this platform's socket calls do
-        # The two probes the library's comments quote -- the `recvfrom` fallback's semantics and the `WSARecvMsg`
-        # prototype's arity -- compiled and RUN on real Windows, so their output is evidence a reader can compare
-        # with the Wine output they were written from. They assert nothing: this step exists because Wine and
-        # Windows are not the same provider, and the first native run proved it (a peek of a datagram that exactly
-        # fits the buffer left the queue empty here and did not under Wine).
-        run: |
-          mkdir -p C99/out/windows-native/probes
-          for probe in recvfrom recvmsg-arity; do
-            gcc "C99/tests/windows/probe-$probe.c" -o "C99/out/windows-native/probes/probe-$probe.exe" -lws2_32
-            echo "=== probe-$probe ==="
-            "C99/out/windows-native/probes/probe-$probe.exe" || echo "(probe exited $?)"
-          done
-
       - name: Unit tests
         run: ctest --test-dir C99/out/ci/build --output-on-failure
 
@@ -321,6 +307,20 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DWEBTRANSPORT_C99_BUILD_APPS=ON
           cmake --build C99/out/windows-native
+
+      - name: Measure what this platform's socket calls do
+        # The two probes the library's comments quote -- the `recvfrom` fallback's semantics and the `WSARecvMsg`
+        # prototype's arity -- compiled and RUN on real Windows, so their output is evidence a reader can compare
+        # with the Wine output they were written from. They assert nothing: this step exists because Wine and
+        # Windows are not the same provider, and the first native run proved it (a peek of a datagram that exactly
+        # fits the buffer left the queue empty here and did not under Wine).
+        run: |
+          mkdir -p C99/out/windows-native/probes
+          for probe in recvfrom recvmsg-arity; do
+            gcc "C99/tests/windows/probe-$probe.c" -o "C99/out/windows-native/probes/probe-$probe.exe" -lws2_32
+            echo "=== probe-$probe ==="
+            "C99/out/windows-native/probes/probe-$probe.exe" || echo "(probe exited $?)"
+          done
 
       - name: Unit tests
         run: ctest --test-dir C99/out/windows-native --output-on-failure
