@@ -34,6 +34,8 @@ foreach(app wt-client-c99 wt-server-c99 wt-conformance-c99)
   wt_set_c99(${app})
   wt_apply_warnings(${app})
   target_link_libraries(${app} PRIVATE ${WT_LINK_TARGET})
+  # The tools are spawned by the CLI process tests, so they need the shared library beside them on Windows.
+  wt_stage_windows_runtime(${app})
   if(WT_SANITIZER_FLAGS)
     target_compile_options(${app} PRIVATE ${WT_SANITIZER_FLAGS})
     target_link_options(${app} PRIVATE ${WT_SANITIZER_FLAGS})
@@ -49,6 +51,7 @@ add_executable(wt-api-sample wt-api-sample/main.c)
 wt_set_c99(wt-api-sample)
 wt_apply_warnings(wt-api-sample)
 target_link_libraries(wt-api-sample PRIVATE ${WT_LINK_TARGET})
+wt_stage_windows_runtime(wt-api-sample)
 if(WT_SANITIZER_FLAGS)
   target_compile_options(wt-api-sample PRIVATE ${WT_SANITIZER_FLAGS})
   target_link_options(wt-api-sample PRIVATE ${WT_SANITIZER_FLAGS})
@@ -118,6 +121,15 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   add_test(NAME wt_cli_hostile_datagram
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-hostile.sh
             $<TARGET_FILE:wt-conformance-c99> $<TARGET_FILE:wt-client-c99> 45428 datagram-for-another-session)
+
+  # 77 is CTest's SKIP_RETURN_CODE, set for every script here that parses the tools' JSON with `python3`: a machine
+  # without that interpreter skips the check with its reason rather than reporting a broken protocol, which is what
+  # a FreeBSD (no python3 in base) or MSYS2 run did before WT-201. A skip is visible in the CTest summary; an exit
+  # 0 would have been counted as a pass.
+  set_tests_properties(wt_cli_session_stream wt_cli_session_datagram wt_cli_session_retry wt_cli_trust
+                       wt_cli_early_stream wt_cli_early_stream_datagram
+                       wt_cli_hostile_peer wt_cli_hostile_datagram
+                       PROPERTIES SKIP_RETURN_CODE 77)
 
   add_test(NAME wt_cli_contract
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-contract.sh

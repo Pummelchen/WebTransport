@@ -35,6 +35,18 @@ mode="${4:-stream}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# The reports are PARSED rather than grepped, because a field appended without its comma produced a report no
+# caller could read while every substring assertion passed it (`WT-144`). The parser is `python3`, and a machine
+# without one -- FreeBSD does not ship it in base, and a Windows environment may not have it -- must say so
+# rather than report a broken protocol: a missing interpreter read as `a report is not valid JSON` and turned
+# eight working CLI sessions into eight failures on the FreeBSD leg (`WT-201`). 77 is CTest's SKIP_RETURN_CODE,
+# which the registration in `apps/CMakeLists.txt` sets for this test, so the skip is visible in a summary instead
+# of being counted as a pass.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "cli early stream: unsupported -- python3 is not installed, so the JSON reports cannot be parsed (WT-201)"
+  exit 77
+fi
+
 fail() {
   echo "cli early stream: $1"
   echo "--- client:"; cat "$work/client.json"

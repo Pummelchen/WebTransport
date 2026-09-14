@@ -329,6 +329,26 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   enable_testing()
 endif()
 
+# A Windows loader looks for an imported DLL beside the EXECUTABLE and in PATH, and nowhere else. A test in
+# `tests/` or an app in `apps/` therefore cannot find a `libwebtransport.dll` left at the build root: every
+# binary fails to LOAD -- status c0000135, whose low byte is the silent `rc=53` the first Wine run reported for
+# every test -- and `ctest` on a Windows runner reports a load failure instead of a test result. Staging the DLL
+# beside each executable is what makes this build tree RUNNABLE rather than merely linked; before the helper
+# existed, `scripts/check-windows-wine.sh` copied it by hand, which is how the defect was found.
+#
+# The OpenSSL DLLs are not staged here: they belong to the OpenSSL prefix, which is on PATH for a native Windows
+# build and staged by the Wine script for a cross one.
+#
+# Defined before the subdirectories, because a function used by a subdirectory has to exist by the time CMake
+# reads that subdirectory -- not merely by the end of this file.
+function(wt_stage_windows_runtime target)
+  if(WIN32 AND BUILD_SHARED_LIBS)
+    add_custom_command(TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_FILE:webtransport_shared> $<TARGET_FILE_DIR:${target}>)
+  endif()
+endfunction()
+
 if(WEBTRANSPORT_C99_BUILD_APPS)
   add_subdirectory(apps)
 endif()

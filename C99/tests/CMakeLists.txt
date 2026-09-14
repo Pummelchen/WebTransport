@@ -106,6 +106,9 @@ foreach(test IN LISTS WT_UNIT_TESTS)
     target_compile_options(${test} PRIVATE ${WT_SANITIZER_FLAGS})
     target_link_options(${test} PRIVATE ${WT_SANITIZER_FLAGS})
   endif()
+  # A Windows test executable has to find the shared library beside itself (see `wt_stage_windows_runtime`),
+  # which is what makes `ctest` work on a Windows runner and under Wine.
+  wt_stage_windows_runtime(${test})
   add_test(NAME ${test} COMMAND ${test})
 endforeach()
 
@@ -129,6 +132,7 @@ wt_apply_warnings(fuzz_smoke)
 target_include_directories(fuzz_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit
   vectors ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
 target_link_libraries(fuzz_smoke PRIVATE ${WT_LINK_TARGET})
+wt_stage_windows_runtime(fuzz_smoke)
 if(WT_SANITIZER_FLAGS)
   target_compile_options(fuzz_smoke PRIVATE ${WT_SANITIZER_FLAGS})
   target_link_options(fuzz_smoke PRIVATE ${WT_SANITIZER_FLAGS})
@@ -155,6 +159,7 @@ if(WT_FUZZER_PROBE_RESULT EQUAL 0 AND NOT WT_SANITIZER_FLAGS)
   target_include_directories(fuzz_parsers PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit
     vectors ${CMAKE_CURRENT_SOURCE_DIR}/../tests)
   target_link_libraries(fuzz_parsers PRIVATE ${WT_LINK_TARGET})
+wt_stage_windows_runtime(fuzz_parsers)
   target_compile_options(fuzz_parsers PRIVATE -fsanitize=fuzzer,address -g)
   target_link_options(fuzz_parsers PRIVATE -fsanitize=fuzzer,address)
   add_test(NAME fuzz_parsers_libfuzzer
@@ -186,6 +191,7 @@ if(WIN32)
     target_compile_options(test_windows_udp PRIVATE ${WT_SANITIZER_FLAGS})
     target_link_options(test_windows_udp PRIVATE ${WT_SANITIZER_FLAGS})
   endif()
+  wt_stage_windows_runtime(test_windows_udp)
   add_test(NAME test_windows_udp COMMAND test_windows_udp)
 endif()
 

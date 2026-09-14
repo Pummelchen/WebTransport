@@ -23,6 +23,18 @@ act="${4:-max-streams-decrease}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
+# The reports are PARSED rather than grepped, because a field appended without its comma produced a report no
+# caller could read while every substring assertion passed it (`WT-144`). The parser is `python3`, and a machine
+# without one -- FreeBSD does not ship it in base, and a Windows environment may not have it -- must say so
+# rather than report a broken protocol: a missing interpreter read as `a report is not valid JSON` and turned
+# eight working CLI sessions into eight failures on the FreeBSD leg (`WT-201`). 77 is CTest's SKIP_RETURN_CODE,
+# which the registration in `apps/CMakeLists.txt` sets for this test, so the skip is visible in a summary instead
+# of being counted as a pass.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "cli hostile: unsupported -- python3 is not installed, so the JSON reports cannot be parsed (WT-201)"
+  exit 77
+fi
+
 # What each act must make the client do. The acts differ in the CLOSE the client sends, and one of them also
 # differs in what must NOT happen: a datagram for another session must not be counted as received, which is the
 # whole reason that act exists (WT-179). Kept here rather than in the script's prose so a new act cannot be added

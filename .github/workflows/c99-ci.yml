@@ -1,12 +1,26 @@
 # The C99 implementation's own CI, separate from the Swift job because the two
 # share nothing but the repository: no toolchain overlap, no dependency overlap,
-# and a failure in one should not mask the other. The matrix is the plan's
-# Phase 12 list minus the platforms whose runners are not free -- FreeBSD and
-# Windows 11 are still to be added -- and the Windows entries wait on the WSA
-# runtime in Phase 4 rather than on the build system. What the Linux job CAN do
-# about Windows is compile and LINK the whole tree with a cross-compiler, and
-# both steps are here: see C99/docs/PORTABILITY.md for what that does and does
-# not prove.
+# and a failure in one should not mask the other.
+#
+# Four jobs, and the plan's Phase 12 list is what they are for. macOS 26 and Debian
+# run the tree in CI as they always have; the FreeBSD leg is still to be added; and
+# the Windows leg is here twice, because there are two different claims to make and
+# only one of them needs a Windows machine:
+#
+#   * `windows-wine` cross-builds the whole tree with mingw on Linux and RUNS every
+#     test executable under Wine. That is what found `WT-199` and `WT-200` -- a
+#     datagram receive that mis-reported truncation and dropped the sender, and a
+#     `WSARecvMsg` prototype this tree had written by hand with one parameter too
+#     many, which no cross-compile could see. It runs in about four minutes on a
+#     hosted runner.
+#   * `windows-native` builds and tests on a real Windows machine with MSYS2's
+#     MINGW64 toolchain. Wine is a faithful Win32 implementation, not Windows, so
+#     this is the job that settles what Wine cannot: the extension function Wine
+#     happens to answer correctly, the platform trust store, and the loader's own
+#     DLL search. It starts NOT enforced, because it had never been run when it was
+#     written -- the same rule `check-windows-build.sh` was held to.
+#
+# See C99/docs/PORTABILITY.md for what each of those does and does not prove.
 
 name: C99 CI
 
@@ -38,6 +52,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      # The workflow files themselves, checked before anything else runs: a step with two `env:` blocks is a
+      # workflow GitHub rejects outright, and the failure has no job list and only "This run likely failed because
+      # of a workflow file issue" to go on. `check-workflows.py` refuses a repeated key, which `yaml.safe_load`
+      # silently accepts -- and a checker nothing runs is a checker nobody has tested.
+      - name: The workflow files parse and have no duplicate keys
+        if: runner.os == 'Linux'
+        run: python3 C99/scripts/check-workflows.py .github/workflows
 
       - name: Install Ninja
         run: |
@@ -184,3 +206,111 @@ jobs:
             echo "wt-client-c99 exited 0 with no protocol implemented" >&2
             exit 1
           fi
+
+  # The Windows leg, RUN rather than linked: the cross-build above says the tree compiles and links for Windows,
+  # and this says it EXECUTES there. It runs the binaries through Wine on Linux, which is as far as a hosted
+  # runner without Windows can take it -- `windows-native` below is the job that goes further.
+  windows-wine:
+    name: C99 / Windows (mingw cross-build, run under Wine)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Ninja, the cross-compiler, Wine and zstd
+        # `wine64` is the package Ubuntu ships and the binary inside it is /usr/lib/wine/wine64 -- there is no
+        # `wine64` on PATH, which is why C99/scripts/check-windows-wine.sh looks for that exact path. zstd
+        # unpacks the Windows OpenSSL below.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build gcc-mingw-w64-x86-64 wine64 zstd
+
+      - name: Fetch a Windows OpenSSL
+        # The same pinned package the Linux matrix uses, for the same reason: the compile check wants the
+        # TARGET's headers and the cross-link wants its import libraries, and a version that moves under the
+        # project's feet would turn a portability check into a version check.
+        run: |
+          curl -sL -o /tmp/mingw-openssl.pkg.tar.zst \
+            https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-openssl-3.6.4-1-any.pkg.tar.zst
+          zstd -d -f /tmp/mingw-openssl.pkg.tar.zst -o /tmp/mingw-openssl.tar
+          mkdir -p /tmp/windows-openssl && tar -xf /tmp/mingw-openssl.tar -C /tmp/windows-openssl
+
+      - name: Compile the Windows platform branch
+        run: C99/scripts/check-windows-platform.sh
+        env:
+          WT_WINDOWS_OPENSSL: /tmp/windows-openssl/mingw64
+
+      - name: Link the whole tree for Windows
+        run: C99/scripts/check-windows-build.sh
+        env:
+          WT_WINDOWS_OPENSSL: /tmp/windows-openssl/mingw64
+
+      - name: Run the whole suite under Wine
+        # Every linked test executable, bounded per test so a hang is reported as a hang rather than as a jobs
+        # timeout. This is the step that turns "linked for Windows" into "runs on Windows", and it is the step
+        # that found WT-199 and WT-200.
+        run: C99/scripts/check-windows-wine.sh
+        env:
+          WT_WINDOWS_OPENSSL: /tmp/windows-openssl/mingw64
+          WT_WINDOWS_WINE_TIMEOUT: "60"
+
+  # A REAL Windows machine, because Wine is a faithful Win32 implementation and not Windows. MSYS2's MINGW64
+  # toolchain is the same GCC the cross-build uses, so the code compiles under the same warning set; what is new
+  # here is the operating system underneath it: the provider's own `WSARecvMsg`, the Windows certificate store
+  # behind `--trust system`, the loader's DLL search, and Winsock's own error numbers.
+  windows-native:
+    name: C99 / Windows (native, MSYS2 MINGW64)
+    runs-on: windows-latest
+    # NOT enforced yet. It had never been run when it was written, and a CI job that cannot pass teaches people
+    # to ignore CI -- the rule `check-windows-build.sh` was held to before it was seen to finish. It becomes
+    # enforced the moment it has been seen green, and the commit that flips it says so.
+    continue-on-error: true
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up MSYS2 with the MINGW64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-python
+
+      - name: Check the toolchain
+        run: |
+          gcc --version | head -1
+          cmake --version | head -1
+          ninja --version
+
+      - name: Make sure the CLI checks can find python3
+        # The three `check-cli-*.sh` scripts PARSE the tools' JSON reports with `python3` (WT-144) and skip with a
+        # reason when it is absent (WT-201). MSYS2's mingw python installs `python.exe`; a `python3.exe` beside it
+        # is what those scripts look for, and creating one is cheaper than teaching three scripts about a naming
+        # difference between platforms.
+        run: |
+          if ! command -v python3 >/dev/null 2>&1; then
+            cp "$(command -v python)" "$(dirname "$(command -v python)")/python3.exe"
+          fi
+          python3 --version
+
+      - name: Configure and build
+        run: |
+          cmake -S C99 -B C99/out/windows-native -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWEBTRANSPORT_C99_BUILD_APPS=ON
+          cmake --build C99/out/windows-native
+
+      - name: Unit tests
+        run: ctest --test-dir C99/out/windows-native --output-on-failure
+
+      - name: Compile the portability inventory check too
+        # The inventory is checked against the tree here as well, because this is the platform it is about.
+        run: C99/scripts/check-portability.sh

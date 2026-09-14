@@ -31,6 +31,14 @@ if ! "$analyzer" --analyze -x c /dev/null -o /dev/null >/dev/null 2>&1; then
   exit 0
 fi
 
+# The analysis is driven by python3, which reads the compilation database and replays each entry with the analyzer
+# in place of the compiler. A machine without it cannot check a path, and says so rather than reporting success
+# (WT-201).
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "static analysis: unsupported -- python3 is not installed, so the compilation database cannot be replayed"
+  exit 0
+fi
+
 (cd "$root" && cmake -S . -B "$build" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug >/dev/null)
 
 # One analysis per SOURCE, not per build entry: the static and shared libraries compile the same file twice
