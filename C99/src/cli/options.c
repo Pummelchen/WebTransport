@@ -2,6 +2,8 @@
 
 #include "webtransport/cli/options.h"
 
+#include "cli_json.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -198,7 +200,13 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
 }
 
 wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **out_error) {
-  if (options == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (options == NULL) {
+    /* `options.h` promises "WT_ERR_INVALID_ARGUMENT with `*out_error` pointing at a static message" for a NULL
+     * argument too, and this path returned without touching it -- so a caller that printed the error printed
+     * whatever its own variable held. */
+    if (out_error != NULL) *out_error = "no options to check";
+    return WT_ERR_INVALID_ARGUMENT;
+  }
   if (out_error != NULL) *out_error = NULL;
 
   if (options->mode == WT_CLI_MODE_NONE) {
@@ -237,12 +245,16 @@ wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **o
    * accepts it for any address would be offering something the library will refuse later;
    * saying so here is the cheap place to say it. */
   if (options->trust == WT_CLI_TRUST_LOCAL_DEVELOPMENT) {
-    if (out_error != NULL) {
-      *out_error = "the development bypass is refused for a non-loopback address";
-    }
     if (strncmp(options->address, "localhost", 9U) != 0 &&
         strncmp(options->address, "127.0.0.1", 9U) != 0 &&
         strncmp(options->address, "[::1]", 5U) != 0) {
+      /* The message is set INSIDE the refusal. It used to be set before the test and left standing when the
+       * address passed, so `--trust local-development 127.0.0.1:4433` returned WT_OK with `*out_error` naming a
+       * refusal that had not happened -- an output that contradicts the return value is worse than no output,
+       * because a caller that logs it reports a failure that did not occur. */
+      if (out_error != NULL) {
+        *out_error = "the development bypass is refused for a non-loopback address";
+      }
       return WT_ERR_INVALID_ARGUMENT;
     }
   }
@@ -255,9 +267,11 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
   if (options->address == NULL) {
     fprintf(stream, "null");
   } else {
-    /* No escaping is needed for the addresses this tool accepts, and inventing an escaper here
-     * would be a second, weaker implementation of one the library already owns. */
-    fprintf(stream, "\"%s\"", options->address);
+    /* Escaped like every other caller-supplied string. The comment here used to say no escaping was needed and
+     * that an escaper would be "a second, weaker implementation of one the library already owns" -- there was no
+     * such implementation to reuse for a command line, and `--origin 'x","evil":1'` proved it by injecting a
+     * member into the report an audit was reading. */
+    wt_cli_write_json_string(stream, options->address);
   }
   fprintf(stream, ",\"transport\":\"%s\",\"trust\":\"%s\",\"trustSet\":%s",
           wt_cli_transport_name(options->transport), wt_cli_trust_name(options->trust),
@@ -266,19 +280,19 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
   if (options->origin == NULL) {
     fprintf(stream, "null");
   } else {
-    fprintf(stream, "\"%s\"", options->origin);
+    wt_cli_write_json_string(stream, options->origin);
   }
   fprintf(stream, ",\"authority\":");
   if (options->authority == NULL) {
     fprintf(stream, "null");
   } else {
-    fprintf(stream, "\"%s\"", options->authority);
+    wt_cli_write_json_string(stream, options->authority);
   }
   fprintf(stream, ",\"protocol\":");
   if (options->protocol == NULL) {
     fprintf(stream, "null");
   } else {
-    fprintf(stream, "\"%s\"", options->protocol);
+    wt_cli_write_json_string(stream, options->protocol);
   }
   fprintf(stream, ",\"settingsValidation\":%s%s,\"exchange\":\"%s\",\"timeoutMs\":%llu",
           options->settings_validation != 0 ? "true" : "false",
@@ -288,7 +302,7 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
   if (options->hostile == NULL) {
     fprintf(stream, "null");
   } else {
-    fprintf(stream, "\"%s\"", options->hostile);
+    wt_cli_write_json_string(stream, options->hostile);
   }
   fprintf(stream, ",\"json\":%s}\n",
           options->json != 0 ? "true" : "false");

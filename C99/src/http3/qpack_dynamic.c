@@ -2,6 +2,7 @@
 
 #include "webtransport/http3/qpack.h"
 
+#include <stdint.h>
 #include <string.h>
 
 void wt_qpack_dynamic_init(wt_qpack_dynamic_table_t *table, size_t capacity) {
@@ -45,6 +46,23 @@ void wt_qpack_dynamic_set_capacity(wt_qpack_dynamic_table_t *table, size_t capac
   }
 }
 
+/* Whether a caller's view points INTO the table's own arena. A pointer comparison between unrelated objects is
+ * undefined in C, so the addresses are compared as integers -- which is exactly what the question is about: this
+ * is an address-range test, not a pointer comparison. */
+static int aliases_arena(const wt_qpack_dynamic_table_t *table, const uint8_t *bytes, size_t length) {
+  uintptr_t start;
+  uintptr_t end;
+  uintptr_t arena_start;
+  uintptr_t arena_end;
+
+  if (bytes == NULL || length == 0U) return 0;
+  start = (uintptr_t)(const void *)bytes;
+  end = start + length;
+  arena_start = (uintptr_t)(const void *)table->bytes;
+  arena_end = arena_start + sizeof(table->bytes);
+  return start < arena_end && arena_start < end;
+}
+
 wt_status_t wt_qpack_dynamic_insert(wt_qpack_dynamic_table_t *table, const uint8_t *name,
                                     size_t name_length, const uint8_t *value, size_t value_length,
                                     uint64_t *out_absolute_index) {
@@ -65,6 +83,26 @@ wt_status_t wt_qpack_dynamic_insert(wt_qpack_dynamic_table_t *table, const uint8
   /* The arena holds the live bytes; an entry that would not fit even after every
    * eviction is one this build's bound refuses. */
   if (name_length + value_length > sizeof(table->bytes)) return WT_ERR_LIMIT;
+  needed = name_length + value_length;
+
+  /* RFC 9204 section 3.2.2 warns about this exact trap: an instruction whose name or value is a REFERENCE INTO
+   * THE TABLE (an insert that names a dynamic entry, or a duplicate) is decoded into a view, and applying it
+   * evicts entries -- which compacts the arena the view points into -- before copying. The first version copied
+   * straight from the view, so the bytes stored were whatever had moved over them: an audit duplicating entry 0
+   * of a two-entry table got entry 1's bytes, and ASan reported an overlapping memcpy at the copy below.
+   *
+   * A view that points into the arena is therefore STAGED first. The buffer is the arena's own size and `needed`
+   * is already bounded by it (the check above), so staging can never truncate what the caller named. */
+  if (aliases_arena(table, name, name_length) || aliases_arena(table, value, value_length)) {
+    /* On the STACK rather than `static`: a file-scope staging buffer would make this function share state
+     * between two handles on two threads, which the library's contract does not allow and does not need to. Four
+     * kilobytes beside a table the same size is the honest price of a correct copy. */
+    uint8_t staged[WT_QPACK_DYNAMIC_MAX_BYTES];
+    if (name_length != 0U) memcpy(staged, name, name_length);
+    if (value_length != 0U) memcpy(staged + name_length, value, value_length);
+    name = staged;
+    value = staged + name_length;
+  }
 
   /* Make room, oldest first, then by compacting what is left to the front: the
    * bytes of evicted entries would otherwise be holes, and a table that only ever
@@ -79,7 +117,6 @@ wt_status_t wt_qpack_dynamic_insert(wt_qpack_dynamic_table_t *table, const uint8
     return WT_ERR_LIMIT;
   }
 
-  needed = name_length + value_length;
   /* An empty name or value is legal and has no bytes to copy; the guards keep a
    * NULL with a zero length away from `memcpy`'s nonnull parameters. */
   if (name_length != 0U) memcpy(table->bytes + table->used, name, name_length);

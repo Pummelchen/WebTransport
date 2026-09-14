@@ -777,15 +777,24 @@ static wt_status_t send_encoded_frame(wt_quic_connection_t *connection, wt_quic_
  * smallest less the gap, and it covers `length` packets. A pair that would take the chain below zero is
  * a malformed frame and not something to clamp. */
 static wt_status_t validate_ack(const wt_quic_frame_t *frame) {
+  wt_cursor_t c = wt_cursor_init(frame->as.ack.ranges, frame->as.ack.ranges_len);
   uint64_t largest = frame->as.ack.largest;
   uint64_t smallest;
   uint64_t i;
 
   if (frame->as.ack.first_range > largest) return WT_ERR_PROTOCOL;
   smallest = largest - frame->as.ack.first_range;
+  /* ONE pass over the range list, not one pass PER range: `wt_quic_frame_ack_range_at` re-parses the list from
+   * its first byte for every index, so a peer-supplied range count made this loop quadratic -- an audit measured
+   * 2.2 seconds for a single 16,000-range ACK and a 64 KB datagram carries twice that, before the per-packet
+   * `ack_covers` sweep multiplies it. The cursor walks the list once; the arithmetic below is the same section
+   * 19.3.1 chain it always was. */
   for (i = 0U; i < frame->as.ack.range_count; i++) {
     wt_quic_ack_range_t range;
-    if (wt_quic_frame_ack_range_at(frame, i, &range) != WT_OK) return WT_ERR_PROTOCOL;
+    if (wt_quic_varint_decode(&c, &range.gap) != WT_OK ||
+        wt_quic_varint_decode(&c, &range.length) != WT_OK) {
+      return WT_ERR_PROTOCOL;
+    }
     if (range.length == 0U) return WT_ERR_PROTOCOL;
     if (smallest < range.gap + 2U) return WT_ERR_PROTOCOL;
     largest = smallest - range.gap - 2U;
@@ -798,15 +807,21 @@ static wt_status_t validate_ack(const wt_quic_frame_t *frame) {
 
 /* Whether the frame acknowledges one packet number. Assumes `validate_ack` passed. */
 static int ack_covers(const wt_quic_frame_t *frame, uint64_t packet_number) {
+  wt_cursor_t c = wt_cursor_init(frame->as.ack.ranges, frame->as.ack.ranges_len);
   uint64_t largest = frame->as.ack.largest;
   uint64_t smallest = largest - frame->as.ack.first_range;
   uint64_t i;
 
   if (packet_number > largest) return 0;
   if (packet_number >= smallest) return 1;
+  /* The same single pass as `validate_ack`, and for the same reason: this runs once per in-flight packet, so a
+   * quadratic range walk here was multiplied by the number of them. */
   for (i = 0U; i < frame->as.ack.range_count; i++) {
     wt_quic_ack_range_t range;
-    if (wt_quic_frame_ack_range_at(frame, i, &range) != WT_OK) return 0;
+    if (wt_quic_varint_decode(&c, &range.gap) != WT_OK ||
+        wt_quic_varint_decode(&c, &range.length) != WT_OK) {
+      return 0;
+    }
     largest = smallest - range.gap - 2U;
     smallest = largest - (range.length - 1U);
     if (packet_number > largest) return 0;
@@ -2620,11 +2635,11 @@ static void aead_limits_for(wt_aead_t aead, uint64_t *out_confidentiality, uint6
  * thing a key update does not change, which is also what lets the receive path unprotect a header of any phase
  * with the keys it already holds. */
 static wt_status_t derive_next_keys(const wt_quic_packet_keys_t *current, wt_quic_packet_keys_t *out) {
-  wt_status_t status = wt_quic_packet_keys_update(current, out);
-  if (status != WT_OK) return status;
-  memcpy(out->hp, current->hp, current->hp_len);
-  out->hp_len = current->hp_len;
-  return WT_OK;
+  /* One call: the "header protection key is not updated" rule (RFC 9001 section 6.1) lives INSIDE
+   * `wt_quic_packet_keys_update` now, because a caller of that public function has to get it right too. This
+   * wrapper used to copy the old hp back over the freshly derived one, which is what made the tree work while the
+   * public function was wrong. */
+  return wt_quic_packet_keys_update(current, out);
 }
 
 /* The next phase's RECEIVE keys, derived on first use rather than at every pump: section 6.3 allows generating
@@ -3266,6 +3281,12 @@ void wt_quic_connection_clear(wt_quic_connection_t *connection) {
     wt_quic_packet_keys_clear(&connection->keys_in[i]);
     wt_quic_packet_keys_clear(&connection->keys_out[i]);
   }
+  /* The key-update sets are live 1-RTT KEY MATERIAL after an update, and clearing only `keys_in`/`keys_out` left
+   * them in a struct a caller may reuse or hand on: an audit read all three back after `clear`. Every set this
+   * struct holds is cleared here, which is what "clear" has to mean. */
+  wt_quic_packet_keys_clear(&connection->previous_keys_in);
+  wt_quic_packet_keys_clear(&connection->next_keys_in);
+  wt_quic_packet_keys_clear(&connection->next_keys_out);
   connection->has_peer = 0;
   connection->socket.fd = WT_UDP_INVALID_FD;
 }

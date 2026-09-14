@@ -139,8 +139,53 @@ static void test_capacity_and_limits(void) {
   }
 }
 
+/* RFC 9204 section 3.2.2 warns about this exact shape, and an audit found the table doing it: an instruction
+ * whose name or value is a REFERENCE INTO THE TABLE (a duplicate, or an insert naming a dynamic entry) is
+ * decoded into a view, and applying it EVICTS entries -- which compacts the arena the view points into -- before
+ * copying. The bytes then stored are whatever moved over them. The harness that found it duplicated entry 0 of a
+ * two-entry table and got entry 1's name and value; ASan reported an overlapping `memcpy` at the copy. */
+static void test_a_duplicate_of_a_live_entry_copies_that_entry(void) {
+  wt_qpack_dynamic_table_t table;
+  uint64_t index = 0U;
+  const uint8_t *name = NULL;
+  const uint8_t *value = NULL;
+  size_t name_length = 0U;
+  size_t value_length = 0U;
+
+  /* A capacity that holds two of these entries and no more, so the duplicate has to evict something before it
+   * copies. (Each entry is name + value + 32, so 100 holds two 18-byte entries and nothing else.) */
+  wt_qpack_dynamic_init(&table, 100U);
+  WT_EXPECT_OK("the first entry inserts",
+               wt_qpack_dynamic_insert(&table, (const uint8_t *)"aaaaaaaa", 8U,
+                                       (const uint8_t *)"1111", 4U, &index));
+  WT_EXPECT_OK("and a second",
+               wt_qpack_dynamic_insert(&table, (const uint8_t *)"bbbbbbbb", 8U,
+                                       (const uint8_t *)"2222", 4U, &index));
+
+  /* The views are taken BEFORE the insert, exactly as the encoder-stream decoder takes them: they point into the
+   * table's arena. */
+  WT_EXPECT_OK("the first entry is readable",
+               wt_qpack_dynamic_entry(&table, 0U, &name, &name_length, &value, &value_length) != WT_OK);
+  WT_EXPECT_U64("with its name length", 8U, (uint64_t)name_length);
+  WT_EXPECT_OK("and duplicating it from its own bytes",
+               wt_qpack_dynamic_insert(&table, name, name_length, value, value_length, &index));
+
+  /* The SOURCE was evicted to make room -- that is what makes this the bug's exact case -- and the duplicate
+   * must still carry the FIRST entry's bytes rather than the second's, which is what a copy performed after the
+   * arena was compacted over them stored. */
+  WT_EXPECT_STATUS("the source entry was evicted to make room", WT_ERR_CLOSED,
+                   wt_qpack_dynamic_entry(&table, 0U, &name, &name_length, &value, &value_length));
+  WT_EXPECT_U64("while the duplicate lives on", 2U, (uint64_t)table.count);
+  WT_EXPECT_OK("and the duplicate reads back",
+               wt_qpack_dynamic_entry(&table, index, &name, &name_length, &value, &value_length));
+  WT_EXPECT_U64("with the name it duplicated", 8U, (uint64_t)name_length);
+  WT_EXPECT_BYTES("byte for byte", (const uint8_t *)"aaaaaaaa", name, 8U);
+  WT_EXPECT_BYTES("and the value it duplicated", (const uint8_t *)"1111", value, 4U);
+}
+
 int main(void) {
   test_insert_and_lookup();
+  test_a_duplicate_of_a_live_entry_copies_that_entry();
   test_eviction_keeps_indices();
   test_capacity_and_limits();
   WT_TEST_MAIN_END("wt_qpack_dynamic");

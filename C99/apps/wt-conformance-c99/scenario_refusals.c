@@ -95,16 +95,29 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
         "a repeated SETTINGS identifier is H3_SETTINGS_ERROR");
   }
   {
-    /* A reserved identifier: 0x21 is the first of the RFC's 0x1f-spaced reserved values. */
-    static const uint8_t reserved[] = {0x21U, 0x01U};
+    /* The EXERCISE identifiers of RFC 9114 section 7.2.4.1 -- `0x1f * N + 0x21` -- are IGNORED: "Endpoints
+     * SHOULD include at least one such setting in their SETTINGS frame. Endpoints MUST NOT consider such settings
+     * to have any meaning upon receipt." This scenario asserted the OPPOSITE for a round (that one is
+     * H3_SETTINGS_ERROR), which is the rule for the other reserved family and made this tool refuse a conforming
+     * peer's padding. Both outcomes are now asserted, because the section states them one sentence apart. */
+    static const uint8_t exerciser[] = {0x21U, 0x01U};
+    static const uint8_t http2_reserved[] = {0x02U, 0x01U};
     wt_http3_settings_t settings;
     wt_http3_error_t settings_error = WT_HTTP3_NO_ERROR;
-    wt_status_t status = wt_http3_settings_parse(reserved, sizeof(reserved), &settings, &settings_error);
-    {
-      add(report, "settings-reserved-identifier",
-          status == WT_ERR_PROTOCOL && settings_error == WT_HTTP3_SETTINGS_ERROR,
-          "a reserved SETTINGS identifier (0x1f*N+0x21) is H3_SETTINGS_ERROR rather than something to ignore");
-    }
+    wt_status_t status = wt_http3_settings_parse(exerciser, sizeof(exerciser), &settings,
+                                                 &settings_error);
+    int present = 1;
+    add(report, "settings-exerciser-identifier-ignored",
+        status == WT_OK && settings_error == WT_HTTP3_NO_ERROR &&
+            wt_http3_settings_get(&settings, 0x21U, &present) == 0U && present == 0,
+        "a SETTINGS exercise identifier (0x1f*N+0x21) is IGNORED, not stored and not an error");
+
+    settings_error = WT_HTTP3_NO_ERROR;
+    status = wt_http3_settings_parse(http2_reserved, sizeof(http2_reserved), &settings,
+                                     &settings_error);
+    add(report, "settings-http2-identifier-refused",
+        status == WT_ERR_PROTOCOL && settings_error == WT_HTTP3_SETTINGS_ERROR,
+        "a SETTINGS identifier reserved from HTTP/2 (0x02..0x05) is H3_SETTINGS_ERROR");
   }
 
   /* A field section that references a dynamic entry when NO dynamic table was advertised must be refused rather
@@ -212,8 +225,8 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     wt_status_t status = wt_webtransport_datagram_parse(NULL, 0U, &quarter, &payload, &payload_length,
                                                         &datagram_error);
     add(report, "datagram-without-quarter-id",
-        status == WT_ERR_PROTOCOL && datagram_error == WT_HTTP3_MESSAGE_ERROR,
-        "an empty datagram is malformed rather than incomplete");
+        status == WT_ERR_PROTOCOL && datagram_error == WT_HTTP3_DATAGRAM_ERROR,
+        "an empty datagram is malformed rather than incomplete, with H3_DATAGRAM_ERROR (0x33)");
   }
 
   /* And the positive edge this project earned the hard way: a prefix split across frames is assembled, and a

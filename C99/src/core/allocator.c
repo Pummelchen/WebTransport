@@ -57,9 +57,18 @@ static wt_allocator_t wt_allocator_resolve(const wt_allocator_t *a) {
   return *a;
 }
 
+/* The size an allocator is TOLD for a request of `size` bytes.
+ *
+ * The header states two rules that only agree if the answer is "at least one": `alloc` is "called with a non-zero
+ * size only", and "a request of size zero succeeds and returns a unique, freeable pointer". One byte is what both
+ * require, and it has to be substituted in the FREE path too -- an allocator is entitled to subtract the size it
+ * is told, so a block allocated as one byte and freed as zero is a block it reports as still live. That asymmetry
+ * is what an audit's strict allocator and this tree's own counting allocator both showed. */
+static size_t wt_requested_size(size_t size) { return size == 0U ? 1U : size; }
+
 void *wt_alloc(const wt_allocator_t *a, size_t size) {
   wt_allocator_t resolved = wt_allocator_resolve(a);
-  return resolved.alloc(resolved.context, size);
+  return resolved.alloc(resolved.context, wt_requested_size(size));
 }
 
 void *wt_alloc_array(const wt_allocator_t *a, size_t count, size_t elem_size,
@@ -99,7 +108,7 @@ void *wt_calloc_array(const wt_allocator_t *a, size_t count, size_t elem_size,
 void *wt_realloc(const wt_allocator_t *a, void *ptr, size_t old_size,
                  size_t new_size) {
   wt_allocator_t resolved = wt_allocator_resolve(a);
-  if (ptr == NULL) return resolved.alloc(resolved.context, new_size);
+  if (ptr == NULL) return resolved.alloc(resolved.context, wt_requested_size(new_size));
   return resolved.realloc(resolved.context, ptr, old_size, new_size);
 }
 
@@ -107,5 +116,5 @@ void wt_dealloc(const wt_allocator_t *a, void *ptr, size_t size) {
   wt_allocator_t resolved;
   if (ptr == NULL) return;
   resolved = wt_allocator_resolve(a);
-  resolved.free(resolved.context, ptr, size);
+  resolved.free(resolved.context, ptr, wt_requested_size(size));
 }

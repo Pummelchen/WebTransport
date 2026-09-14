@@ -271,10 +271,15 @@ static void test_initial_keys(void) {
                  wt_hkdf_expand_label_sha256(WT_RFC9001_CHACHA_KEY_UPDATE, 32U,
                                              "quic iv", NULL, 0U, want, 12U));
     WT_EXPECT_BYTES("is the derived one", want, next.iv, 12U);
-    WT_EXPECT_OK("its header protection key",
-                 wt_hkdf_expand_label_sha256(WT_RFC9001_CHACHA_KEY_UPDATE, 32U,
-                                             "quic hp", NULL, 0U, want, 32U));
-    WT_EXPECT_BYTES("is the derived one", want, next.hp, 32U);
+    /* RFC 9001 section 6.1: "The header protection key is not updated." The next set's hp is the CURRENT set's,
+     * byte for byte -- the assertion here used to derive "quic hp" from the next secret and require that, which is
+     * the rule for the key and the IV and is explicitly NOT the rule for the header protection key. The old
+     * expectation is what let the public function get it wrong while its only in-tree caller patched over it. */
+    WT_EXPECT_BYTES("while the header protection key is NOT updated",
+                    current.hp, next.hp, sizeof(current.hp));
+    WT_EXPECT_INT("and its length comes with it", (long)current.hp_len, (long)next.hp_len);
+    /* The key and the IV ARE new, so the copy above is not "nothing changed". */
+    WT_EXPECT_TRUE("the AEAD key did change", memcmp(current.key, next.key, sizeof(current.key)) != 0);
     WT_EXPECT_U64("the suite does not change across an update",
                   (uint64_t)WT_AEAD_CHACHA20_POLY1305, (uint64_t)next.aead);
     WT_EXPECT_INT("the next secret is not the current one", 0,

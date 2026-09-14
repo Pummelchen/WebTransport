@@ -90,22 +90,27 @@ typedef struct wt_udp_platform_message {
 
 /* WSAStartup belongs to the socket lifetime, and this layer is the only place in the library that touches the
  * operating system at all: a reference count here means a caller cannot forget it, and cannot call it twice.
- * The count is the number of OPEN sockets, so the last close is what releases Winsock. */
+ * The count is the number of OPEN sockets, so the last close is what releases Winsock.
+ *
+ * ONE counter, at FILE scope, and that is the whole point of it being here: the first version declared
+ * `static int open_sockets` inside EACH function, which is two distinct objects -- `release` decremented its
+ * own zero and returned early, so `WSACleanup` was unreachable and the count documented above was fiction.
+ * Both functions compiled, both looked right line by line, and only running the pair shows it. */
+static int wt_udp_platform_open_sockets = 0;
+
 static int wt_udp_platform_acquire(void) {
-  static int open_sockets = 0;
-  if (open_sockets == 0) {
+  if (wt_udp_platform_open_sockets == 0) {
     WSADATA data;
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) return -1;
   }
-  open_sockets++;
+  wt_udp_platform_open_sockets++;
   return 0;
 }
 
 static void wt_udp_platform_release(void) {
-  static int open_sockets = 0;
-  if (open_sockets == 0) return;
-  open_sockets--;
-  if (open_sockets == 0) (void)WSACleanup();
+  if (wt_udp_platform_open_sockets == 0) return;
+  wt_udp_platform_open_sockets--;
+  if (wt_udp_platform_open_sockets == 0) (void)WSACleanup();
 }
 
 static int wt_udp_platform_close(wt_udp_handle_t handle) { return closesocket(handle); }
@@ -577,6 +582,10 @@ static wt_status_t wt_udp_platform_status_of_error(int error) {
     case ETIMEDOUT:
       return WT_ERR_TIMEOUT;
     case ECONNREFUSED:
+    /* `ECONNRESET` belongs here because the Windows branch maps `WSAECONNRESET` to the same status: a reset
+     * reported to a connected UDP socket is the same network event on both platforms, and a caller that
+     * classified it as a generic IO failure here would see the platform change the meaning of its own error. */
+    case ECONNRESET:
     case ENETUNREACH:
     case EHOSTUNREACH:
     case ENETDOWN:

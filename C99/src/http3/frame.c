@@ -34,8 +34,25 @@ const char *wt_http3_frame_type_name(uint64_t type) {
 }
 
 int wt_http3_frame_type_is_reserved(uint64_t type) {
-  /* RFC 9114 section 7.2.8: HTTP/2's frame types were reserved here as
-   * 0x1f * N + 0x21, and receiving one is a connection error. */
+  /* RFC 9114 section 7.2.8, first paragraph: "Frame types that were used in HTTP/2 where there is no corresponding
+   * HTTP/3 frame have also been reserved ... These frame types MUST NOT be sent, and their receipt MUST be treated
+   * as a connection error of type H3_FRAME_UNEXPECTED." Section 11.2.1 names them: PRIORITY (0x02), PING (0x06),
+   * WINDOW_UPDATE (0x08) and CONTINUATION (0x09).
+   *
+   * The first version of this function had it the OTHER way round -- it reserved `0x1f * N + 0x21`, which the
+   * same section says a peer MAY send and MUST have ignored, and accepted 0x02 and friends -- so this layer
+   * refused conforming padding frames and accepted the four types the RFC forbids. `is_exerciser` below is the
+   * other half, and a unit test had pinned the inversion. */
+  return type == (uint64_t)0x02 || type == (uint64_t)0x06 || type == (uint64_t)0x08 ||
+         type == (uint64_t)0x09;
+}
+
+int wt_http3_frame_type_is_exerciser(uint64_t type) {
+  /* Section 7.2.8, second paragraph: "Frame types of the format 0x1f * N + 0x21 ... are reserved to exercise the
+   * requirement that unknown types be ignored ... These frames have no semantics, and they MAY be sent on any
+   * stream where frames are allowed to be sent. This enables their use for application-layer padding. Endpoints
+   * MUST NOT consider these frames to have any meaning upon receipt." So these are IGNORED, not refused, and this
+   * predicate exists so that the rule is stated rather than implied by falling into the unknown-type path. */
   if (type < (uint64_t)0x21) return 0;
   return ((type - (uint64_t)0x21) % (uint64_t)0x1f) == 0U;
 }

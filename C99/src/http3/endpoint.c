@@ -79,6 +79,12 @@ static wt_status_t track_request(wt_http3_endpoint_t *endpoint, uint64_t stream_
   slot = &endpoint->requests[endpoint->request_count];
   slot->stream_id = stream_id;
   slot->locally_opened = locally_opened;
+  /* CLEARED here, because this is the only place a slot is created: the table hands out slots by reuse, so a
+   * request that follows a finished one inherits the finished one's fields unless every field is set. The first
+   * version left `response_seen` alone, so the next request's FIRST response was refused as a second one
+   * (`WT-ERR_STATE`) whenever the slot had been used before -- a stale byte deciding whether a valid response is
+   * accepted, which is the shape of bug that only a reused slot shows. */
+  slot->response_seen = 0;
   wt_http3_request_init(&slot->request);
   endpoint->request_count++;
   return WT_OK;
@@ -145,7 +151,16 @@ wt_status_t wt_http3_endpoint_on_request_headers(wt_http3_endpoint_t *endpoint, 
      * BEFORE the frame is applied, so it is read first. */
     if (request != NULL) before = request->request.state;
 
-    /* The ordering rule is the request machine's, applied exactly as any other frame's: a
+    /* The FRAME ORDERING question is answered FIRST, and the order is deliberate rather than incidental (an
+     * audit filed it as "state advanced before HEADERS validation" and this is the answer): a HEADERS frame that
+     * arrived has arrived, whatever its section says, so the machine advances and a section the MESSAGE layer
+     * refuses is reported as the message error it is. Doing it the other way round -- decode, then advance --
+     * reports a content error where the caller's own ordering is wrong, which the assertion "an untracked stream
+     * is a state error" pins: the section in that case decodes fine, and the answer must still be the state
+     * error, not a message error. What the reverse order buys -- a DATA frame accepted after a refused HEADERS --
+     * is never observable, because the caller aborts the request on the message error.
+     *
+     * The ordering rule is the request machine's, applied exactly as any other frame's: a
      * HEADERS frame after the trailer is as invalid here as anywhere. */
     status = wt_http3_endpoint_on_request_frame(endpoint, stream_id, WT_HTTP3_FRAME_HEADERS,
                                                 out_error);
@@ -226,6 +241,10 @@ wt_status_t wt_http3_endpoint_on_response_headers(wt_http3_endpoint_t *endpoint,
      * handles, or a peer that has lost track of the stream -- and neither is a second response. */
     return WT_ERR_STATE;
   }
+  /* Marked seen BEFORE the section is decoded, for the reason the request path above records: the frame
+   * arrived, and a section the message layer refuses is reported as a message error. A caller that treated that
+   * error as survivable and waited for another response would be wrong about the protocol, not about this
+   * flag. */
   request->response_seen = 1;
   return wt_http3_message_decode(out_message, WT_HTTP3_HEADER_RESPONSE, payload, length,
                                  &endpoint->decoder_table,
@@ -424,11 +443,13 @@ wt_status_t wt_http3_endpoint_on_uni_stream(wt_http3_endpoint_t *endpoint, uint6
     /* A push stream is refused deterministically rather than ignored: this build has no
      * MAX_PUSH_ID and WebTransport does not use push, so a client that did not ask for one
      * is H3_ID_ERROR, and a client may not send one at all. Ignoring it would leave a
-     * stream the peer believes is delivering a response. */
-    endpoint->streams[endpoint->stream_count].stream_id = stream_id;
-    endpoint->streams[endpoint->stream_count].kind = WT_HTTP3_ENDPOINT_STREAM_PUSH;
-    endpoint->streams[endpoint->stream_count].type = type;
-    endpoint->stream_count++;
+     * stream the peer believes is delivering a response.
+     *
+     * The stream is NOT recorded, and that is a memory-safety fix rather than a tidy-up: the first version
+     * recorded it here -- before the `stream_count >= MAX` check further down, which this branch returns before
+     * reaching -- so a 33rd stream wrote `streams[32]` one past the end of the array and overwrote `stream_count`
+     * with a peer-controlled stream ID (an audit grew the count from 32 to 133 with one push, and UBSan named the
+     * index). A stream this endpoint is refusing is not a stream it tracks. */
     if (endpoint->role == WT_HTTP3_ROLE_CLIENT) {
       return refuse(WT_ERR_PROTOCOL, WT_HTTP3_ID_ERROR, out_error);
     }
@@ -484,6 +505,16 @@ wt_status_t wt_http3_endpoint_on_uni_stream_end(wt_http3_endpoint_t *endpoint, u
     wt_status_t status = wt_http3_control_on_closed(&endpoint->peer_control, out_error);
     forget_stream(endpoint, stream_id);
     return status;
+  }
+  if (kind == WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER ||
+      kind == WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER) {
+    /* RFC 9114 section 6.2.1 and RFC 9204 section 4.2: the QPACK encoder and decoder streams are CRITICAL, so
+     * closing either one is H3_CLOSED_CRITICAL_STREAM -- not a quiet end. The first version special-cased only
+     * the control stream and forgot these two with WT_OK, which left a peer free to close the stream its
+     * instructions were arriving on and continue as if the table were still in sync. */
+    forget_stream(endpoint, stream_id);
+    if (out_error != NULL) *out_error = WT_HTTP3_CLOSED_CRITICAL_STREAM;
+    return WT_ERR_PROTOCOL;
   }
   forget_stream(endpoint, stream_id);
   return WT_OK;

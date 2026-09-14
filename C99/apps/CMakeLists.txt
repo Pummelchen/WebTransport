@@ -60,6 +60,15 @@ endif()
 # so the standard variable is never defined here and a guard on it would drop the test
 # silently.
 if(WEBTRANSPORT_C99_BUILD_TESTS)
+  # The CLI scenarios below are POSIX SHELL SCRIPTS. A test whose COMMAND names a `.sh` file works where the
+  # kernel honours its shebang and nowhere else: on Windows CTest reports `BAD_COMMAND` for every one of them,
+  # which is what the first native-Windows run did for all ten. Naming the interpreter explicitly makes the same
+  # test run on both platforms, and `find_program(... REQUIRED)` says so at CONFIGURE time on a machine without
+  # one instead of at test time with no explanation. It is inside this branch because a shell is only needed when
+  # these tests are built.
+  find_program(WT_CLI_SHELL NAMES sh bash REQUIRED)
+  set(WT_CLI_TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../scripts)
+
   add_test(NAME wt_api_sample COMMAND wt-api-sample)
   # The conformance tool's own scenarios, including the two print sessions over loopback: registered so that
   # "the tools run local IPv4 and IPv6 packet sessions" is CHECKED rather than demonstrated by hand. The
@@ -74,39 +83,39 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   # over a real socket, which is what the plan's CLI criteria ask for and what one process cannot prove.
   # Both exchange modes, because they are different code paths in both tools.
   add_test(NAME wt_cli_session_stream
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45417 stream)
   add_test(NAME wt_cli_session_datagram
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45419 datagram)
   # A client that sends BEFORE its CONNECT (WT-189): the only order that reaches the SERVER's section 4.6 parking
   # path from the tools, since every other script drives a well-ordered client whose CONNECT arrives first. Both
   # exchange modes, because a stream and a datagram are parked by the same object through different paths.
   add_test(NAME wt_cli_early_stream
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-early-stream.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-early-stream.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45431 stream)
   add_test(NAME wt_cli_early_stream_datagram
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-early-stream.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-early-stream.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45433 datagram)
   # The same exchange with the SERVER validating the client's address first (WT-168): the client has to accept the
   # Retry, adopt the connection ID it named, echo the token, and start a session on it. Every one of those is a
   # step the no-Retry path does not take, so this is the case that keeps the flow working.
   add_test(NAME wt_cli_session_retry
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45423 stream "127.0.0.1" "" retry)
   # `--trust` decides how the peer is validated, and it used to decide nothing: the client took the loopback
   # development bypass whatever the option said, while its report still claimed `"trust":"system"` (WT-193). This
   # is the case that cannot pass unless the option is honoured, because the two modes must DISAGREE about a
   # self-signed leaf -- the bypass accepts it and the platform store refuses it.
   add_test(NAME wt_cli_trust
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-trust.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-trust.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45441 45443)
   # The process CONTRACT: exit statuses, refused command lines and the JSON report, checked without a peer.
   # And the same session over IPv6, where the machine has it: 77 is CTest's SKIP_RETURN_CODE, which the script
   # returns when the conformance tool reports that this machine has no IPv6 loopback -- a fact about the machine
   # rather than a failure of the tools.
   add_test(NAME wt_cli_session_ipv6
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-session.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-session.sh
             $<TARGET_FILE:wt-server-c99> $<TARGET_FILE:wt-client-c99> 45421 stream "[::1]"
             $<TARGET_FILE:wt-conformance-c99>)
   set_tests_properties(wt_cli_session_ipv6 PROPERTIES SKIP_RETURN_CODE 77)
@@ -114,12 +123,12 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
   # A peer that BREAKS A RULE, against the client tool (WT-147): the refusal path of a shipped tool, asserted on
   # both sides of a real socket -- the client's report says what it sent, and the peer's says what it received.
   add_test(NAME wt_cli_hostile_peer
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-hostile.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-hostile.sh
             $<TARGET_FILE:wt-conformance-c99> $<TARGET_FILE:wt-client-c99> 45427 max-streams-decrease)
   # The second act: a WebTransport DATAGRAM whose quarter stream ID names a session this endpoint does not have.
   # The client must refuse it with HTTP/3's ID_ERROR and must NOT count it as a received message (WT-179).
   add_test(NAME wt_cli_hostile_datagram
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-hostile.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-hostile.sh
             $<TARGET_FILE:wt-conformance-c99> $<TARGET_FILE:wt-client-c99> 45428 datagram-for-another-session)
 
   # 77 is CTest's SKIP_RETURN_CODE, set for every script here that parses the tools' JSON with `python3`: a machine
@@ -132,7 +141,7 @@ if(WEBTRANSPORT_C99_BUILD_TESTS)
                        PROPERTIES SKIP_RETURN_CODE 77)
 
   add_test(NAME wt_cli_contract
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/check-cli-contract.sh
+    COMMAND ${WT_CLI_SHELL} ${WT_CLI_TEST_DIR}/check-cli-contract.sh
             $<TARGET_FILE:wt-client-c99> $<TARGET_FILE:wt-server-c99>
             $<TARGET_FILE:wt-conformance-c99>)
 endif()

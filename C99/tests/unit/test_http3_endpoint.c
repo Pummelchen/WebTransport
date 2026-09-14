@@ -196,6 +196,9 @@ static void test_control_frames_are_forwarded(void) {
 }
 
 static void test_the_peer_table_is_bounded(void) {
+  /* A PUSH stream's prefix: section 6.2.1's type 0x01. */
+  static const uint8_t push_prefix[1] = {0x01U};
+  static const size_t push_prefix_length = 1U;
   wt_http3_endpoint_t endpoint;
   uint8_t bytes[8];
   size_t length = 0U;
@@ -220,6 +223,17 @@ static void test_the_peer_table_is_bounded(void) {
                    wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length, NULL, &kind,
                                                    &error));
   WT_EXPECT_U64("with no error code", (uint64_t)WT_HTTP3_NO_ERROR, (uint64_t)error);
+
+  /* And a PUSH stream at the bound is where an audit found an OUT-OF-BOUNDS WRITE: that branch recorded the
+   * stream BEFORE the `stream_count >= MAX` check below it -- which it returned before reaching -- so
+   * `streams[32]` was written one past the end of a 32-entry array and `stream_count` was overwritten with the
+   * peer's stream ID (32 became 133 in the audit's harness, which is how the corruption was visible). The
+   * refusal is asserted here, and so is the count, because the count was the evidence. */
+  WT_EXPECT_STATUS("a PUSH stream at the bound is refused", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_uni_stream(&endpoint, 8192U, push_prefix,
+                                                   push_prefix_length, NULL, &kind, &error));
+  WT_EXPECT_U64("and leaves the table as it was", (uint64_t)WT_HTTP3_ENDPOINT_STREAMS_MAX,
+                (uint64_t)wt_http3_endpoint_stream_count(&endpoint));
 
   /* A control stream still gets in, because the bound is about what this endpoint tracks
    * and the critical streams are what it tracks first. */

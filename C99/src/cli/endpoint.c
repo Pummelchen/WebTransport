@@ -16,6 +16,11 @@ wt_status_t wt_cli_endpoint_open(wt_cli_endpoint_t *endpoint, const char *host_p
   wt_status_t status;
 
   if (endpoint == NULL || host_port == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* CLOSED first if it was already open: the memset below used to clear `open` and the descriptor along with
+   * everything else, so a second `wt_cli_endpoint_open` on the same struct leaked the first socket -- the header
+   * names no precondition, and "open twice" is what a caller that reuses a configuration does. `close` is
+   * idempotent and safe on a zeroed struct. */
+  wt_cli_endpoint_close(endpoint);
   memset(endpoint, 0, sizeof(*endpoint));
   endpoint->socket.fd = WT_UDP_INVALID_FD;
 
@@ -54,7 +59,9 @@ void wt_cli_endpoint_write_json(const wt_cli_endpoint_t *endpoint, const char *a
   if (stream == NULL) return;
   fputs("{\"family\":", stream);
   if (endpoint == NULL) {
-    fputs("null,\"address\":null,\"boundPort\":0}", stream);
+    /* The newline is not decoration: every other path ends the object with one, and a consumer that reads one
+     * JSON object per LINE mis-frames a report whose last line has none. */
+    fputs("null,\"address\":null,\"boundPort\":0}\n", stream);
     return;
   }
   fprintf(stream, "\"%s\"", wt_cli_family_name(endpoint->address.family));

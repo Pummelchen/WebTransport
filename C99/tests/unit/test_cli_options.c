@@ -241,6 +241,30 @@ static void test_the_names_and_the_json(void) {
     WT_EXPECT_TRUE("a missing field as null", strstr(buffer, "\"origin\":null") != NULL);
     WT_EXPECT_TRUE("and ends the object", buffer[read_length - 2U] == '}');
   }
+
+  /* A caller-supplied string is ESCAPED. The writer had a comment saying no escaping was needed and that "the
+   * library already owns" an escaper -- it did not, and an audit put a quote, a comma and a brace into `--origin`
+   * and watched a new member appear in the object a script was reading. `http://a"b\nc` is the shape: a quote, a
+   * control byte and a backslash, all three of which RFC 8259 requires to be escaped. */
+  memset(&options, 0, sizeof(options));
+  options.mode = WT_CLI_MODE_CONNECT;
+  options.address = "localhost:4433";
+  options.origin = "http://a\"b\\c";
+  options.protocol = "chat\tv1";
+  stream = tmpfile();
+  WT_EXPECT_TRUE("a second temporary stream opens", stream != NULL);
+  if (stream != NULL) {
+    wt_cli_options_write_json(&options, stream);
+    rewind(stream);
+    read_length = fread(buffer, 1U, sizeof(buffer) - 1U, stream);
+    buffer[read_length] = '\0';
+    fclose(stream);
+    WT_EXPECT_TRUE("the quote is escaped",
+                   strstr(buffer, "\"origin\":\"http://a\\\"b\\\\c\"") != NULL);
+    WT_EXPECT_TRUE("the tab is escaped as \\t", strstr(buffer, "\"protocol\":\"chat\\tv1\"") != NULL);
+    WT_EXPECT_TRUE("and no raw quote ends the value early",
+                   strstr(buffer, "\"origin\":\"http://a\"") == NULL);
+  }
 }
 
 int main(void) {

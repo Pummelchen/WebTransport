@@ -226,7 +226,12 @@ static void test_rfc8448_certificate_verify(void) {
                                            WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA512,
                                            content, sizeof(content), verify.signature,
                                            verify.signature_len));
-  WT_EXPECT_STATUS("and neither does an ECDSA scheme", WT_ERR_AUTHENTICATION,
+  /* Namely WT_ERR_PROTOCOL rather than WT_ERR_AUTHENTICATION, and that is the stronger answer: the RSA key this
+   * fixture carries cannot produce an ECDSA signature at all, so the mismatch is caught BEFORE any verification
+   * (RFC 8446 section 4.2.3 binds a scheme to a key type). The assertion here used to be AUTHENTICATION, which is
+   * what the code returned while it was verifying the signature with PKCS#1 v1.5 -- an algorithm section 4.2.3
+   * forbids for CertificateVerify -- and calling that a failed verification is how the defect hid. */
+  WT_EXPECT_STATUS("and neither does an ECDSA scheme", WT_ERR_PROTOCOL,
                    wt_tls_signature_verify(spki, spki_len,
                                            WT_TLS_SIGNATURE_ECDSA_SECP256R1_SHA256,
                                            content, sizeof(content), verify.signature,

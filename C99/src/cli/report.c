@@ -2,6 +2,8 @@
 
 #include "webtransport/cli/report.h"
 
+#include "cli_json.h"
+
 #include <string.h>
 
 void wt_cli_report_init(wt_cli_report_t *report) {
@@ -70,19 +72,10 @@ int wt_cli_report_exit_status(const wt_cli_report_t *report) {
   return 0;
 }
 
-/* A JSON string with the two characters that can appear in these messages escaped. The names and
- * details are this tool's own text, so this is a guard against a message containing a quote or a
- * backslash rather than a general-purpose escaper. */
-static void write_json_string(FILE *stream, const char *text) {
-  size_t i;
-
-  fputc('"', stream);
-  for (i = 0U; text[i] != '\0'; i++) {
-    if (text[i] == '"' || text[i] == '\\') fputc('\\', stream);
-    fputc(text[i], stream);
-  }
-  fputc('"', stream);
-}
+/* The shared writer. This file used to carry its own, which escaped a quote and a backslash and left every
+ * control byte raw -- so a detail containing a newline produced two lines where the contract is one object per
+ * line, and a tab or a NUL byte produced JSON no reader accepts. */
+#define write_json_string wt_cli_write_json_string
 
 void wt_cli_report_write_json(const wt_cli_report_t *report, FILE *stream) {
   size_t i;

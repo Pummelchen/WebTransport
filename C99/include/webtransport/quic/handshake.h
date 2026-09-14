@@ -55,7 +55,14 @@ extern "C" {
  * CRYPTO window, which the next consume slides over. Both are needed for the connection's whole life:
  * the protocol picks the application layer and the parameters carry the limits it must obey. */
 #define WT_QUIC_HANDSHAKE_ALPN_MAX 64U
-#define WT_QUIC_HANDSHAKE_PARAMETERS_MAX 256U
+/* The bound on the peer's transport parameters this endpoint keeps a copy of. It is deliberately several times
+ * the largest parameter RFC 9000 defines, because a peer may legally send parameters this version does not
+ * understand -- the GREASE parameters browsers send run to a few hundred bytes -- and refusing those would make
+ * this endpoint reject exactly the peers the draft asks it to interoperate with. A peer that exceeds even this
+ * bound is refused with a handshake failure rather than ignored: the parameters ARE the connection's limits and
+ * its connection-ID checks, so a connection that dropped them would run without either, which is what the
+ * audit found the 256-byte version doing. */
+#define WT_QUIC_HANDSHAKE_PARAMETERS_MAX 1024U
 
 typedef enum wt_quic_handshake_state {
   /* Nothing has been started. */

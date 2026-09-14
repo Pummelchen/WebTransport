@@ -485,6 +485,13 @@ wt_status_t wt_quic_retry_packet_decode(const uint8_t *data, size_t length,
   if (status != WT_OK) return status;
 
   header_len = c.offset;
+  /* The header is as long as its two connection ID lengths make it, so the check at the top of this function --
+   * which only demands the SHORTEST possible Retry -- is not enough: `length - header_len - 16` underflows to
+   * nearly `SIZE_MAX` for a datagram whose header runs into the tag, and the "token" view points past the end of
+   * the buffer while the function reports WT_OK. A parser that hands out a length it did not verify is the
+   * memory-safety defect an audit found here, and the guard is one comparison: the header and the tag have to
+   * fit before anything may be called a token (`WT-203`). */
+  if (length < header_len + WT_QUIC_RETRY_INTEGRITY_TAG_LEN) return WT_ERR_TRUNCATED;
   /* The token is what is left once the tag is reserved, and the tag is the last
    * sixteen bytes. A Retry with no token is malformed: RFC 9000 section 17.2.5
    * allows a zero-length token but then the packet is only a header and a tag,

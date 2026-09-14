@@ -135,10 +135,17 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
 
   if (capsule.type == WT_CAPSULE_DRAIN_SESSION) {
     status = wt_webtransport_session_on_drain(&session->machine, 0);
+    /* The error surface is recorded BEFORE the callback, and the callback is the LAST thing this function does
+     * to the session. Both halves matter: the first means the consumer that reads `wt_session_last_error` from
+     * inside the callback sees this call's result rather than the previous one's, and the second means the
+     * library does not write through a handle the callback may have released -- `on_close` followed by
+     * `wt_session_destroy` is the pattern a consumer reaches for first, and it used to be a use-after-free. The
+     * contract in `webtransport/api/events.h` still forbids calling back into the session, because the DRIVER
+     * that invoked this function owns the handle next; what is fixed here is the library's own write. */
+    wt_session_set_error(session, status, 0U);
     if (status == WT_OK && session->callbacks.on_drain != NULL) {
       session->callbacks.on_drain(session->callbacks.context);
     }
-    wt_session_set_error(session, status, 0U);
     return status;
   }
   if (capsule.type == WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION) {
@@ -148,12 +155,13 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
       return status;
     }
     status = wt_webtransport_session_on_close(&session->machine, 0, code);
+    /* The peer's code travels to the caller: that is what "the refusal keeps the peer's code" means at this
+     * surface -- and it is recorded BEFORE `on_close` runs, so the callback reads this call's result and the
+     * handle is not written through after the callback returns (see the drain branch above). */
+    wt_session_set_error(session, status, (uint64_t)code);
     if (status == WT_OK && session->callbacks.on_close != NULL) {
       session->callbacks.on_close(session->callbacks.context, code);
     }
-    /* The peer's code travels to the caller: that is what "the refusal keeps the peer's
-     * code" means at this surface. */
-    wt_session_set_error(session, status, (uint64_t)code);
     return status;
   }
 
@@ -167,7 +175,13 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
       wt_session_set_error(session, status, (uint64_t)h3_error);
       return status;
     }
-    if (session->flow_enabled == 0) return WT_OK;
+    if (session->flow_enabled == 0) {
+      /* Ignored, and that is a RESULT rather than a failure: `wt_session_last_error` answers "what the last
+       * operation left behind", so leaving the previous call's error standing would report a failure for a call
+       * that returned WT_OK. */
+      wt_session_set_error(session, WT_OK, 0U);
+      return WT_OK;
+    }
     {
       uint64_t flow_error = 0U;
       status = wt_webtransport_flow_on_max_data(&session->limits, maximum, &flow_error);
@@ -183,7 +197,10 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
       wt_session_set_error(session, status, (uint64_t)h3_error);
       return status;
     }
-    if (session->flow_enabled == 0) return WT_OK;
+    if (session->flow_enabled == 0) {
+      wt_session_set_error(session, WT_OK, 0U);
+      return WT_OK;
+    }
     {
       uint64_t flow_error = 0U;
       status = wt_webtransport_flow_on_max_streams(&session->limits, bidirectional, maximum,

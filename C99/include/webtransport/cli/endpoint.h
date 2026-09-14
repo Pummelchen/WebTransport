@@ -35,7 +35,9 @@ typedef struct wt_cli_endpoint {
 
 /* Open the socket for `host_port` and, for a listener, bind it. A client parses and does not bind:
  * its local port is the system's business. `host_port` may be `host:port`, `[v6]:port`, or a bare
- * `:port` for every interface, and port 0 asks the system to choose one, which is what a test
+ * `host:port` or `[v6]:port` -- a wildcard is spelled `0.0.0.0:port` or `[::]:port` rather than a bare `:port`,
+ * because the address parser refuses an empty host, and this comment claimed otherwise. Port 0 asks the system to
+ * choose one, which is what a test
  * wants. Returns the runtime's own statuses unchanged -- a bind that is refused is refused
  * because the system refused it, and translating that would hide the reason. */
 wt_status_t wt_cli_endpoint_open(wt_cli_endpoint_t *endpoint, const char *host_port, int listen);

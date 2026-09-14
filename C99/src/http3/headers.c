@@ -21,6 +21,54 @@ static int equals(const uint8_t *bytes, size_t length, const char *text) {
 /* The connection-specific fields of section 4.2, and `te`, whose only legal value is
  * `trailers`. A field a proxy would act on has no meaning over HTTP/3, where the
  * connection is already multiplexed. */
+/* Whether a field name is a `token` (RFC 9110 section 5.6.2) with the uppercase letters HTTP/3 forbids left
+ * out. A colon, a space, a control byte or an uppercase letter all fail: a name is a token, and section 10.3
+ * makes a name that is not one a malformed message. */
+static int field_name_is_valid(const uint8_t *name, size_t length) {
+  size_t i;
+
+  if (length == 0U) return 0;
+  for (i = 0U; i < length; i++) {
+    uint8_t c = name[i];
+    if ((c >= (uint8_t)'a' && c <= (uint8_t)'z') || (c >= (uint8_t)'0' && c <= (uint8_t)'9')) continue;
+    switch (c) {
+      case '!':
+      case '#':
+      case '$':
+      case '%':
+      case '&':
+      case '\'':
+      case '*':
+      case '+':
+      case '-':
+      case '.':
+      case '^':
+      case '_':
+      case '`':
+      case '|':
+      case '~':
+        continue;
+      default:
+        return 0;
+    }
+  }
+  return 1;
+}
+
+/* Whether a field value is `field-content` (RFC 9110 section 5.5): visible bytes, spaces and horizontal tabs,
+ * with the C0 controls other than HTAB and the DEL byte refused. Bytes above 0x7f are `obs-text` and are legal.
+ * CR and LF are the two that matter most -- they are how a value becomes a second field. */
+static int field_value_is_valid(const uint8_t *value, size_t length) {
+  size_t i;
+
+  for (i = 0U; i < length; i++) {
+    uint8_t c = value[i];
+    if (c == (uint8_t)0x09U || c == (uint8_t)0x20U) continue;
+    if (c < (uint8_t)0x21U || c == (uint8_t)0x7fU) return 0;
+  }
+  return 1;
+}
+
 static int is_connection_specific(const uint8_t *name, size_t name_length) {
   return equals(name, name_length, "connection") || equals(name, name_length, "transfer-encoding") ||
          equals(name, name_length, "keep-alive") || equals(name, name_length, "upgrade") ||
@@ -80,16 +128,19 @@ wt_status_t wt_http3_header_validate(wt_http3_header_validation_t *validation, c
     return WT_OK;
   }
 
-  /* A regular field. Section 4.2: field names are lowercase, and a name that is not
-   * is a message error rather than something to fold. */
-  {
-    size_t i;
-    for (i = 0U; i < name_length; i++) {
-      if (name[i] >= (uint8_t)'A' && name[i] <= (uint8_t)'Z') {
-        if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
-        return WT_ERR_PROTOCOL;
-      }
-    }
+  /* A regular field. Section 4.2: field names are lowercase, and section 10.3 makes a name or a value that is
+   * not a valid field at all a MALFORMED message: "A request or response that contains a character not permitted
+   * in a field value MUST be treated as malformed. ... Likewise, a field name that contains uppercase characters
+   * or characters that are not permitted in a field name MUST be treated as malformed."
+   *
+   * The first version checked uppercase and nothing else, so a name with a space or a colon in it and a value
+   * carrying CR, LF or NUL all passed -- which an audit demonstrated with a value of "a\r\nX: y" and a name of
+   * "bad name". That is the classic intermediary-encapsulation shape: a value this layer accepts and a later
+   * writer turns into a new field. Two functions rather than one loop because the two grammars are different
+   * (`field-name` is a token, `field-content` allows spaces and visible bytes). */
+  if (!field_name_is_valid(name, name_length) || !field_value_is_valid(value, value_length)) {
+    if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
+    return WT_ERR_PROTOCOL;
   }
   if (is_connection_specific(name, name_length)) {
     if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;

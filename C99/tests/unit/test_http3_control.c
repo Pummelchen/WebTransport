@@ -55,11 +55,17 @@ static void test_first_frame_must_be_settings(void) {
 }
 
 static void test_frames_after_settings(void) {
+  /* The ALLOWED list carries the exercise types on purpose: RFC 9114 section 7.2.8 says a peer MAY send
+   * `0x1f * N + 0x21` on any stream where frames are allowed and that a receiver MUST NOT give them meaning.
+   * `0x02` and `0x06` are the opposite family -- PRIORITY and PING, reserved from HTTP/2 -- and their receipt is
+   * H3_FRAME_UNEXPECTED. This fixture had the two the wrong way round, which is what the audit found. */
   static const uint64_t allowed[] = {WT_HTTP3_FRAME_CANCEL_PUSH, WT_HTTP3_FRAME_GOAWAY,
-                                     WT_HTTP3_FRAME_MAX_PUSH_ID, 0x2aU /* unknown extension */};
+                                     WT_HTTP3_FRAME_MAX_PUSH_ID, 0x2aU /* unknown extension */,
+                                     0x21U /* exercise type: padding, to be ignored */,
+                                     0x40U /* exercise type: 0x1f * 1 + 0x21 */};
   static const uint64_t refused[] = {WT_HTTP3_FRAME_DATA, WT_HTTP3_FRAME_HEADERS,
-                                     WT_HTTP3_FRAME_PUSH_PROMISE, 0x21U /* reserved for HTTP/2 */,
-                                     0x40U /* also reserved: 0x1f * 1 + 0x21 */};
+                                     WT_HTTP3_FRAME_PUSH_PROMISE, 0x02U /* PRIORITY, from HTTP/2 */,
+                                     0x06U /* PING, from HTTP/2 */};
   size_t i;
 
   for (i = 0U; i < sizeof(allowed) / sizeof(allowed[0]); i++) {

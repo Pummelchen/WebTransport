@@ -21,6 +21,27 @@ static wt_status_t resolve_relative(const wt_qpack_dynamic_table_t *table, uint6
   return WT_OK;
 }
 
+/* Apply an insertion the peer's encoder stream asked for.
+ *
+ * Every failure has to be REPORTED rather than returned raw: the cursor has already consumed the instruction, so
+ * carrying on would leave this endpoint's insert count -- and therefore every absolute index it can be asked to
+ * resolve -- out of step with the peer's, silently. An audit watched the 33rd insert be consumed and vanish
+ * (`status=9`, no error code, `insert_count` still 32), which is a table that diverges in silence; RFC 9204
+ * section 3.2.2 makes it QPACK_ENCODER_STREAM_ERROR. A failure caused by this endpoint's own table bound keeps
+ * that code too, because the peer must be told to stop rather than left believing the entry is there. */
+static wt_status_t apply_insert(wt_qpack_encoder_stream_t *stream, const uint8_t *name,
+                                size_t name_length, const uint8_t *value, size_t value_length,
+                                wt_qpack_error_t *out_error) {
+  wt_status_t status =
+      wt_qpack_dynamic_insert(stream->table, name, name_length, value, value_length, NULL);
+
+  if (status == WT_OK) return WT_OK;
+  if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
+  /* A bound is still a bound: the caller gets WT_ERR_LIMIT for one this endpoint owns and WT_ERR_PROTOCOL for an
+   * instruction that could never have been applied. Both carry the code above. */
+  return status == WT_ERR_LIMIT ? WT_ERR_LIMIT : WT_ERR_PROTOCOL;
+}
+
 wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_cursor_t *c,
                                           wt_qpack_error_t *out_error) {
   uint8_t first;
@@ -81,8 +102,8 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
         if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
         return WT_ERR_PROTOCOL;
       }
-      return wt_qpack_dynamic_insert(stream->table, (const uint8_t *)entry.name, entry.name_length,
-                                     value, value_length, NULL);
+      return apply_insert(stream, (const uint8_t *)entry.name, entry.name_length, value,
+                          value_length, out_error);
     }
     {
       uint64_t absolute = 0U;
@@ -102,7 +123,7 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
       }
       (void)stored_value;
       (void)stored_length;
-      return wt_qpack_dynamic_insert(stream->table, name, name_length, value, value_length, NULL);
+      return apply_insert(stream, name, name_length, value, value_length, out_error);
     }
   }
 
@@ -141,8 +162,7 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
       if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
       return WT_ERR_STATE;
     }
-    return wt_qpack_dynamic_insert(stream->table, name, (size_t)name_length, value, value_length,
-                                   NULL);
+    return apply_insert(stream, name, (size_t)name_length, value, value_length, out_error);
   }
 
   if ((first & 0x20U) != 0U) {
@@ -192,7 +212,7 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
       if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
       return WT_ERR_PROTOCOL;
     }
-    return wt_qpack_dynamic_insert(stream->table, name, name_length, value, value_length, NULL);
+    return apply_insert(stream, name, name_length, value, value_length, out_error);
   }
 }
 

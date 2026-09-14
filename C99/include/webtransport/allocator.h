@@ -34,8 +34,9 @@ typedef struct wt_allocator {
   void *context;
 
   /* Returns a block of at least `size` bytes aligned for any type, or NULL.
-   * Called with a non-zero size only: zero-size requests are answered by the
-   * helper functions below without reaching the allocator. */
+   * Called with a non-zero size only: a zero-size request reaches this function as
+   * a request for ONE byte, and `free` below is told the same one byte, so an
+   * allocator that accounts by the size it is given stays balanced. */
   void *(*alloc)(void *context, size_t size);
 
   /* Returns a block of at least `new_size` bytes whose first

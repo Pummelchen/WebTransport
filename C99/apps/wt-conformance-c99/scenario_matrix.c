@@ -294,7 +294,7 @@ void wt_scenario_datagram_matrix(wt_cli_report_t *report) {
   {
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
     int ok = wt_webtransport_datagram_parse(framed, 0U, NULL, NULL, NULL, &error) != WT_OK &&
-             error == WT_HTTP3_MESSAGE_ERROR;
+             error == WT_HTTP3_DATAGRAM_ERROR;
     rows[count].name = "an empty datagram is malformed";
     rows[count].held = ok;
     count++;
@@ -303,7 +303,7 @@ void wt_scenario_datagram_matrix(wt_cli_report_t *report) {
     static const uint8_t partial[] = {0xffU};
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
     int ok = wt_webtransport_datagram_parse(partial, sizeof(partial), NULL, NULL, NULL, &error) != WT_OK &&
-             error == WT_HTTP3_MESSAGE_ERROR;
+             error == WT_HTTP3_DATAGRAM_ERROR;
     rows[count].name = "a quarter id that did not all arrive is malformed";
     rows[count].held = ok;
     count++;

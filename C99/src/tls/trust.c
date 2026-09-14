@@ -336,6 +336,31 @@ wt_status_t wt_tls_signature_verify(const uint8_t *spki, size_t spki_len,
     return WT_ERR_PROTOCOL;
   }
 
+  /* RFC 8446 section 4.2.3 binds each signature scheme to a KEY TYPE, and TLS 1.3 removed PKCS#1 v1.5 from
+   * CertificateVerify entirely. Verifying without that binding let an RSA key answer a claim of
+   * `ecdsa_secp256r1_sha256`: the signature DID verify -- under the leaf's own RSA key, with OpenSSL's default
+   * PKCS#1 v1.5 padding, because no RSA-PSS parameters were set for a scheme this code did not recognise as
+   * PSS. An audit proved it with the fixture's RSA leaf. The key's type is checked here rather than the
+   * scheme's digest, because it is the key that selects the padding. */
+  {
+    int key_type = EVP_PKEY_base_id(key);
+    int matches = 0;
+    if (scheme == WT_TLS_SIGNATURE_ECDSA_SECP256R1_SHA256 ||
+        scheme == WT_TLS_SIGNATURE_ECDSA_SECP384R1_SHA384) {
+      matches = key_type == EVP_PKEY_EC;
+    } else if (scheme == WT_TLS_SIGNATURE_ED25519) {
+      matches = key_type == EVP_PKEY_ED25519;
+    } else if (scheme_is_rsa_pss(scheme)) {
+      matches = key_type == EVP_PKEY_RSA;
+    }
+    if (!matches) {
+      /* A scheme the peer's key cannot produce is a protocol violation, not a bad signature: the peer named an
+       * algorithm that does not go with the key it sent. */
+      EVP_PKEY_free(key);
+      return WT_ERR_PROTOCOL;
+    }
+  }
+
   ctx = EVP_MD_CTX_new();
   if (ctx == NULL) {
     EVP_PKEY_free(key);

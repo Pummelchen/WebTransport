@@ -131,10 +131,24 @@ wt_status_t wt_udp_wait(const wt_udp_socket_t *socket, uint64_t timeout_micros);
  * a caller that CONSUMED that packet would have to wait for a retransmission -- and a peer that had already
  * given up would never send one.
  *
- * `out_length` is the datagram's length and `out_available` is how much of it fits in `buffer`; a caller that
- * only wants the sender can pass a zero-capacity buffer, and one that wants the bytes must check the two against
- * each other. A datagram is still a datagram: a peek that cannot see the whole thing does not guess at the part
- * it can. */
+ * `out_available` is always how many of the datagram's bytes are in `buffer`, never more than `capacity`.
+ * `out_length` is the datagram's OWN length where the platform can report it and the copied count where it
+ * cannot, and WHICH PLATFORM THAT IS belongs to this contract rather than to the implementation:
+ *
+ *   - Linux honours `MSG_TRUNC` as an INPUT flag to `recvmsg`, so a 2000-byte datagram peeked into a 100-byte
+ *     buffer reports `out_length = 2000` and `out_available = 100`;
+ *   - macOS, the BSDs and Windows treat it as an OUTPUT flag only, so a peek cannot see past the caller's
+ *     buffer: the same datagram reports `out_length = 100` and `out_available = 100`, which is byte-identical
+ *     to a whole 100-byte datagram.
+ *
+ * A caller that needs the whole datagram therefore SIZES ITS BUFFER for the largest datagram it accepts, or
+ * receives rather than peeks: on the second group of platforms `out_length` is a floor rather than a
+ * measurement. The limitation is the one `docs/PORTABILITY.md` records for Windows, and it is not Windows-only,
+ * which is why `tests/unit/test_runtime_udp.c` asserts the invariants that hold everywhere -- a datagram that
+ * does not fit reports `out_available == capacity` and `out_length >= out_available`, and it is still in the
+ * queue afterwards -- rather than a value that differs by platform.
+ *
+ * Both out-parameters are zeroed before the call and on every failure, like `wt_udp_receive`'s. */
 wt_status_t wt_udp_peek(const wt_udp_socket_t *socket, uint8_t *buffer, size_t capacity,
                         size_t *out_length, size_t *out_available, wt_udp_address_t *out_from);
 

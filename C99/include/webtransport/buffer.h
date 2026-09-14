@@ -57,7 +57,10 @@ wt_status_t wt_buf_append(wt_buf_t *b, const void *data, size_t len);
 wt_status_t wt_buf_append_u8(wt_buf_t *b, uint8_t value);
 
 /* Append `len` bytes and hand them back unwritten, for a case that fills a
- * region after reserving it. Returns NULL on failure. */
+ * region after reserving it. Returns NULL on failure -- and ALSO for a zero-length request on an EMPTY buffer,
+ * where there is nothing to fail and no byte to point at (`b->data + b->len` is NULL + 0). A caller that asks for
+ * zero bytes and checks only for NULL has to own that case: the status is WT_OK either way, which is what
+ * `wt_buf_reserve` answers for a zero request. */
 uint8_t *wt_buf_reserve_tail(wt_buf_t *b, size_t len);
 
 /* Drop `n` bytes from the front, moving the rest down. `n` greater than `len`

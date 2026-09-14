@@ -78,10 +78,14 @@ wt_status_t wt_session_on_stream_opened(wt_session_t *session, uint64_t stream_i
   slot->unidirectional = unidirectional;
   session->stream_count++;
 
+  /* Recorded BEFORE the callback and touched nowhere after it: the callback is the last thing this function does
+   * to the session, so the error surface it can read is this call's, and the library does not write through a
+   * handle the callback may have released. `webtransport/api/events.h` states the contract the callback is held
+   * to -- it must not call back into the session, because the driver owns the handle next. */
+  wt_session_set_error(session, WT_OK, 0U);
   if (session->callbacks.on_stream_opened != NULL) {
     session->callbacks.on_stream_opened(session->callbacks.context, stream_id, unidirectional);
   }
-  wt_session_set_error(session, WT_OK, 0U);
   return WT_OK;
 }
 
@@ -94,14 +98,17 @@ wt_status_t wt_session_on_stream_data(wt_session_t *session, uint64_t stream_id,
     return WT_ERR_STATE;
   }
 
+  /* The state and the error surface are settled BEFORE the callback, and nothing touches the session after it
+   * returns. The first version forgot the stream AFTER the callback "so the callback still sees it as open",
+   * which bought a callback a stream count that was about to change and paid for it with a write through a
+   * handle the callback could have released. A callback is told `end_stream` in its arguments, so it does not
+   * need the table to still hold the stream to know the stream has ended. */
+  if (end_stream != 0) wt_session_forget_stream(session, stream_id);
+  wt_session_set_error(session, WT_OK, 0U);
   if (session->callbacks.on_stream_data != NULL) {
     session->callbacks.on_stream_data(session->callbacks.context, stream_id, data, length,
                                       end_stream != 0);
   }
-  /* Forgotten AFTER the callback, so the callback still sees the stream as open and can
-   * ask about it; the report and the state agree for the whole of the call. */
-  if (end_stream != 0) wt_session_forget_stream(session, stream_id);
-  wt_session_set_error(session, WT_OK, 0U);
   return WT_OK;
 }
 
@@ -113,12 +120,13 @@ wt_status_t wt_session_on_stream_reset(wt_session_t *session, uint64_t stream_id
     return WT_ERR_STATE;
   }
 
+  /* Settled before the callback, for the reason the stream-data path above records. */
+  wt_session_forget_stream(session, stream_id);
+  wt_session_set_error(session, WT_OK, error_code);
   if (session->callbacks.on_stream_reset != NULL) {
     /* The peer's code, unchanged: a refusal keeps the peer's code at this surface too. */
     session->callbacks.on_stream_reset(session->callbacks.context, stream_id, error_code);
   }
-  wt_session_forget_stream(session, stream_id);
-  wt_session_set_error(session, WT_OK, error_code);
   return WT_OK;
 }
 
@@ -152,9 +160,9 @@ wt_status_t wt_session_on_datagram(wt_session_t *session, const uint8_t *data, s
     return WT_ERR_LIMIT;
   }
 
+  wt_session_set_error(session, WT_OK, 0U);
   if (session->callbacks.on_datagram != NULL) {
     session->callbacks.on_datagram(session->callbacks.context, payload, payload_length);
   }
-  wt_session_set_error(session, WT_OK, 0U);
   return WT_OK;
 }

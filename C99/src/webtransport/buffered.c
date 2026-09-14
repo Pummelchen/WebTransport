@@ -64,7 +64,7 @@ wt_status_t wt_webtransport_buffered_park_stream(wt_webtransport_buffered_t *buf
     parked->unidirectional = unidirectional != 0 ? 1 : 0;
     parked->length = 0U;
     buffer->stream_count++;
-  } else if (parked->length + length > WT_WEBTRANSPORT_BUFFERED_STREAM_BYTES_MAX) {
+  } else if (length > WT_WEBTRANSPORT_BUFFERED_STREAM_BYTES_MAX - parked->length) {
     /* A later piece of a stream already parked does not fit the hold. The whole stream is rejected
      * rather than its tail dropped: a stream delivered with a hole in it would be a corrupt message
      * rather than a short one. What was held for it goes too -- the stream is not parked any more,

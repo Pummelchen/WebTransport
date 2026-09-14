@@ -229,6 +229,16 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
     }
     session_cursor = wt_cursor_init(data + take, length - take);
     if (wt_quic_varint_decode(&session_cursor, &session_id) != WT_OK) return WT_ERR_TRUNCATED;
+    /* The session the prefix names must be THIS session, and the check is here because the bidirectional path
+     * has had it since it was written (`driver.c`, the `start_kind == WEBTRANSPORT` branch) while this one did
+     * not: an audit pointed a unidirectional stream at another session ID and the payload was delivered to this
+     * session anyway. Sessions on one connection are mutually hostile -- the draft says a stream that names a
+     * session this endpoint does not have is H3_ID_ERROR -- and a data stream is the easiest place to smuggle
+     * one. Checked before the stream is remembered, so a stream for somebody else leaves no trace here. */
+    if (driver->session_id_set != 0 && session_id != driver->session_id) {
+      if (out_error != NULL) *out_error = WT_HTTP3_ID_ERROR;
+      return WT_ERR_PROTOCOL;
+    }
     session_bytes = (length - take) - wt_cursor_remaining(&session_cursor);
     take += session_bytes;
     /* The caller is told how much of ITS frame went to the whole prefix -- type and session ID -- because
@@ -259,9 +269,17 @@ wt_status_t wt_http3_driver_on_uni_stream_end(wt_http3_driver_t *driver, uint64_
     /* The stream ended before its type prefix was complete, so it never became a stream of
      * any type and there is nothing for the endpoint's rules to apply to. */
     forget_pending(driver, stream_id);
+    (void)wt_http3_driver_forget_frame(driver, stream_id);
     return WT_OK;
   }
-  return wt_http3_endpoint_on_uni_stream_end(driver->endpoint, stream_id, out_error);
+  {
+    /* The stream is over, so any frame state it had goes with it: this is one of the two release points (the
+     * other is the fin path in `on_stream_bytes`), and without them the eight-slot table filled up and stayed
+     * full. */
+    wt_status_t status = wt_http3_endpoint_on_uni_stream_end(driver->endpoint, stream_id, out_error);
+    (void)wt_http3_driver_forget_frame(driver, stream_id);
+    return status;
+  }
 }
 
 /* ---------------------------------------------- frame boundaries */
@@ -282,11 +300,13 @@ int wt_http3_driver_forget_frame(wt_http3_driver_t *driver, uint64_t stream_id) 
   for (i = 0U; i < driver->frame_count; i++) {
     if (driver->frames[i].stream_id == stream_id) {
       int was_in_frame = driver->frames[i].in_frame;
-      driver->frames[i].in_frame = 0;
-      driver->frames[i].header_length = 0U;
-      driver->frames[i].payload_received = 0U;
-      driver->frames[i].payload_length = 0U;
-      /* The slot is kept while the stream lives: a stream's frames are its own sequence. */
+      /* RELEASED, not merely cleared. The comment here used to say "the slot is kept while the stream lives",
+       * which is right -- and the stream's END is exactly when that stops being true, except that nothing on the
+       * request path called this at all: eight streams that began and ended left the table full and the ninth
+       * stream was refused WT_ERR_LIMIT, which an audit reproduced with eight empty DATA frames. The table is
+       * unordered, so the last entry fills the hole. */
+      driver->frames[i] = driver->frames[driver->frame_count - 1U];
+      driver->frame_count--;
       return was_in_frame;
     }
   }
@@ -450,15 +470,17 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
     return sink->on_stream_data(sink->context, stream_id, NULL, 0U, fin);
   }
 
-  if (fin != 0 && (state->in_frame || state->header_length > 0U)) {
-    /* The stream ended part way through a frame -- and a partial frame HEADER counts, which is
-     * the case a naive implementation misses: one byte of a two-varint header is exactly as
-     * incomplete as one byte of a payload. Nothing more is coming, which is what turns the
-     * wait into a refusal. */
-    state->in_frame = 0;
-    state->header_length = 0U;
-    if (out_error != NULL) *out_error = WT_HTTP3_FRAME_ERROR;
-    return WT_ERR_TRUNCATED;
+  if (fin != 0) {
+    /* The stream ended part way through a frame -- and a partial frame HEADER counts, which is the case a naive
+     * implementation misses: one byte of a two-varint header is exactly as incomplete as one byte of a payload.
+     * Nothing more is coming, which is what turns the wait into a refusal. Read BEFORE the slot is released,
+     * because `state` points into the table. */
+    int incomplete = state->in_frame || state->header_length > 0U;
+    (void)wt_http3_driver_forget_frame(driver, stream_id);
+    if (incomplete) {
+      if (out_error != NULL) *out_error = WT_HTTP3_FRAME_ERROR;
+      return WT_ERR_TRUNCATED;
+    }
   }
   return WT_OK;
 }
@@ -816,10 +838,13 @@ wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
       transport->send_stream == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
+  /* The section is measured into its own buffer and the frame written into `scratch`: writing the frame over the
+   * bytes the section was measured into is an overlapping `memcpy` (the writer moves the section down by the
+   * frame header's length inside the same buffer), which is undefined behaviour and was ASan's
+   * `memcpy-param-overlap` in an audit. */
   w = wt_writer_init(driver->scratch, sizeof(driver->scratch));
   status = wt_http3_endpoint_write_headers(driver->endpoint, message, peer_max_entries,
-                                           driver->scratch + 256U,
-                                           sizeof(driver->scratch) - 256U, &w, NULL);
+                                           driver->section, sizeof(driver->section), &w, NULL);
   if (status != WT_OK) return status;
   /* Retained on the way out: a probe timeout may have to send these very bytes again (WT-135). */
   driver->request_stream_id = stream_id;

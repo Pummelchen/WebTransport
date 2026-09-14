@@ -226,8 +226,28 @@ static wt_status_t process_messages(wt_quic_handshake_t *handshake, wt_quic_spac
       } else {
         view = wt_tls_server_transport_parameters(&handshake->server, &view_len);
       }
-      if (handshake->peer_parameters_len == 0U && view != NULL && view_len != 0U &&
-          view_len <= sizeof(handshake->peer_parameters)) {
+      if (handshake->peer_parameters_len == 0U && view != NULL && view_len != 0U) {
+        /* A peer whose parameters do not fit is REFUSED, and this is the branch that matters: the first version
+         * guarded the copy with `view_len <= sizeof(...)` and had no else, so the parameters were silently
+         * dropped, `peer_parameters_len` stayed zero, `apply_peer_parameters` returned WT_OK without applying
+         * anything, and the handshake completed -- with none of RFC 9000 section 7.3's connection-ID checks and
+         * none of the peer's limits, which is a connection that "works" while obeying neither. RFC 9000 section
+         * 7.4.1 makes an endpoint that cannot process them close with TRANSPORT_PARAMETER_ERROR, and the alert
+         * mapping below turns this status into that code. */
+        if (view_len > sizeof(handshake->peer_parameters)) {
+          /* The code is named rather than taken from `fail`'s alert table: RFC 9000 section 7.4.1 has a
+           * transport-level code for exactly this case (0x08, TRANSPORT_PARAMETER_ERROR), and reporting a
+           * CRYPTO_ERROR would blame the TLS layer for a QUIC bound. */
+          handshake->state = WT_QUIC_HANDSHAKE_FAILED;
+          handshake->failure = WT_ERR_LIMIT;
+          handshake->error_code = (uint64_t)WT_QUIC_TRANSPORT_PARAMETER_ERROR;
+          if (handshake->connection != NULL) {
+            handshake->connection->close_code = handshake->error_code;
+            handshake->connection->close_frame_type = WT_QUIC_FRAME_CRYPTO;
+            handshake->connection->close_code_set = 1;
+          }
+          return WT_ERR_LIMIT;
+        }
         memcpy(handshake->peer_parameters, view, view_len);
         handshake->peer_parameters_len = view_len;
       }

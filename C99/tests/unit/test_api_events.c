@@ -133,7 +133,12 @@ static void test_streams(void) {
   WT_EXPECT_STR("in wire order", "open-uni", recorder.events[0]);
   WT_EXPECT_STR("then data", "data", recorder.events[1]);
   WT_EXPECT_STR("then the end", "data-end", recorder.events[2]);
-  WT_EXPECT_U64("and the stream was open during its last callback", 1U,
+  /* The stream is FORGOTTEN before the callback runs, so a callback observes the state its event has already
+   * produced: `on_stream_opened` sees the new stream counted, and the `end_stream` callback sees it gone. The
+   * first version forgot it after the callback and this assertion said 1; the reordering is what removes the
+   * library's last write through a handle a callback may have released, and it makes the observation rule uniform
+   * across `on_stream_opened`, `on_stream_data` and `on_stream_reset` instead of depending on which one ran. */
+  WT_EXPECT_U64("and the stream was already forgotten during its last callback", 0U,
                 (uint64_t)recorder.streams_open_at_last_event);
 
   /* Data on a stream that was never opened is the APPLICATION's ordering problem. */

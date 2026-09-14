@@ -26,15 +26,30 @@ static void test_frame_type_names_and_reserved_range(void) {
                 wt_http3_frame_type_name(WT_HTTP3_FRAME_MAX_PUSH_ID));
   WT_EXPECT_STR("anything else is unknown", "unknown", wt_http3_frame_type_name(0x2aU));
 
-  /* RFC 9114 section 7.2.8: 0x1f * N + 0x21 was reserved for HTTP/2's frame
-   * types. The WebTransport frame type 0x41 is not one of them, and neither is
-   * 0x22, which is what an off-by-one in the rule would claim. */
-  WT_EXPECT_INT("0x21 is reserved", 1, wt_http3_frame_type_is_reserved(0x21U));
-  WT_EXPECT_INT("0x40 is reserved", 1, wt_http3_frame_type_is_reserved(0x40U));
-  WT_EXPECT_INT("0x5f is reserved", 1, wt_http3_frame_type_is_reserved(0x5fU));
-  WT_EXPECT_INT("0x20 is not", 0, wt_http3_frame_type_is_reserved(0x20U));
-  WT_EXPECT_INT("0x22 is not", 0, wt_http3_frame_type_is_reserved(0x22U));
-  WT_EXPECT_INT("0x41 is not", 0, wt_http3_frame_type_is_reserved(0x41U));
+  /* RFC 9114 section 7.2.8 has TWO reserved families with OPPOSITE outcomes, and both are asserted here
+   * because conflating them is what this file used to do: it called `0x1f * N + 0x21` the reserved family (which
+   * a peer MAY send and this endpoint MUST ignore) and left the HTTP/2-derived types (which MUST be
+   * H3_FRAME_UNEXPECTED) out of the rule entirely.
+   *
+   * The forbidden family, named by section 11.2.1: PRIORITY 0x02, PING 0x06, WINDOW_UPDATE 0x08,
+   * CONTINUATION 0x09. */
+  WT_EXPECT_INT("PRIORITY's type is reserved", 1, wt_http3_frame_type_is_reserved(0x02U));
+  WT_EXPECT_INT("PING's type is reserved", 1, wt_http3_frame_type_is_reserved(0x06U));
+  WT_EXPECT_INT("WINDOW_UPDATE's type is reserved", 1, wt_http3_frame_type_is_reserved(0x08U));
+  WT_EXPECT_INT("and CONTINUATION's", 1, wt_http3_frame_type_is_reserved(0x09U));
+  WT_EXPECT_INT("while the QPACK setting is not a frame type", 0,
+                wt_http3_frame_type_is_reserved(0x01U));
+  WT_EXPECT_INT("nor is a DATA frame", 0, wt_http3_frame_type_is_reserved(WT_HTTP3_FRAME_DATA));
+
+  /* The IGNORED family: 0x1f * N + 0x21, which the WebTransport frame type 0x41 is deliberately NOT, and 0x22,
+   * which an off-by-one in the arithmetic would claim. */
+  WT_EXPECT_INT("0x21 is an exerciser", 1, wt_http3_frame_type_is_exerciser(0x21U));
+  WT_EXPECT_INT("0x40 is an exerciser", 1, wt_http3_frame_type_is_exerciser(0x40U));
+  WT_EXPECT_INT("0x5f is an exerciser", 1, wt_http3_frame_type_is_exerciser(0x5fU));
+  WT_EXPECT_INT("0x20 is not", 0, wt_http3_frame_type_is_exerciser(0x20U));
+  WT_EXPECT_INT("0x22 is not", 0, wt_http3_frame_type_is_exerciser(0x22U));
+  WT_EXPECT_INT("0x41 is not", 0, wt_http3_frame_type_is_exerciser(0x41U));
+  WT_EXPECT_INT("and a reserved HTTP/2 type is not", 0, wt_http3_frame_type_is_exerciser(0x02U));
 }
 
 static void test_frames_round_trip(void) {

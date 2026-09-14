@@ -95,6 +95,13 @@ wt_status_t wt_endpoint_config_check(const wt_endpoint_config_t *config) {
      * hit at create; finding out here names the field that is wrong. */
     return WT_ERR_LIMIT;
   }
+  if (config->authority == NULL && strlen(config->host) >= WT_SESSION_AUTHORITY_MAX) {
+    /* The HOST becomes the authority when none was named (`wt_endpoint_session_config` below), and the first
+     * version bounded only the explicit authority -- so a 199-byte host passed this check and failed later, at
+     * `wt_session_create`, with the same WT_ERR_LIMIT and no indication of which field caused it. A check that
+     * reports the right status for the wrong reason still costs the caller the diagnosis. */
+    return WT_ERR_LIMIT;
+  }
 
   if (config->role == WT_ENDPOINT_ROLE_SERVER) {
     if (config->trust.mode != (wt_tls_trust_mode_t)0) {

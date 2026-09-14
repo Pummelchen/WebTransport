@@ -315,10 +315,43 @@ int main(void) {
     WT_EXPECT_STATUS("a Retry below the minimum length is truncated",
                      WT_ERR_TRUNCATED,
                      wt_quic_retry_packet_decode(retry, 20U, &decoded, &error));
-    WT_EXPECT_STATUS("a Retry of exactly the minimum parses", WT_OK,
-                     wt_quic_retry_packet_decode(
-                         retry, 1U + 4U + 1U + 0U + 1U + 3U + 16U, &decoded,
-                         &error));
+    /* A Retry of exactly the minimum: ZERO-length connection IDs and a three-byte token, which is 26 bytes.
+     *
+     * The first version of this case decoded a 26-byte PREFIX of the packet built above, whose header names an
+     * 8-byte destination and a 4-byte source ID -- so the "minimum" it claimed to test was really a header that
+     * ran past the tag, and it passed only because the token length UNDERFLOWED to nearly `SIZE_MAX`. An audit
+     * found the underflow and this case with it: a test that passes for the wrong reason is the thing that hides
+     * the defect beside it. So the minimum is now BUILT, the prefix is asserted to be REFUSED, and the underflow
+     * has the regression test it did not have. */
+    {
+      static const uint8_t short_token[3] = {0xA1U, 0xA2U, 0xA3U};
+      static const uint8_t short_scid[1] = {0x77U};
+      uint8_t minimal[64];
+      wt_writer_t minimal_writer = wt_writer_init(minimal, sizeof(minimal));
+      wt_quic_retry_packet_t minimal_decoded;
+
+      /* The shortest Retry that can exist: no destination connection ID, the one-byte source ID a server that
+       * retries must have chosen (RFC 9000 section 17.2.5), and a three-byte token. */
+      WT_EXPECT_STATUS("a Retry with the shortest header encodes", WT_OK,
+                       wt_quic_retry_packet_encode(&minimal_writer, WT_QUIC_VERSION_1, NULL, 0U,
+                                                   short_scid, sizeof(short_scid), short_token,
+                                                   sizeof(short_token), tag));
+      WT_EXPECT_U64("to exactly the minimum length",
+                    (uint64_t)(1U + 4U + 1U + 0U + 1U + 1U + 3U + 16U),
+                    (uint64_t)wt_writer_offset(&minimal_writer));
+      WT_EXPECT_STATUS("and that minimum parses", WT_OK,
+                       wt_quic_retry_packet_decode(minimal, wt_writer_offset(&minimal_writer),
+                                                   &minimal_decoded, &error));
+      WT_EXPECT_U64("with its short token", (uint64_t)sizeof(short_token),
+                    (uint64_t)minimal_decoded.token_len);
+      WT_EXPECT_BYTES("byte for byte", short_token, minimal_decoded.token, sizeof(short_token));
+      WT_EXPECT_BYTES("and its tag", tag, minimal_decoded.integrity_tag, 16U);
+
+      /* A header that reaches into the tag is TRUNCATED, not a token of nearly `SIZE_MAX` bytes: this is the
+       * exact packet the audit used, and before the guard it returned WT_OK with a token view past the end. */
+      WT_EXPECT_STATUS("a header that runs into the tag is truncated", WT_ERR_TRUNCATED,
+                       wt_quic_retry_packet_decode(retry, 26U, &decoded, &error));
+    }
     /* The long header parser refuses a Retry, which has its own shape. */
     c = wt_cursor_init(retry, wt_writer_offset(&w));
     {

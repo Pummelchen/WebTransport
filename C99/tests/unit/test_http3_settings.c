@@ -47,8 +47,11 @@ static void test_round_trip_is_ordered(void) {
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_QPACK_MAX_TABLE_CAPACITY, 4096U));
   WT_EXPECT_OK("connect protocol is enabled",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U));
-  /* An unknown identifier that is NOT reserved: what a future setting looks like, and what a round trip must
-   * use. The reserved one (0x21) is refused below, which is the rule this fixture used to hide. */
+  /* An unknown identifier that is neither an HTTP/2-reserved one nor an exerciser: what a future setting looks
+   * like, and what a round trip must use. (The exerciser 0x21 is legal to SEND -- the RFC says a SETTINGS frame
+   * SHOULD carry one -- and is IGNORED on receipt, which `test_exercisers_are_ignored` asserts. The previous
+   * comment here said 0x21 was "refused below, which is the rule this fixture used to hide", and that was the
+   * misreading.) */
   WT_EXPECT_OK("and an unknown setting is included",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_UNKNOWN, 0U));
   WT_EXPECT_OK("the payload encodes",
@@ -85,12 +88,15 @@ static void test_round_trip_is_ordered(void) {
    * receipt of one a connection error of type H3_SETTINGS_ERROR, which is the rule a conformance scenario found
    * missing (WT-137). */
   {
-    static const uint8_t reserved_payload[2] = {0x21U, 0x00U};
+    /* 0x02 is the HTTP/2-derived reserved identifier: forbidden to send and H3_SETTINGS_ERROR to receive. The
+     * exercise identifier `WT_HTTP3_SETTING_EXERCISER` (0x21) is the OTHER family and is accepted by the setter
+     * -- see `test_exercisers_are_ignored`. */
+    static const uint8_t reserved_payload[2] = {0x02U, 0x00U};
     wt_http3_settings_t reserved_settings;
     wt_http3_error_t reserved_error = WT_HTTP3_NO_ERROR;
     WT_EXPECT_STATUS("a reserved identifier is refused when set",
                      WT_ERR_INVALID_ARGUMENT,
-                     wt_http3_settings_set(&settings, WT_HTTP3_SETTING_EXERCISER, 0U));
+                     wt_http3_settings_set(&settings, 0x02U, 0U));
     WT_EXPECT_STATUS("and refused when parsed", WT_ERR_PROTOCOL,
                      wt_http3_settings_parse(reserved_payload, sizeof(reserved_payload), &reserved_settings,
                                              &reserved_error));
@@ -200,8 +206,54 @@ static void test_set_refusals(void) {
                    wt_http3_settings_set(&other, 0x300U, 0U));
 }
 
+/* An EXERCISER identifier is ignored, and an HTTP/2-reserved one is not. The two rules are one line apart in
+ * RFC 9114 section 7.2.4.1 and the tree had them backwards, so both outcomes are asserted here against a real
+ * payload: `0x21` parses to a set that does NOT contain it (and is not an error), and `0x02` is
+ * H3_SETTINGS_ERROR. This is the case a conformance scenario asserted wrongly for a whole round. */
+static void test_exercisers_are_ignored(void) {
+  static const uint8_t exerciser[] = {0x21U, 0x01U};
+  static const uint8_t http2_reserved[] = {0x02U, 0x01U};
+  static const uint8_t mixed[] = {0x06U, 0x00U, 0x21U, 0x01U, 0x22U, 0x03U};
+  wt_http3_settings_t settings;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  int present = 1;
+
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("an exerciser identifier parses",
+               wt_http3_settings_parse(exerciser, sizeof(exerciser), &settings, &error));
+  WT_EXPECT_INT("without an error code", (int)WT_HTTP3_NO_ERROR, (int)error);
+  WT_EXPECT_U64("and is NOT stored",
+                wt_http3_settings_get(&settings, 0x21U, &present), 0U);
+  WT_EXPECT_INT("so a later ask finds nothing", 0, present);
+
+  /* Several of them, around a real setting: the real one survives, the exercisers leave no trace. */
+  WT_EXPECT_OK("a payload with exercisers around a real setting parses",
+               wt_http3_settings_parse(mixed, sizeof(mixed), &settings, &error));
+  WT_EXPECT_U64("the real setting is stored",
+                wt_http3_settings_get(&settings, 0x06U, &present), 0U);
+  WT_EXPECT_INT("and is present", 1, present);
+  WT_EXPECT_U64("while a real unknown setting still is", 3U,
+                wt_http3_settings_get(&settings, 0x22U, &present));
+  WT_EXPECT_INT("and the exerciser is still absent", 0,
+                wt_http3_settings_get(&settings, 0x21U, &present) != 0U && present != 0);
+
+  /* And an exerciser may be SET, because the RFC says a SETTINGS frame SHOULD carry one. */
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("an exerciser can be included in ours too",
+               wt_http3_settings_set(&settings, 0x21U, 0x1234U));
+
+  /* The other family: forbidden to send and a connection error on receipt. */
+  WT_EXPECT_STATUS("a reserved HTTP/2 identifier is still refused", WT_ERR_PROTOCOL,
+                   wt_http3_settings_parse(http2_reserved, sizeof(http2_reserved), &settings,
+                                           &error));
+  WT_EXPECT_U64("with H3_SETTINGS_ERROR", (uint64_t)WT_HTTP3_SETTINGS_ERROR, (uint64_t)error);
+  WT_EXPECT_STATUS("and cannot be set", WT_ERR_INVALID_ARGUMENT,
+                   wt_http3_settings_set(&settings, 0x02U, 1U));
+}
+
 int main(void) {
   test_reserved_and_exerciser_identifiers();
+  test_exercisers_are_ignored();
   test_round_trip_is_ordered();
   test_parse_errors();
   test_too_many_settings();

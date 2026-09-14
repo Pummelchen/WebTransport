@@ -13,11 +13,29 @@
  *     callback is undefined; the library does not queue what a callback reports. Deliver
  *     a datagram by returning from the callback and calling the next feed function.
  *
+ *     THAT INCLUDES `wt_session_destroy` AND `wt_session_set_callbacks`, and the reason is worth stating rather
+ *     than implying: releasing the handle inside a callback is the first pattern a consumer reaches for, and it
+ *     cannot be made safe here. The library settles its own state and error surface BEFORE a callback runs and
+ *     touches the session nowhere afterwards, so a callback that destroys the session does not corrupt this
+ *     library's own write -- but the DRIVER that invoked the feed function still owns the handle when the
+ *     callback returns, and it will use it. The discipline is to record the decision in the callback and act on
+ *     it after the driver returns: a `closed` flag beside the loop, not `destroy` inside `on_close`.
+ *
+ *     A callback also reads the error surface of the call it runs inside (`wt_session_last_error`), because
+ *     that surface is recorded before the callback is invoked rather than after it.
+ *
  *   - NO CALLBACK MEANS THE EVENT IS ACCEPTED AND DISCARDED, not refused. A peer's
  *     datagram is not an error because this endpoint did not ask for one, and turning it
  *     into a connection error would blame the peer for our own configuration. The one
  *     exception is a bound this endpoint published: a value over it is refused, and the
  *     refusal says so.
+ *
+ *   - A CALLBACK OBSERVES THE STATE ITS EVENT HAS ALREADY PRODUCED. The stream table is
+ *     updated before the callback runs, so `wt_session_stream_count` inside the
+ *     `on_stream_opened` callback counts the new stream and inside the `end_stream` or
+ *     `on_stream_reset` callback does not count the finished one. The rule is uniform on
+ *     purpose: it is the same rule for all three, and it is the one that leaves the
+ *     library with nothing to write after a callback returns.
  *
  *   - EVERY POINTER PASSED TO A CALLBACK IS A VIEW INTO THE CALLER'S OWN BUFFER and is
  *     valid only for the duration of the callback, exactly like the reader convention the

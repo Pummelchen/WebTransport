@@ -22,11 +22,17 @@ int wt_http3_setting_is_reserved_http2(uint64_t identifier) {
 }
 
 int wt_http3_setting_is_exerciser(uint64_t identifier) {
-  /* RFC 9114 section 7.2.4.1: the identifiers 0x1f * N + 0x21 are RESERVED, and a receiver MUST treat one as a
-   * connection error of type H3_SETTINGS_ERROR. This comment used to say they were "reserved to exercise the
-   * rule that unknown identifiers are ignored", which is the opposite of the section, and nothing checked the
-   * rule until a conformance scenario asserted the code (WT-137). Same arithmetic as section 7.2.8's reserved
-   * frame types; the consequence is the opposite one. */
+  /* RFC 9114 section 7.2.4.1: "Setting identifiers of the format 0x1f * N + 0x21 for non-negative integer values
+   * of N are reserved to exercise the requirement that unknown identifiers be ignored. Such settings have no
+   * defined meaning. Endpoints SHOULD include at least one such setting in their SETTINGS frame. Endpoints MUST
+   * NOT consider such settings to have any meaning upon receipt."
+   *
+   * So an exerciser is IGNORED, and the comment that used to be here said the opposite -- that a receiver MUST
+   * treat one as H3_SETTINGS_ERROR -- which is the rule for the HTTP/2-derived family (0x02..0x05), not for this
+   * one. `WT-137` corrected a fixture that used an exerciser as its example of a legal unknown setting and made
+   * the parser refuse it; this reverses that, because a peer that follows the RFC's SHOULD was being refused.
+   * The tree's own conformance scenario asserted the wrong rule too, which is what a test written from the same
+   * misreading as the code does. */
   if (identifier < (uint64_t)0x21) return 0;
   return ((identifier - (uint64_t)0x21) % (uint64_t)0x1f) == 0U;
 }
@@ -37,12 +43,11 @@ wt_status_t wt_http3_settings_set(wt_http3_settings_t *settings, uint64_t identi
 
   if (settings == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (identifier > WT_QUIC_VARINT_MAX || value > WT_QUIC_VARINT_MAX) return WT_ERR_INVALID_ARGUMENT;
-  /* The same rule as the parser's: the HTTP/2 identifiers this version has no equivalent for and the RESERVED
-   * ones are values a peer must never send, so refusing them at the SETTER keeps the encoder from producing a
-   * frame the parser would refuse. */
-  if (wt_http3_setting_is_reserved_http2(identifier) || wt_http3_setting_is_exerciser(identifier)) {
-    return WT_ERR_INVALID_ARGUMENT;
-  }
+  /* The HTTP/2 identifiers this version has no equivalent for are values a peer must never send, so refusing
+   * them at the SETTER keeps the encoder from producing a frame the parser would refuse. EXERCISERS are the
+   * opposite: the RFC says a SETTINGS frame SHOULD carry one, so the setter accepts them and the parser ignores
+   * them (see `wt_http3_setting_is_exerciser`). */
+  if (wt_http3_setting_is_reserved_http2(identifier)) return WT_ERR_INVALID_ARGUMENT;
   /* RFC 9220 section 3: ENABLE_CONNECT_PROTOCOL is a boolean, and any other
    * value MUST be treated as H3_SETTINGS_ERROR. Refusing it at the setter keeps
    * the encoder from producing a frame the parser would refuse. */
@@ -102,12 +107,17 @@ wt_status_t wt_http3_settings_parse(const uint8_t *payload, size_t length,
       if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
       return WT_ERR_TRUNCATED;
     }
-    if (wt_http3_setting_is_reserved_http2(identifier) || wt_http3_setting_is_exerciser(identifier)) {
-      /* The HTTP/2 identifiers this version has no equivalent for, and the RESERVED ones: both are
-       * H3_SETTINGS_ERROR rather than something to ignore. The reserved set was missing here, and a conformance
-       * scenario is what found it (WT-137). */
+    if (wt_http3_setting_is_reserved_http2(identifier)) {
+      /* The HTTP/2-derived family: "These reserved settings MUST NOT be sent, and their receipt MUST be treated
+       * as a connection error of type H3_SETTINGS_ERROR." */
       if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
       return WT_ERR_PROTOCOL;
+    }
+    if (wt_http3_setting_is_exerciser(identifier)) {
+      /* An exerciser: IGNORED, not stored and not an error, which is what the section quoted at the predicate
+       * says a receiver must do. Ignoring rather than storing is also what keeps a peer from filling this
+       * endpoint's settings table with values that mean nothing. */
+      continue;
     }
     if (identifier == WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL && value > 1U) {
       if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;

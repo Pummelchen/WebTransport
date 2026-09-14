@@ -70,7 +70,13 @@ typedef enum wt_http3_error {
   WT_HTTP3_REQUEST_INCOMPLETE = 0x010d,
   WT_HTTP3_MESSAGE_ERROR = 0x010e,
   WT_HTTP3_CONNECT_ERROR = 0x010f,
-  WT_HTTP3_VERSION_FALLBACK = 0x0110
+  WT_HTTP3_VERSION_FALLBACK = 0x0110,
+  /* NOT from RFC 9114: this is the WebTransport draft's own code, defined for a DATAGRAM whose quarter stream ID
+   * is malformed or names a stream that cannot be a session. It travels in the same connection-close code space,
+   * which is why it lives in this enum rather than beside the framing helpers -- the values below 0x0100 are the
+   * extension range, and this is one. An audit found the framing layer reporting a malformed datagram prefix as
+   * H3_MESSAGE_ERROR, which names the wrong rule. */
+  WT_HTTP3_DATAGRAM_ERROR = 0x33
 } wt_http3_error_t;
 
 /* One frame, as it is on the wire: a type and a view of the payload the caller
@@ -92,6 +98,13 @@ const char *wt_http3_frame_type_name(uint64_t type);
  * 7.2.8). Receiving one is H3_FRAME_UNEXPECTED, which the stream layer raises;
  * this exists so the rule is stated once. */
 int wt_http3_frame_type_is_reserved(uint64_t type);
+
+/* The OTHER reserved family (RFC 9114 section 7.2.8): `0x1f * N + 0x21` are reserved to exercise the rule that
+ * unknown types are ignored. A peer MAY send one as padding and this endpoint MUST NOT give it meaning -- so the
+ * answer here is IGNORE, and a caller that refused one would refuse a conforming peer. Kept as its own predicate
+ * because "reserved" names two rules with opposite outcomes, which is exactly the confusion that had this file
+ * refusing the legal family and accepting the forbidden one. */
+int wt_http3_frame_type_is_exerciser(uint64_t type);
 
 /* Write one frame. Refuses a type or payload length outside the varint range and
  * a null payload with a non-zero length. */

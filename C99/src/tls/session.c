@@ -25,8 +25,25 @@
  * that only a `clear` call would free is a leak waiting for the caller who does not make it.
  * LeakSanitizer on the Linux CI leg found exactly that: a test that reused a client struct
  * after a failed begin leaked the context the begin had allocated. */
+/* Every secret this machine derived goes with the failure, because the comment above says a FAILED MACHINE
+ * HOLDS NOTHING and the first version released only the transcript. What was left -- the handshake and master
+ * secrets, both directions' traffic secrets and the private key -- is unreachable through the API (every entry
+ * point rejects FAILED) but it is still key material sitting in a caller-owned struct, and a struct is memory a
+ * caller may reuse. `wt_secure_zero` rather than `memset`, because a compiler is free to delete a memset of a
+ * buffer that is never read again. */
+static void client_scrub(wt_tls_client_t *client) {
+  wt_secure_zero(client->handshake_secret, sizeof(client->handshake_secret));
+  wt_secure_zero(client->master_secret, sizeof(client->master_secret));
+  wt_secure_zero(client->client_handshake_secret, sizeof(client->client_handshake_secret));
+  wt_secure_zero(client->server_handshake_secret, sizeof(client->server_handshake_secret));
+  wt_secure_zero(client->client_application_secret, sizeof(client->client_application_secret));
+  wt_secure_zero(client->server_application_secret, sizeof(client->server_application_secret));
+  wt_secure_zero(client->private_key, sizeof(client->private_key));
+}
+
 static wt_status_t fail(wt_tls_client_t *client, wt_status_t status) {
   wt_tls13_transcript_clear(&client->transcript);
+  client_scrub(client);
   client->state = WT_TLS_CLIENT_FAILED;
   return status;
 }
@@ -581,28 +598,13 @@ wt_status_t wt_tls_client_handshake_secrets(const wt_tls_client_t *client,
   }
   memcpy(read_out, client->server_handshake_secret, WT_TLS13_SECRET_LEN);
   memcpy(write_out, client->client_handshake_secret, WT_TLS13_SECRET_LEN);
-  /* A DIAGNOSTIC, at DERIVATION time rather than after the handshake: the CLI's dump of the same field read all
-   * zeros once (WT-135), and the difference between "the secret is zero" and "the secret was cleared" is this
-   * line. Gated by an environment variable because it writes a traffic secret to a file. */
-  {
-    const char *keylog_path = getenv("WT_TLS_SECRET_LOG");
-    if (keylog_path != NULL) {
-      FILE *keylog = fopen(keylog_path, "a");
-      if (keylog != NULL) {
-        unsigned index;
-        fprintf(keylog, "# at-derivation client=");
-        for (index = 0U; index < WT_TLS13_SECRET_LEN; index++) {
-          fprintf(keylog, "%02x", client->client_handshake_secret[index]);
-        }
-        fprintf(keylog, " server=");
-        for (index = 0U; index < WT_TLS13_SECRET_LEN; index++) {
-          fprintf(keylog, "%02x", client->server_handshake_secret[index]);
-        }
-        fprintf(keylog, "\n");
-        (void)fclose(keylog);
-      }
-    }
-  }
+  /* There was a diagnostic here that appended both handshake traffic secrets to the file named by the
+   * `WT_TLS_SECRET_LOG` environment variable. It is GONE, and the reason is a rule rather than a
+   * preference: the plan's Phase 13 asks for "no sensitive logs", and an environment variable is not a
+   * log LEVEL -- it is set in the environment of any process that inherits it, it writes key material to a
+   * path of the setter's choosing, and a library that can be made to do that is not one a caller can audit
+   * by reading its own configuration. The field it read is still filled, so a caller that wants to trace
+   * its own handshake can read `wt_tls_client_handshake_secrets` and decide for itself where that goes. */
   return WT_OK;
 }
 
@@ -656,8 +658,19 @@ void wt_tls_client_clear(wt_tls_client_t *client) {
 /* The marker `wt_tls_server_t.live` carries, for the same reason the client has one. */
 #define WT_TLS_SERVER_LIVE UINT64_C(0x3c9e51a7b0d4f286)
 
+static void server_scrub(wt_tls_server_t *server) {
+  wt_secure_zero(server->handshake_secret, sizeof(server->handshake_secret));
+  wt_secure_zero(server->master_secret, sizeof(server->master_secret));
+  wt_secure_zero(server->client_handshake_secret, sizeof(server->client_handshake_secret));
+  wt_secure_zero(server->server_handshake_secret, sizeof(server->server_handshake_secret));
+  wt_secure_zero(server->client_application_secret, sizeof(server->client_application_secret));
+  wt_secure_zero(server->server_application_secret, sizeof(server->server_application_secret));
+  wt_secure_zero(server->private_key, sizeof(server->private_key));
+}
+
 static wt_status_t server_fail(wt_tls_server_t *server, wt_status_t status) {
   wt_tls13_transcript_clear(&server->transcript);
+  server_scrub(server);
   server->state = WT_TLS_SERVER_FAILED;
   return status;
 }

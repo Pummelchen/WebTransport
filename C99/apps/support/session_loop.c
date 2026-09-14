@@ -44,6 +44,9 @@ typedef struct loop_side {
   uint8_t section[2048];
   size_t section_length;
   int section_complete;
+  /* Set when the peer's field section did not fit `section`: the section is a bound THIS TOOL imposed, and without
+   * this flag the loop below reports the same `"status":"timeout"` it reports for a peer that answered nothing. */
+  int section_overflow;
   uint64_t request_stream_id;
   unsigned frames_seen;
   uint8_t data[512];
@@ -144,11 +147,18 @@ static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint
     }
   }
   if (type == WT_HTTP3_FRAME_HEADERS && stream_id == side->request_stream_id) {
-    if (side->section_length + length <= sizeof(side->section)) {
-      if (length > 0U) memcpy(side->section + side->section_length, payload, length);
-      side->section_length += length;
-      if (last != 0) side->section_complete = 1;
+    if (length > sizeof(side->section) - side->section_length) {
+      /* The section is larger than this tool's scratch, and the first version dropped it in silence -- no copy, no
+       * `section_complete`, no error -- so the client loop ran to its deadline and reported `"status":"timeout"`.
+       * A bound this tool imposed read as the peer never answering, which is the failure mode the capsule path
+       * beside it already refuses to have (`capsule_stream.c` sets a limit outcome for the same reason). The
+       * status is WT_ERR_LIMIT with no error code: the peer did nothing wrong. */
+      side->section_overflow = 1;
+      return WT_ERR_LIMIT;
     }
+    if (length > 0U) memcpy(side->section + side->section_length, payload, length);
+    side->section_length += length;
+    if (last != 0) side->section_complete = 1;
     return WT_OK;
   }
   return WT_OK;
@@ -699,6 +709,13 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     record_oracle(&loop, out);
     wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
+    if (loop.side.section_overflow != 0) {
+      /* The response WAS refused, and by this tool's bound rather than by the peer: saying so is the difference
+       * between "the peer never answered" and "the answer did not fit", which is the distinction WT-155 added
+       * `responseOutcome` for. No HTTP/3 error code goes with it, because the peer broke no rule. */
+      out->response_outcome = (unsigned)WT_LOOP_RESPONSE_REFUSED;
+      return WT_ERR_LIMIT;
+    }
     return loop_is_closed(&loop) != 0 ? loop_wait_status(&loop) : WT_ERR_TIMEOUT;
   }
   {
@@ -1059,6 +1076,12 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     record_oracle(&loop, out);
     wt_runtime_session_clear(&loop.session);
     wt_udp_close(&loop.socket);
+    if (loop.side.section_overflow != 0) {
+      /* The same bound as the client's, reported the same way: a request whose section did not fit is not a
+       * request that never arrived. */
+      out->request_outcome = (unsigned)WT_WEBTRANSPORT_REQUEST_REJECT;
+      return WT_ERR_LIMIT;
+    }
     return loop_is_closed(&loop) != 0 ? loop_wait_status(&loop) : WT_ERR_TIMEOUT;
   }
   /* A DIAGNOSTIC, gated by WT_HTTP3_SECTION_LOG: the request's field section exactly as it arrived, so that a

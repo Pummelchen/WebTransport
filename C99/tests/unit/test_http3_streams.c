@@ -104,9 +104,11 @@ static void test_reserved_frame_types_everywhere(void) {
   size_t i;
 
   for (i = 0U; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
-    /* 0x21 and 0x40 are the first two of section 7.2.8's reserved range. */
-    expect_refused(WT_HTTP3_ROLE_CLIENT, kinds[i], 0x21U, "a reserved frame type is refused");
-    expect_refused(WT_HTTP3_ROLE_SERVER, kinds[i], 0x40U, "on every stream kind");
+    /* 0x02 and 0x06 are PRIORITY and PING: the frame types section 7.2.8 reserves from HTTP/2, whose receipt is
+     * H3_FRAME_UNEXPECTED. This used to test 0x21 and 0x40, which are the EXERCISE types the same section says a
+     * receiver MUST ignore -- so the file asserted the inversion rather than catching it. */
+    expect_refused(WT_HTTP3_ROLE_CLIENT, kinds[i], 0x02U, "a reserved frame type is refused");
+    expect_refused(WT_HTTP3_ROLE_SERVER, kinds[i], 0x09U, "on every stream kind");
   }
 }
 

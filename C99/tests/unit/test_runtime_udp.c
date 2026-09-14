@@ -217,6 +217,77 @@ static void test_round_trip(wt_udp_family_t family) {
   wt_udp_close(&receiver);
 }
 
+/* The PEEK's contract, which is the part of this file that differs by platform and was therefore the part
+ * nothing asserted: the Windows-only test measures the `_WIN32` branch, and on POSIX there was no peek test at
+ * all, so a header promising "the datagram's own length" passed while macOS returned the copied count.
+ *
+ * What is asserted here is what holds on EVERY platform: a peek of a datagram larger than the buffer reports a
+ * full buffer, never a length below what it copied, the bytes are the datagram's own prefix, the sender is
+ * named -- and the datagram is still in the queue afterwards, which is the property a listener depends on.
+ * Whether `out_length` is the datagram's own length (Linux) or the copied count (macOS, the BSDs) is documented
+ * in `webtransport/runtime/udp.h` rather than asserted, because a test that pinned one of them would fail on
+ * the other platform for being right. */
+static void test_peek(wt_udp_family_t family) {
+  wt_udp_socket_t receiver;
+  wt_udp_socket_t sender;
+  wt_udp_address_t receiver_address;
+  wt_udp_address_t sender_address;
+  wt_udp_address_t from;
+  uint8_t large[2000];
+  uint8_t small[16];
+  uint8_t buffer[100];
+  size_t length = 0U;
+  size_t available = 0U;
+  size_t i;
+
+  for (i = 0U; i < sizeof(large); i++) large[i] = (uint8_t)(i & 0xffU);
+  for (i = 0U; i < sizeof(small); i++) small[i] = (uint8_t)(0x80U + i);
+
+  open_pair(family, &receiver, &sender, &receiver_address, &sender_address);
+
+  /* A datagram that FITS: both lengths are its size, and it is still there afterwards. */
+  WT_EXPECT_OK("a datagram that fits is sent", wt_udp_send(&sender, &receiver_address, small, sizeof(small)));
+  WT_EXPECT_OK("and the socket becomes readable", wt_udp_wait(&receiver, 2000000U));
+  length = 99U;
+  available = 99U;
+  memset(&from, 0, sizeof(from));
+  WT_EXPECT_OK("a peek looks at it", wt_udp_peek(&receiver, buffer, sizeof(buffer), &length, &available, &from));
+  WT_EXPECT_U64("reporting its length", (uint64_t)sizeof(small), (uint64_t)length);
+  WT_EXPECT_U64("and all of it available", (uint64_t)sizeof(small), (uint64_t)available);
+  WT_EXPECT_BYTES("with its bytes", small, buffer, sizeof(small));
+  WT_EXPECT_INT("and the sender named", 1, wt_udp_address_equal(&from, &sender_address));
+  length = 0U;
+  WT_EXPECT_OK("and the peek did not consume it",
+               wt_udp_receive(&receiver, buffer, sizeof(buffer), &length, &from));
+  WT_EXPECT_U64("which the receive gets whole", (uint64_t)sizeof(small), (uint64_t)length);
+
+  /* A datagram LARGER than the buffer: the invariants above hold, and the queue is untouched. */
+  WT_EXPECT_OK("a datagram larger than the buffer is sent",
+               wt_udp_send(&sender, &receiver_address, large, sizeof(large)));
+  WT_EXPECT_OK("and the socket becomes readable", wt_udp_wait(&receiver, 2000000U));
+  length = 99U;
+  available = 99U;
+  memset(&from, 0, sizeof(from));
+  WT_EXPECT_OK("a peek looks at it too",
+               wt_udp_peek(&receiver, buffer, sizeof(buffer), &length, &available, &from));
+  WT_EXPECT_U64("a full buffer is reported", (uint64_t)sizeof(buffer), (uint64_t)available);
+  WT_EXPECT_TRUE("and the datagram's length is never BELOW what was copied", length >= available);
+  WT_EXPECT_BYTES("the bytes are the datagram's own prefix", large, buffer, sizeof(buffer));
+  WT_EXPECT_INT("and the sender is named", 1, wt_udp_address_equal(&from, &sender_address));
+  {
+    uint8_t whole[2048];
+    length = 0U;
+    memset(&from, 0, sizeof(from));
+    WT_EXPECT_OK("the oversized datagram is STILL in the queue",
+                 wt_udp_receive(&receiver, whole, sizeof(whole), &length, &from));
+    WT_EXPECT_U64("whole", (uint64_t)sizeof(large), (uint64_t)length);
+    WT_EXPECT_BYTES("with its bytes", large, whole, sizeof(large));
+  }
+
+  wt_udp_close(&sender);
+  wt_udp_close(&receiver);
+}
+
 /* A datagram larger than the buffer is refused as a truncation with nothing usable in it. */
 static void test_truncation(wt_udp_family_t family) {
   wt_udp_socket_t receiver;
@@ -356,6 +427,8 @@ int main(void) {
   test_round_trip(WT_UDP_IPV6);
   test_truncation(WT_UDP_IPV4);
   test_truncation(WT_UDP_IPV6);
+  test_peek(WT_UDP_IPV4);
+  test_peek(WT_UDP_IPV6);
   test_refusals();
 
   WT_TEST_MAIN_END("wt_runtime_udp");

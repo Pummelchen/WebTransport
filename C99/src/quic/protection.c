@@ -121,7 +121,17 @@ wt_status_t wt_quic_packet_keys_update(const wt_quic_packet_keys_t *current,
   if (status != WT_OK) return status;
   status = wt_quic_derive_packet_keys(next_secret, current->aead, out);
   wt_secure_zero(next_secret, sizeof(next_secret));
-  return status;
+  if (status != WT_OK) return status;
+  /* RFC 9001 section 6.1: "The header protection key is not updated." The new set's AEAD key and IV come from the
+   * next secret and its header protection key comes from the CURRENT one, so a packet this endpoint protects
+   * after an update uses a key its peer already has -- which is the whole point of the update being cheap.
+   *
+   * The function used to return a freshly derived hp, and its only in-tree caller copied the old one back over it
+   * (`derive_next_keys` in connection.c), so the tree worked while the PUBLIC function was wrong and its header
+   * documented the wrong behaviour. An audit found it by calling the function directly. */
+  memcpy(out->hp, current->hp, sizeof(out->hp));
+  out->hp_len = current->hp_len;
+  return WT_OK;
 }
 
 wt_status_t wt_quic_packet_nonce(const uint8_t iv[WT_AEAD_IV_LEN],

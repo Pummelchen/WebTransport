@@ -126,6 +126,16 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
         return WT_ERR_PROTOCOL;
       }
       absolute = prefix->base - line.index - 1U;
+      /* RFC 9204 section 2.2.3: "If the absolute index of a dynamic table entry is greater than or equal to the
+       * Required Insert Count, the decoder MUST treat this as a connection error of type
+       * QPACK_DECOMPRESSION_FAILED." The table bounds check alone is not enough -- the entry can be in the table
+       * and still be one this section was never allowed to reference, which tells the decoder the encoder's
+       * count and its own have diverged. An audit decoded a section with a Required Insert Count of 1 and a Base
+       * of 6 into entry 5 without complaint. */
+      if (absolute >= prefix->required_insert_count) {
+        if (out_error != NULL) *out_error = WT_QPACK_ERROR_DECOMPRESSION_FAILED;
+        return WT_ERR_PROTOCOL;
+      }
       status = dynamic_lookup(table, absolute, out_error, &entry_name, &entry_name_length,
                               &entry_value, &entry_value_length);
       if (status != WT_OK) return status;
@@ -148,6 +158,13 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
         return WT_ERR_PROTOCOL;
       }
       absolute = prefix->base + line.index;
+      /* The same section 2.2.3 rule as the base-relative form above, and it is the form where it matters most: a
+       * post-base index counts UP past the Base, so an encoder that has lost the count can name an entry no
+       * section was allowed to reference. */
+      if (absolute >= prefix->required_insert_count) {
+        if (out_error != NULL) *out_error = WT_QPACK_ERROR_DECOMPRESSION_FAILED;
+        return WT_ERR_PROTOCOL;
+      }
       status = dynamic_lookup(table, absolute, out_error, &entry_name, &entry_name_length,
                               &entry_value, &entry_value_length);
       if (status != WT_OK) return status;

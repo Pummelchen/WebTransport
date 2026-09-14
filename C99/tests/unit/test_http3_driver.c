@@ -181,7 +181,15 @@ static void test_control_and_qpack_reach_the_endpoint(void) {
   WT_EXPECT_STATUS("and only one is allowed", WT_ERR_PROTOCOL,
                    wt_http3_driver_on_uni_stream_data(&driver, 15U, 0U, frame, 1U, &kind, &payload,
                                                       &payload_length, &consumed, &error));
-  WT_EXPECT_OK("ending it is not an error", wt_http3_driver_on_uni_stream_end(&driver, 11U, &error));
+  /* And ending it IS one: RFC 9204 section 4.2 makes the QPACK encoder stream critical, so closing it is
+   * H3_CLOSED_CRITICAL_STREAM -- the same answer the control stream gets two cases above. This assertion used to
+   * read `WT_EXPECT_OK("ending it is not an error")`, which was the defect written down as a test: a peer could
+   * close the stream its instructions were arriving on and this endpoint would carry on as though the dynamic
+   * table were still in sync. An audit filed it (finding 11) and the endpoint now refuses it. */
+  WT_EXPECT_STATUS("ending it is an error", WT_ERR_PROTOCOL,
+                   wt_http3_driver_on_uni_stream_end(&driver, 11U, &error));
+  WT_EXPECT_U64("with the closed-critical-stream code", WT_HTTP3_CLOSED_CRITICAL_STREAM,
+                (uint64_t)error);
 }
 
 static void test_the_pending_table_is_bounded(void) {

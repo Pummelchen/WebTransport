@@ -144,7 +144,9 @@ static void test_datagrams(void) {
     WT_EXPECT_STATUS("a datagram with no quarter ID is refused", WT_ERR_PROTOCOL,
                      wt_webtransport_datagram_parse(too_short, sizeof(too_short), &quarter, &parsed,
                                                     &parsed_length, &error));
-    WT_EXPECT_U64("as a message error", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+    /* H3_DATAGRAM_ERROR (0x33, the WebTransport draft's own code), not H3_MESSAGE_ERROR: the draft names this
+     * one for a datagram whose quarter stream ID is missing, and the assertion here used to pin the wrong rule. */
+    WT_EXPECT_U64("as a datagram error", WT_HTTP3_DATAGRAM_ERROR, (uint64_t)error);
   }
   WT_EXPECT_STATUS("and an empty one is too", WT_ERR_PROTOCOL,
                    wt_webtransport_datagram_parse(NULL, 0U, &quarter, &parsed, &parsed_length,

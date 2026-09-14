@@ -90,7 +90,19 @@ int main(void) {
   rc = recvfrom(a, buf, 64, 0, (struct sockaddr *)&from, &from_len);
   printf("and the next one: rc=%d err=%d\n", rc, WSAGetLastError());
 
-  printf("--- 4: a zero-length buffer, NULL and one stand-in byte (two datagrams, one for each call) ---\n");
+  printf("--- 4: an EXACT-FIT datagram peeked into an exact-fit buffer, then received ---\n");
+  sendto(b, "abcd", 4, 0, (struct sockaddr *)&addr, sizeof(addr));
+  memset(&from, 0, sizeof(from));
+  from_len = (int)sizeof(from);
+  rc = recvfrom(a, buf, 4, MSG_PEEK, (struct sockaddr *)&from, &from_len);
+  printf("peek 4 into 4: rc=%d err=%d from_family=%d\n", rc, WSAGetLastError(), from.sin_family);
+  memset(&from, 0, sizeof(from));
+  from_len = (int)sizeof(from);
+  rc = recvfrom(a, buf, 4, 0, (struct sockaddr *)&from, &from_len);
+  printf("then receive 4 into 4: rc=%d err=%d (10035 is WSAEWOULDBLOCK: the peek CONSUMED it)\n", rc,
+         WSAGetLastError());
+
+  printf("--- 5: a zero-length buffer, NULL and one stand-in byte (two datagrams, one for each call) ---\n");
   fill_queue(2);
   memset(&from, 0, sizeof(from));
   from_len = (int)sizeof(from);

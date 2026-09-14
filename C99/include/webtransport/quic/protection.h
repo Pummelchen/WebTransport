@@ -94,8 +94,11 @@ wt_status_t wt_quic_packet_keys_from_secret(
  *
  *   secret_<n+1> = HKDF-Expand-Label(secret_<n>, "quic ku", "", Hash.length)
  *
- * and the key, IV and header protection key are then derived from the new secret
- * as usual. The AEAD does not change across an update, which is why this takes
+ * and the KEY and IV are derived from the new secret as usual -- while the HEADER PROTECTION KEY IS NOT UPDATED
+ * ("The header protection key is not updated", section 6.1), so `out->hp` is a copy of `current->hp` rather than
+ * a fresh derivation. This comment used to say all three were derived from the new secret, which is what the
+ * implementation did and what a caller following it would have got wrong: every protected header after an update
+ * would be one the peer cannot unmask. The AEAD does not change across an update either, which is why this takes
  * the current keys rather than a suite. */
 wt_status_t wt_quic_packet_keys_update(const wt_quic_packet_keys_t *current,
                                        wt_quic_packet_keys_t *out);

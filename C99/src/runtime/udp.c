@@ -348,7 +348,10 @@ wt_status_t wt_udp_wait(const wt_udp_socket_t *socket, uint64_t timeout_micros) 
   entry.revents = 0;
 
   ready = wt_udp_platform_wait_readable(entry.fd, timeout_ms);
-  if (ready < 0) return wt_udp_platform_status_of_error(errno);
+  /* The PLATFORM's error number, not `errno`: `WSAPoll` reports through `WSAGetLastError`, so reading
+   * `errno` here asked the C runtime about a failure Winsock never reported to it -- and the answer was a
+   * stale value classified as `WT_ERR_IO`. This is what `wt_udp_platform_last_error` exists for. */
+  if (ready < 0) return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   if (ready == 0) return WT_ERR_TIMEOUT;
   return WT_OK;
 }

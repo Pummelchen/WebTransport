@@ -148,8 +148,14 @@ typedef struct wt_http3_driver {
   /* Streams part way through a frame's header. */
   wt_http3_driver_frame_state_t frames[WT_HTTP3_DRIVER_FRAMES_MAX];
   size_t frame_count;
-  /* The bytes of the message being sent, measured before the frame around them is written. */
+  /* The bytes of the message being sent, measured before the frame around them is written, and the frame that
+   * carries them. TWO buffers, because the two must not overlap: the writer copies the section from where it was
+   * measured to just past the frame header, and a single buffer makes that copy overlap itself -- undefined
+   * behaviour that produced garbage under a hardened build (an audit caught it with ASan). `start_own_streams`
+   * can use two halves of one buffer because a SETTINGS payload is small; a HEADERS section is a caller's, so it
+   * gets a buffer of its own. The frame is the retained copy (`request_retained`), exactly as before. */
   uint8_t scratch[WT_HTTP3_DRIVER_SCRATCH];
+  uint8_t section[WT_HTTP3_DRIVER_SCRATCH];
   /* The session this endpoint serves. A WebTransport stream's prefix must name it, and until it is set a
    * WebTransport stream is refused rather than delivered to an endpoint that cannot say which session it
    * belongs to. */
@@ -301,8 +307,11 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
                                             const wt_http3_driver_sink_t *sink,
                                             wt_http3_error_t *out_error);
 
-/* Forget a stream's half-read frame when the stream ends or is reset. Returns whether one was
- * in progress, which is what a caller needs to decide between WT_ERR_TRUNCATED and silence. */
+/* Forget a stream's half-read frame when the stream ends or is reset, and RELEASE the slot it was using.
+ * Returns whether a frame was in progress, which is what a caller needs to decide between WT_ERR_TRUNCATED and
+ * silence. The driver calls this itself when a unidirectional stream ends and when a bidirectional one is
+ * finished, so a caller only needs it for a reset; the table is eight slots, and a stream that is over must not
+ * keep one. */
 int wt_http3_driver_forget_frame(wt_http3_driver_t *driver, uint64_t stream_id);
 
 /* What a peer's opening bytes on a BIDIRECTIONAL stream make it.

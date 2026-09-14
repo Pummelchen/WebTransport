@@ -86,8 +86,18 @@ wt_status_t wt_webtransport_datagram_parse(const uint8_t *data, size_t length,
   c = wt_cursor_init(data, length);
   if (wt_quic_varint_decode(&c, &quarter) != WT_OK) {
     /* A datagram is a whole unit, so one that does not hold its quarter ID is
-     * malformed rather than early -- the packet layer's rule, not the stream layer's. */
-    if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
+     * malformed rather than early -- and the draft names the code for exactly this: H3_DATAGRAM_ERROR. The first
+     * version reported H3_MESSAGE_ERROR, which is the code for a field section's problem, so a peer was told the
+     * wrong rule. */
+    if (out_error != NULL) *out_error = WT_HTTP3_DATAGRAM_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
+  /* And a quarter ID whose session would not fit is the same class of error, refused here rather than handed on:
+   * `wt_webtransport_session_id_from_quarter` multiplies by four, and a peer-supplied value above
+   * `UINT64_MAX / 4` wraps to an ID that can name a REAL session -- an audit fed quarter 2^62 and got session 0.
+   * Checked at the parse boundary because this is where a peer's number enters the library. */
+  if (quarter > UINT64_MAX / 4U) {
+    if (out_error != NULL) *out_error = WT_HTTP3_DATAGRAM_ERROR;
     return WT_ERR_PROTOCOL;
   }
   if (out_quarter_stream_id != NULL) *out_quarter_stream_id = quarter;

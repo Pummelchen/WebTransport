@@ -1,7 +1,13 @@
 /* WebTransport C99: status and error codes.
  *
  * Every public operation in this library returns a wt_status_t, and every
- * out-parameter is written only when the return value is WT_OK. That rule is
+ * out-parameter is written only when the return value is WT_OK -- unless the
+ * function's OWN documentation says otherwise, which three of them do on
+ * purpose: `wt_udp_receive` and `wt_udp_peek` ZERO their length outputs on
+ * every failure so a caller cannot read a stale length as a fresh one, and
+ * `wt_buf_reserve_tail` may answer NULL for a zero-length request on an empty
+ * buffer. A blanket rule that the exceptions contradict is worse than no rule,
+ * so the rule is stated with them. That rule is
  * what lets a caller write
  *
  *     if (wt_buf_reserve(&buf, 16) != WT_OK) { ... }
