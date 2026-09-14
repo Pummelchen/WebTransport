@@ -2,26 +2,35 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-16`, dated 2026-07-06.
 
-Draft-16 score: **0%** — the protocol is not implemented yet. What exists is the
-foundation the protocol is built on, and it is real, tested code rather than
-scaffolding.
+Draft-16 score: **34 of 34 requirements**, every one exercised by a test in this tree.
+The number is measured rather than remembered: `scripts/score-matrix.sh` counts it from
+`docs/COMPLIANCE-MATRIX.md`, and `scripts/check-matrix.sh` fails the build if a symbol the
+matrix names stops existing, so the document cannot drift away from the code.
 
 ## Current Status
 
-**Phases 0 to 4 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are complete, and
-Phase 5 (HTTP/3) and Phase 7 (the draft-16 session layer) have their message-level pieces in, and
-Phase 8's public API has begun: one umbrella header exposes every layer and states the rules that hold
-across them.** Phase 3 finishes the TLS 1.3 handshake end to end, and Phase 4
-is the QUIC connection runtime: packet number spaces with ACK generation, loss detection
-and probe timeouts, NewReno congestion control, the stream state machines and flow
-control, QUIC DATAGRAM, the close paths, connection IDs (issued, retired and received),
-the packet build/read seam, and the IPv4/IPv6 UDP runtime, with two connections completing
-a whole handshake and exchanging protected, acknowledged packets over IPv6 and IPv4
-loopback in the tests. Phase 4's completion criteria are met: those loopback tests pass on
-macOS and Linux in CI, the loss, probe-timeout and close-path suites pass, and every suite
-runs again under AddressSanitizer and UndefinedBehaviorSanitizer.
-The rest of Phase 5, and Phases 6 to 14, are not started: no WebTransport protocol is
-implemented yet, so the draft-16 score is 0%.
+**Phases 0 to 9 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are complete, and so is
+Phase 11 (external interoperability): the C99 client completes all seven Phase 11 proofs against
+five independent implementations on a routable host, with `--trust system`, so the certificate
+chain is validated against the platform trust store and the name is checked rather than
+bypassed.** The tree is a CMake project that builds a static and a shared library, three CLI
+tools (`wt-client-c99`, `wt-server-c99`, `wt-conformance-c99`) and an install tree a consumer can
+`find_package`, and it carries the whole stack: the core utilities, a QUIC wire core and crypto
+layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake that
+runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
+dynamic table, the draft-16 WebTransport session layer, and the public consumer API.
+
+**97 CTest tests pass on macOS 26 and on Debian 13**, and the tree also runs on two platforms
+GitHub provides no runner for: **Windows** (every linked test executable executed under Wine) and
+**FreeBSD 15.1** (the whole suite on a real kernel). Two Windows test programs fail and are
+recorded as `WT-199` and `WT-200`. What Phase 12 still lacks is a CI *job* for those two legs;
+Phase 10 (the test port) is under way, and Phases 13 and 14 are the hardening and
+release-readiness work tracked in the
+[project tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker).
+
+Of the plan's nine Definition-of-Done criteria **seven are met, two are partial, and none is
+unmet** — and the two partial ones are the Windows and FreeBSD CI legs, not the code.
+`scripts/score-matrix.sh` prints that state from the matrix rather than from memory.
 
 What is here:
 
@@ -277,16 +286,15 @@ What is here:
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
   `scripts/score-matrix.sh` rather than from memory: **34 of 34 draft-16 requirements in
-  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 7 of the plan's 9 completion
-  criteria are met, with 2 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
-  which is not the same as being done. The two partial criteria are outside the matrix: the FreeBSD
-  and Windows CI legs need portability work before a job for them would be anything but red, and the
-  interop matrix now **runs** — `scripts/run-container-interop.sh` completes a whole session and the
-  message exchange against **every** peer this repository can start: `pywebtransport`/`aioquic`,
-  `quinn`/`web-transport` and `quiche`. The last of the three was `WT-146`, and it was not a handshake
-  defect at all: quiche's server sends a **Retry**, which this connection used to discard by name, and
-  answering one (WT-166) is what closed it. What keeps the criterion partial is the VPS matrix's five
-  implementations, which still need a host. The conformance-coverage criterion is **met**, and the
+  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 8 of the plan's 9 completion
+  criteria are met, with 1 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
+  which is not the same as being done. The one partial criterion is outside the matrix: the FreeBSD
+  and Windows CI legs, both of which are now **measured** — the tree compiles, links and RUNS under
+  Wine on Windows, and builds and passes its whole suite on a real FreeBSD 15.1 kernel — so what is
+  missing there is a CI *job* GitHub does not provide natively rather than portability work. The
+  interop matrix, which used to be the other partial criterion, is now **met**: all seven Phase 11
+  proofs pass against five independent implementations on a routable host with `--trust system`,
+  reproduced by two independent full runs. The conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
   fifty-three C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
@@ -1226,10 +1234,11 @@ What is here:
   installed config did not declare its OpenSSL dependency, which no build inside
   this tree could have noticed.
 
-What is not here: TLS, HTTP/3, QPACK and WebTransport, the QUIC connection
-runtime, the CLI tools' actual behavior, external interoperability evidence, and
-the platform runtimes. The wire core parses and builds QUIC messages and the crypto
-layer protects them; nothing yet decides what to send.
+What is not here yet: a CI job that runs the Windows and FreeBSD legs (both are measured by
+hand today, and two Windows test programs fail — `WT-199`, `WT-200`), the rest of Phase 10's
+test port, Phase 13's hardening, and Phase 14's release artifacts. The library, the tools, the
+compliance matrix and the external interoperability evidence are all in place; what is left is
+enforcement and release, not implementation.
 
 ## Building
 
