@@ -208,4 +208,26 @@ struct WebTransportInboundStreamQueueTests {
             try await queue.next(direction: Self.direction, timeoutMilliseconds: 50)
         }
     }
+
+    /// F-swift-perf-tests-04: remembering a delivery must not shift the history.
+    ///
+    /// `enqueue` appended the delivery key and, once the 4,096-entry history was
+    /// full, called `deliveryOrder.removeFirst()`, which moves every remaining
+    /// element. The number of deliveries is peer-driven and unbounded over a
+    /// connection's life, so each delivery past the cap cost O(4,096). The probe
+    /// counts elements physically moved, so the assertion is independent of load.
+    @Test
+    func deliveryHistoryIsNotShiftedPerDelivery() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+        let deliveries = 40_000
+        for index in 0..<deliveries {
+            await queue.enqueue(index, direction: Self.direction, streamID: UInt64(index))
+        }
+
+        let moves = await queue.deliveryOrderMoves
+        #expect(
+            moves <= deliveries * 2,
+            "recording \(deliveries) deliveries moved \(moves) history elements"
+        )
+    }
 }

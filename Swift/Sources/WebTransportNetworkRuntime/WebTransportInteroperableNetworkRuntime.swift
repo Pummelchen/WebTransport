@@ -2614,6 +2614,14 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     private let maxRememberedDeliveries = 4096
     private var deliveredKeys: Set<DeliveredStream> = []
     private var deliveryOrder: [DeliveredStream] = []
+    /// How many leading entries of ``deliveryOrder`` have been evicted.
+    private var deliveryHead = 0
+
+    /// How many elements the delivery history moved while evicting.
+    ///
+    /// A cost probe for the regression test in `WebTransportInboundStreamQueueTests`:
+    /// remembering a delivery must not shift the whole history.
+    private(set) var deliveryOrderMoves = 0
     private var failure: Error?
 
     /// Ceiling on streams held at once for one direction.
@@ -2705,9 +2713,12 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         }
         deliveredKeys.insert(key)
         deliveryOrder.append(key)
-        if deliveryOrder.count > maxRememberedDeliveries {
-            deliveredKeys.remove(deliveryOrder.removeFirst())
+        while deliveryOrder.count - deliveryHead > maxRememberedDeliveries {
+            let evicted = deliveryOrder[deliveryHead]
+            deliveryHead += 1
+            deliveredKeys.remove(evicted)
         }
+        compactDeliveryOrderIfWorthwhile()
         if var waiters = waiting[direction], !waiters.isEmpty {
             let waiter = waiters.removeFirst()
             if waiters.isEmpty {
@@ -2724,6 +2735,24 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         }
         queued[direction, default: []].append(stream)
         return .accepted
+    }
+
+    /// Reclaims the evicted prefix once it is at least half the history.
+    ///
+    /// Removing from the front moves every remaining entry, so doing it per
+    /// delivery is what made recording a delivery past the cap cost O(4,096).
+    /// Waiting until the evicted prefix is as large as the live tail makes the
+    /// move amortised O(1) per delivery.
+    private func compactDeliveryOrderIfWorthwhile() {
+        guard deliveryHead > 0 else {
+            return
+        }
+        guard deliveryHead == deliveryOrder.count || deliveryHead * 2 >= deliveryOrder.count else {
+            return
+        }
+        deliveryOrderMoves += deliveryOrder.count - deliveryHead
+        deliveryOrder.removeFirst(deliveryHead)
+        deliveryHead = 0
     }
 
     /// Removes and returns the oldest queued stream for `direction`.

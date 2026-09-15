@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import WebTransportHTTP3Core
+@testable import WebTransportHTTP3Core
 import WebTransportQUICCore
 
 @Test
@@ -290,6 +290,32 @@ private func makeReadyManagers() throws -> (client: WebTransportSessionManager, 
     return (
         WebTransportSessionManager(http3: clientHTTP3),
         WebTransportSessionManager(http3: serverHTTP3)
+    )
+}
+
+/// F-swift-perf-tests-04: a stream close must not shift the tombstone window.
+///
+/// `recordClosedStream` scanned the 4,096-entry order array with
+/// `firstIndex(of:)` and evicted with `removeFirst()`, which moves every
+/// remaining element. Both the number of closed streams and the number of
+/// tombstone evictions are peer-driven and unbounded over a connection's life,
+/// so each close past the cap cost O(4,096). The probe counts elements
+/// physically moved, so the assertion is independent of load.
+@Test
+func closedStreamTombstonesAreNotShiftedPerClose() throws {
+    var manager = WebTransportSessionManager(http3: HTTP3ConnectionState(role: .server))
+    let retained = manager.maxRetainedClosedStreams
+    #expect(retained > 0)
+    let closures = retained * 8
+
+    for streamID in 0..<UInt64(closures) {
+        manager.recordClosedStream(streamID)
+    }
+
+    #expect(manager.retainedClosedStreamCount == retained)
+    #expect(
+        manager.closedStreamTombstoneMoves <= closures * 2,
+        "recording \(closures) stream closes moved \(manager.closedStreamTombstoneMoves) tombstone elements"
     )
 }
 

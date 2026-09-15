@@ -282,6 +282,23 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     /// Tombstone insertion order, oldest first, so eviction is deterministic.
     private var closedSessionOrder: [WebTransportSessionID]
     private var closedStreamOrder: [UInt64]
+    /// How many leading entries of ``closedStreamOrder`` have been evicted.
+    private var closedStreamHead: Int
+    /// Membership for the tombstones still retained, so a duplicate close is
+    /// recognised without scanning ``closedStreamOrder``.
+    private var retainedClosedStreamIDs: Set<UInt64>
+
+    /// How many elements ``recordClosedStream(_:)`` moved while evicting.
+    ///
+    /// A cost probe for the regression test in `WebTransportSessionTests`: a
+    /// stream close must not shift the whole retention window.
+    private(set) var closedStreamTombstoneMoves = 0
+
+    /// How many stream tombstones are retained, as distinct from the storage they
+    /// occupy.
+    var retainedClosedStreamCount: Int {
+        closedStreamOrder.count - closedStreamHead
+    }
 
     public init(
         http3: HTTP3ConnectionState,
@@ -324,6 +341,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.requestStreamIDsClosedByReceivedCloseCapsule = []
         self.closedSessionOrder = []
         self.closedStreamOrder = []
+        self.closedStreamHead = 0
+        self.retainedClosedStreamIDs = []
     }
 
     public mutating func makeClientSessionRequest(
@@ -1212,15 +1231,35 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     /// Records a terminated stream and evicts the oldest beyond the bound.
-    private mutating func recordClosedStream(_ streamID: UInt64) {
-        if let existing = closedStreamOrder.firstIndex(of: streamID) {
-            closedStreamOrder.remove(at: existing)
+    ///
+    /// Membership is a set lookup and eviction advances a head index, so neither
+    /// costs anything proportional to the retention window. The consumed prefix is
+    /// reclaimed in one move once it is at least half the storage, which makes the
+    /// reclaim amortised O(1) per recorded close.
+    mutating func recordClosedStream(_ streamID: UInt64) {
+        guard retainedClosedStreamIDs.insert(streamID).inserted else {
+            return
         }
         closedStreamOrder.append(streamID)
-        while closedStreamOrder.count > maxRetainedClosedStreams {
-            let evicted = closedStreamOrder.removeFirst()
+        while retainedClosedStreamCount > maxRetainedClosedStreams {
+            let evicted = closedStreamOrder[closedStreamHead]
+            closedStreamHead += 1
+            retainedClosedStreamIDs.remove(evicted)
             closedStreamSessionIDsByStreamID.removeValue(forKey: evicted)
         }
+        compactClosedStreamOrderIfWorthwhile()
+    }
+
+    private mutating func compactClosedStreamOrderIfWorthwhile() {
+        guard closedStreamHead > 0 else {
+            return
+        }
+        guard closedStreamHead == closedStreamOrder.count || closedStreamHead * 2 >= closedStreamOrder.count else {
+            return
+        }
+        closedStreamTombstoneMoves += retainedClosedStreamCount
+        closedStreamOrder.removeFirst(closedStreamHead)
+        closedStreamHead = 0
     }
 
     private mutating func register(_ stream: WebTransportStreamState) {
