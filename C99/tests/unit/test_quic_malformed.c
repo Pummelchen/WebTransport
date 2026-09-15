@@ -199,7 +199,7 @@ static void fuzz_transport_parameters(wt_rng_t *rng) {
       /* The check either accepts it or names an offender that is in the list. */
       {
         uint64_t offender = 0U;
-        if (wt_quic_transport_parameters_check(&params, &error, &offender) !=
+        if (wt_quic_transport_parameters_check(&params, 0, &error, &offender) !=
             WT_OK) {
           size_t i;
           int found = 0;

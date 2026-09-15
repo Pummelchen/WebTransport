@@ -130,8 +130,11 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   status = wt_quic_transport_parameters_decode(data, length, &params, &error);
   if (status != WT_OK) return status;
   /* RFC 9000 section 18.2's own rules -- a max_udp_payload_size below 1200, an ack delay exponent
-   * above 20, a stream limit above 2^60 -- are an error rather than something to clamp. */
-  status = wt_quic_transport_parameters_check(&params, &error, &offender);
+   * above 20, a stream limit above 2^60 -- are an error rather than something to clamp. `peer_is_client`
+   * is this endpoint's own role inverted: the parameters being checked are the peer's, and the
+   * stateless_reset_token rule depends on which end sent them. */
+  status = wt_quic_transport_parameters_check(
+      &params, connection->config.role == WT_QUIC_ROLE_SERVER ? 1 : 0, &error, &offender);
   if (status != WT_OK) return status;
 
   memset(&limits, 0, sizeof(limits));

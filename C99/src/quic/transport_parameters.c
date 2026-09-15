@@ -212,8 +212,8 @@ wt_status_t wt_quic_transport_parameters_decode(
 }
 
 wt_status_t wt_quic_transport_parameters_check(
-    const wt_quic_transport_parameters_t *params, wt_quic_error_t *out_error,
-    uint64_t *out_offender) {
+    const wt_quic_transport_parameters_t *params, int peer_is_client,
+    wt_quic_error_t *out_error, uint64_t *out_offender) {
   wt_status_t status;
   uint64_t value = 0U;
 
@@ -268,6 +268,18 @@ wt_status_t wt_quic_transport_parameters_check(
   if (status == WT_OK && value < 2U) {
     WT_QUIC_TP_REJECT(WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT);
   }
+  /* RFC 9000 section 4.6: "If a max_streams transport parameter or a MAX_STREAMS frame is received with a value
+   * greater than 2^60 ... the connection MUST be closed immediately with a connection error of type
+   * TRANSPORT_PARAMETER_ERROR if the offending value was received in a transport parameter". 2^60 itself is the
+   * boundary and is legal; only a value above it is refused. The frame half is enforced in `frame.c`. */
+  status = wt_quic_transport_parameters_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, &value);
+  if (status == WT_OK && value > (UINT64_C(1) << 60)) {
+    WT_QUIC_TP_REJECT(WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI);
+  }
+  status = wt_quic_transport_parameters_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, &value);
+  if (status == WT_OK && value > (UINT64_C(1) << 60)) {
+    WT_QUIC_TP_REJECT(WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI);
+  }
   /* A stateless reset token is exactly sixteen bytes. */
   {
     size_t token_length = 0U;
@@ -275,6 +287,14 @@ wt_status_t wt_quic_transport_parameters_check(
             params, WT_QUIC_TP_STATELESS_RESET_TOKEN, NULL,
             &token_length) == WT_OK &&
         token_length != 16U) {
+      WT_QUIC_TP_REJECT(WT_QUIC_TP_STATELESS_RESET_TOKEN);
+    }
+    /* RFC 9000 section 18.2: "This parameter is valid only for a server. ... A server MUST treat receipt of a
+     * stateless_reset_token transport parameter as a connection error of type TRANSPORT_PARAMETER_ERROR." The
+     * length rule above cannot cover it: a well-formed token from the wrong role is still an error, and a
+     * server (peer_is_client == 0) may send one. */
+    if (peer_is_client != 0 &&
+        wt_quic_transport_parameters_get(params, WT_QUIC_TP_STATELESS_RESET_TOKEN, NULL, NULL) == WT_OK) {
       WT_QUIC_TP_REJECT(WT_QUIC_TP_STATELESS_RESET_TOKEN);
     }
   }

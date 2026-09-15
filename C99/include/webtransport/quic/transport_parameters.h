@@ -152,10 +152,16 @@ wt_status_t wt_quic_transport_parameters_integer(
 /* The rules of RFC 9000 section 18.2 that make a parameter an error rather than
  * something to ignore. Returns WT_OK, or WT_ERR_PROTOCOL with `out_error` set to
  * TRANSPORT_PARAMETER_ERROR and `out_offender` set to the identifier at fault
- * when one is. */
+ * when one is.
+ *
+ * `peer_is_client` is which ROLE sent the list, and it is explicit because one
+ * of the rules depends on it: `stateless_reset_token` is valid only for a
+ * server, and a server MUST treat receipt of one as TRANSPORT_PARAMETER_ERROR.
+ * A caller that does not know the sending role passes 0, which leaves that one
+ * rule out -- every other rule here is independent of who sent the list. */
 wt_status_t wt_quic_transport_parameters_check(
-    const wt_quic_transport_parameters_t *params, wt_quic_error_t *out_error,
-    uint64_t *out_offender);
+    const wt_quic_transport_parameters_t *params, int peer_is_client,
+    wt_quic_error_t *out_error, uint64_t *out_offender);
 
 /* Encode a parameter list through a writer. The entries are written in the order
  * given, and a caller building one should use
