@@ -89,3 +89,71 @@ func cryptoReassemblyCeilingDoesNotBecomeALifetimeCap() throws {
     #expect(decoder.consumedByteCount > UInt64(64 * 1024))
     #expect(decoder.reassembler.pendingByteCount == 0)
 }
+
+// MARK: - F-swift-line-security-08: quadratic accounting and unbounded retention
+
+/// Consumed CRYPTO bytes used to be retained forever so that a conflicting
+/// retransmission could always be detected, which made the buffer grow with the
+/// connection. Conflict detection only needs a recent window, so rows that fall
+/// out of it are dropped and retention stays bounded.
+@Test
+func cryptoReassemblyBoundsRetainedConsumedBytes() throws {
+    var reassembler = TLSCryptoStreamReassembler(maximumBufferedBytes: 64)
+
+    for chunk in 0..<256 {
+        try reassembler.append(
+            offset: UInt64(chunk * 64),
+            data: Data(repeating: 0x41, count: 64)
+        )
+        reassembler.markConsumed(below: UInt64((chunk + 1) * 64))
+        #expect(reassembler.pendingByteCount == 0)
+    }
+
+    #expect(
+        reassembler.bufferedByteCount <= 4 * 1024 + 64,
+        "16 KiB was consumed, so keeping all of it means consumed rows are never dropped")
+}
+
+/// The handshake transcript appended every decoded message with no ceiling, so a
+/// peer that kept sending well-formed handshake messages grew it for the
+/// connection's lifetime.
+@Test
+func handshakeTranscriptRetentionIsBounded() throws {
+    var transcript = TLS13Transcript()
+    let message = TLSHandshakeMessage(type: .finished, body: Data())
+
+    var threw = false
+    do {
+        for _ in 0..<(1024 * 1024 / 4 + 2) {
+            try transcript.append(message)
+        }
+    } catch {
+        threw = true
+    }
+
+    #expect(threw, "the transcript accepted more than a megabyte of handshake messages")
+    #expect(transcript.encodedMessages.count <= 1024 * 1024)
+}
+
+/// `append` used to recompute the pending-byte count by scanning the whole buffer
+/// once per frame, so a peer feeding one-byte CRYPTO frames made reassembly
+/// quadratic in the buffered byte count. The stored counter makes each frame O(1).
+@Test
+func cryptoReassemblyPerFrameCostDoesNotGrowWithBufferedBytes() throws {
+    var reassembler = TLSCryptoStreamReassembler(maximumBufferedBytes: 200_000)
+    try reassembler.append(offset: 0, data: Data(repeating: 0x11, count: 8))
+    reassembler.markConsumed(below: 8)
+
+    let frameCount = 50_000
+    let started = Date()
+    for index in 0..<frameCount {
+        try reassembler.append(offset: UInt64(8 + index), data: Data([UInt8(index & 0xff)]))
+    }
+    let elapsed = Date().timeIntervalSince(started)
+
+    #expect(reassembler.pendingByteCount == frameCount)
+    #expect(
+        elapsed < 4,
+        "\(frameCount) one-byte CRYPTO frames took \(elapsed)s with a \(reassembler.pendingByteCount)-byte buffer; per-frame accounting must not rescan the buffer"
+    )
+}

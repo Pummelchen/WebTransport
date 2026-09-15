@@ -60,24 +60,46 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
     /// real footprint is a multiple of it.
     public static let defaultMaximumBufferedBytes = 64 * 1024
 
+    /// How many already-consumed bytes stay behind the watermark so that a
+    /// conflicting retransmission of recent data is still detected.
+    ///
+    /// Consumed bytes used to be retained forever, which made the buffer grow with
+    /// the connection. Conflict detection only has to cover a recent window: a
+    /// retransmission that matters is one racing the bytes the decoder is working
+    /// on, not one arriving long after they were consumed.
+    public static let defaultConsumedHistoryBytes = 4 * 1024
+
     private var bytesByOffset: [UInt64: UInt8]
     public let maximumBufferedBytes: Int
+    public let consumedHistoryBytes: Int
 
     /// Everything below this offset has already been handed to the decoder.
     ///
-    /// The bytes themselves are deliberately retained rather than deleted: they are
-    /// what a conflicting retransmission is checked against, so a peer that sends
-    /// different bytes for an offset it already used is still rejected after the
-    /// decoder has moved past it. This watermark is what lets the ceiling below
-    /// measure only what is still waiting for a gap.
+    /// This watermark lets the ceiling below measure only what is still waiting for
+    /// a gap. Bytes just below it are kept for a bounded window so that a peer
+    /// contradicting itself about a recent byte is still rejected.
     private var consumedByteCount: UInt64 = 0
 
-    public init(maximumBufferedBytes: Int = TLSCryptoStreamReassembler.defaultMaximumBufferedBytes) {
+    /// Everything below this offset has been dropped from ``bytesByOffset`` too.
+    private var prunedByteCount: UInt64 = 0
+
+    /// Held bytes at or above ``consumedByteCount``.
+    ///
+    /// Maintained incrementally rather than recomputed: recomputing scanned the
+    /// whole map once per frame, so a peer feeding one-byte CRYPTO frames made
+    /// reassembly quadratic in the buffered byte count.
+    private var pendingByteTotal: Int = 0
+
+    public init(
+        maximumBufferedBytes: Int = TLSCryptoStreamReassembler.defaultMaximumBufferedBytes,
+        consumedHistoryBytes: Int = TLSCryptoStreamReassembler.defaultConsumedHistoryBytes
+    ) {
         self.bytesByOffset = [:]
         self.maximumBufferedBytes = max(1, maximumBufferedBytes)
+        self.consumedHistoryBytes = max(0, consumedHistoryBytes)
     }
 
-    /// How many bytes are currently held, including those already consumed.
+    /// How many bytes are currently held, including the bounded consumed history.
     public var bufferedByteCount: Int {
         bytesByOffset.count
     }
@@ -85,51 +107,56 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
     /// How many held bytes the decoder has not yet consumed.
     ///
     /// This, not the total row count, is the quantity ``maximumBufferedBytes`` bounds.
-    /// Counting every row made the ceiling a lifetime cap: consumed bytes are retained
-    /// for conflict detection, so a peer that completed a large handshake could no
-    /// longer deliver a legitimate post-handshake message such as a NewSessionTicket
-    /// or KeyUpdate, and was disconnected instead.
+    /// Counting every row made the ceiling a lifetime cap: consumed bytes were
+    /// retained for conflict detection, so a peer that completed a large handshake
+    /// could no longer deliver a legitimate post-handshake message such as a
+    /// NewSessionTicket or KeyUpdate, and was disconnected instead.
     ///
     /// A peer scattering bytes across the offset space never completes a message, so
     /// the watermark never moves and this figure grows with every byte received —
     /// which is the attack the ceiling exists to stop.
     public var pendingByteCount: Int {
-        recomputePendingByteCount()
-    }
-
-    /// Counts held bytes at or above the watermark.
-    ///
-    /// `append` reads this once per frame and increments a local from there, so a large
-    /// frame is linear rather than quadratic. Recomputing per byte would make a 16 KB
-    /// CRYPTO frame cost hundreds of millions of dictionary probes, which is the kind of
-    /// peer-controlled cost the ceiling exists to prevent.
-    private func recomputePendingByteCount() -> Int {
-        guard consumedByteCount > 0 else {
-            return bytesByOffset.count
-        }
-        // Contiguous fragmented data starts at the current watermark, so the pending
-        // count is every row except the consumed prefix below the lowest live key.
-        guard let lowestLive = bytesByOffset.keys.filter({ $0 >= consumedByteCount }).min() else {
-            return 0
-        }
-        return bytesByOffset.count - bytesByOffset.keys.count(where: { $0 < lowestLive })
+        pendingByteTotal
     }
 
     /// Records that the decoder has consumed everything below `offset`.
     ///
-    /// The bytes stay in place; only the accounting changes.
+    /// The watermark moves over the contiguous run the decoder assembled, so the
+    /// walk costs one step per consumed byte in total rather than one per frame.
+    /// Bytes within ``consumedHistoryBytes`` of the new watermark stay held for
+    /// conflict detection; older ones are dropped.
     public mutating func markConsumed(below offset: UInt64) {
-        if offset > consumedByteCount {
-            consumedByteCount = offset
+        guard offset > consumedByteCount else {
+            return
         }
+
+        // Stop at the first gap. The decoder only advances over a contiguous
+        // prefix, so this is exactly the newly consumed run; it also bounds the
+        // walk for a caller that marks past the data it actually received (those
+        // rows stay counted, which is the conservative outcome).
+        var runEnd = consumedByteCount
+        while runEnd < offset, bytesByOffset[runEnd] != nil {
+            pendingByteTotal -= 1
+            runEnd += 1
+        }
+        consumedByteCount = offset
+
+        // Drop conflict-detection rows outside the grace window. Both the window
+        // and the discovered run bound this walk.
+        let keepFrom = offset > UInt64(consumedHistoryBytes) ? offset - UInt64(consumedHistoryBytes) : 0
+        let pruneEnd = min(keepFrom, runEnd)
+        var cursor = prunedByteCount
+        while cursor < pruneEnd {
+            bytesByOffset.removeValue(forKey: cursor)
+            cursor += 1
+        }
+        prunedByteCount = max(prunedByteCount, pruneEnd)
     }
 
     public mutating func append(offset: UInt64, data: Data) throws {
         guard UInt64(data.count) <= UInt64.max - offset else {
             throw QUICCodecError.valueOutOfRange("CRYPTO data offset would overflow")
         }
-
-        var pendingBytes = pendingByteCount
 
         for (index, byte) in data.enumerated() {
             let absoluteOffset = offset + UInt64(index)
@@ -139,13 +166,15 @@ public struct TLSCryptoStreamReassembler: Equatable, Sendable {
                 }
                 continue
             }
-            guard pendingBytes < maximumBufferedBytes else {
+            guard pendingByteTotal < maximumBufferedBytes else {
                 throw QUICCodecError.valueOutOfRange(
                     "CRYPTO stream buffer exceeded \(maximumBufferedBytes) bytes"
                 )
             }
             bytesByOffset[absoluteOffset] = byte
-            pendingBytes += 1
+            if absoluteOffset >= consumedByteCount {
+                pendingByteTotal += 1
+            }
         }
     }
 
