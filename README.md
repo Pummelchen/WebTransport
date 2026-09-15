@@ -48,11 +48,14 @@ chain is validated against the platform trust store and the name is checked rath
 84 test programs and 91,552 checks pass (plus a 200,000-input parser fuzz run and a Clang Static
 Analyzer pass over all 94 sources), and every suite runs again under AddressSanitizer and
 UndefinedBehaviorSanitizer, on macOS and Linux in CI: **97 CTest tests pass on macOS 26 and
-Debian 13**. The tree also compiles, links and **runs** on two platforms GitHub provides no runner
-for -- Windows (85 of 85 test executables under Wine, including a Windows-only test of the datagram
-layer) and FreeBSD 15.1 (the whole suite on a real kernel) -- and running the Windows branch is what
-found and fixed `WT-199` and `WT-200`. Of the plan's nine completion criteria **8 are met and 1 is
-partial** (the CI *job* for the Windows and FreeBSD legs, not the code on them). All 34 of the
+Debian 13**. The tree also compiles, links and **runs** on Windows (85 of 85 test executables
+under Wine, including a Windows-only test of the datagram layer) and FreeBSD 15.1 (the whole suite
+on a real kernel) -- and running the Windows branch is what found and fixed `WT-199` and `WT-200`.
+Windows is covered by two CI legs: `windows-wine` (enforced -- mingw cross-build, then every test
+under Wine) and `windows-native` on `windows-latest` (MSYS2 MINGW64, present but
+`continue-on-error: true` until it has been seen green). FreeBSD 15.1 has no CI leg. Of the plan's
+nine completion criteria **8 are met and 1 is partial** (the CI *job* for the FreeBSD leg and an
+enforced native Windows leg, not the code on them). All 34 of the
 draft-16 compliance-matrix rows are exercised by a test. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).

@@ -20,19 +20,22 @@ layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1
 runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
 dynamic table, the draft-16 WebTransport session layer, and the public consumer API.
 
-**97 CTest tests pass on macOS 26 and on Debian 13**, and the tree also runs on two platforms
-GitHub provides no runner for: **Windows** (85 test executables executed under Wine, 85 passing,
-plus a Windows-only test of the datagram layer itself) and **FreeBSD 15.1** (the whole suite on a
-real kernel). Running the Windows branch is what found and fixed `WT-199` and `WT-200` — a datagram
+**97 CTest tests pass on macOS 26 and on Debian 13**, and the tree also runs on **Windows** (85
+test executables executed under Wine, 85 passing, plus a Windows-only test of the datagram layer
+itself) and **FreeBSD 15.1** (the whole suite on a real kernel). Running the Windows branch is what
+found and fixed `WT-199` and `WT-200` — a datagram
 receive that reported a truncated packet as a limit error and dropped the sender, and a
 hand-written `WSARecvMsg` prototype with one parameter too many, which a cross-compile cannot see
-because the declaration was this tree's own. What Phase 12 still lacks is a CI *job* for those two
-legs; Phase 10 (the test port) is under way, and Phases 13 and 14 are the hardening and
+because the declaration was this tree's own. Windows already has two CI legs — `windows-wine`
+(enforced) and `windows-native` on `windows-latest` (MSYS2 MINGW64, not yet enforced) — so what
+Phase 12 still lacks is a CI *job* for FreeBSD and an enforced native Windows leg; Phase 10 (the
+test port) is under way, and Phases 13 and 14 are the hardening and
 release-readiness work tracked in the
 [project tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker).
 
 Of the plan's nine Definition-of-Done criteria **eight are met and one is partial** — and the
-partial one is the CI *job* for the Windows and FreeBSD legs, not the code on them.
+partial one is CI *job* coverage (no FreeBSD leg, and the native Windows leg not yet enforced),
+not the code on them.
 `scripts/score-matrix.sh` prints that state from the matrix rather than from memory.
 
 What is here:
