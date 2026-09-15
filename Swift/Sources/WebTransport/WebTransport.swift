@@ -214,6 +214,43 @@ public enum WebTransportErrorSurface {
     }
 }
 
+/// Escapes peer-supplied text before it is written to an operator-facing line.
+///
+/// A payload interpolated raw can close the quoted field it sits in and forge
+/// extra log lines with an embedded newline, and a C0 control byte can drive the
+/// terminal. Every control byte, the double quote and the backslash are replaced
+/// with a visible escape, so the text is preserved for diagnosis but the peer can
+/// no longer choose where a line ends. This is the formatting companion to
+/// ``WebTransportErrorSurface``, which keeps peer detail out of error text.
+public enum WebTransportLogText {
+    public static func escaped(_ value: String) -> String {
+        var output = ""
+        output.reserveCapacity(value.utf8.count)
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\\":
+                output += "\\\\"
+            case "\"":
+                output += "\\\""
+            case "\n":
+                output += "\\n"
+            case "\r":
+                output += "\\r"
+            case "\t":
+                output += "\\t"
+            default:
+                if scalar.value < 0x20 || scalar.value == 0x7f {
+                    let hex = String(scalar.value, radix: 16)
+                    output += "\\x" + (hex.count == 1 ? "0" + hex : hex)
+                } else {
+                    output.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return output
+    }
+}
+
 /// Network endpoint for the production WebTransport runtime.
 public struct WebTransportEndpoint: Equatable, Sendable, CustomStringConvertible {
     public var host: String

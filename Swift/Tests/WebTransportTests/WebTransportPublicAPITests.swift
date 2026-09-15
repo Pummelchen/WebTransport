@@ -96,6 +96,27 @@ func webTransportPublicErrorSurfaceRedactsPeerControlledDetail() {
     #expect(WebTransportErrorSurface.publicDescription(for: codecError) == "WebTransport protocol codec rejected malformed input")
 }
 
+/// F-swift-line-security-09: the CLIs interpolated the peer's echoed payload
+/// straight into an operator log line, so a payload carrying a quote and a newline
+/// closed the quoted field and forged a second line. `WebTransportLogText.escaped`
+/// is the seam the two `main.swift` print sites call.
+@Test
+func webTransportLogTextEscapesPeerControlledPayload() {
+    let forged = "x\"\nFORGED: admin=true\u{00}\u{1b}[31m\r\t\\"
+    let escaped = WebTransportLogText.escaped(forged)
+
+    #expect(!escaped.contains("\n"), "a peer newline must not survive into the log line")
+    #expect(!escaped.contains("\r"))
+    #expect(!escaped.contains("\u{00}"))
+    #expect(!escaped.contains("\u{1b}"))
+    #expect(escaped == "x\\\"\\nFORGED: admin=true\\x00\\x1b[31m\\r\\t\\\\")
+    #expect(escaped.contains("FORGED: admin=true"), "the text stays readable in escaped form")
+
+    // Ordinary payloads are unchanged apart from the quote/backslash escapes.
+    #expect(WebTransportLogText.escaped("hello world") == "hello world")
+    #expect(WebTransportLogText.escaped("caf\u{e9}") == "caf\u{e9}")
+}
+
 private func makeLoopbackPublicAPIPair(
     protocols: [String],
     optimisticCapsules: [WebTransportFlowCapsule] = [],
