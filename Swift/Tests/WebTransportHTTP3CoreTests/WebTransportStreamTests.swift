@@ -245,6 +245,65 @@ func webTransportSessionTeardownSignalsOnlyTheHalvesThisEndpointOwns() throws {
     #expect(stopSendingStreamIDs == [4, 6])
 }
 
+/// The public per-stream reset/stop API must apply the same RFC 9000 section 2.1
+/// half-ownership rule as the session teardown path.
+///
+/// Teardown was fixed to gate its frames on `hasSendHalf` / `hasReceiveHalf`, but
+/// a caller could still ask `resetStream` for a peer-initiated unidirectional
+/// stream (receive-only here) or `stopSendingStream` for a locally initiated one
+/// (send-only here) and receive back a frame that RFC 9000 sections 19.4 and 19.5
+/// make a STREAM_STATE_ERROR at the peer.
+@Test
+func webTransportPublicStreamSignalsApplyTheHalfOwnershipRule() throws {
+    var pair = try WebTransportStreamTestSupport.makeReadyManagers()
+    let requestFrame = try pair.client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(
+            authority: "example.com",
+            path: "/wt",
+            availableProtocols: []
+        )
+    )
+    let decision = try pair.server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: requestFrame,
+        policy: try WebTransportServerSessionPolicy()
+    )
+    _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
+
+    let session = pair.server.session(forRequestStreamID: 0)!
+
+    // Bidirectional: the server owns both halves.
+    let bidirectionalPrefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: session.id)
+    _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: bidirectionalPrefix)
+    // Peer-initiated unidirectional: the server owns the receive half only.
+    let peerUnidirectionalPrefix = try pair.client.openUnidirectionalStream(streamID: 6, sessionID: session.id)
+    _ = try pair.server.acceptUnidirectionalStream(streamID: 6, firstBytes: peerUnidirectionalPrefix)
+    // Locally initiated unidirectional: the server owns the send half only.
+    let localUnidirectionalPrefix = try pair.server.openUnidirectionalStream(streamID: 7, sessionID: session.id)
+    _ = try pair.client.acceptUnidirectionalStream(streamID: 7, firstBytes: localUnidirectionalPrefix)
+
+    // The halves this endpoint owns still produce frames.
+    _ = try pair.server.resetStream(streamID: 4, applicationErrorCode: 0x10)
+    _ = try pair.server.stopSendingStream(streamID: 4, applicationErrorCode: 0x11)
+    _ = try pair.server.stopSendingStream(streamID: 6, applicationErrorCode: 0x11)
+    _ = try pair.server.resetStream(streamID: 7, applicationErrorCode: 0x10)
+
+    // The halves it does not own are refused with the RFC's error, not a frame.
+    #expect(
+        throws: QUICStateError.streamStateViolation(
+            "cannot reset a stream half this endpoint does not own")
+    ) {
+        _ = try pair.server.resetStream(streamID: 6, applicationErrorCode: 0x10)
+    }
+    #expect(
+        throws: QUICStateError.streamStateViolation(
+            "cannot stop a stream half this endpoint does not own")
+    ) {
+        _ = try pair.server.stopSendingStream(streamID: 7, applicationErrorCode: 0x11)
+    }
+}
+
 @Test
 func webTransportStreamOpenRejectsUnknownSession() throws {
     var pair = try WebTransportStreamTestSupport.makeReadyManagers()

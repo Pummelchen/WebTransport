@@ -1091,6 +1091,14 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         guard var stream = streamsByID[streamID] else {
             throw QUICCodecError.malformed("unknown WebTransport stream")
         }
+        // RFC 9000 section 19.4: RESET_STREAM aborts the sender's send half, so a
+        // stream whose send half this endpoint does not own (a peer-initiated
+        // unidirectional stream) must not carry one. Emitting it anyway is a
+        // STREAM_STATE_ERROR at the peer, so refuse it at the API boundary.
+        guard stream.hasSendHalf else {
+            throw QUICStateError.streamStateViolation(
+                "cannot reset a stream half this endpoint does not own")
+        }
         let frame = stream.reset(applicationErrorCode: try mapApplicationErrorCode(applicationErrorCode))
         streamsByID[streamID] = stream
         return frame
@@ -1102,6 +1110,13 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     ) throws -> QUICFrame {
         guard var stream = streamsByID[streamID] else {
             throw QUICCodecError.malformed("unknown WebTransport stream")
+        }
+        // RFC 9000 section 19.5: STOP_SENDING aborts the receive half, so a stream
+        // this endpoint only sends on (a locally initiated unidirectional stream)
+        // must not carry one, for the same reason as RESET_STREAM above.
+        guard stream.hasReceiveHalf else {
+            throw QUICStateError.streamStateViolation(
+                "cannot stop a stream half this endpoint does not own")
         }
         let frame = stream.stopSending(applicationErrorCode: try mapApplicationErrorCode(applicationErrorCode))
         streamsByID[streamID] = stream
