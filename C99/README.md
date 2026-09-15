@@ -58,8 +58,9 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 84 test programs and 91,552 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
-  AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
+- The `ctest` suite (97 tests, the count `ctest` itself reports), plus a 200,000-input parser fuzz run, run by
+  `ctest` and again under
+  AddressSanitizer and UndefinedBehaviorSanitizer. Most of the checks are the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
   of than a list of cases somebody did, and under the sanitizers an out-of-bounds
@@ -287,10 +288,10 @@ What is here:
   **it now compiles for Windows**, which is the claim that check is measured by. The cross-compile
   found four real differences the inventory had not named, including `EHOSTDOWN` not existing there
   (which is why the error *classification*, not just the number, is per platform) and `inet_ntop`'s
-  length type. The check now sweeps the **whole tree** — 72 library sources and 92 test/app sources —
+  length type. The check now sweeps the **whole tree** — 76 library sources and 108 test/app sources —
   and they all compile for Windows, which is the claim a runner needs before it is worth adding. Two
   more defects came out of that sweep, both invisible to clang. It goes further than compiling now: with
-  a mingw toolchain and a Windows OpenSSL the whole tree **links** — 84 PE32+ executables and
+  a mingw toolchain and a Windows OpenSSL the whole tree **links** — 91 PE32+ executables and
   `libwebtransport.dll` — and CI does that on the legs it already has, because the MSYS2 OpenSSL
   package is a plain tarball. That link found a defect the compile could not (`-Wstringop-overflow` in
   a Release build, which clang never reported). What remains is *running* those binaries, which needs

@@ -128,7 +128,8 @@ is a check nobody has tested; this one is on its second real find.
 
 **The tree RUNS for Windows, under Wine.** `scripts/check-windows-wine.sh` executes every linked test binary
 through Wine and reports the aggregate. On the VPS, in an `ubuntu:24.04` container with the mingw cross-build:
-**85 test executables ran, 85 passed, 0 failed, 0 hung, and the reported checks sum to 91,674.** That is the
+**85 test executables ran, 85 passed, 0 failed, 0 hung; the runner sums the per-binary check counts and
+reports 91,674 checks.** That is the
 claim the section above could not make — "linked, not run" — and it is the first time this tree has executed on
 a Windows target at all. The count moved twice since the first Wine run, and both moves are the point of the
 paragraphs below: **84 → 85** because a new Windows-only test now measures the datagram layer directly, and

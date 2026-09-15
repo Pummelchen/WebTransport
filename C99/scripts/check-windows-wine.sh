@@ -93,6 +93,12 @@ passed=0
 failed=0
 hung=0
 total=0
+# The per-binary check total is the LAST line a test binary prints -- "<name>: all N checks passed", or
+# "<name>: M of N checks FAILED" -- and summing it here is what makes "91,674 checks" a number this runner
+# produces rather than one a reader adds up by hand from a scrollback. A binary whose output has no such line
+# (a hang, a load failure) is counted separately rather than silently contributing zero.
+checks_total=0
+checks_unknown=0
 
 for exe in "$build_dir"/tests/test_*.exe; do
   [ -f "$exe" ] || continue
@@ -113,6 +119,13 @@ for exe in "$build_dir"/tests/test_*.exe; do
     echo "windows wine: $name FAILED (exit $status)"
     tail -3 "/tmp/wt-wine-$name.out" | sed 's/^/               /'
   fi
+  summary="$(grep -E ': (all [0-9]+ checks passed|[0-9]+ of [0-9]+ checks FAILED)$' \
+             "/tmp/wt-wine-$name.out" | tail -1 || true)"
+  if [ -n "$summary" ]; then
+    checks_total=$((checks_total + $(printf '%s\n' "$summary" | grep -oE '[0-9]+' | tail -1)))
+  else
+    checks_unknown=$((checks_unknown + 1))
+  fi
 done
 
 if [ "$total" -eq 0 ]; then
@@ -120,5 +133,8 @@ if [ "$total" -eq 0 ]; then
   exit 0
 fi
 
-echo "windows wine: ran $total test executable(s) -- $passed passed, $failed failed, $hung hung"
+echo "windows wine: ran $total test executable(s) -- $passed passed, $failed failed, $hung hung, $checks_total checks"
+if [ "$checks_unknown" -ne 0 ]; then
+  echo "windows wine: $checks_unknown executable(s) printed no check total (a hang or a load failure)"
+fi
 [ "$failed" -eq 0 ] && [ "$hung" -eq 0 ]
