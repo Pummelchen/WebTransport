@@ -800,6 +800,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     }
 
     public func drain(timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil) async throws {
+        if await sessionIsClosed() {
+            InteroperableQUICDebug.log("session drain ignored: session is already closed")
+            return
+        }
         let capsule = try await manager.withManager { manager in
             try manager.makeDrainSessionCapsule(sessionID: WebTransportSessionID(rawValue: self.sessionID))
         }
@@ -820,6 +824,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         // QUIC connection itself until the peer closes it or it idles out — the
         // framework exposes no way to cancel a started `NetworkConnection`.
         defer { lease?.release() }
+        if await sessionIsClosed() {
+            InteroperableQUICDebug.log("session close ignored: session is already closed")
+            return
+        }
         let capsule = try await manager.withManager { manager in
             try manager.makeCloseSessionCapsule(
                 sessionID: WebTransportSessionID(rawValue: self.sessionID),
@@ -829,6 +837,22 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
         try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
             try await self.connectStream.send(capsule, endOfStream: true)
+        }
+    }
+
+    /// Whether the session manager has already terminated this session.
+    ///
+    /// The manager treats a second close/drain as a no-op and still returns the
+    /// capsule, but writing that capsule a second time would put a duplicate
+    /// WT_CLOSE_SESSION on a CONNECT stream that is already finishing. Checking
+    /// here keeps the public teardown a true no-op, which is what an application
+    /// that closes on an error path and again in a `defer` relies on.
+    private func sessionIsClosed() async -> Bool {
+        await manager.withManager { manager in
+            if case .closed = manager.sessionsByID[WebTransportSessionID(rawValue: self.sessionID)]?.state {
+                return true
+            }
+            return false
         }
     }
 

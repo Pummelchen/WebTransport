@@ -83,6 +83,52 @@ func webTransportCloseSessionResultCarriesFINStopSendingAndStreamCleanupActions(
     #expect(pair.client.stream(for: 4) == nil)
 }
 
+/// F-swift-architecture-11: a close/drain teardown must be idempotent. An
+/// application that closes on an error path and again in a `defer` previously
+/// got a spurious `sessionGone` from the second call, and a `drain()` after a
+/// close failed the same way.
+@Test
+func webTransportCloseAndDrainAreIdempotent() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    let sessionID = try WebTransportPhase13Support.establishSession(client: &pair.client, server: &pair.server)
+    let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+    _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
+
+    let first = try pair.client.makeCloseSessionCapsuleResult(
+        sessionID: sessionID,
+        applicationErrorCode: 7,
+        message: "done"
+    )
+    #expect(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 7, message: "done"))
+    #expect(!first.terminationActions.streamResetFrames.isEmpty)
+
+    // A second close returns the same capsule and re-runs no teardown.
+    let second = try pair.client.makeCloseSessionCapsuleResult(
+        sessionID: sessionID,
+        applicationErrorCode: 7,
+        message: "done"
+    )
+    #expect(second.capsuleBytes == first.capsuleBytes)
+    #expect(second.terminationActions.streamResetFrames.isEmpty)
+    #expect(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 7, message: "done"))
+
+    // Draining an already-closed session is a no-op too.
+    let drain = try pair.client.makeDrainSessionCapsule(sessionID: sessionID)
+    #expect(try WebTransportFlowCapsuleCodec.parse(drain).capsule == .drainSession)
+    #expect(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 7, message: "done"))
+
+    // Draining a live session twice stays in the draining state.
+    var secondPair = try WebTransportPhase13Support.makeReadyManagers()
+    let liveSessionID = try WebTransportPhase13Support.establishSession(
+        client: &secondPair.client,
+        server: &secondPair.server
+    )
+    _ = try secondPair.client.makeDrainSessionCapsule(sessionID: liveSessionID)
+    #expect(secondPair.client.sessionsByID[liveSessionID]?.state == .draining)
+    _ = try secondPair.client.makeDrainSessionCapsule(sessionID: liveSessionID)
+    #expect(secondPair.client.sessionsByID[liveSessionID]?.state == .draining)
+}
+
 @Test
 func webTransportReceivedCloseCleansStreamsAndDatagrams() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()

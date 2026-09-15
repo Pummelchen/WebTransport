@@ -664,11 +664,28 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         )
     }
 
+    /// Builds the WT_DRAIN_SESSION capsule for a session.
+    ///
+    /// Draining a session that has already been closed is a no-op: the capsule is
+    /// returned without touching state, because a teardown that runs on an error
+    /// path and again in a `defer` must not fail the second time. Only a session
+    /// that is gone for another reason (rejected, or never established) throws.
     public mutating func makeDrainSessionCapsule(sessionID: WebTransportSessionID) throws -> Data {
         try validateSettingsReady()
-        _ = try writableSession(for: sessionID)
-        try markSessionDraining(sessionID)
-        return try WebTransportFlowCapsuleCodec.serialize(.drainSession)
+        guard let session = sessionsByID[sessionID] else {
+            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+        }
+        switch session.state {
+        case .closed:
+            return try WebTransportFlowCapsuleCodec.serialize(.drainSession)
+        case .rejected:
+            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+        case .requested:
+            throw QUICCodecError.malformed("WT_DRAIN_SESSION requires an established session")
+        case .accepted, .draining:
+            try markSessionDraining(sessionID)
+            return try WebTransportFlowCapsuleCodec.serialize(.drainSession)
+        }
     }
 
     public func makeOptimisticConnectStreamCapsule(
@@ -696,28 +713,55 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         ).capsuleBytes
     }
 
+    /// Builds the WT_CLOSE_SESSION capsule for a session and terminates it.
+    ///
+    /// Closing a session that is already closed is a no-op: the capsule is
+    /// returned without re-running teardown, because an application that closes on
+    /// an error path and again in a `defer` must not get a spuriously failing
+    /// teardown. Only a session that is gone for another reason (rejected, or
+    /// never established) throws.
     public mutating func makeCloseSessionCapsuleResult(
         sessionID: WebTransportSessionID,
         applicationErrorCode: UInt32,
         message: String
     ) throws -> WebTransportCloseSessionCapsuleResult {
         try validateSettingsReady()
-        _ = try sessionForIngress(sessionID)
+        guard let session = sessionsByID[sessionID] else {
+            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+        }
         let capsuleBytes = try WebTransportFlowCapsuleCodec.serialize(
             .closeSession(
                 applicationErrorCode: applicationErrorCode,
                 message: message
             ))
-        let terminationActions = try markSessionClosed(
-            sessionID,
-            applicationErrorCode: applicationErrorCode,
-            message: message,
-            closeCapsuleReceived: false
-        )
-        return WebTransportCloseSessionCapsuleResult(
-            capsuleBytes: capsuleBytes,
-            terminationActions: terminationActions
-        )
+        switch session.state {
+        case .closed:
+            // The streams were terminated by the first close, so there is nothing
+            // to reset again; only the CONNECT FIN is re-derived, and a duplicate
+            // FIN on an already-finishing stream is not a protocol violation.
+            return WebTransportCloseSessionCapsuleResult(
+                capsuleBytes: capsuleBytes,
+                terminationActions: WebTransportSessionTerminationActions(
+                    connectFINFrame: .stream(id: session.requestStreamID, offset: nil, fin: true, data: Data()),
+                    connectStopSendingFrame: nil,
+                    streamResetFrames: [],
+                    streamStopSendingFrames: []
+                )
+            )
+        case .rejected:
+            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+        case .requested, .accepted, .draining:
+            let terminationActions = try markSessionClosed(
+                sessionID,
+                applicationErrorCode: applicationErrorCode,
+                message: message,
+                closeCapsuleReceived: false
+            )
+            return WebTransportCloseSessionCapsuleResult(
+                capsuleBytes: capsuleBytes,
+                terminationActions: terminationActions
+            )
+        }
     }
 
     @discardableResult
