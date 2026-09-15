@@ -87,7 +87,7 @@ echo "  partial: the FreeBSD and Windows CI legs (WT-134): both platforms are no
 echo "           missing is a CI JOB for each. Windows: the whole tree compiles under mingw with the POSIX"
 echo "           warning set as errors and LINKS into 91 PE32+ executables plus a shared library, enforced"
 echo "           in CI; and it now RUNS -- scripts/check-windows-wine.sh executes 85 test binaries under"
-echo "           Wine and all 85 pass, 91,674 checks, including a Windows-only test of the datagram layer"
+echo "           Wine and all 85 pass, 64,900 checks, including a Windows-only test of the datagram layer"
 echo "           on both of its receive paths. Running it is also what found and fixed the three defects"
 echo "           of WT-199 and WT-200 (a receive that mis-reported truncation and dropped the sender, the"
 echo "           Retry path that depended on it, and a hand-written WSARecvMsg prototype with one"

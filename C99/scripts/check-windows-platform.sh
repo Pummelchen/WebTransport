@@ -107,9 +107,30 @@ done
 
 # The TESTS and the APPS too, with the include paths and the one define CMake gives them: a Windows port is only
 # worth a runner if the whole tree compiles, and the sweep is what makes that a measurement. The trust-fixture
-# directory is a path, not a file read, so it needs no fixtures to compile. `src/runtime` is on the include path
-# because the Windows datagram test includes the private platform header directly -- the same header `udp.c`
-# includes -- which is what makes the `_WIN32` branch's behaviour reachable by a test and not only by the library.
+# directory is a path, not a file read, so it needs no fixtures to compile.
+#
+# The tests reach into the library's private headers exactly as C99/tests/CMakeLists.txt lets them per target:
+# `test_time` includes `src/core/time_internal.h` (F-28) and the Windows datagram test includes
+# `src/runtime/udp_platform.h`, which is what makes the `_WIN32` branch's behaviour reachable by a test rather
+# than only by the library. This list used to name `src/runtime` alone, and that is how the tree sweep passed on
+# the development host and failed the first time it ran on a real CI runner: a private header in another module
+# directory is a compile error for every job. Naming EVERY module directory that holds a header is what keeps it
+# from drifting again -- the check is that the `_WIN32` branch compiles, not that someone remembered a `-I`.
+#
+# A flat include path can only address private headers whose basenames are unique, so that is asserted rather
+# than assumed: a collision would silently compile one module's header in another's place, which is a false pass
+# rather than a failure, and the message names the directory form to use instead.
+duplicate_headers="$(find "$root/src" -name '*.h' -exec basename {} \; | sort | uniq -d)"
+if [ -n "$duplicate_headers" ]; then
+  printf 'windows platform: two private headers share a basename (%s), so a flat include path cannot address them; name the directory instead\n' \
+    "$duplicate_headers" >&2
+  exit 1
+fi
+private_includes=""
+for directory in "$root"/src/*/; do
+  [ -n "$(find "$directory" -maxdepth 1 -name '*.h' -print -quit)" ] || continue
+  private_includes="$private_includes -I $directory"
+done
 checked_tree=0
 skipped_tree=0
 for source in $(find "$root/tests" "$root/apps" -name '*.c' | sort); do
@@ -124,7 +145,7 @@ for source in $(find "$root/tests" "$root/apps" -name '*.c' | sort); do
   "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
     -DWT_TRUST_FIXTURE_DIR='"'"'""'"'"' \
     -I "$root/include" $openssl_flags -I "$root/tests" -I "$root/tests/unit" \
-    -I "$root/tests/vectors" -I "$root/apps/support" -I "$root/src/runtime" \
+    -I "$root/tests/vectors" -I "$root/apps/support" $private_includes \
     -c "$source" -o "$output/tree.o"
   checked_tree=$((checked_tree + 1))
 done

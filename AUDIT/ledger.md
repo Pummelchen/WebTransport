@@ -46,7 +46,9 @@ Base commit: `196324e` (main). Branch: `audit/2026-09-15`. **Landed on `main` at
 | F-03 | S0 | c99 | Stream-table reclaim decremented the ID-issuing counters | AUDIT (fix 8946cfd) |
 | F-repo-ops-02 | S1 | c99 | Interop matrix must be re-run now that the client sends webtransport-h3 | BLOCKED (needs VPS approval) |
 | A-0007 | S3 | swift | Manifests not swift-format clean; CI format gate excludes them | START |
-| A-0005 | S3 | swift | `swift-tools-version: 6.3` vs mandated Swift 6.4 | START |
+| A-0005 | S3 | swift | `swift-tools-version: 6.3` vs mandated Swift 6.4 | SUPERSEDED (6.4 baseline landed; see Round 14) |
+| F-repo-ops-21 | S2 | repo-ops | Windows cross-compile sweep named private include dirs by hand: first real CI run failed on the audit's own F-28 test | AUDIT (fixed) |
+| F-repo-ops-22 | S2 | repo-ops | Wine runner's check total never matched (anchored pattern vs CRLF): "0 checks", and 91,674 was never a number the runner produced | AUDIT (fixed) |
 | F-repo-ops-20 | S3 | repo-ops | The Swift tree's Linux boundary was asserted, not measured: Swift 6.4 on the VPS builds 2 of 11 library targets | DONE (install + matrix) |
 
 ## Task records
@@ -163,3 +165,34 @@ dropped — the audit's own `swift format lint` gate (A-0007) caught them, which
 Re-verified on the integrated tree: `swift format lint --strict` clean, `check-manifest-sync.sh` 19
 shared targets agree, `check-target-imports.sh` 42 targets / 202 imports covered, `swift test` (root)
 **360 tests, 0 failures, 0 warnings**, `swift test --package-path Swift` green, C99 **97/97**, 0 warnings.
+
+## Round 14 — the first real CI run on `main`, and what the audit's own CI additions found
+
+Pushing the audit to `main` started CI on this tree for the first time: branch pushes trigger nothing, so every
+check the audit added had only ever been run by hand. **Two defects, both in the audit's own CI additions, and
+both fixed and re-measured** rather than waived:
+
+- **`F-repo-ops-21` (S2) — all four C99 jobs failed at "Compile the Windows platform branch".** The audit's F-28
+  test (`C99/tests/unit/test_time.c`) includes the private `src/core/time_internal.h` and CMake gives that test
+  the include directory (`C99/tests/CMakeLists.txt:118`), so the CMake builds and the local 97/97 ctest run were
+  green while the cross-compile sweep — which keeps a hand-written `-I` list — could not see the header. Reproduced
+  on the VPS with mingw-w64: `time_internal.h: No such file or directory`. The sweep now scans every `src/*/`
+  directory that holds a header instead of naming them, and asserts that no two private headers share a basename
+  (a flat include path cannot address those), so a new private header cannot break it again. Re-measured: 76
+  library sources and 108 test/app sources compile under `x86_64-w64-mingw32-gcc`, 0 warnings; the Windows link
+  produces 91 PE32+ executables and 1 shared library.
+- **`F-repo-ops-22` (S2) — the Wine runner's check total was always 0.** `check-windows-wine.sh` summed each
+  binary's last line with a `$`-anchored pattern, and a Windows binary writes text-mode stdout as CRLF: `od -c`
+  shows `passed\r\n`, so the pattern matched nothing and the runner printed `85 passed, 0 failed, 0 hung, 0 checks`
+  with the misleading `85 executable(s) printed no check total (a hang or a load failure)`. Measured at the commit
+  that added the summing (`a2d995e`) — the same `0 checks` — which means the `91,674` that F-21 added the summing
+  *to produce* was never produced by any revision: it was a hand-added number, and it had spread to
+  `C99/docs/PORTABILITY.md`, `C99/scripts/score-matrix.sh` and `C99/IMPLEMENTATION_PLAN.md`. The runner now reads
+  the output through `tr -d '\r'`, a missing total **fails** the run instead of counting as zero checks (the same
+  floor F-25 put one level down in `WT_TEST_MAIN_END`), and the documents carry the measured numbers rather than
+  the drifted one: **64,900 checks over 85 executables under Wine**, **64,778 over 84 programs natively on Debian
+  13**, and the audit's own **64,731 on macOS 26**, each with its host named.
+
+Neither is a product defect — the checks failed loudly, and the second one's product evidence (85 of 85 executables
+passing) was never in doubt — but both are the check-integrity class this audit was about, found by the CI gates
+the audit added. Ledger: **108 entries — 99 AUDIT (fixed + verified), 9 DONE, 0 open, 0 blocked.**
