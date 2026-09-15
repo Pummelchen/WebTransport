@@ -26,6 +26,9 @@ Base commit: `196324e` (main). Branch: `audit/2026-09-15`.
 | F-swift-architecture-03 | S1 | swift | datagramsUsable returned a constant true, so datagramsAvailable and echo claimed an unnegotiated capability | AUDIT (fix f4a9424) |
 | F-swift-architecture-04 | S1 | swift | receive(maximumBytes:) ignored its bound on a buffered initial payload | AUDIT (fix 02745a9) |
 | F-swift-architecture-05 | S1 | swift | magic 16 sentinel silently overrode an explicit maxConcurrentConnections: 16 | AUDIT (fix 649b14d) |
+| F-swift-line-security-01 | S1 | swift | Session teardown resets and stops every associated stream regardless of which half this endpoint owns | AUDIT (fix bf6ff0c) |
+| F-swift-line-security-02 | S1 | swift | Short-header reserved bits are never validated, although the long-header and Retry decoders do validate them | AUDIT (fix 1f0077c) |
+| F-swift-line-security-03 | S1 | swift | Per-connection inbound-stream queue has no bound and post-establishment unidirectional streams have no consumer | AUDIT (fix 3ac7baf) |
 | F-01 | S0 | c99 | QPACK static table truncated at the RFC line wrap; --check could not catch it | AUDIT (fix 03c65f0) |
 | F-02 | S0 | c99 | :protocol token constants identical, so webtransport-h3 neither sent nor accepted | AUDIT (fix 448190e) |
 | F-03 | S0 | c99 | Stream-table reclaim decremented the ID-issuing counters | AUDIT (fix 8946cfd) |
