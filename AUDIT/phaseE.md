@@ -56,6 +56,7 @@ The objective is not declared complete. This file records exactly what has been 
 | Zero placeholders | §5 sweep: `TODO/FIXME/HACK/XXX/WIP/dummy/lorem` = 0; every `STUB`/`placeholder` hit read as prose. |
 | Ledger: no non-BLOCKED open task | 106 entries: 97 AUDIT (fixed + verified), 9 DONE (one of them, `F-swift-line-security-05b`, was first rejected with a recorded measurement and then implemented at the owner's request), 0 open, 0 blocked. |
 | Wiki synced | `Project-Tracker.md` mirrors this outcome; the ledger wins on conflict. |
+| Landed on `main` | `git merge --no-ff audit/2026-09-15` at **`6607d71`** (owner-directed after Phase E passed). One conflict resolved deliberately: `.github/traffic.json`, deleted by `F-repo-ops-14` and hand-refreshed on `main` by `b526c9e`, stays deleted. The merged tree is identical to the audited tree and was re-verified on `main` before the push: `swift build --build-tests` + `swift test` **360 tests, 0 failures, 0 warnings**; C99 Ninja/Release build + `ctest` **97/97**, 0 warnings. `CHANGELOG.md`'s `[Unreleased]` section records the caller- and operator-visible changes, and `audit/2026-09-15` is fast-forwarded to the landing commit so the two branches do not diverge. |
 
 The interop criterion is verified **with the per-peer token selection documented**: 7 of 7 proofs across 5 implementations,
 every proof on attempt 1, in two independent VPS runs (`vps-interop-f02b-run{1,2}`), after `F-02b` gave the client an

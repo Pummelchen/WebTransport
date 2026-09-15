@@ -3,14 +3,26 @@
 Machine-readable twin: `AUDIT/ledger.json`. The ledger wins on any conflict with the wiki.
 Protocol: pre-production audit, Phases A–E (§0–§12 of the audit brief).
 
-Base commit: `196324e` (main). Branch: `audit/2026-09-15`.
+Base commit: `196324e` (main). Branch: `audit/2026-09-15`. **Landed on `main` at `6607d71`**
+(merge commit, 2026-09-16), owner-directed after Phase E passed.
 
 > **Branch-policy note (§0 vs. standing instruction).** The repository's standing instruction was to
 > commit every major task directly to `main`. This audit's brief forbids that (§0: "Never commit
 > directly to main/master/release", "Work only on branch `audit/<date>`"). The audit brief is the later
-> and more specific instruction, so it wins: **all audit work stays on `audit/2026-09-15`** and reaches
-> `main` only through a PR after Phase E passes. Rollback for this branch creation is
-> `git branch -D audit/2026-09-15` (printed here before any destructive-looking operation, per §0).
+> and more specific instruction, so it won for the duration: **all audit work stayed on
+> `audit/2026-09-15`**, and Phase E was complete before any of it reached `main`. Rollback for the
+> branch creation is `git branch -D audit/2026-09-15` (printed here before any destructive-looking
+> operation, per §0).
+>
+> **How it landed.** The owner directed a full sync ("push all to git so the code is in sync"), which is
+> the standing instruction reasserting itself now that the audit is closed, so the branch was merged into
+> `main` rather than left for a PR: `git merge --no-ff audit/2026-09-15` at `6607d71`. One conflict was
+> resolved deliberately — `.github/traffic.json` (the "Views (14d)" badge's committed data source) was
+> deleted by `F-repo-ops-14` and hand-refreshed on `main` by `b526c9e` ("18" → "56"). That manual edit is
+> exactly the hand-maintenance the finding describes, so the deletion stands and a live endpoint is the
+> way to bring the badge back. The merged tree is byte-identical to the audited branch tree, and both
+> suites were re-run on it before the push: Swift **360 tests, 0 failures, 0 warnings**; C99
+> **97/97 CTest**, 0 warnings.
 
 ## Status board
 
@@ -107,3 +119,23 @@ local trees; the CI's own secret scan,
 commits**, so the new entries (a public sha256 and a public PGP fingerprint, no secret) are clean.
 The workflows run on `main` and on pull requests only, so a push to `audit/2026-09-15` starts no CI
 job; the local scan is the check that counts.
+
+## Landing — the audit on `main` (`6607d71`)
+
+The owner directed a full sync, so the audited branch was merged into `main` (see the branch-policy
+note at the top for why the PR step was replaced and how the one conflict was resolved). What changed
+with the landing:
+
+- `main` now carries the whole audit: the 97 verified fixes, the `AUDIT/` evidence tree, the blocking
+  secret/CVE scan workflow, the removed committed build output and the third-party notice.
+- The merged tree is byte-identical to `audit/2026-09-15`'s tree, and it was re-verified before the
+  push rather than assumed: `swift build --build-tests` + `swift test` on the root package —
+  **360 tests, 0 failures, 0 warnings**; `cmake` configure/build (Ninja, Release) + `ctest` on C99 —
+  **100% tests passed out of 97**, 0 warnings.
+- `CHANGELOG.md`'s `[Unreleased]` section now records what a caller and an operator can observe from
+  the audit — the new unidirectional-stream API, the capability and bound corrections, the Swift and
+  C99 security fixes, the CLI and CI changes and the badge removal — with the ledger named as the
+  complete list. The audit had not touched the changelog, which is a documentation gap that only
+  mattered once the work reached `main`.
+- `audit/2026-09-15` and `main` are kept identical (the branch was fast-forwarded to the landing
+  commit), so there is no divergence to reconcile later and no stale copy of these documents.

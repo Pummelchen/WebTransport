@@ -4,7 +4,9 @@
     "base_commit": "196324e",
     "started": "2026-09-15",
     "protocol": "pre-production audit (Phases A-E, \u00a70-\u00a712)",
-    "note": "The standing project instruction said to commit to main; this audit's protocol forbids it and takes precedence. All audit work stays on audit/2026-09-15 and reaches main only by PR after Phase E."
+    "note": "The standing project instruction said to commit to main; this audit's protocol forbids it and takes precedence FOR THE DURATION OF THE AUDIT. All audit work stayed on audit/2026-09-15 and Phase E was complete before any of it reached main.",
+    "landed_on_main": "6607d71",
+    "landed": "Owner-directed merge into main at 6607d71 after Phase E passed ('push all to git so the code is in sync'). One conflict, resolved deliberately: .github/traffic.json was deleted by F-repo-ops-14 and hand-refreshed on main by b526c9e, which is the hand-maintenance that finding describes, so the deletion stands. The merged tree is identical to the audited branch tree and was re-verified on main before the push: Swift 360 tests / 0 failures / 0 warnings, C99 97/97 CTest, 0 warnings. audit/2026-09-15 and main are kept identical."
   },
   "tasks": [
     {
