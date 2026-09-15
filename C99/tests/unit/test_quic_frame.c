@@ -43,17 +43,20 @@ static wt_status_t round_trip(const char *label, const wt_quic_frame_t *frame,
   wt_cursor_t c;
   wt_quic_error_t error = 0U;
   wt_status_t status;
+  size_t written;
 
   WT_EXPECT_STATUS(label, WT_OK, wt_quic_frame_encode(&measure, frame));
   if (wt_writer_offset(&measure) > capacity) {
     WT_EXPECT_TRUE("  the measurement fits the test buffer", 0);
     return WT_ERR_LIMIT;
   }
-  (void)encode_ok("  the encode", frame, buffer, capacity);
+  written = encode_ok("  the encode", frame, buffer, capacity);
+  /* The SECOND pass's real length against the measurement: this used to compare
+   * `wt_writer_offset(&measure)` with itself, so the two-pass property the helper exists for was
+   * never checked, and the discard of `encode_ok`'s return hid it. */
   WT_EXPECT_U64("  the encode wrote what the measurement said",
-                (uint64_t)wt_writer_offset(&measure),
-                (uint64_t)wt_writer_offset(&measure));
-  c = wt_cursor_init(buffer, wt_writer_offset(&measure));
+                (uint64_t)wt_writer_offset(&measure), (uint64_t)written);
+  c = wt_cursor_init(buffer, written);
   status = wt_quic_frame_decode(&c, out, &error);
   if (status == WT_OK) {
     WT_EXPECT_INT("  the frame consumed its whole encoding", 1,
