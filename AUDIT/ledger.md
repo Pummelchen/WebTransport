@@ -99,3 +99,11 @@ Linux" into a per-target measurement.
 Ledger: **106 entries — 97 AUDIT (fixed + verified), 9 DONE, 0 open, 0 blocked**; one of the nine DONE
 rows, `F-swift-line-security-05b`, was rejected with a measurement and then implemented at the owner's
 request.
+
+Verification for this round: the toolchain was exercised, not just installed (see above); the audit
+branch is pushed to `origin` at `c51783b` and the wiki at `3964900`, and both remote refs match the
+local trees; the CI's own secret scan,
+`gitleaks git --no-banner --redact --config .gitleaks.toml .`, reports **no leaks found over 628
+commits**, so the new entries (a public sha256 and a public PGP fingerprint, no secret) are clean.
+The workflows run on `main` and on pull requests only, so a push to `audit/2026-09-15` starts no CI
+job; the local scan is the check that counts.
