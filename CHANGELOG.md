@@ -6,6 +6,22 @@ The project uses semantic versioning.
 
 ## [Unreleased]
 
+Changed:
+
+- The Swift toolchain baseline is Swift 6.4 / Xcode 27. Both manifests declare
+  `swift-tools-version: 6.4`, `Swift/check-toolchain.sh` requires Swift 6.4 and Xcode 27, the macOS CI
+  jobs run on the `xcode-27` image, and the README states the new floor. Two things the compiler made
+  explicit were fixed rather than suppressed: 12 redundant `unsafe` effect markers are gone
+  (`[#UnnecessaryEffectMarker::UnnecessaryUnsafe]` reports an `unsafe` expression with no unsafe
+  operation inside, so the removal is what the diagnostic asks for), and `WebTransportHTTP3CoreTests`
+  now depends on `WebTransportTLSCore` explicitly because the 6.4 build system no longer resolves that
+  transitive symbol — the bundle previously failed to link with "Undefined symbols for architecture
+  arm64". `swift test` is green: 59 + 128 + 6 tests.
+- Swift is no longer part of this repository's CodeQL default setup. That setup autobuilds with the
+  runner image's Swift 6.3.3, which cannot parse a 6.4 manifest; advanced setup on `xcode-27` with
+  `build-mode: manual` (the pattern MCPSearch uses) is the way to bring Swift CodeQL back.
+
+
 Fixed:
 
 - A connection the transport failed to establish is reported as `WebTransportNetworkRuntimeError.connectionEstablishmentFailed(role:domain:code:)` rather than as the framework's own error. `NetworkConnection.State.failed` was rethrown verbatim, so a caller saw a bare `POSIXErrorCode` — on a loaded runner `ENETDOWN` (50) and, in another run, `ENOTCONN` (57) — with nothing to say whether the endpoint was wrong or the local stack was momentarily unavailable. The case names the condition, keeps the framework's domain and code for diagnosis, and `isTransientEstablishmentFailure` answers whether a fresh connection can clear it. This is the error `listenerServesMoreSequentialSessionsThanTheDefaultCeiling` was failing on under Thread Sanitizer; that test now retries only the named transient condition, bounded, so a listener that has genuinely stopped accepting — issue #23, which presents as a timeout — still fails it (WT-185).
