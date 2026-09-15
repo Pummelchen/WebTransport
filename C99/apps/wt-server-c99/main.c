@@ -1,10 +1,12 @@
-/* wt-server-c99 -- see ../../IMPLEMENTATION_PLAN.md, Phase 9.
+/* wt-server-c99 -- the C99 command-line server (IMPLEMENTATION_PLAN.md, Phase 9).
  *
- * Phase 0 builds the executable and its link against the library, which is what
- * the plan's completion criterion asks for: "empty library and CLI stubs build
- * on every target compiler". The protocol phases fill this in, and until they do
- * the tool prints its usage and exits 3 -- a distinct status for "not
- * implemented" so that a script driving it cannot read a stub as success.
+ * It listens for one peer and serves the WebTransport session that peer asks
+ * for, over the transport named by --transport, presenting the identity
+ * --trust describes. `--help` prints the usage and exits 0.
+ *
+ * Exit statuses: 0 when a session completes, 1 when the run fails, 2 for an
+ * argument error, and 3 when nothing failed but something was not attempted --
+ * the status the usage path returns.
  */
 
 #include <stdio.h>

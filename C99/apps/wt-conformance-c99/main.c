@@ -1,10 +1,13 @@
-/* wt-conformance-c99 -- see ../../IMPLEMENTATION_PLAN.md, Phase 9.
+/* wt-conformance-c99 -- the C99 conformance runner (IMPLEMENTATION_PLAN.md, Phase 9).
  *
- * Phase 0 builds the executable and its link against the library, which is what
- * the plan's completion criterion asks for: "empty library and CLI stubs build
- * on every target compiler". The protocol phases fill this in, and until they do
- * the tool prints its usage and exits 3 -- a distinct status for "not
- * implemented" so that a script driving it cannot read a stub as success.
+ * It runs the scenario suites and writes a machine-readable report: the codec
+ * and framing cases, the refusals, the connection-control and flow-control
+ * matrices, the sub-protocol negotiation, and two real sessions over IPv4 and
+ * IPv6. `--help` prints the usage and exits 0.
+ *
+ * Exit statuses: 0 when nothing failed, 1 when a scenario fails, 2 for an
+ * argument error, and 3 when nothing failed but something was not attempted --
+ * a scenario reported UNSUPPORTED rather than passed.
  */
 
 #include <stdint.h>
