@@ -112,7 +112,6 @@ wt_status_t wt_qpack_field_line_encode_coded(wt_writer_t *w, const wt_qpack_fiel
       size_t name_wire_length = line->name_length;
 
       if (line->never_indexed) flags |= 0x10U;
-      if (line->never_indexed != 0) flags |= 0x00U;
       if (line->name == NULL && line->name_length != 0U) return WT_ERR_INVALID_ARGUMENT;
       if (line->name_huffman) {
         size_t needed = 0U;
