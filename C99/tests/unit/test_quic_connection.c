@@ -1270,6 +1270,7 @@ static void test_stream_retransmit_descriptor(void) {
   wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
   wt_quic_transport_parameters_t params;
   size_t i;
+  uint64_t stream_id = 0U;
   uint64_t now = 101000000U;
 
   memset(&witness, 0, sizeof(witness));
@@ -1292,12 +1293,16 @@ static void test_stream_retransmit_descriptor(void) {
   WT_EXPECT_OK("and is parsed by the client",
                wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
   WT_EXPECT_OK("the client sends stream data",
-               wt_quic_connection_open_stream(&pair.client, 1, &now));
+               wt_quic_connection_open_stream(&pair.client, 1, &stream_id));
+  WT_EXPECT_U64("and the first client-initiated stream is number 0", 0U, stream_id);
+  /* The out-parameter is a stream id, NOT a clock: passing `&now` here (as this test used to) overwrote the
+   * synthetic clock with the stream id 0 and ran the whole loss scenario at time 0. */
+  WT_EXPECT_U64("and the synthetic clock is untouched by it", 101000000U, now);
   wt_quic_connection_set_handlers(&pair.client, NULL, NULL, record_stream_loss, &witness);
   for (i = 0U; i < 4U; i++) {
     uint8_t data[2] = {(uint8_t)i, (uint8_t)(0xf0U + i)};
     WT_EXPECT_OK("a stream payload is sent",
-                 wt_quic_connection_send_stream(&pair.client, 0U, i * 2U, data, sizeof(data), 0,
+                 wt_quic_connection_send_stream(&pair.client, stream_id, i * 2U, data, sizeof(data), 0,
                                                 now));
     now += 100U;
   }
