@@ -782,7 +782,7 @@
       "blocked-reason": ""
     },
     {
-      "id": "F-repo-ops-02",
+      "id": "F-repo-ops-02b",
       "severity": "S2",
       "project": "repo-ops",
       "file": "build/CMakeCache.txt:391",
@@ -796,7 +796,7 @@
       "fix-summary": "",
       "evidence-after": "",
       "commit": "",
-      "notes": "confirmed",
+      "notes": "confirmed Renamed from F-repo-ops-02 to resolve a duplicate id from a second independent report of the same area.",
       "blocked-reason": ""
     },
     {
@@ -1034,7 +1034,7 @@
       "blocked-reason": ""
     },
     {
-      "id": "F-swift-line-security-04",
+      "id": "F-swift-line-security-04b",
       "severity": "S2",
       "project": "swift-line-security",
       "file": "Swift/Sources/WebTransportHTTP3Core/WebTransportSession.swift",
@@ -1048,7 +1048,7 @@
       "fix-summary": "",
       "evidence-after": "",
       "commit": "",
-      "notes": "",
+      "notes": "Renamed from F-swift-line-security-04 to resolve a duplicate id from a second independent report of the same area.",
       "blocked-reason": ""
     },
     {
@@ -1070,7 +1070,7 @@
       "blocked-reason": ""
     },
     {
-      "id": "F-swift-line-security-05",
+      "id": "F-swift-line-security-05b",
       "severity": "S2",
       "project": "swift-line-security",
       "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
@@ -1084,7 +1084,7 @@
       "fix-summary": "",
       "evidence-after": "",
       "commit": "",
-      "notes": "",
+      "notes": "Renamed from F-swift-line-security-05 to resolve a duplicate id from a second independent report of the same area.",
       "blocked-reason": ""
     },
     {
