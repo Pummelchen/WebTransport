@@ -1,13 +1,11 @@
-// swift-tools-version: 6.3
+// swift-tools-version: 6.4
 //
-// A-0005: 6.3 is deliberate, not a stale copy of the mandated toolchain.
-// `swift-tools-version` declares the OLDEST SwiftPM that may read this manifest,
-// and Swift/check-toolchain.sh records 6.3.3 / Xcode 26.6 as the project's
-// development floor. The mandate (Swift 6.4 / Xcode 27) is asserted separately
-// by CI (`./Swift/check-toolchain.sh 6.4 27.0`), so raising this line to 6.4
-// would lock a contributor on the documented floor out of the package without
-// enabling any manifest feature this file uses. Revisit only when the 6.3.3
-// floor itself moves.
+// A-0005 kept this at 6.3 while the project's documented development floor
+// (6.3.3 / Xcode 26.6) was older than the mandate, because `swift-tools-version`
+// declares the OLDEST SwiftPM that may read the manifest and raising it would
+// lock a floor contributor out. The toolchain-baseline commit raised the floor
+// itself to Swift 6.4 / Xcode 27, so the floor and the mandate are one toolchain
+// and the manifest declares it; the same line changed in Swift/Package.swift.
 import PackageDescription
 
 let strictSwiftSettings: [SwiftSetting] = [
@@ -234,7 +232,13 @@ let package = Package(
             dependencies: [
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
-                "WebTransportTLSCore",
+                // A-0001 / 15d37bf: PeerInputFuzzTests calls WebTransportTLSCore's parsers directly.
+                // The dependency was implicit and resolved through eager linking before the Swift 6.4
+                // build system, which no longer surfaces transitive symbols: the test bundle failed to
+                // link with "Undefined symbols for architecture arm64" until this became explicit.
+                // Swift/Package.swift declares the same dependency -- check-manifest-sync.sh fails when
+                // the two manifests disagree.
+                "WebTransportTLSCore"
             ],
             path: "Swift/Tests/WebTransportHTTP3CoreTests",
             swiftSettings: strictSwiftSettings

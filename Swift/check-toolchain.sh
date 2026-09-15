@@ -2,16 +2,18 @@
 #
 # Checks the active toolchain against a floor.
 #
-# With no arguments the project's development floor (Swift 6.3.3 / Xcode 26.6)
-# is used, so a developer on the oldest supported toolchain still gets a clear
-# answer. CI passes the mandated floors explicitly
-# (`./Swift/check-toolchain.sh 6.4 27.0`) so a runner image that silently
-# downgrades the toolchain fails the job instead of building green on a compiler
-# the mandate does not name.
+# The floor IS the mandate now: `swift-tools-version: 6.4` in both manifests, the
+# project's documented baseline and this script's default are all Swift 6.4 /
+# Xcode 27. (A-0005 kept the default at 6.3.3 / 26.6 for as long as the documented
+# development floor was older than the mandate; the toolchain-baseline commit
+# moved the floor itself, so that split is gone.) The floors stay overridable, and
+# CI passes them explicitly (`./Swift/check-toolchain.sh 6.4 27.0`) so a runner
+# image that silently downgrades the toolchain fails the job instead of building
+# green on a compiler the mandate does not name.
 set -eu
 
-minimum_swift="${1:-6.3.3}"
-minimum_xcode="${2:-26.6}"
+minimum_swift="${1:-6.4}"
+minimum_xcode="${2:-27.0}"
 
 version_at_least() {
     awk -v current="$1" -v minimum="$2" 'BEGIN {

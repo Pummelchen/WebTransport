@@ -26,20 +26,17 @@ jobs:
     # toolchain (Swift 6.4 / Xcode 27), so CI must exercise that toolchain, not
     # whatever compiler the default macOS image happens to carry. `xcode-27` is
     # the GitHub-hosted image that provides Xcode 27 / Swift 6.4 for the macOS
-    # targets this package declares; it is currently a public preview, so the
-    # explicit assertion below keeps a silent image change from building green
-    # on the wrong compiler. The job stays blocking.
+    # targets this package declares, and the assertion below keeps a silent image
+    # change from building green on the wrong compiler. The job stays blocking.
     runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - name: Validate Swift toolchain
-        run: ./Swift/check-toolchain.sh
-
-      # Blocking. `check-toolchain.sh` takes the mandated floors as arguments;
-      # without them it keeps the project's 6.3.3 / 26.6 development floor. This
-      # step fails when `swift --version` (or Xcode) is below the mandate.
+      # Blocking, and the only toolchain gate. `check-toolchain.sh` defaults to the
+      # same floors the mandate names and the step passes them explicitly, so a
+      # drifted default cannot silently lower the gate; it fails when
+      # `swift --version` (or Xcode) is below Swift 6.4 / Xcode 27.
       - name: Assert mandated toolchain (Swift 6.4 / Xcode 27)
         run: ./Swift/check-toolchain.sh 6.4 27.0
 
