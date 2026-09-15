@@ -317,7 +317,9 @@ static wt_status_t write_type_prefix(uint64_t type, wt_writer_t *w) {
 
   if (length == 0U) return WT_ERR_LIMIT;
   wt_writer_bytes(w, encoded, length);
-  return WT_OK;
+  /* The writer has a sticky overflow flag rather than a status, so the write has to be
+   * asked about: a prefix that did not fit means the stream would start with zero bytes. */
+  return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
 
 wt_status_t wt_http3_endpoint_write_prefix(wt_http3_endpoint_t *endpoint,
@@ -325,18 +327,32 @@ wt_status_t wt_http3_endpoint_write_prefix(wt_http3_endpoint_t *endpoint,
   if (endpoint == NULL || w == NULL) return WT_ERR_INVALID_ARGUMENT;
 
   switch (kind) {
-    case WT_HTTP3_ENDPOINT_STREAM_CONTROL:
+    case WT_HTTP3_ENDPOINT_STREAM_CONTROL: {
+      wt_status_t status;
       if (endpoint->control_sent != 0) return WT_ERR_STATE;
+      status = write_type_prefix(WT_HTTP3_STREAM_CONTROL, w);
+      /* The latch records a stream that was OPENED. A prefix the writer refused opened
+       * nothing, so it must not consume the one control stream the endpoint is allowed. */
+      if (status != WT_OK) return status;
       endpoint->control_sent = 1;
-      return write_type_prefix(WT_HTTP3_STREAM_CONTROL, w);
-    case WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER:
+      return WT_OK;
+    }
+    case WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER: {
+      wt_status_t status;
       if (endpoint->qpack_encoder_sent != 0) return WT_ERR_STATE;
+      status = write_type_prefix(WT_HTTP3_STREAM_QPACK_ENCODER, w);
+      if (status != WT_OK) return status;
       endpoint->qpack_encoder_sent = 1;
-      return write_type_prefix(WT_HTTP3_STREAM_QPACK_ENCODER, w);
-    case WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER:
+      return WT_OK;
+    }
+    case WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER: {
+      wt_status_t status;
       if (endpoint->qpack_decoder_sent != 0) return WT_ERR_STATE;
+      status = write_type_prefix(WT_HTTP3_STREAM_QPACK_DECODER, w);
+      if (status != WT_OK) return status;
       endpoint->qpack_decoder_sent = 1;
-      return write_type_prefix(WT_HTTP3_STREAM_QPACK_DECODER, w);
+      return WT_OK;
+    }
     case WT_HTTP3_ENDPOINT_STREAM_PUSH:
     case WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT:
     case WT_HTTP3_ENDPOINT_STREAM_UNKNOWN:
