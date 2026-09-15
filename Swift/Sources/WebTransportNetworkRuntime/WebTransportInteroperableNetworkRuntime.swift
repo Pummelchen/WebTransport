@@ -1686,11 +1686,19 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     }
 }
 
-private enum InteroperableQUICRuntime {
+enum InteroperableQUICRuntime {
     static let defaultAuthority = "localhost"
     static let defaultPath = "/wt"
     static let defaultOrigin = "https://localhost"
     static let defaultProtocol = "demo.v1"
+
+    /// The ALPN identifiers every QUIC connection this runtime builds offers.
+    ///
+    /// The HTTP/3 token comes from ``WebTransportALPNPolicy`` rather than a
+    /// literal so the offer and the negotiated-ALPN validation cannot drift
+    /// apart: a change to the policy moves the offer with it, and a test pins the
+    /// two together.
+    static let alpnProtocols = [WebTransportALPNPolicy.requiredHTTP3Protocol]
 
     static func host(for value: String) -> NWEndpoint.Host {
         switch value {
@@ -1716,7 +1724,7 @@ private enum InteroperableQUICRuntime {
     }
 
     static func makeBaseQUIC(limits: WebTransportTransportLimits = .default) -> QUIC {
-        QUIC(alpn: ["h3"]) {
+        QUIC(alpn: alpnProtocols) {
             UDP()
         }
         .idleTimeout(limits.idleTimeoutMilliseconds)
@@ -1729,7 +1737,7 @@ private enum InteroperableQUICRuntime {
         .maxDatagramFrameSize(limits.maxDatagramFrameSize)
     }
 
-    static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
+    fileprivate static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
         switch trustConfiguration {
         case .systemTrust:
             return makeBaseQUIC()
