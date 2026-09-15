@@ -125,5 +125,17 @@ if [ ! -f "$tools_prefix/include/webtransport/webtransport.h" ]; then
   exit 1
 fi
 
+# OpenSSL is REQUIRED and Apache-2.0 (C99/CMakeLists.txt), so an install tree that carries this
+# library carries a redistribution of it and owes the licence notice. The install rules put the
+# repository's THIRD_PARTY_NOTICES.md under share/doc/webtransport_c99/, and this asserts it
+# survived install -- in the library-only tree and in the tree with the tools (F-repo-ops-18).
+for installed_prefix in "$prefix" "$tools_prefix"; do
+  if ! find "$installed_prefix" -name 'THIRD_PARTY_NOTICES.md' -print | grep -q .; then
+    echo "webtransport-c99: $installed_prefix carries no third-party licence notice" >&2
+    find "$installed_prefix" -type f | sort >&2
+    exit 1
+  fi
+done
+
 echo "webtransport-c99: the installed package builds a consumer"
 echo "webtransport-c99: the install tree carries the three tools and nothing that tests them"

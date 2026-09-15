@@ -28,7 +28,10 @@ include(WTCompilerWarnings)
 # portable platforms; a freestanding target would select a different one, which is
 # why the choice is an option rather than a hard-coded find_package. REQUIRED
 # because a library that silently built without a crypto backend would fail at the
-# first handshake instead of at configure time.
+# first handshake instead of at configure time. OpenSSL is Apache-2.0, so a
+# redistributed binary owes its notice: the text is in the repository's
+# THIRD_PARTY_NOTICES.md and the install rules below place it in the install tree
+# (F-repo-ops-18).
 set(WEBTRANSPORT_C99_CRYPTO "openssl" CACHE STRING
   "Cryptographic backend: openssl (a freestanding target would add another)")
 set_property(CACHE WEBTRANSPORT_C99_CRYPTO PROPERTY STRINGS openssl)
@@ -431,6 +434,13 @@ if(WEBTRANSPORT_C99_BUILD_APPS)
   install(TARGETS wt-client-c99 wt-server-c99 wt-conformance-c99
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
+
+# OpenSSL is REQUIRED and Apache-2.0, so every install tree that carries this library carries a
+# redistribution of it and owes the licence notice. The text is the repository's own
+# THIRD_PARTY_NOTICES.md, installed with the package rather than left in the source checkout, and
+# `scripts/check-package.sh` asserts it is present (F-repo-ops-18).
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../THIRD_PARTY_NOTICES.md"
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/webtransport_c99)
 
 # Winsock is not in a Windows link's default set, so every target that touches the socket layer asks for it.
 # Guarded by `TARGET` because either library may be built alone, and written here rather than beside the targets
