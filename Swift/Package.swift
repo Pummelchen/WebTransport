@@ -1,4 +1,13 @@
 // swift-tools-version: 6.3
+//
+// A-0005: 6.3 is deliberate, not a stale copy of the mandated toolchain.
+// `swift-tools-version` declares the OLDEST SwiftPM that may read this manifest,
+// and Swift/check-toolchain.sh records 6.3.3 / Xcode 26.6 as the project's
+// development floor. The mandate (Swift 6.4 / Xcode 27) is asserted separately
+// by CI (`./Swift/check-toolchain.sh 6.4 27.0`), so raising this line to 6.4
+// would lock a contributor on the documented floor out of the package without
+// enabling any manifest feature this file uses. Revisit only when the 6.3.3
+// floor itself moves.
 import PackageDescription
 
 let strictSwiftSettings: [SwiftSetting] = [
