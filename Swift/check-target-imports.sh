@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# Verifies that every module a target imports is covered by that target's
-# declared dependencies in the manifest that builds it.
+# Verifies that a target's declared dependencies and the modules its sources
+# import are the same set, in both directions.
 #
 # Why this exists: check-manifest-sync.sh compares the two manifests with each
 # other, so a dependency both manifests omit stays invisible to every check in
@@ -10,7 +10,10 @@
 # the test bundle (A-0001) -- the root manifest built green on the older
 # toolchains because the missing module happened to be available transitively.
 # A per-target import/dependency check catches that class at the manifest, before
-# the link step, for both package entry points.
+# the link step, for both package entry points. The reverse direction is checked
+# too: a declared dependency that no source imports is a stale entry that keeps an
+# otherwise-unused module in the build graph and hides the same kind of drift
+# (F-swift-architecture-12).
 #
 # Both manifests point at the same source directories, so each target is checked
 # against the manifest that declares it; a target only the nested manifest
@@ -108,6 +111,26 @@ check_package() {
             failures=$((failures + 1))
         done <<<"$imports"
 
+        # The reverse direction: a declared dependency that no source in the
+        # target imports keeps an otherwise-unused module in the build graph and
+        # hides real drift (A-0006 covers imports with no declaration; this is a
+        # declaration with no import). An import line is the only way a Swift
+        # target can use a module, so a dependency absent from `imports` is stale.
+        local dependency
+        local -a declared_modules=()
+        if [ -n "$declared" ]; then
+            IFS=',' read -ra declared_modules <<<"$declared"
+        fi
+        for dependency in ${declared_modules[@]+"${declared_modules[@]}"}; do
+            [ -n "$dependency" ] || continue
+            if ! grep -qx -- "$dependency" <<<"$imports"; then
+                printf 'error: %s target "%s" declares "%s", which no source imports\n' \
+                    "$package_label" "$name" "$dependency" >&2
+                printf '       imported: %s\n' "$(printf '%s' "$imports" | tr '\n' ' ')" >&2
+                failures=$((failures + 1))
+            fi
+        done
+
         local count
         count="$(printf '%s\n' "$imports" | grep -c . || true)"
         covered_imports=$((covered_imports + count))
@@ -132,7 +155,7 @@ check_package "." "Package.swift"
 check_package "Swift" "Swift/Package.swift"
 
 if [ "$failures" -ne 0 ]; then
-    echo "error: $failures undeclared target import(s); declare the module in the target's dependencies" >&2
+    echo "error: $failures target import/dependency mismatch(es); a target's declared dependencies must equal the modules its sources import" >&2
     exit 1
 fi
 

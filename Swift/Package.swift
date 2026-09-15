@@ -75,7 +75,6 @@ let package = Package(
             name: "WebTransportCLIConformance",
             dependencies: [
                 "WebTransport",
-                "WebTransportCryptoApple",
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
                 "WebTransportTLSCore",
