@@ -9,6 +9,19 @@
 
 #include "webtransport/time.h"
 
+#include "time_internal.h"
+
+/* See the header. The conversion divides before multiplying so that the tick count is turned into whole seconds
+ * first; multiplying first, which is what this used to do, wraps uint64 once the tick count passes
+ * 2^64 / 10^6 ~ 1.84e13 -- about 21 days at the usual 10 MHz QueryPerformanceFrequency -- and the clock then
+ * returns a SMALLER value than before, breaking the monotonicity this file promises and mis-arming every QUIC
+ * deadline, idle timeout and probe timeout on the connection. */
+uint64_t wt_time_counter_to_micros(uint64_t counter, uint64_t frequency) {
+  if (frequency == 0U) return 0U;
+  return (counter / frequency) * UINT64_C(1000000) +
+         ((counter % frequency) * UINT64_C(1000000)) / frequency;
+}
+
 #if defined(_WIN32)
 /* QueryPerformanceCounter is the monotonic source on Windows, and it is
  * specified as non-decreasing. The frequency is fixed per boot, so it is
@@ -32,7 +45,7 @@ uint64_t wt_now_micros(void) {
   uint64_t frequency = wt_windows_frequency();
   if (frequency == 0U) return 0U;
   if (QueryPerformanceCounter(&counter) == 0 || counter.QuadPart < 0) return 0U;
-  return ((uint64_t)counter.QuadPart * 1000000U) / frequency;
+  return wt_time_counter_to_micros((uint64_t)counter.QuadPart, frequency);
 }
 #else
 /* clock_gettime(CLOCK_MONOTONIC) on macOS, Linux and FreeBSD. Its epoch is
