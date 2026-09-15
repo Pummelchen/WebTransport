@@ -258,6 +258,10 @@ typedef struct wt_quic_stream_table {
   wt_quic_stream_t streams[WT_QUIC_STREAM_TABLE_MAX];
   uint8_t used[WT_QUIC_STREAM_TABLE_MAX];
   size_t count;
+  /* The cumulative stream count per class, which is also the index the NEXT number of that class is built
+   * from. RFC 9000 section 2.1 forbids reusing a stream number, and section 4.6 measures `initial_max_streams_*`
+   * over the connection's life rather than over the streams live now, so these are MONOTONIC: a reclaim or a
+   * close frees the slot (`used`, `count`) and leaves these alone. */
   uint64_t opened_by_us_bidi;
   uint64_t opened_by_us_uni;
   uint64_t opened_by_peer_bidi;

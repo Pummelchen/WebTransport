@@ -456,6 +456,52 @@ static void test_stream_table(void) {
   WT_EXPECT_TRUE("nor a const find", wt_quic_stream_table_find_const(NULL, 0U) == NULL);
 }
 
+/* End both halves of a stream so the table may forget it. The FIN ends the send half; the receive half is
+ * ended the other way RFC 9000 section 3.2 allows, by a reset the application has been told about. */
+static void complete_table_stream(wt_quic_stream_t *stream) {
+  WT_EXPECT_STATUS("the send half ends", WT_OK, wt_quic_stream_on_fin_sent(stream));
+  WT_EXPECT_STATUS("and the peer resets the receive half", WT_OK,
+                   wt_quic_stream_on_reset_received(stream, 0U, 0U));
+  WT_EXPECT_STATUS("which the application is told about", WT_OK,
+                   wt_quic_stream_on_reset_read(stream));
+  WT_EXPECT_TRUE("so the stream is complete", wt_quic_stream_complete(stream));
+}
+
+/* RFC 9000 section 2.1: "A QUIC endpoint MUST NOT reuse a stream ID". The opened counts are what name the
+ * numbers -- `wt_quic_connection_open_stream` builds the next number from them -- so reclaiming a finished
+ * stream's SLOT must not take its NUMBER back out of circulation. Before this the reclaim decremented the
+ * count, so it fell below the numbers already in use; the next open read the count, rebuilt a number a
+ * completed stream had held, and because the reclaim had just freed a slot the table accepted it instead of
+ * reporting a duplicate. Two streams then shared one number. */
+static void test_stream_table_reclaim_keeps_ids_new(void) {
+  wt_quic_stream_table_t table;
+  uint64_t highest = 0U;
+  uint64_t i;
+  int have_highest = 0;
+
+  wt_quic_stream_table_init(&table);
+  /* More opens than the table has slots, so a reclaim happens mid-run and the number after it is the one
+   * under test; every slot is reclaimable because each stream is completed as soon as it opens. */
+  for (i = 0U; i < (uint64_t)WT_QUIC_STREAM_TABLE_MAX + 2U; i++) {
+    uint64_t index = wt_quic_stream_table_opened_by_us(&table, 1);
+    uint64_t id = wt_quic_stream_id_make(1, 1, index);
+    wt_quic_stream_t *stream;
+
+    WT_EXPECT_OK("a stream opens", wt_quic_stream_table_open(&table, id, 1, 1000U));
+    if (have_highest) {
+      WT_EXPECT_TRUE("and its number is one no earlier stream used", id > highest);
+    }
+    highest = id;
+    have_highest = 1;
+    WT_EXPECT_U64("the run of opened numbers only grows", (uint64_t)(i + 1U),
+                  wt_quic_stream_table_opened_by_us(&table, 1));
+
+    stream = wt_quic_stream_table_find(&table, id);
+    WT_EXPECT_TRUE("the stream is in the table", stream != NULL);
+    if (stream != NULL) complete_table_stream(stream);
+  }
+}
+
 int main(void) {
   test_send_states();
   test_reset_and_stop();
@@ -465,5 +511,6 @@ int main(void) {
 
   test_stream_id_fields();
   test_stream_table();
+  test_stream_table_reclaim_keeps_ids_new();
   WT_TEST_MAIN_END("wt_quic_stream");
 }

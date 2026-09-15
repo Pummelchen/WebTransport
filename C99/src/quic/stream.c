@@ -455,12 +455,22 @@ wt_status_t wt_quic_stream_table_open(wt_quic_stream_table_t *table, uint64_t st
      * anywhere in the library, so a slot was never reused: a connection that opened and finished 32 streams could
      * not open a 33rd, and the peer that finished them got `WT_ERR_LIMIT` for traffic it was entitled to send. An
      * audit found the missing caller. The sweep is here because this is the one place that asks "is there room",
-     * and a stream that is complete by definition is not using its room. */
+     * and a stream that is complete by definition is not using its room.
+     *
+     * A RECLAIMED SLOT RELEASES A SLOT, NOT A STREAM NUMBER. The opened counts are not a live-stream gauge: they
+     * are the index the next stream number is built from (RFC 9000 section 2.1 numbers streams by how many of
+     * their class came before), so they are monotonic and RFC 9000 section 2.1 forbids handing the number out
+     * again. Decrementing them here made the caller that reads the count to choose the next number
+     * (`wt_quic_connection_open_stream`) rebuild a number a finished stream had already used -- and because the
+     * slot was free after this same sweep, `wt_quic_stream_table_open` accepted it rather than reporting the
+     * duplicate, so two different streams shared one number. Section 4.6 is the reason the counter cannot simply
+     * track the live streams either: `initial_max_streams_*` limits the CUMULATIVE number of streams a peer may
+     * open, so the count that is checked against it only ever grows. `close` above already leaves these counts
+     * alone; this reclaim must too. */
     for (i = 0U; i < WT_QUIC_STREAM_TABLE_MAX; i++) {
       if (table->used[i] && wt_quic_stream_complete(&table->streams[i])) {
         table->used[i] = 0U;
         table->count--;
-        (*opened)--;
         if (slot == WT_QUIC_STREAM_TABLE_MAX) slot = i;
       }
     }
