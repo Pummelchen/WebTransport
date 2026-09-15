@@ -5,8 +5,8 @@
     "started": "2026-09-15",
     "protocol": "pre-production audit (Phases A-E, \u00a70-\u00a712)",
     "note": "The standing project instruction said to commit to main; this audit's protocol forbids it and takes precedence FOR THE DURATION OF THE AUDIT. All audit work stayed on audit/2026-09-15 and Phase E was complete before any of it reached main.",
-    "landed_on_main": "6607d71",
-    "landed": "Owner-directed merge into main at 6607d71 after Phase E passed ('push all to git so the code is in sync'). One conflict, resolved deliberately: .github/traffic.json was deleted by F-repo-ops-14 and hand-refreshed on main by b526c9e, which is the hand-maintenance that finding describes, so the deletion stands. The merged tree is identical to the audited branch tree and was re-verified on main before the push: Swift 360 tests / 0 failures / 0 warnings, C99 97/97 CTest, 0 warnings. audit/2026-09-15 and main are kept identical."
+    "landed_on_main": "6607d71 (+ edfc57a integrating main's Swift 6.4 toolchain baseline)",
+    "landed": "Owner-directed merge into main at 6607d71 after Phase E passed ('push all to git so the code is in sync'). One conflict, resolved deliberately: .github/traffic.json was deleted by F-repo-ops-14 and hand-refreshed on main by b526c9e, which is the hand-maintenance that finding describes, so the deletion stands. The merged tree is identical to the audited branch tree and was re-verified on main before the push: Swift 360 tests / 0 failures / 0 warnings, C99 97/97 CTest, 0 warnings. audit/2026-09-15 and main are kept identical. Second merge: main moved while the audit was landing -- node4 pushed 15d37bf, 21e7bce and 0255595, which independently fixed the same 6.4 test-bundle link failure (A-0001) and the same 12 redundant unsafe effect markers (A-0004), and raised the toolchain baseline itself (swift-tools-version 6.4 in both manifests, check-toolchain.sh at 6.4/27, the macOS jobs on xcode-27). That supersedes A-0005's written justification for staying at 6.3, so the merge at edfc57a takes 6.4 and 1f7ee98 restores the two trailing commas the conflict resolution dropped (the audit's own format gate caught them). Re-verified on the integrated tree: Swift 360 tests / 0 failures / 0 warnings, C99 97/97, format and manifest gates clean."
   },
   "tasks": [
     {
@@ -1374,7 +1374,7 @@
       "fix-summary": "",
       "evidence-after": "(S2/S3 batch) evidence pasted in the commit; frozen-tree gates: swift build 0 warnings, swift test 356 tests/0 failures, ctest 97/97, swift format lint --strict clean, check-manifest-sync/target-imports/workflows/portability/package and the library smoke pair all exit 0.",
       "commit": "d112fab",
-      "notes": "",
+      "notes": "SUPERSEDED after the landing, not wrong when filed: this row recorded a written justification for keeping swift-tools-version at 6.3 while the documented development floor was 6.3.3 / Xcode 26.6. node4's toolchain-baseline commit (15d37bf) moved the floor itself to Swift 6.4 / Xcode 27, which is exactly the condition the row's own text named ('revisit only when the 6.3.3 floor itself moves'), so both manifests now declare 6.4 and Swift/check-toolchain.sh defaults to 6.4 / 27.0. The merge resolution (edfc57a) records the change in the manifests.",
       "blocked-reason": ""
     },
     {

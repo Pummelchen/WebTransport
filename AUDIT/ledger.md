@@ -120,7 +120,7 @@ commits**, so the new entries (a public sha256 and a public PGP fingerprint, no 
 The workflows run on `main` and on pull requests only, so a push to `audit/2026-09-15` starts no CI
 job; the local scan is the check that counts.
 
-## Landing — the audit on `main` (`6607d71`)
+## Landing — the audit on `main` (`6607d71`, then `edfc57a`)
 
 The owner directed a full sync, so the audited branch was merged into `main` (see the branch-policy
 note at the top for why the PR step was replaced and how the one conflict was resolved). What changed
@@ -139,3 +139,27 @@ with the landing:
   mattered once the work reached `main`.
 - `audit/2026-09-15` and `main` are kept identical (the branch was fast-forwarded to the landing
   commit), so there is no divergence to reconcile later and no stale copy of these documents.
+
+### Second merge — `main` moved while the landing was in flight (`edfc57a`)
+
+The push of the landing was rejected because `main` had advanced: **node4 pushed three commits**
+(`15d37bf`, `21e7bce`, `0255595`) that did part of the same work the audit had done, independently —
+the Swift 6.4 test-bundle link failure (`A-0001`) and the 12 redundant `unsafe` effect markers
+(`A-0004`) — and went further by **raising the toolchain baseline itself**: `swift-tools-version: 6.4`
+in both manifests, `Swift/check-toolchain.sh` at Swift 6.4 / Xcode 27, and the three macOS jobs on the
+`xcode-27` image. The merge is `edfc57a`; six files conflicted and each was resolved on its merits:
+
+| File | Resolution |
+| --- | --- |
+| `Package.swift`, `Swift/Package.swift` | Take `swift-tools-version: 6.4`, with a comment recording that it supersedes `A-0005`; keep node4's explanation of why the 6.4 build system needs the `WebTransportTLSCore` test dependency explicit, plus the audit's cross-manifest note. |
+| `Swift/check-toolchain.sh` | Keep the overridable floors, move the default from 6.3.3 / 26.6 to 6.4 / 27.0: the development floor and the mandate are one toolchain now, so the split the script documented is gone. |
+| `.github/workflows/swift-ci.yml` | Keep the audit's job name and F-repo-ops-01 comment (the toolchain is what the job asserts; `runs-on` is `xcode-27` on both sides) and collapse two toolchain steps into one, since the bare call was only distinct while the default was the older floor. |
+| `Swift/Sources/WebTransportUDPApple/QUICUDPPort.swift` | Keep the audit's reused receive buffer (`F-swift-perf-tests-05`) and drop the per-call `buffer`; node4's redundant-`unsafe` removal on `withUnsafeMutableBytes` is preserved. |
+| `CHANGELOG.md` | Keep the audit's paragraph and its Fixed/Added/Changed entries; replace the now-obsolete "swift-tools-version stays at 6.3" bullet with node4's toolchain-baseline and CodeQL bullets, in the same `Changed` section. |
+
+`A-0005` is recorded as **superseded, not wrong**: it asked for 6.3 to be revisited when the 6.3.3
+floor moved, and node4 moved it. `1f7ee98` restores the two trailing commas the hand resolution
+dropped — the audit's own `swift format lint` gate (A-0007) caught them, which is the gate working.
+Re-verified on the integrated tree: `swift format lint --strict` clean, `check-manifest-sync.sh` 19
+shared targets agree, `check-target-imports.sh` 42 targets / 202 imports covered, `swift test` (root)
+**360 tests, 0 failures, 0 warnings**, `swift test --package-path Swift` green, C99 **97/97**, 0 warnings.
