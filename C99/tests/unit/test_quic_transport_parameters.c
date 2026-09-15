@@ -161,6 +161,27 @@ static void test_a_retry_is_named_only_when_one_was_sent(void) {
   WT_EXPECT_STATUS("and a client cannot name one at all", WT_ERR_INVALID_ARGUMENT, status);
 }
 
+/* F-04: the reliable-stream-reset extension's transport parameter is registered as 0x1d by
+ * draft-ietf-quic-reliable-stream-reset-09 section 8.1, and draft-ietf-webtrans-http3-16 section 3.1 makes an
+ * empty `reset_stream_at` a requirement of EVERY WebTransport endpoint. The pre-registration value this tree
+ * advertised (0x17f7586d2cb570, a greased 8-byte varint) is not the identifier a conforming draft-16 peer
+ * looks for, so the extension was never negotiated. The assertion is on the WIRE byte and not on the C
+ * constant: a test that compared `WT_QUIC_TP_RESET_STREAM_AT` with itself would pass while the wire stayed
+ * wrong. */
+static void test_reset_stream_at_is_the_registered_identifier(void) {
+  wt_quic_transport_parameters_t params;
+  uint8_t encoded[16];
+  wt_writer_t w = wt_writer_init(encoded, sizeof(encoded));
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("the reliable-stream-reset parameter is added",
+               wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
+  WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
+  /* The registered identifier is 0x1d, a one-byte varint, followed by the empty value's zero length. */
+  WT_EXPECT_U64("to exactly two bytes", 2U, (uint64_t)wt_writer_offset(&w));
+  WT_EXPECT_BYTES("with 0x1d as the identifier on the wire", (const uint8_t *)"\x1d\x00", encoded, 2U);
+}
+
 int main(void) {
   wt_quic_transport_parameters_t params;
   wt_quic_error_t error = 0U;
@@ -663,5 +684,6 @@ int main(void) {
 
   test_build_sends_the_mandatory_connection_ids();
   test_a_retry_is_named_only_when_one_was_sent();
+  test_reset_stream_at_is_the_registered_identifier();
   WT_TEST_MAIN_END("wt_quic_transport_parameters");
 }

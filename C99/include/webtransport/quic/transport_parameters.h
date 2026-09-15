@@ -60,8 +60,10 @@ extern "C" {
  * (draft-ietf-webtrans-http3-16 section 3.1) because a WebTransport stream's prefix must be delivered even when
  * the stream is reset: `reset_stream_at`. Its value is EMPTY -- it is a flag, and a peer that understands it must
  * treat a non-empty value as TRANSPORT_PARAMETER_ERROR (draft-ietf-quic-reliable-stream-reset, "Negotiating
- * Extension Use"). */
-#define WT_QUIC_TP_RESET_STREAM_AT ((uint64_t)0x17f7586d2cb570)
+ * Extension Use"). The identifier is the REGISTERED one, 0x1d (draft-ietf-quic-reliable-stream-reset-09 section
+ * 8.1); the pre-registration value 0x17f7586d2cb570 this tree once advertised is greased, not registered, and a
+ * conforming draft-16 peer that looks for 0x1d never saw the extension. */
+#define WT_QUIC_TP_RESET_STREAM_AT ((uint64_t)0x1d)
 #define WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID ((uint64_t)0x0f)
 #define WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID ((uint64_t)0x10)
 /* RFC 9221 section 3. */
