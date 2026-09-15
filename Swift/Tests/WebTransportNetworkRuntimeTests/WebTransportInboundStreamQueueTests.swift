@@ -179,4 +179,33 @@ struct WebTransportInboundStreamQueueTests {
         #expect(try await queue.next(direction: 0, timeoutMilliseconds: 5_000) == 1)
         #expect(try await queue.next(direction: 1, timeoutMilliseconds: 5_000) == 2)
     }
+
+    /// The queue is a retention bound, not an unbounded inbox.
+    ///
+    /// RFC 9000 section 4.6 counts a stream against `initial_max_streams_*` only
+    /// until it is closed, and a stream the peer FINs is closed whether or not
+    /// the application ever read it, so the advertised stream limit does not
+    /// bound how many `QUIC.Stream` objects a connection accumulates over its
+    /// life. The per-direction ceiling — taken from those same advertised
+    /// limits — is what does, so a stream beyond it must not be retained.
+    @Test
+    func streamsBeyondThePerDirectionCeilingAreNotRetained() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+        let limit = WebTransportTransportLimits.default.initialMaxUnidirectionalStreams
+        #expect(limit > 0)
+
+        for index in 0..<limit {
+            await queue.enqueue(index, direction: Self.direction, streamID: UInt64(index))
+        }
+        // The queue holds its ceiling now, so this stream must be refused
+        // rather than retained behind the others.
+        await queue.enqueue(limit, direction: Self.direction, streamID: UInt64(limit))
+
+        for index in 0..<limit {
+            #expect(try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000) == index)
+        }
+        await #expect(throws: (any Error).self) {
+            try await queue.next(direction: Self.direction, timeoutMilliseconds: 50)
+        }
+    }
 }

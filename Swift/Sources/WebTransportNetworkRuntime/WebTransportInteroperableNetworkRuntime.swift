@@ -159,11 +159,10 @@ public struct WebTransportQUICClient: Sendable {
             do {
                 await inboundRegistration.markEntered()
                 try await connection.inboundStreams { stream in
-                    InteroperableQUICDebug.log("client inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
-                    await inboundStreams.enqueue(
+                    await InteroperableQUICHelpers.enqueueInboundStream(
                         stream,
-                        direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality),
-                        streamID: UInt64(stream.streamID)
+                        into: inboundStreams,
+                        role: "client"
                     )
                 }
             } catch {
@@ -1156,6 +1155,9 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let acceptedConnections = self.acceptedConnections
         let rateLimiter = self.rateLimiter
         let connectionBudget = self.connectionBudget
+        // The listener task must not retain the server to read these, and each
+        // accepted connection builds its own collector from them.
+        let advertisedStreamLimits = transportLimits
         listenerTask = Task {
             do {
                 try await listener.run { connection in
@@ -1182,17 +1184,23 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                     // The peer opens its control stream as soon as the handshake
                     // completes, which is typically while this connection is
                     // still queued and long before anything calls `serveOne`.
-                    let inboundStreams = InteroperableQUICInboundStreamCollector()
+                    // The collector's per-direction ceiling is the stream count
+                    // this listener advertised: retaining more would hold stream
+                    // objects the peer was never allowed to open, and fewer would
+                    // refuse streams the advertisement promised.
+                    let inboundStreams = InteroperableQUICInboundStreamCollector(
+                        bidirectionalLimit: advertisedStreamLimits.initialMaxBidirectionalStreams,
+                        unidirectionalLimit: advertisedStreamLimits.initialMaxUnidirectionalStreams
+                    )
                     let inboundRegistration = InteroperableQUICInboundRegistration()
                     let inboundTask = Task {
                         do {
                             await inboundRegistration.markEntered()
                             try await connection.inboundStreams { stream in
-                                InteroperableQUICDebug.log("server inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
-                                await inboundStreams.enqueue(
+                                await InteroperableQUICHelpers.enqueueInboundStream(
                                     stream,
-                                    direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality),
-                                    streamID: UInt64(stream.streamID)
+                                    into: inboundStreams,
+                                    role: "server"
                                 )
                             }
                         } catch {
@@ -1703,6 +1711,58 @@ enum InteroperableQUICHelpers {
         @unknown default:
             return bidirectionalStreamDirection
         }
+    }
+
+    /// Hands an inbound stream to its connection's collector, refusing it at the
+    /// transport when the collector will not retain it.
+    ///
+    /// The collector bounds how many streams it holds per direction so a peer
+    /// cannot make this endpoint retain stream objects, and the buffers behind
+    /// them, for the connection's whole life. A stream the collector declines is
+    /// not merely dropped: the peer still believes it is open and keeps writing
+    /// into it. RFC 9000 section 3.5 gives a receiver STOP_SENDING for exactly
+    /// this, and the WebTransport draft's `WT_BUFFERED_STREAM_REJECTED` is the
+    /// refusal code the session layer already uses for an over-limit buffered
+    /// stream.
+    ///
+    /// Network.framework exposes neither stop-sending nor a per-stream reset, but
+    /// documents enough for both halves of the refusal: the application error
+    /// code set on the stream is the one sent to the peer when the stream is
+    /// closed, and releasing the last handle lets the transport cancel the
+    /// receive side — which the peer observes as STOP_SENDING. The refusal is
+    /// therefore to set the code and return without retaining the stream.
+    @discardableResult
+    static func enqueueInboundStream(
+        _ stream: QUIC.Stream<QUICStream>,
+        into inboundStreams: InteroperableQUICStreamQueue<QUIC.Stream<QUICStream>>,
+        role: String
+    ) async -> InteroperableQUICInboundStreamDisposition {
+        let direction = streamDirectionKey(stream.directionality)
+        let disposition = await inboundStreams.enqueue(
+            stream,
+            direction: direction,
+            streamID: UInt64(stream.streamID)
+        )
+        switch disposition {
+        case .accepted:
+            InteroperableQUICDebug.log(
+                "\(role) inbound stream direction=\(stream.directionality) id=\(stream.streamID)"
+            )
+        case .refusedQueueFull(let limit):
+            InteroperableQUICDebug.log(
+                "\(role) refusing inbound stream id=\(stream.streamID): "
+                    + "direction \(direction) already holds its \(limit)-stream ceiling"
+            )
+            stream.streamApplicationErrorCode =
+                WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
+        case .refusedInboundDeliveryFailed:
+            InteroperableQUICDebug.log(
+                "\(role) refusing inbound stream id=\(stream.streamID): inbound delivery has already failed"
+            )
+            stream.streamApplicationErrorCode =
+                WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
+        }
+        return disposition
     }
 
     static func makeRequestStreamPayload(streamID: UInt64, requestFrame: HTTP3Frame) throws -> Data {
@@ -2379,6 +2439,26 @@ private actor InteroperableQUICInboundRegistration {
     }
 }
 
+/// What the inbound-stream collector did with a stream offered to it.
+///
+/// Spelled out rather than returned as a `Bool` so a caller cannot ignore a
+/// refusal by accident. A stream the collector did not retain is one the peer
+/// still believes is open, so the caller has to refuse it at the transport; see
+/// ``InteroperableQUICStreamQueue/enqueue(_:direction:streamID:)``.
+enum InteroperableQUICInboundStreamDisposition: Equatable, Sendable {
+    /// The stream was handed to a parked caller, queued for the next one, or
+    /// recognised as a repeat of a stream already delivered. In every one of
+    /// those cases the caller must leave the stream alone — a duplicate is the
+    /// live stream, not a new one, so refusing it would signal an error on a
+    /// stream a reader is using.
+    case accepted
+    /// The per-direction ceiling is already reached, so nothing was retained.
+    case refusedQueueFull(limit: Int)
+    /// Inbound delivery for this connection has already failed, so nothing more
+    /// can be retained.
+    case refusedInboundDeliveryFailed
+}
+
 private typealias InteroperableQUICInboundStreamCollector = InteroperableQUICStreamQueue<QUIC.Stream<QUICStream>>
 
 /// Delivers inbound streams to whoever is waiting for one of that direction.
@@ -2408,6 +2488,32 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     private var deliveryOrder: [DeliveredStream] = []
     private var failure: Error?
 
+    /// Ceiling on streams held at once for one direction.
+    ///
+    /// Taken from the transport limits this endpoint advertised, because that is
+    /// the number of streams the peer was told it may have open. It is a
+    /// *retention* bound rather than an enforcement of the advertisement — QUIC
+    /// enforces that itself — so each entry keeps at least one slot: the CONNECT
+    /// request stream and the peer's control stream can both arrive before a
+    /// reader parks, and refusing those because an operator advertised zero
+    /// streams would break the connection instead of bounding it.
+    private let ceilingByDirection: [Int: Int]
+
+    init(
+        bidirectionalLimit: Int = WebTransportTransportLimits.default.initialMaxBidirectionalStreams,
+        unidirectionalLimit: Int = WebTransportTransportLimits.default.initialMaxUnidirectionalStreams
+    ) {
+        ceilingByDirection = [
+            InteroperableQUICHelpers.bidirectionalStreamDirection: max(1, bidirectionalLimit),
+            InteroperableQUICHelpers.unidirectionalStreamDirection: max(1, unidirectionalLimit),
+        ]
+    }
+
+    private func ceiling(for direction: Int) -> Int {
+        ceilingByDirection[direction]
+            ?? max(1, WebTransportTransportLimits.default.initialMaxBidirectionalStreams)
+    }
+
     /// Peer control and QPACK streams, held for the lifetime of the connection.
     ///
     /// These are critical streams: RFC 9114 section 6.2.1 and RFC 9204 section
@@ -2436,14 +2542,38 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     /// follows its original almost immediately, and a connection is free to open
     /// unboundedly many streams over its lifetime, so retaining every identifier
     /// would trade this defect for unbounded growth.
-    func enqueue(_ stream: Element, direction: Int, streamID: UInt64) {
+    ///
+    /// ## Retention bound and refusal
+    ///
+    /// At most ``ceiling(for:)`` streams are held per direction. RFC 9000
+    /// section 4.6 stops counting a stream against `initial_max_streams_*` once
+    /// it is closed, and a stream the peer FINs is closed whether or not the
+    /// application read it, so the advertised stream limit does not bound how
+    /// many stream objects a long-lived connection accumulates. Without a
+    /// ceiling, a peer that opens streams this endpoint has no consumer for —
+    /// post-establishment unidirectional streams in particular — makes the
+    /// runtime retain each one, and the buffers behind it, until the connection
+    /// ends.
+    ///
+    /// A stream that does not fit is **not** retained and is reported as
+    /// ``InteroperableQUICInboundStreamDisposition/refusedQueueFull(limit:)``.
+    /// The caller owns refusing it: dropping the handle alone tells the peer
+    /// nothing, and the peer keeps writing into a stream this endpoint has
+    /// forgotten. ``InteroperableQUICHelpers/enqueueInboundStream(_:into:role:)``
+    /// is that caller for the runtime and performs the transport-level refusal.
+    @discardableResult
+    func enqueue(
+        _ stream: Element,
+        direction: Int,
+        streamID: UInt64
+    ) -> InteroperableQUICInboundStreamDisposition {
         guard failure == nil else {
-            return
+            return .refusedInboundDeliveryFailed
         }
         let key = DeliveredStream(direction: direction, streamID: streamID)
         guard !deliveredKeys.contains(key) else {
             InteroperableQUICDebug.log("ignoring duplicate inbound stream delivery id=\(streamID)")
-            return
+            return .accepted
         }
         deliveredKeys.insert(key)
         deliveryOrder.append(key)
@@ -2458,9 +2588,14 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
                 waiting[direction] = waiters
             }
             waiter.continuation.resume(returning: stream)
-            return
+            return .accepted
+        }
+        let limit = ceiling(for: direction)
+        guard (queued[direction]?.count ?? 0) < limit else {
+            return .refusedQueueFull(limit: limit)
         }
         queued[direction, default: []].append(stream)
+        return .accepted
     }
 
     /// Removes and returns the oldest queued stream for `direction`.
@@ -2515,6 +2650,11 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         failure = error
         let waitingByDirection = waiting
         waiting.removeAll()
+        // A failed collector can never deliver what it still holds: every later
+        // `next` throws `error` before reaching the queue. Keeping the queued
+        // streams would only pin the peer's stream objects and their buffers for
+        // the remaining life of the connection.
+        queued.removeAll()
         for (_, waiters) in waitingByDirection {
             for waiter in waiters {
                 waiter.continuation.resume(throwing: error)
