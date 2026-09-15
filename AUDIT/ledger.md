@@ -51,3 +51,18 @@ _(one entry per task; fields per §8)_
 | item | reason | options |
 | --- | --- | --- |
 | valgrind (Darwin/arm64) | no arm64 macOS build exists | (1) ASan/LSan+UBSan in a Debian container locally; (2) VPS Linux run for a second host (needs approval per §1b) |
+
+## Round 1 progress (goal round 1/256)
+
+All four S0 findings are fixed and verified: `A-0001` (Swift 6.4 link failure), `F-swift-architecture-01`
+(unbounded capsule buffer), `F-01` (QPACK static table truncated at the RFC wrap), `F-02` (:protocol token),
+`F-03` (stream-table counters). Sixteen of the S1 findings are fixed: the Swift architecture set
+(`F-swift-architecture-02..05`), the Swift line/security set (`F-swift-line-security-01..03`), the Swift
+test/CI set (`F-swift-perf-tests-07/08`, `A-0006`, `F-repo-ops-01`, `A-0004`), and the C99 set
+(`F-04..F-08`, `F-28`). Every fix carries a test that failed before it and passes after, the suites are green
+(Swift 318 tests; C99 97/97 CTest), and the Swift clean build went from 24 warnings to 0 with warnings-as-errors
+enabled. Two follow-on items were filed from the fixes' residual doubt (`F-swift-line-security-04/05`), and
+`F-repo-ops-02` is BLOCKED on VPS approval to re-run the third-party interop matrix now that the C99 client
+sends `webtransport-h3`.
+
+Remaining: 5 S1 (one blocked), 47 S2, 26 S3.
