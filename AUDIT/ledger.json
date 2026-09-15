@@ -260,13 +260,13 @@
       "blocked-reason": ""
     },
     {
-      "id": "F-repo-ops-02",
+      "id": "F-repo-ops-09",
       "severity": "S1",
       "project": "repo-ops",
       "file": "C99/src/http3/driver.c:1252",
       "title": "The C99 client now sends the draft-16 :protocol token, so the third-party interop evidence (7/7 across five implementations) predates the change and must be re-run",
       "category": "test",
-      "status": "START",
+      "status": "BLOCKED",
       "host-used": "local",
       "discovered-by": "F-02 fix",
       "evidence-before": "The interop matrix was produced while the client sent the pre-draft token 'webtransport'; F-02 changed it to 'webtransport-h3'. Four of the five peers implement earlier drafts.",
@@ -274,8 +274,8 @@
       "fix-summary": "",
       "evidence-after": "",
       "commit": "",
-      "notes": "Needs VPS access; per the audit brief the VPS must be requested before provisioning work onto it.",
-      "blocked-reason": ""
+      "notes": "Needs VPS access; per the audit brief the VPS must be requested before provisioning work onto it. Renamed from F-repo-ops-02 to end the collision with the repo-ops examiner's own F-repo-ops-02 (committed build output, fixed as F-repo-ops-02b).",
+      "blocked-reason": "Needs the VPS (root@91.99.176.243) to re-run C99/scripts/run-vps-third-party-interop.sh against the five peers, because the C99 client's :protocol token changed in F-02. The audit brief requires approval before provisioning work onto the VPS, so this is a human decision: (1) approve the VPS run, or (2) accept the pre-change 7/7 evidence with the token change listed as a release note, or (3) run the matrix against the containerised peers only. Until then the interop claim is UNVERIFIED for the changed client."
     },
     {
       "id": "F-swift-architecture-02",
@@ -446,7 +446,7 @@
       "file": "build/",
       "title": "Committed CMake build output at the repository root",
       "category": "deps",
-      "status": "START",
+      "status": "DONE",
       "host-used": "local",
       "discovered-by": "Phase A discovery (\u00a72.1)",
       "evidence-before": "build/ contains .o objects and generated cmake files (build/CMakeFiles/webtransport_static.dir/src/core/*.o, build/webtransport_c99ConfigVersion.cmake).",
@@ -454,7 +454,7 @@
       "fix-summary": "",
       "evidence-after": "",
       "commit": "",
-      "notes": "",
+      "notes": "DUPLICATE: same finding as F-repo-ops-02b (independent discovery in Phase A); the fix is recorded there.",
       "blocked-reason": ""
     },
     {
