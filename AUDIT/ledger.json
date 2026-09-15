@@ -140,14 +140,14 @@
       "file": "C99/src/http3/driver.c:1252",
       "title": "The C99 client has no way to send the pre-draft ':protocol' token, so 4 of the 5 interop peers reject every session (7/7 -> 2/7)",
       "category": "bug",
-      "status": "START",
+      "status": "DONE",
       "host-used": "vps",
       "discovered-by": "F-repo-ops-09 VPS re-run",
       "evidence-before": "VPS matrix with the draft-16 token: 2/7, twice; h3 rejects with H3_MESSAGE_ERROR naming 'webtransport-h3'; pywebtransport/quinn/quiche only accept 'webtransport'; erlang accepts both.",
       "expected": "The client DEFAULTS to draft-16 (correct per draft-ietf-webtrans-http3-16 section 3.2, and what the Swift reference sends) and offers a documented, explicit way to send the pre-draft token for peers that predate the rename -- the same split the Swift library's interop modes implement. The interop runner selects it per peer, and the matrix is re-run to 7/7 with that selection recorded.",
-      "fix-summary": "",
-      "evidence-after": "",
-      "commit": "",
+      "fix-summary": "Added an explicit upgrade-token selection: `--upgrade-token draft16|legacy` on wt-client-c99, a driver/request-policy field with a setter, the value in --help and in the options/proof JSON, an unknown value refused with a specific message, and the flag refused for a listener. The DEFAULT stays draft-16 (`webtransport-h3`). run-vps-third-party-interop.sh now drives the four pre-draft peers (pywebtransport, quinn, quiche, h3) with `legacy` and erlang with `draft16`, naming each peer's rejection evidence in a comment.",
+      "evidence-after": "Local: ctest 97/97 with warnings-as-errors; new tests fail before (driver: 'want 12, got 15'; options: flag unrecognized) and pass after; check-matrix.sh clean. VPS (Debian 13, gcc 14.2.0): rebuilt client, **7 of 7 proofs across 5 implementations, all on attempt 1, in TWO independent runs** (/var/wt-c99-interop/WebTransport-audit/C99/out/vps-interop-f02b-run{1,2}, summary.json allPassed:true); peer logs confirm legacy for pywebtransport/quinn/quiche/h3 and draft16 for erlang.",
+      "commit": "8864f001021432de4a266480d68d52f459db9925",
       "notes": "Do NOT revert the draft-16 default and do not weaken any check.",
       "blocked-reason": ""
     },
@@ -284,7 +284,7 @@
       "file": "C99/src/http3/driver.c:1252",
       "title": "The C99 client now sends the draft-16 :protocol token, so the third-party interop evidence (7/7 across five implementations) predates the change and must be re-run",
       "category": "test",
-      "status": "BLOCKED",
+      "status": "DONE",
       "host-used": "local",
       "discovered-by": "F-02 fix",
       "evidence-before": "The interop matrix was produced while the client sent the pre-draft token 'webtransport'; F-02 changed it to 'webtransport-h3'. Four of the five peers implement earlier drafts.",
@@ -292,7 +292,7 @@
       "fix-summary": "",
       "evidence-after": "",
       "commit": "",
-      "notes": "Needs VPS access; per the audit brief the VPS must be requested before provisioning work onto it. Renamed from F-repo-ops-02 to end the collision with the repo-ops examiner's own F-repo-ops-02 (committed build output, fixed as F-repo-ops-02b).",
+      "notes": "Needs VPS access; per the audit brief the VPS must be requested before provisioning work onto it. Renamed from F-repo-ops-02 to end the collision with the repo-ops examiner's own F-repo-ops-02 (committed build output, fixed as F-repo-ops-02b). The re-run's 2/7 result is what F-02b then fixed; the matrix is 7/7 again with per-peer token selection.",
       "blocked-reason": "Needs the VPS (root@91.99.176.243) to re-run C99/scripts/run-vps-third-party-interop.sh against the five peers, because the C99 client's :protocol token changed in F-02. The audit brief requires approval before provisioning work onto the VPS, so this is a human decision: (1) approve the VPS run, or (2) accept the pre-change 7/7 evidence with the token change listed as a release note, or (3) run the matrix against the containerised peers only. Until then the interop claim is UNVERIFIED for the changed client."
     },
     {
@@ -1556,7 +1556,7 @@
       "blocked-reason": ""
     },
     {
-      "id": "F-repo-ops-09",
+      "id": "F-repo-ops-09b",
       "severity": "S3",
       "project": "repo-ops",
       "file": "C99/README.md:61",
@@ -1570,7 +1570,7 @@
       "fix-summary": "",
       "evidence-after": "VPS re-run executed (user-approved). RESULT: **2 of 7 proofs across 5 implementations** (was 7/7 with the pre-draft token), twice, identical. Four peers REJECT the draft-16 token: h3 logs 'H3_MESSAGE_ERROR - invalid header value \":protocol\" [119,101,98,116,114,97,110,115,112,111,114,116,45,104,51]' (the bytes are 'webtransport-h3'); pywebtransport accepts only b\"webtransport\" (handler.py:402); quinn and quiche fail in web-transport-proto connect.rs:162 ('if protocol != Some(\"webtransport\")'); only erlang-webtransport (wt_h3.erl:211, 'latest' mode) accepts draft-16, which is why its stream+datagram proofs pass. Toolchain: gcc 14.2.0, cmake 3.31.6, ninja 1.12.1, libssl 3.5.7 on Debian 13; proofs under /var/wt-c99-interop/WebTransport-audit/C99/out/vps-interop-audit-run{1,2}/. Conclusion: the draft-16 default is CORRECT and must stay; what is missing is the documented legacy-token mode the Swift reference already has (its chromiumInterop/pywebtransportStreamInterop modes), selected per peer by the runner. Filed as F-02b.",
       "commit": "a217ad1",
-      "notes": "confirmed The audit's own figure (91,713) does not reproduce on any state; the measured count is 64,731 and the README now carries it. The examiner's evidence was itself stale, which is recorded rather than quietly adopted.",
+      "notes": "confirmed The audit's own figure (91,713) does not reproduce on any state; the measured count is 64,731 and the README now carries it. The examiner's evidence was itself stale, which is recorded rather than quietly adopted. Renamed to keep ids unique.",
       "blocked-reason": ""
     },
     {
