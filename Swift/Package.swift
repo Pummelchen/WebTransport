@@ -217,7 +217,10 @@ let package = Package(
             name: "WebTransportHTTP3CoreTests",
             dependencies: [
                 "WebTransportHTTP3Core",
-                "WebTransportQUICCore"
+                "WebTransportQUICCore",
+                // Kept identical to the root manifest; Swift/check-manifest-sync.sh fails the build
+                // when a shared target's dependencies diverge between the two.
+                "WebTransportTLSCore"
             ],
             swiftSettings: strictSwiftSettings
         )
