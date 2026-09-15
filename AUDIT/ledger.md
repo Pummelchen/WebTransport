@@ -22,6 +22,10 @@ Base commit: `196324e` (main). Branch: `audit/2026-09-15`.
 | A-0004 | S1 | swift | Baseline warning count (earlier figure withdrawn as a misread); warnings-as-errors per §1 | START |
 | A-0006 | S1 | swift | No check that target imports are covered by declared dependencies (A-0001 class) | START |
 | F-swift-architecture-01 | S0 | swift | Unbounded peer-controlled CONNECT-stream capsule buffer | AUDIT (fix 81043ae) |
+| F-01 | S0 | c99 | QPACK static table truncated at the RFC line wrap; --check could not catch it | AUDIT (fix 03c65f0) |
+| F-02 | S0 | c99 | :protocol token constants identical, so webtransport-h3 neither sent nor accepted | AUDIT (fix 448190e) |
+| F-03 | S0 | c99 | Stream-table reclaim decremented the ID-issuing counters | AUDIT (fix 8946cfd) |
+| F-repo-ops-02 | S1 | c99 | Interop matrix must be re-run now that the client sends webtransport-h3 | BLOCKED (needs VPS approval) |
 | A-0007 | S3 | swift | Manifests not swift-format clean; CI format gate excludes them | START |
 | A-0005 | S3 | swift | `swift-tools-version: 6.3` vs mandated Swift 6.4 | START |
 
