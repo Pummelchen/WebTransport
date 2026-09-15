@@ -130,13 +130,22 @@ destination, which clang accepts and mingw's GCC refuses (`apps/wt-conformance-c
 is a check nobody has tested; this one is on its second real find.
 
 **The tree RUNS for Windows, under Wine.** `scripts/check-windows-wine.sh` executes every linked test binary
-through Wine and reports the aggregate. On the VPS, in an `ubuntu:24.04` container with the mingw cross-build:
-**85 test executables ran, 85 passed, 0 failed, 0 hung; the runner sums the per-binary check counts and
-reports 91,674 checks.** That is the
+through Wine and reports the aggregate. On the VPS, with the mingw cross-build: **85 test executables ran, 85
+passed, 0 failed, 0 hung; the runner sums the per-binary check counts and reports 64,900 checks.** (The same
+runner reports 64,778 checks over 84 programs natively on Debian 13; the difference is the Windows-only datagram
+test plus the per-platform counts a few tests assert.) That is the
 claim the section above could not make — "linked, not run" — and it is the first time this tree has executed on
 a Windows target at all. The count moved twice since the first Wine run, and both moves are the point of the
 paragraphs below: **84 → 85** because a new Windows-only test now measures the datagram layer directly, and
 **82 of 84 passing → 85 of 85** because running the tree found real defects.
+
+> **Correction (2026-09-16, `F-repo-ops-22`).** This paragraph previously read "reports 91,674 checks". That
+> number was never one the runner produced: the summing was added with a `$`-anchored pattern, Wine writes the
+> Windows binary's stdout as CRLF, so the pattern matched nothing and the runner printed **0 checks** while also
+> printing "85 executable(s) printed no check total (a hang or a load failure)". Measured at the commit that
+> introduced the summing (`a2d995e`: `ran 85 ... 0 checks`) and on the merged tree. The pattern now reads through
+> `tr -d '\r'`, a missing total fails the run instead of being counted, and the numbers above are the measured
+> ones. Nothing else in this section changes.
 
 **And running it found three defects that linking could not.** They are the whole reason a runner is worth
 having, and all three are fixed and re-measured rather than recorded:

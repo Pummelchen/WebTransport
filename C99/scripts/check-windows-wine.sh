@@ -94,11 +94,20 @@ failed=0
 hung=0
 total=0
 # The per-binary check total is the LAST line a test binary prints -- "<name>: all N checks passed", or
-# "<name>: M of N checks FAILED" -- and summing it here is what makes "91,674 checks" a number this runner
+# "<name>: M of N checks FAILED" -- and summing it here is what makes the aggregate a number this runner
 # produces rather than one a reader adds up by hand from a scrollback. A binary whose output has no such line
-# (a hang, a load failure) is counted separately rather than silently contributing zero.
+# (a hang, a load failure) is counted separately, named, and FAILS the run rather than silently contributing
+# zero.
+#
+# The output is read through `tr -d '\r'` because the binary is a WINDOWS one: its C runtime writes text-mode
+# stdout as CRLF, so a line ends `passed\r\n` and an anchored `passed$` matches NOTHING. That is exactly what
+# happened -- the summing was added with the anchor (F-21) and then reported "0 checks" for all 85 executables
+# on a Linux host while claiming they were all fine, which is a false pass of the same shape F-25 closed one
+# level down. The carriage return is stripped once here rather than being tolerated in the pattern, so the
+# pattern keeps saying what the harness actually prints.
 checks_total=0
 checks_unknown=0
+checks_unknown_names=""
 
 for exe in "$build_dir"/tests/test_*.exe; do
   [ -f "$exe" ] || continue
@@ -119,12 +128,13 @@ for exe in "$build_dir"/tests/test_*.exe; do
     echo "windows wine: $name FAILED (exit $status)"
     tail -3 "/tmp/wt-wine-$name.out" | sed 's/^/               /'
   fi
-  summary="$(grep -E ': (all [0-9]+ checks passed|[0-9]+ of [0-9]+ checks FAILED)$' \
-             "/tmp/wt-wine-$name.out" | tail -1 || true)"
+  summary="$(tr -d '\r' < "/tmp/wt-wine-$name.out" \
+             | grep -E ': (all [0-9]+ checks passed|[0-9]+ of [0-9]+ checks FAILED)$' | tail -1 || true)"
   if [ -n "$summary" ]; then
     checks_total=$((checks_total + $(printf '%s\n' "$summary" | grep -oE '[0-9]+' | tail -1)))
   else
     checks_unknown=$((checks_unknown + 1))
+    checks_unknown_names="$checks_unknown_names $name"
   fi
 done
 
@@ -135,6 +145,9 @@ fi
 
 echo "windows wine: ran $total test executable(s) -- $passed passed, $failed failed, $hung hung, $checks_total checks"
 if [ "$checks_unknown" -ne 0 ]; then
-  echo "windows wine: $checks_unknown executable(s) printed no check total (a hang or a load failure)"
+  # FAIL, not warn: an executable that exits 0 without printing a total is either not the harness this runner
+  # thinks it ran or a binary whose output was lost, and "it passed" would be a claim nothing checked. The names
+  # are printed because a count alone cannot be acted on.
+  echo "windows wine: $checks_unknown executable(s) printed no check total:$checks_unknown_names" >&2
 fi
-[ "$failed" -eq 0 ] && [ "$hung" -eq 0 ]
+[ "$failed" -eq 0 ] && [ "$hung" -eq 0 ] && [ "$checks_unknown" -eq 0 ]
