@@ -447,8 +447,13 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
         maximumBytes: Int = 64 * 1024,
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
     ) async throws -> Data {
-        if let initialPayload = await state.consumeInitialPayload(), !initialPayload.isEmpty {
-            if let manager {
+        // A stream accepted from the wire carries the prefix-stripped remainder of
+        // its first chunk. That buffer is served first, and it is a read like any
+        // other: it must return at most `maximumBytes` and keep the unread
+        // remainder for the next call, or the bound the caller asked for is only
+        // honoured on the network path.
+        if let initialPayload = await state.consumeInitialPayload(maximumBytes: maximumBytes) {
+            if !initialPayload.isEmpty, let manager {
                 _ = await manager.withManager { manager in
                     manager.popStreamPayload(streamID: self.streamID)
                 }
@@ -923,10 +928,19 @@ private actor WebTransportNetworkStreamState {
         return value
     }
 
-    func consumeInitialPayload() -> Data? {
-        let value = initialPayload
-        initialPayload = nil
-        return value
+    func consumeInitialPayload(maximumBytes: Int) -> Data? {
+        guard let buffered = initialPayload, !buffered.isEmpty else {
+            return nil
+        }
+        let limit = max(0, maximumBytes)
+        guard buffered.count > limit else {
+            initialPayload = nil
+            return buffered
+        }
+        let returned = Data(buffered.prefix(limit))
+        let remainder = Data(buffered.dropFirst(limit))
+        initialPayload = remainder.isEmpty ? nil : remainder
+        return returned
     }
 }
 
