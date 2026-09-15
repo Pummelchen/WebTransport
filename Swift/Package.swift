@@ -171,12 +171,24 @@ let package = Package(
         ),
         .testTarget(
             name: "WebTransportTests",
-            dependencies: ["WebTransport"],
+            dependencies: [
+                "WebTransport",
+                "WebTransportHTTP3Core",
+                "WebTransportNetworkRuntime",
+                "WebTransportQUICCore"
+            ],
             swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportNetworkRuntimeTests",
-            dependencies: ["WebTransportNetworkRuntime"],
+            dependencies: [
+                "WebTransportNetworkRuntime",
+                "WebTransportCryptoApple",
+                "WebTransportHTTP3Core",
+                "WebTransportQUICCore",
+                "WebTransportTLSCore",
+                "WebTransportUDPApple"
+            ],
             resources: [
                 .copy("Resources/README.md"),
                 .copy("Resources/libressl-explicit-curve-identity.p12"),
@@ -217,7 +229,8 @@ let package = Package(
             name: "WebTransportHTTP3CoreTests",
             dependencies: [
                 "WebTransportHTTP3Core",
-                "WebTransportQUICCore"
+                "WebTransportQUICCore",
+                "WebTransportTLSCore"
             ],
             swiftSettings: strictSwiftSettings
         )

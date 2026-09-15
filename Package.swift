@@ -145,13 +145,25 @@ let package = Package(
         ),
         .testTarget(
             name: "WebTransportTests",
-            dependencies: ["WebTransport"],
+            dependencies: [
+                "WebTransport",
+                "WebTransportHTTP3Core",
+                "WebTransportNetworkRuntime",
+                "WebTransportQUICCore"
+            ],
             path: "Swift/Tests/WebTransportTests",
             swiftSettings: strictSwiftSettings
         ),
         .testTarget(
             name: "WebTransportNetworkRuntimeTests",
-            dependencies: ["WebTransportNetworkRuntime"],
+            dependencies: [
+                "WebTransportNetworkRuntime",
+                "WebTransportCryptoApple",
+                "WebTransportHTTP3Core",
+                "WebTransportQUICCore",
+                "WebTransportTLSCore",
+                "WebTransportUDPApple"
+            ],
             path: "Swift/Tests/WebTransportNetworkRuntimeTests",
             resources: [
                 .copy("Resources/README.md"),
@@ -197,7 +209,8 @@ let package = Package(
             name: "WebTransportHTTP3CoreTests",
             dependencies: [
                 "WebTransportHTTP3Core",
-                "WebTransportQUICCore"
+                "WebTransportQUICCore",
+                "WebTransportTLSCore"
             ],
             path: "Swift/Tests/WebTransportHTTP3CoreTests",
             swiftSettings: strictSwiftSettings
