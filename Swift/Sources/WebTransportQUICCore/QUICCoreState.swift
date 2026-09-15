@@ -10,6 +10,12 @@ public enum QUICStateError: Error, Equatable, CustomStringConvertible, Sendable 
     case invalidAckFrame
     case flowControlViolation(limit: UInt64, attempted: UInt64)
     case streamStateViolation(String)
+    /// A final-size rule was broken (RFC 9000 section 4.5).
+    ///
+    /// Kept separate from ``streamStateViolation(_:)`` so the FINAL_SIZE_ERROR
+    /// versus STREAM_STATE_ERROR choice is made on the error case rather than on
+    /// the wording of a message.
+    case finalSizeViolation(String)
     case datagramTooLarge(limit: Int, attempted: Int)
     case connectionClosed
     case idleTimeout
@@ -34,6 +40,8 @@ public enum QUICStateError: Error, Equatable, CustomStringConvertible, Sendable 
             "flow control violation: attempted \(attempted), limit \(limit)"
         case .streamStateViolation(let message):
             "stream state violation: \(message)"
+        case .finalSizeViolation(let message):
+            "final size violation: \(message)"
         case .datagramTooLarge(let limit, let attempted):
             "datagram too large: attempted \(attempted), limit \(limit)"
         case .connectionClosed:
@@ -681,10 +689,10 @@ public struct QUICStreamState: Equatable, Sendable {
             // never observe a non-nil `finalReceiveSize`.
             if let finalReceiveSize {
                 guard !receiveOverflow, attempted <= finalReceiveSize else {
-                    throw QUICStateError.streamStateViolation("STREAM data exceeds final size")
+                    throw QUICStateError.finalSizeViolation("STREAM data exceeds final size")
                 }
                 if fin, attempted != finalReceiveSize {
-                    throw QUICStateError.streamStateViolation("inconsistent final stream size")
+                    throw QUICStateError.finalSizeViolation("inconsistent final stream size")
                 }
             }
 
@@ -723,11 +731,11 @@ public struct QUICStreamState: Equatable, Sendable {
                 "cannot receive on locally initiated unidirectional stream")
         }
         guard finalSize >= receiveOffset else {
-            throw QUICStateError.streamStateViolation(
+            throw QUICStateError.finalSizeViolation(
                 "RESET_STREAM final size is below the bytes already received")
         }
         if let finalReceiveSize, finalReceiveSize != finalSize {
-            throw QUICStateError.streamStateViolation("inconsistent final stream size")
+            throw QUICStateError.finalSizeViolation("inconsistent final stream size")
         }
         finalReceiveSize = finalSize
         receiveClosed = true

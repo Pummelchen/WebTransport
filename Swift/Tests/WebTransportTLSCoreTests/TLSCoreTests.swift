@@ -665,8 +665,37 @@ func tlsQUICConnectionStateMapsApplicationCloseAndFinalSizeErrors() throws {
             == .connectionClose(
                 errorCode: QUICTransportErrorCode.finalSizeError.rawValue,
                 frameType: nil,
-                reason: Data("stream state violation: STREAM data exceeds final size".utf8)
+                reason: Data("final size violation: STREAM data exceeds final size".utf8)
             ))
+}
+
+/// F-swift-line-security-11: the FINAL_SIZE_ERROR versus STREAM_STATE_ERROR choice
+/// was made by `message.contains("final size")`, so a wording change silently
+/// reclassified a wire-visible connection error. The violation has to be its own
+/// error case, matched structurally.
+@Test
+func finalSizeFailuresUseTheirOwnErrorCaseRatherThanAMessageMatch() throws {
+    var state = TLSQUICConnectionState(role: .server)
+    try state.openStream(id: 0, maxSendOffset: 1_024, maxReceiveOffset: 1_024)
+    _ = try state.receiveStreamFrame(.stream(id: 0, offset: 0, fin: true, data: Data([0x01, 0x02])))
+
+    do {
+        _ = try state.receiveStreamFrame(.stream(id: 0, offset: 2, fin: false, data: Data([0x03])))
+        Issue.record("a STREAM frame past the final size must be refused")
+    } catch let error as QUICStateError {
+        if case .streamStateViolation = error {
+            Issue.record(
+                "the final-size failure is a generic stream-state violation, so the FINAL_SIZE_ERROR mapping still depends on the message text"
+            )
+        }
+    }
+
+    #expect(state.phase == .closed)
+    guard case .connectionClose(let errorCode, _, _) = state.closeState.closeFrame else {
+        Issue.record("expected a transport connection close frame")
+        return
+    }
+    #expect(errorCode == QUICTransportErrorCode.finalSizeError.rawValue)
 }
 
 private enum PromptFreeCertificateFixture {

@@ -501,11 +501,11 @@ func streamStateEnforcesARecordedFinalSize() throws {
 
     // A STREAM frame past the recorded final size is FINAL_SIZE_ERROR even
     // though the receive half is already closed.
-    #expect(throws: QUICStateError.streamStateViolation("STREAM data exceeds final size")) {
+    #expect(throws: QUICStateError.finalSizeViolation("STREAM data exceeds final size")) {
         _ = try stream.receive(.stream(id: 0, offset: 5, fin: false, data: Data("x".utf8)))
     }
     // A FIN whose size disagrees with the recorded final size is FINAL_SIZE_ERROR.
-    #expect(throws: QUICStateError.streamStateViolation("inconsistent final stream size")) {
+    #expect(throws: QUICStateError.finalSizeViolation("inconsistent final stream size")) {
         _ = try stream.receive(.stream(id: 0, offset: 0, fin: true, data: Data("hi".utf8)))
     }
 }
@@ -530,11 +530,11 @@ func streamStateRecordsFinalSizeFromResetStream() throws {
     #expect(stream.receiveClosed)
 
     // The reset's final size now bounds later STREAM frames.
-    #expect(throws: QUICStateError.streamStateViolation("STREAM data exceeds final size")) {
+    #expect(throws: QUICStateError.finalSizeViolation("STREAM data exceeds final size")) {
         _ = try stream.receive(.stream(id: 0, offset: 5, fin: false, data: Data("x".utf8)))
     }
     // A second RESET_STREAM that changes the final size is FINAL_SIZE_ERROR.
-    #expect(throws: QUICStateError.streamStateViolation("inconsistent final stream size")) {
+    #expect(throws: QUICStateError.finalSizeViolation("inconsistent final stream size")) {
         _ = try stream.receive(.resetStream(id: 0, applicationErrorCode: 0x10, finalSize: 9))
     }
 
@@ -547,7 +547,7 @@ func streamStateRecordsFinalSizeFromResetStream() throws {
     )
     _ = try short.receive(.stream(id: 0, offset: 0, fin: false, data: Data("hello".utf8)))
     #expect(
-        throws: QUICStateError.streamStateViolation(
+        throws: QUICStateError.finalSizeViolation(
             "RESET_STREAM final size is below the bytes already received")
     ) {
         _ = try short.receive(.resetStream(id: 0, applicationErrorCode: 0x10, finalSize: 3))
