@@ -45,7 +45,7 @@ an independent implementation (`pywebtransport`/`aioquic`) in a container -- the
 container, `C99/scripts/run-vps-third-party-interop.sh` completes all seven Phase 11 proofs against
 **five independent implementations** on a routable host with `--trust system`, so the certificate
 chain is validated against the platform trust store and the name is checked rather than bypassed.
-84 test programs and 91,552 checks pass (plus a 200,000-input parser fuzz run and a Clang Static
+84 test programs and 64,731 checks pass (plus a 200,000-input parser fuzz run and a Clang Static
 Analyzer pass over all 94 sources), and every suite runs again under AddressSanitizer and
 UndefinedBehaviorSanitizer, on macOS and Linux in CI: **97 CTest tests pass on macOS 26 and
 Ubuntu 24.04** (the workflow's two `ubuntu-24.04` legs). The tree also compiles, links and
