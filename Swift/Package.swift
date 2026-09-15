@@ -238,6 +238,16 @@ let package = Package(
                 "WebTransportTLSCore",
             ],
             swiftSettings: strictSwiftSettings
+        ),
+        // F-swift-line-security-10: `WebTransportTestSupport` is declared only by
+        // this manifest (the root manifest deliberately excludes the shared test
+        // support), so a test for it can only live in this package too.
+        .testTarget(
+            name: "WebTransportTestSupportTests",
+            dependencies: [
+                "WebTransportTestSupport"
+            ],
+            swiftSettings: strictSwiftSettings
         )
     ],
     swiftLanguageModes: [

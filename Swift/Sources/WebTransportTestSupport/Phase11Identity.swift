@@ -3,7 +3,7 @@ import CryptoKit
 import Security
 import WebTransportTLSCore
 
-public enum Phase11IdentityError: Error, CustomStringConvertible {
+public enum Phase11IdentityError: Error, Equatable, CustomStringConvertible {
     case invalidArgument(String)
 
     public var description: String {
@@ -94,9 +94,10 @@ public enum Phase11IdentitySupport {
             return kSecAttrKeyTypeRSA
         case "ec", "ecsecprimerandom", "prime", "p256":
             return kSecAttrKeyTypeECSECPrimeRandom
-        case "ed25519":
-            return kSecAttrKeyTypeECSECPrimeRandom
         default:
+            // "ed25519" is deliberately not a case: this platform cannot build an
+            // Ed25519 SecKey from raw data, and mapping the name to the EC-prime
+            // type silently mislabels the key instead of refusing it.
             throw Phase11IdentityError.invalidArgument("unsupported key type: \(value)")
         }
     }
