@@ -196,6 +196,7 @@ let package = Package(
             dependencies: [
                 "WebTransportCryptoApple",
                 "WebTransportTLSCore",
+                "WebTransportQUICCore",
             ],
             path: "Swift/Tests/WebTransportCryptoAppleTests",
             swiftSettings: strictSwiftSettings

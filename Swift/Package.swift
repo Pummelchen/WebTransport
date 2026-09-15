@@ -218,6 +218,7 @@ let package = Package(
             dependencies: [
                 "WebTransportCryptoApple",
                 "WebTransportTLSCore",
+                "WebTransportQUICCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
