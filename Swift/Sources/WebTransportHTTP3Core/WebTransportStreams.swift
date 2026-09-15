@@ -183,6 +183,25 @@ public struct WebTransportStreamState: Equatable, Sendable {
         return first
     }
 
+    /// Whether this endpoint owns the stream's send half (RFC 9000 section 2.1).
+    ///
+    /// A bulk teardown has to consult this before producing a RESET_STREAM: for
+    /// a unidirectional stream the peer initiated, this endpoint is the receiver
+    /// only, and a RESET_STREAM on a send-only stream is a STREAM_STATE_ERROR
+    /// (RFC 9000 section 19.4).
+    public var hasSendHalf: Bool {
+        quicStream.hasSendHalf
+    }
+
+    /// Whether this endpoint owns the stream's receive half (RFC 9000 section 2.1).
+    ///
+    /// The mirror of ``hasSendHalf``, guarding STOP_SENDING: RFC 9000 section
+    /// 19.5 makes a STOP_SENDING frame for a receive-only stream a
+    /// STREAM_STATE_ERROR.
+    public var hasReceiveHalf: Bool {
+        quicStream.hasReceiveHalf
+    }
+
     public mutating func reset(applicationErrorCode: UInt64) -> QUICFrame {
         _ = quicStream.reset(applicationErrorCode: applicationErrorCode)
         return .resetStreamAt(

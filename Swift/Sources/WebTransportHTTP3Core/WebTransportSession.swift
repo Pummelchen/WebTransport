@@ -1424,6 +1424,20 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         return terminationActions
     }
 
+    /// Resets and stops the streams associated with a session that is ending.
+    ///
+    /// Each frame is produced only for a half this endpoint owns (RFC 9000
+    /// section 2.1): a RESET_STREAM for a stream whose send half is ours and a
+    /// STOP_SENDING for one whose receive half is ours. A bidirectional stream
+    /// owns both; a unidirectional stream owns exactly the direction its
+    /// initiator gave it. Emitting the other frame is not merely useless — RFC
+    /// 9000 section 19.4 makes RESET_STREAM on a send-only stream a
+    /// STREAM_STATE_ERROR and section 19.5 makes STOP_SENDING on a receive-only
+    /// stream the same, so the peer would close the connection while this
+    /// endpoint is trying to end the session cleanly. A teardown reaches both
+    /// shapes because ``openUnidirectionalStream`` registers locally initiated
+    /// streams and ``acceptUnidirectionalStreamWithActions`` registers
+    /// peer-initiated ones.
     private mutating func terminateAssociatedStreams(
         for sessionID: WebTransportSessionID,
         requestStreamID: UInt64
@@ -1437,8 +1451,12 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             guard var stream = streamsByID[streamID] else {
                 continue
             }
-            streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
-            streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            if stream.hasSendHalf {
+                streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
+            }
+            if stream.hasReceiveHalf {
+                streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            }
             closedStreamSessionIDsByStreamID[streamID] = sessionID
             recordClosedStream(streamID)
             streamsByID.removeValue(forKey: streamID)
@@ -1449,8 +1467,12 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             guard var stream = bufferedStreamsByID[streamID] else {
                 continue
             }
-            streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
-            streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            if stream.hasSendHalf {
+                streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
+            }
+            if stream.hasReceiveHalf {
+                streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            }
             closedStreamSessionIDsByStreamID[streamID] = sessionID
             recordClosedStream(streamID)
             bufferedStreamsByID.removeValue(forKey: streamID)

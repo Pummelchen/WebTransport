@@ -183,6 +183,68 @@ func webTransportStreamResetAndStopSendingEmitFrames() throws {
             ))
 }
 
+/// Session teardown may only signal the stream halves this endpoint owns.
+///
+/// RFC 9000 section 19.4 makes a RESET_STREAM frame for a send-only stream a
+/// STREAM_STATE_ERROR, and section 19.5 makes a STOP_SENDING frame for a
+/// receive-only stream the same, so emitting both for every associated stream
+/// lets the peer kill the connection on the path whose whole purpose is to end
+/// the session cleanly. The associated set holds both peer-initiated
+/// unidirectional streams (receive-only here) and locally initiated ones
+/// (send-only here), which is exactly the pair a bulk teardown gets wrong.
+@Test
+func webTransportSessionTeardownSignalsOnlyTheHalvesThisEndpointOwns() throws {
+    var pair = try WebTransportStreamTestSupport.makeReadyManagers()
+    let requestFrame = try pair.client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(
+            authority: "example.com",
+            path: "/wt",
+            availableProtocols: []
+        )
+    )
+    let decision = try pair.server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: requestFrame,
+        policy: try WebTransportServerSessionPolicy()
+    )
+    _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
+
+    let session = pair.server.session(forRequestStreamID: 0)!
+
+    // Bidirectional: the server owns both halves, so both frames belong.
+    let bidirectionalPrefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: session.id)
+    _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: bidirectionalPrefix)
+
+    // Peer-initiated unidirectional: the server owns the receive half only, so
+    // it may STOP_SENDING but must never RESET_STREAM.
+    let peerUnidirectionalPrefix = try pair.client.openUnidirectionalStream(streamID: 6, sessionID: session.id)
+    _ = try pair.server.acceptUnidirectionalStream(streamID: 6, firstBytes: peerUnidirectionalPrefix)
+
+    // Locally initiated unidirectional: the server owns the send half only, so
+    // it may RESET_STREAM but must never STOP_SENDING.
+    let localUnidirectionalPrefix = try pair.server.openUnidirectionalStream(streamID: 7, sessionID: session.id)
+    _ = try pair.client.acceptUnidirectionalStream(streamID: 7, firstBytes: localUnidirectionalPrefix)
+
+    let close = try pair.server.makeCloseSessionCapsuleResult(
+        sessionID: session.id,
+        applicationErrorCode: 9,
+        message: "bye"
+    )
+
+    let resetStreamIDs = close.terminationActions.streamResetFrames.compactMap { frame -> UInt64? in
+        guard case .resetStreamAt(let id, _, _, _) = frame else { return nil }
+        return id
+    }
+    let stopSendingStreamIDs = close.terminationActions.streamStopSendingFrames.compactMap { frame -> UInt64? in
+        guard case .stopSending(let id, _) = frame else { return nil }
+        return id
+    }
+
+    #expect(resetStreamIDs == [4, 7])
+    #expect(stopSendingStreamIDs == [4, 6])
+}
+
 @Test
 func webTransportStreamOpenRejectsUnknownSession() throws {
     var pair = try WebTransportStreamTestSupport.makeReadyManagers()

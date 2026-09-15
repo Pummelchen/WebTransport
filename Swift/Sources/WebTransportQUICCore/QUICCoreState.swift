@@ -715,11 +715,32 @@ public struct QUICStreamState: Equatable, Sendable {
         return .stopSending(id: id, applicationErrorCode: applicationErrorCode)
     }
 
+    /// Whether this endpoint owns the stream's send half.
+    ///
+    /// RFC 9000 section 2.1: a bidirectional stream is owned in both
+    /// directions by both endpoints, while a unidirectional stream is owned in
+    /// its single direction by the endpoint that initiated it. Callers use this
+    /// to decide whether a send-side signal (STREAM data, RESET_STREAM) may be
+    /// produced at all, which is a different question from whether the send
+    /// side is still open.
+    public var hasSendHalf: Bool {
+        direction == .bidirectional || localRole == endpointRole(for: initiator)
+    }
+
+    /// Whether this endpoint owns the stream's receive half.
+    ///
+    /// The mirror of ``hasSendHalf``: a unidirectional stream whose peer is the
+    /// initiator can only be received from, so a receive-side signal
+    /// (STOP_SENDING) must not be produced for the other form.
+    public var hasReceiveHalf: Bool {
+        direction == .bidirectional || localRole != endpointRole(for: initiator)
+    }
+
     private func ensureCanSend() throws {
         guard !sendClosed && !resetSent else {
             throw QUICStateError.streamStateViolation("send side is closed")
         }
-        if direction == .unidirectional && localRole != endpointRole(for: initiator) {
+        guard hasSendHalf else {
             throw QUICStateError.streamStateViolation("cannot send on peer-initiated unidirectional stream")
         }
     }
@@ -728,7 +749,7 @@ public struct QUICStreamState: Equatable, Sendable {
         guard !receiveClosed && !stopSendingSent else {
             throw QUICStateError.streamStateViolation("receive side is closed")
         }
-        if direction == .unidirectional && localRole == endpointRole(for: initiator) {
+        guard hasReceiveHalf else {
             throw QUICStateError.streamStateViolation("cannot receive on locally initiated unidirectional stream")
         }
     }
