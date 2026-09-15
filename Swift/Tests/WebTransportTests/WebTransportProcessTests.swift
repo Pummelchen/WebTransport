@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Testing
+import WebTransportLoopbackTestSupport
 
 // MARK: - Help and Scenario Selection
 
@@ -686,7 +687,7 @@ enum WebTransportProcessSupport {
         label: String = #function,
         _ body: () async throws -> T
     ) async throws -> T {
-        try await WebTransportLoopbackProcessGate.withLock(label: label, body)
+        try await WebTransportLoopbackTestLock.withLockAsync(label: label) { try await body() }
     }
 
     static func debugProductsAvailable() throws -> Bool {
@@ -938,80 +939,6 @@ enum WebTransportProcessSupport {
         try data.write(to: directory.appendingPathComponent("latest.json"))
         try result.stdout.write(to: directory.appendingPathComponent("latest.stdout"), atomically: true, encoding: .utf8)
         try result.stderr.write(to: directory.appendingPathComponent("latest.stderr"), atomically: true, encoding: .utf8)
-    }
-}
-
-private enum WebTransportLoopbackProcessGate {
-    private static let lockPath = "/tmp/webtransport-loopback-tests.dirlock"
-    private static let ownerFile = "owner.txt"
-    private static let maximumWait: TimeInterval = 180
-
-    static func withLock<T>(label: String, _ body: () throws -> T) throws -> T {
-        try acquireBlocking(label: label)
-        defer {
-            release()
-        }
-        return try body()
-    }
-
-    static func withLock<T>(label: String, _ body: () async throws -> T) async throws -> T {
-        try await acquireAsync(label: label)
-        defer {
-            release()
-        }
-        return try await body()
-    }
-
-    private static func acquireAsync(label: String) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try acquireBlocking(label: label)
-                    continuation.resume()
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
-    private static func acquireBlocking(label: String) throws {
-        let deadline = Date().addingTimeInterval(maximumWait)
-        while true {
-            // SAFETY: Swift supplies a temporary NUL-terminated representation
-            // of this immutable path for the synchronous POSIX call.
-            if unsafe Darwin.mkdir(lockPath, S_IRWXU) == 0 {
-                try writeOwner(label)
-                return
-            }
-            guard errno == EEXIST else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-            if Date() >= deadline {
-                throw ProcessTestError.timeout("loopback-lock", [readOwner()])
-            }
-            usleep(10_000)
-        }
-    }
-
-    private static func writeOwner(_ label: String) throws {
-        let owner = "\(label) pid=\(getpid())"
-        try owner.write(
-            toFile: "\(lockPath)/\(ownerFile)",
-            atomically: true,
-            encoding: .utf8
-        )
-    }
-
-    private static func readOwner() -> String {
-        (try? String(contentsOfFile: "\(lockPath)/\(ownerFile)", encoding: .utf8)) ?? "unknown owner"
-    }
-
-    private static func release() {
-        // SAFETY: Swift supplies temporary NUL-terminated representations of
-        // both immutable paths for these synchronous POSIX calls.
-        _ = unsafe Darwin.unlink("\(lockPath)/\(ownerFile)")
-        _ = unsafe Darwin.rmdir(lockPath)
     }
 }
 

@@ -133,6 +133,14 @@ let package = Package(
             ],
             swiftSettings: strictSwiftSettings
         ),
+        // F-swift-perf-tests-10: the loopback tests in both test targets serialise
+        // across processes, so they share one lock implementation instead of each
+        // carrying a copy.
+        .target(
+            name: "WebTransportLoopbackTestSupport",
+            path: "Tests/WebTransportLoopbackTestSupport",
+            swiftSettings: strictSwiftSettings
+        ),
         .executableTarget(
             name: "WebTransportClient",
             dependencies: [
@@ -178,6 +186,7 @@ let package = Package(
             dependencies: [
                 "WebTransport",
                 "WebTransportHTTP3Core",
+                "WebTransportLoopbackTestSupport",
                 "WebTransportNetworkRuntime",
                 "WebTransportQUICCore",
             ],
@@ -189,6 +198,7 @@ let package = Package(
                 "WebTransportNetworkRuntime",
                 "WebTransportCryptoApple",
                 "WebTransportHTTP3Core",
+                "WebTransportLoopbackTestSupport",
                 "WebTransportQUICCore",
                 "WebTransportTLSCore",
                 "WebTransportUDPApple",
