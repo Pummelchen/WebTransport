@@ -6,7 +6,120 @@
     "protocol": "pre-production audit (Phases A-E, \u00a70-\u00a712)",
     "note": "The standing project instruction said to commit to main; this audit's protocol forbids it and takes precedence. All audit work stays on audit/2026-09-15 and reaches main only by PR after Phase E."
   },
-  "tasks": [],
-  "baseline": {},
-  "blocked": []
+  "tasks": [
+    {
+      "id": "A-0001",
+      "severity": "S0",
+      "project": "swift:WebTransportHTTP3CoreTests",
+      "file": "Swift/Package.swift:217, Package.swift:196",
+      "title": "Swift test bundle fails to LINK on Swift 6.4: the test target uses WebTransportTLSCore without declaring it",
+      "category": "bug",
+      "status": "START",
+      "host-used": "local",
+      "discovered-by": "Phase A baseline (swift build --build-tests)",
+      "evidence-before": "`swift build --build-tests` exit 1; `Undefined symbols for architecture arm64`: TLSExtension.decodeList, TLSCertificate.decode, TLSClientHello.decode, TLSServerHello.decode, TLSHandshakeMessage.decodeAll, TLSCertificateVerify.decode, referenced from PeerInputFuzzTests.o. Same failure from Swift/Package.swift. No test result exists on Swift 6.4.",
+      "expected": "Every test target declares every module it imports, both manifests agree, and `swift build --build-tests`/`swift test` succeed on Swift 6.4 with warnings-as-errors per \u00a71.",
+      "fix-summary": "",
+      "evidence-after": "",
+      "commit": "",
+      "notes": "Also survey all test targets' imports vs dependencies (WebTransportNetworkRuntimeTests, WebTransportCryptoAppleTests import WebTransportTLSCore). Fix both manifests together; add a CI check that the two manifests cannot diverge.",
+      "blocked-reason": ""
+    },
+    {
+      "id": "A-0002",
+      "severity": "S2",
+      "project": "repo",
+      "file": "build/",
+      "title": "Committed CMake build output at the repository root",
+      "category": "deps",
+      "status": "START",
+      "host-used": "local",
+      "discovered-by": "Phase A discovery (\u00a72.1)",
+      "evidence-before": "build/ contains .o objects and generated cmake files (build/CMakeFiles/webtransport_static.dir/src/core/*.o, build/webtransport_c99ConfigVersion.cmake).",
+      "expected": "No build output is tracked; .gitignore covers out/ and build/; git history retains what was committed (removal is a `git rm -r --cached` task, not a history rewrite).",
+      "fix-summary": "",
+      "evidence-after": "",
+      "commit": "",
+      "notes": "",
+      "blocked-reason": ""
+    },
+    {
+      "id": "A-0003",
+      "severity": "S2",
+      "project": "swift:packaging",
+      "file": "Package.swift, Swift/Package.swift",
+      "title": "Two Swift manifests with different package names and target counts (18 vs 21)",
+      "category": "deps",
+      "status": "START",
+      "host-used": "local",
+      "discovered-by": "Phase A discovery",
+      "evidence-before": "/Package.swift name=WebTransport, 18 targets; /Swift/Package.swift name=WebTransportSwift, 21 targets. `.strictMemorySafety()` appears in the root manifest's settings; the Swift/ manifest's settings must be compared field by field.",
+      "expected": "The two manifests agree on targets, products, dependencies and settings, and CI fails if they diverge (swift-ci.yml claims such a check \u2014 verify it actually compares them).",
+      "fix-summary": "",
+      "evidence-after": "",
+      "commit": "",
+      "notes": "",
+      "blocked-reason": ""
+    },
+    {
+      "id": "A-0004",
+      "severity": "S1",
+      "project": "swift:all",
+      "file": "Swift/Sources/WebTransportUDPApple/QUICUDPPort.swift (+2)",
+      "title": "25 Swift warnings in the baseline; \u00a71 mandates warnings-as-errors",
+      "category": "style",
+      "status": "START",
+      "host-used": "local",
+      "discovered-by": "Phase A baseline",
+      "evidence-before": "`grep -c warning:` = 25 (10 in QUICUDPPort.swift, 2 in WebTransportInteroperableNetworkRuntime.swift, 1 in Package.swift, rest to be listed).",
+      "expected": "Zero warnings under Swift 6.4 with warnings-as-errors enabled in the build settings, and each warning class fixed rather than suppressed (\u00a70 forbids -Wno-*/*.disable).",
+      "fix-summary": "",
+      "evidence-after": "",
+      "commit": "",
+      "notes": "Enumerate every warning with file:line first (Phase B).",
+      "blocked-reason": ""
+    },
+    {
+      "id": "A-0005",
+      "severity": "S3",
+      "project": "swift:packaging",
+      "file": "Package.swift:1",
+      "title": "`swift-tools-version: 6.3` while the mandated toolchain is Swift 6.4",
+      "category": "docs",
+      "status": "START",
+      "host-used": "local",
+      "discovered-by": "Phase A discovery",
+      "evidence-before": "Root manifest line 1 is `// swift-tools-version: 6.3`; the toolchain is Swift 6.4.",
+      "expected": "A deliberate choice, recorded: either the tools-version moves to 6.4 (and the setting set is reviewed for new 6.4 diagnostics) or a written justification keeps 6.3.",
+      "fix-summary": "",
+      "evidence-after": "",
+      "commit": "",
+      "notes": "",
+      "blocked-reason": ""
+    }
+  ],
+  "baseline": {
+    "swift": {
+      "toolchain": "6.4/Xcode 27",
+      "build": "FAIL (link error)",
+      "tests": "not run",
+      "warnings": 25,
+      "coverage": null
+    },
+    "c99": {
+      "ctest": "97/97 passed",
+      "sanitizers": "97/97 passed (pre-audit)",
+      "coverage": null
+    }
+  },
+  "blocked": [
+    {
+      "item": "valgrind for Darwin/arm64",
+      "reason": "no arm64 macOS build of valgrind exists; the equivalent check is ASan/LSan+UBSan on Linux (Docker) plus LeakSanitizer on the Linux CI leg",
+      "options": [
+        "run ASan/UBSan/LSan in a Debian container locally",
+        "use the VPS (needs approval) for a second Linux run"
+      ]
+    }
+  ]
 }

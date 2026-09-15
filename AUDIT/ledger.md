@@ -16,7 +16,11 @@ Base commit: `196324e` (main). Branch: `audit/2026-09-15`.
 
 | id | sev | project | title | status |
 | --- | --- | --- | --- | --- |
-| (none yet — Phase A in progress) | | | | |
+| A-0001 | S0 | swift | Swift test bundle fails to LINK on Swift 6.4 (missing WebTransportTLSCore dependency) | START |
+| A-0002 | S2 | repo | Committed CMake build output at the repository root (`build/`) | START |
+| A-0003 | S2 | swift | Two Swift manifests, different names and target counts (18 vs 21) | START |
+| A-0004 | S1 | swift | 25 baseline warnings; §1 mandates warnings-as-errors | START |
+| A-0005 | S3 | swift | `swift-tools-version: 6.3` vs mandated Swift 6.4 | START |
 
 ## Task records
 
@@ -30,4 +34,6 @@ _(one entry per task; fields per §8)_
 
 ## BLOCKED
 
-_(none yet)_
+| item | reason | options |
+| --- | --- | --- |
+| valgrind (Darwin/arm64) | no arm64 macOS build exists | (1) ASan/LSan+UBSan in a Debian container locally; (2) VPS Linux run for a second host (needs approval per §1b) |
