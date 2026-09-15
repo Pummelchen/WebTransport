@@ -1,0 +1,24 @@
+# trivy configuration for the repository filesystem scan (the `dependency-scan`
+# job in `.github/workflows/security-scan.yml`).
+#
+# `vuln` and `secret` are enabled and every severity fails the job (`exit-code`):
+#   * `vuln` covers anything vendored or locked in the tree -- a future
+#     `Package.resolved`, `Cargo.lock`, `requirements.txt`, and so on.
+#   * `secret` is a second engine beside gitleaks.
+#
+# `misconfig` is deliberately NOT enabled. Its 12 findings today are DS-0002
+# (no non-root USER) and DS-0026 (no HEALTHCHECK) on the six interop TEST
+# Dockerfiles; that hardening is tracked as F-repo-ops-13, and folding it in
+# here would mix Dockerfile hardening into the secret/dependency scan.
+#
+# The one real dependency, OpenSSL 3.x, is the platform's: it is found with
+# `find_package(OpenSSL 3.0 REQUIRED)` (C99/CMakeLists.txt:38), never vendored,
+# and there is no lockfile, so a filesystem scan cannot inventory it. That
+# decision is written down in SECURITY.md, "Automated Scanning"; vendoring or
+# pinning OpenSSL later must arrive with a scan that can see it.
+scan:
+  scanners:
+    - vuln
+    - secret
+exit-code: 1
+format: table
