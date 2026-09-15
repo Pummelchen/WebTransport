@@ -35,6 +35,7 @@ Base commit: `196324e` (main). Branch: `audit/2026-09-15`.
 | F-repo-ops-02 | S1 | c99 | Interop matrix must be re-run now that the client sends webtransport-h3 | BLOCKED (needs VPS approval) |
 | A-0007 | S3 | swift | Manifests not swift-format clean; CI format gate excludes them | START |
 | A-0005 | S3 | swift | `swift-tools-version: 6.3` vs mandated Swift 6.4 | START |
+| F-repo-ops-20 | S3 | repo-ops | The Swift tree's Linux boundary was asserted, not measured: Swift 6.4 on the VPS builds 2 of 11 library targets | DONE (install + matrix) |
 
 ## Task records
 
@@ -50,7 +51,7 @@ _(one entry per task; fields per §8)_
 
 | item | reason | options |
 | --- | --- | --- |
-| valgrind (Darwin/arm64) | no arm64 macOS build exists | (1) ASan/LSan+UBSan in a Debian container locally; (2) VPS Linux run for a second host (needs approval per §1b) |
+| valgrind (Darwin/arm64) | no arm64 macOS build exists | (1) ASan/LSan+UBSan in a Debian container locally (done — Phase E); (2) the VPS for a second Linux host (done — `F-repo-ops-19`, and the VPS also carries the Swift-on-Linux probe, `F-repo-ops-20`) |
 
 ## Round 1 progress (goal round 1/256)
 
@@ -66,3 +67,34 @@ enabled. Two follow-on items were filed from the fixes' residual doubt (`F-swift
 sends `webtransport-h3`.
 
 Remaining: 5 S1 (one blocked), 47 S2, 26 S3.
+
+## Round 13 — the Swift-on-Linux boundary, measured (`F-repo-ops-20`, S3)
+
+The owner asked for Swift 6.4 from swift.org on the VPS. The toolchain is installed there and, more
+usefully, it turns Phase E's blanket "Swift cannot run on Linux" into a per-target measurement.
+
+- **Installed, signature-verified**: `swift-6.4.0-RELEASE-debian13.tar.gz` (sha256
+  `b623947404e7ea9843cfc315ed8624e85410fae571eb353339780ed222243737`), GPG `GOODSIG` from
+  `52BB7E3DE28A71BE22EC05FFEF80A866B47A981F` ("Swift 6.x Release Signing Key"), extracted to
+  `/opt/swift-toolchains/swift-6.4.0-RELEASE-debian13` behind a version-independent `swift-6.4`
+  symlink with `/usr/local/bin/{swift,swiftc,swift-format,sourcekit-lsp}` repointed. `swift-6.3.2`
+  stays installed. The whole install is one reproducible block in `AUDIT/environment.md`.
+- **Verified working**, not just present: `swift --version` = 6.4 on `x86_64-unknown-linux-gnu`, a
+  Foundation program compiles and runs, and `swift package init` + `build` + `run` print
+  `Hello, world!`.
+- **Measured boundary**: of the 11 library targets in `Swift/`, exactly two build on Linux —
+  `WebTransportQUICCore` and `WebTransportHTTP3Core`, both with **0 warnings** under
+  `.strictMemorySafety()` and warnings-as-errors. The other nine each fail on a named Apple module:
+  `Darwin` (UDP backend, loopback test support), `CryptoKit` (CryptoApple, TLSCore, TestSupport) and
+  `CoreFoundation` through the `WebTransportSecurityShim` C header (the shim itself, and behind it the
+  public `WebTransport`, `WebTransportNetworkRuntime` and `WebTransportCLIConformance`). Logs under
+  `/var/wt-swift-linux-probe/out/`.
+- **What this changes**: the wiki's `Known-Limitations.md` now states the measured boundary instead
+  of a blanket claim, and `AUDIT/phaseE.md`'s independent-host gap says exactly how much of the Swift
+  product a Linux host can carry. **No Linux CI leg is added** by this row: the portable surface is
+  two targets with no test target of its own, so a leg is a separate design decision rather than a
+  YAML edit.
+
+Ledger: **106 entries — 97 AUDIT (fixed + verified), 9 DONE, 0 open, 0 blocked**; one of the nine DONE
+rows, `F-swift-line-security-05b`, was rejected with a measurement and then implemented at the owner's
+request.

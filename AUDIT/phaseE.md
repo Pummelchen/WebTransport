@@ -26,6 +26,17 @@ The objective is not declared complete. This file records exactly what has been 
    `debian:trixie` with system GCC 14.2 and system OpenSSL 3, no host toolchain: configure, build and
    `100% tests passed, 0 tests failed out of 97` (`docker job exit=0`). This is an independent *environment*,
    not an independent host — the host requirement of §12 is still the open decision below.
+   **Swift on Linux: MEASURED, not assumed** (`F-repo-ops-20`). The VPS now carries signature-verified
+   Swift 6.4.0 for Debian 13 (`/opt/swift-toolchains/swift-6.4`, install block in `AUDIT/environment.md`), so
+   "the Swift tree cannot run on Linux" is no longer an untested sentence: of the 11 library targets, exactly
+   `WebTransportQUICCore` and `WebTransportHTTP3Core` build there (0 warnings, warnings-as-errors and strict
+   memory safety on), and the other nine fail on a named Apple module — `Darwin`
+   (`WebTransportUDPApple`, `WebTransportLoopbackTestSupport`), `CryptoKit` (`WebTransportCryptoApple`,
+   `WebTransportTLSCore`, `WebTransportTestSupport`) or `CoreFoundation` through the C shim header
+   (`WebTransportSecurityShim`, and with it `WebTransport`, `WebTransportNetworkRuntime`,
+   `WebTransportCLIConformance`). The shipped product therefore still has no Linux Swift leg and the
+   independent-host requirement for the Swift side remains unmet — but it is now a bounded measurement with
+   logs (`/var/wt-swift-linux-probe/out/`), not a blanket claim.
 2. **Coverage numbers per language** (§1 requires coverage measurement). **Swift: DONE** — 85.88% line, 95.97% function, 93.06% region over 1,409 non-test lines (`swift test --enable-code-coverage` + `xcrun llvm-cov report` over every `.xctest` binary, tests and `.build` excluded).
    **C99: in flight** — a `--coverage` build and `gcovr` over **C99: DONE** — **90.9% line (12,986/14,292), 99.2% function (1,042/1,050), 67.3% branch (8,222/12,213)** over `C99/src` and
    `C99/apps`, measured with `gcovr` inside the Debian 13 container from the fresh clone. Two earlier attempts reported
@@ -39,11 +50,11 @@ The objective is not declared complete. This file records exactly what has been 
 | Requirement (§12) | Evidence |
 | --- | --- |
 | Clean build, zero warnings, from a fresh checkout | Swift (macOS 26, Xcode 27): fresh clone, `Build complete!`, **0 warnings**, `swift test` **356/356**. C99 (VPS Debian 13, gcc 14.2, its own toolchain): fresh tree, 0 warnings, **97/97 CTest**. C99 again in `debian:trixie` (system GCC/OpenSSL): **97/97**. |
-| Independent host | **VPS Debian 13** for the C99 leg (a host that did not develop the fixes). Swift is Mac-only (Network.framework) and cannot run there; its independent evidence is the macOS fresh clone plus the two CI legs. The 4-Mac fleet still rejects our SSH key, which is recorded rather than papered over. |
+| Independent host | **VPS Debian 13** for the C99 leg (a host that did not develop the fixes). For Swift the same host now runs the mandated Swift 6.4 and the boundary is **measured**: exactly 2 of 11 library targets build there (`F-repo-ops-20`, `AUDIT/environment.md`), the rest need `Darwin`, `CryptoKit` or `CoreFoundation`, so the Swift product has no Linux leg and its independent evidence remains the macOS fresh clone plus the two CI legs. The 4-Mac fleet still rejects our SSH key, which is recorded rather than papered over. |
 | Coverage | Swift **85.88% line / 95.97% function / 93.06% region**; C99 **90.9% line / 99.2% function / 67.3% branch**. |
 | Scanners clean or waived in writing | gitleaks over the full history (588 commits): no live credential, 9 test-fixture false positives allowlisted by path (one by path + exact value). trivy: exit 0, `misconfig` enabled with per-file accepted DS-0002/DS-0026 and the system-OpenSSL decision written in `SECURITY.md`. |
 | Zero placeholders | §5 sweep: `TODO/FIXME/HACK/XXX/WIP/dummy/lorem` = 0; every `STUB`/`placeholder` hit read as prose. |
-| Ledger: no non-BLOCKED open task | 105 entries: 97 AUDIT (fixed + verified), 7 DONE, **1 REJECTED with recorded measurement** (`F-swift-line-security-05b`), 0 open, 0 blocked. |
+| Ledger: no non-BLOCKED open task | 106 entries: 97 AUDIT (fixed + verified), 9 DONE (one of them, `F-swift-line-security-05b`, was first rejected with a recorded measurement and then implemented at the owner's request), 0 open, 0 blocked. |
 | Wiki synced | `Project-Tracker.md` mirrors this outcome; the ledger wins on conflict. |
 
 The interop criterion is verified **with the per-peer token selection documented**: 7 of 7 proofs across 5 implementations,

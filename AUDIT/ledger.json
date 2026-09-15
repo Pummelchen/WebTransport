@@ -1896,6 +1896,24 @@
       "commit": "486aac7",
       "notes": "confirmed Renamed from F-swift-perf-tests-12 to resolve a collision with the flaky-listener finding filed from a batch run.",
       "blocked-reason": ""
+    },
+    {
+      "id": "F-repo-ops-20",
+      "severity": "S3",
+      "project": "repo-ops",
+      "file": "AUDIT/environment.md:11, AUDIT/phaseE.md, Swift/Package.swift",
+      "title": "The Swift tree's Linux boundary was asserted (Apple-only) instead of measured: Swift 6.4 now runs on the VPS and exactly 2 of 11 library targets build there",
+      "category": "test",
+      "status": "DONE",
+      "host-used": "vps",
+      "discovered-by": "Round 13 (owner asked for Swift 6.4 on the VPS; closes the Swift half of Phase E gap 1)",
+      "evidence-before": "Phase E recorded the boundary as a blanket claim, not a measurement: AUDIT/phaseE.md 'Swift is Mac-only (Network.framework) and cannot run there', wiki Known-Limitations.md:9 'The project does not currently provide Linux, Windows, browser, or cross-platform Swift runtime support', and Swift/Package.swift declares platforms: [.macOS(.v26)] with no Linux leg in .github/workflows/swift-ci.yml. The VPS had no mandated toolchain: /opt/swift-toolchains held only swift-6.3.2-RELEASE-debian12 (a Debian 12 build on a Debian 13 host) and `swift --version` reported 6.3.2, so no target of this package had ever been compiled on Linux. The 4-Mac fleet rejects our SSH key, so the Swift leg had no second host either way.",
+      "expected": "The mandated toolchain present, signature-verified and reproducible on the VPS, plus a per-target build matrix that names the missing module for each failing target, so 'Apple-only' is a measurement a Linux CI leg can be planned against rather than a sentence in a document.",
+      "fix-summary": "Installed Swift 6.4.0 for Debian 13 from swift.org on the VPS behind GPG verification: tarball swift-6.4.0-RELEASE-debian13.tar.gz (sha256 b623947404e7ea9843cfc315ed8624e85410fae571eb353339780ed222243737) with its .sig, verified GOOD against key 52BB7E3DE28A71BE22EC05FFEF80A866B47A981F ('Swift 6.x Release Signing Key', signed 2026-09-14), extracted to /opt/swift-toolchains/swift-6.4.0-RELEASE-debian13 with a version-independent /opt/swift-toolchains/swift-6.4 symlink and /usr/local/bin/{swift,swiftc,swift-format,sourcekit-lsp} repointed; swift-6.3.2 is left installed and reachable. The full command block is reproducible from AUDIT/environment.md.",
+      "evidence-after": "VPS Debian 13 (trixie), x86_64, 8 cores: `swift --version` -> 'Swift version 6.4 (swift-6.4-RELEASE) / Target: x86_64-unknown-linux-gnu'; a Foundation program compiled with `swiftc -O` runs; `swift package init --type executable` + `swift build` + `swift run` print 'Hello, world!' (Build complete! 5.23 secs), the only diagnostic being SwiftPM's harmless 'warning: safeExec: signal(33, SIG_DFL) failed: Invalid argument'. Per-target build of a fresh clone of audit/2026-09-15 (96d75c8) with `swift build --package-path Swift --target T`, every log under /var/wt-swift-linux-probe/out/: PASS WebTransportQUICCore, WebTransportHTTP3Core. FAIL the other nine library targets, every one on a missing Apple module -- WebTransportUDPApple and WebTransportLoopbackTestSupport 'no such module Darwin' (QUICUDPPort.swift:1, WebTransportLoopbackTestLock.swift:1); WebTransportCryptoApple, WebTransportTLSCore and WebTransportTestSupport 'no such module CryptoKit' (TLS13KeyAgreement.swift:1); and WebTransportSecurityShim 'fatal error: CoreFoundation/CoreFoundation.h file not found' (include/WebTransportSecurityShim.h:22), which is also why WebTransport, WebTransportNetworkRuntime and WebTransportCLIConformance fail. Both whole-package builds fail the same way. The two portable cores compile clean there under .strictMemorySafety() and .treatAllWarnings(as: .error), i.e. zero warnings on Linux under the mandated toolchain. Known-Limitations.md and AUDIT/phaseE.md are updated with the measurement; no Linux CI leg is added by this row (the portable surface is two targets with no test target of its own, so that is a separate design decision).",
+      "commit": "",
+      "notes": "host-used=vps is the Swift-on-Linux probe host, not a second Apple-platform host: the shipped product still cannot run there. This quantifies the blanket half of F-repo-ops-19 ('Swift cannot run on Linux') into 'nine of eleven Swift library targets cannot build on Linux; the two wire-format cores build clean'. Public, signature-verified toolchain; no repository secret is involved.",
+      "blocked-reason": ""
     }
   ],
   "baseline": {
@@ -1918,7 +1936,7 @@
       "reason": "no arm64 macOS build of valgrind exists; the equivalent check is ASan/LSan+UBSan on Linux (Docker) plus LeakSanitizer on the Linux CI leg",
       "options": [
         "run ASan/UBSan/LSan in a Debian container locally",
-        "use the VPS (needs approval) for a second Linux run"
+        "use the VPS for a second Linux run (done: Phase E, F-repo-ops-19; the VPS is also the Swift-on-Linux probe host, F-repo-ops-20)"
       ]
     }
   ]
