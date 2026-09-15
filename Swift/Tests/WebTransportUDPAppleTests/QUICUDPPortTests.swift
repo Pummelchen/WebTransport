@@ -112,6 +112,41 @@ func udpPortCancellationObservedWithShortReceiveTimeout() async throws {
     )
 }
 
+/// F-swift-perf-tests-05: receives must reuse one buffer, not zero-fill a fresh
+/// 64 KiB one per datagram, and the reused buffer must still honour the caller's
+/// bound.
+@Test
+func udpReceiveReusesItsBufferAcrossCalls() throws {
+    let server = try QUICUDPPort()
+    let client = try QUICUDPPort()
+    let datagrams = 64
+    for index in 0..<datagrams {
+        try client.send(
+            Data(repeating: UInt8(truncatingIfNeeded: index), count: 32),
+            to: server.localEndpoint
+        )
+    }
+
+    for index in 0..<datagrams {
+        let (bytes, _) = try server.receive(maximumBytes: 65_535, timeoutMilliseconds: 1_000)
+        #expect(bytes.count == 32)
+        #expect(bytes.first == UInt8(truncatingIfNeeded: index))
+    }
+    #expect(
+        server.receiveBufferAllocations <= 1,
+        "\(datagrams) receives allocated the buffer \(server.receiveBufferAllocations) times"
+    )
+
+    // The buffer is now larger than this request. A datagram that does not fit
+    // the caller's bound must still be reported rather than silently truncated to
+    // the reused buffer's capacity, and the smaller request must not reallocate.
+    try client.send(Data(repeating: 0x5a, count: 32), to: server.localEndpoint)
+    #expect(throws: QUICUDPError.self) {
+        _ = try server.receive(maximumBytes: 8, timeoutMilliseconds: 1_000)
+    }
+    #expect(server.receiveBufferAllocations <= 1)
+}
+
 /// A datagram larger than the caller's buffer must be reported, not silently truncated.
 ///
 /// The receive path called `recvfrom` without `MSG_TRUNC`, so an oversized datagram came

@@ -40,14 +40,28 @@ public enum QUICUDPError: Error, Equatable, CustomStringConvertible, Sendable {
 /// probes. It intentionally accepts only `localhost`, `127.0.0.1`, and `::1`;
 /// production remote networking is handled by `WebTransportNetworkRuntime`.
 // SAFETY: The file descriptor is immutable after bind and closed exactly once in
-// `deinit`. Receive calls are serialized with `receiveLock`; send calls use
-// `sendto` on the immutable descriptor and do not mutate shared Swift state.
+// `deinit`. Receive calls are serialized with `receiveLock`, which also guards the
+// reused receive buffer and its allocation count; send calls use `sendto` on the
+// immutable descriptor and do not mutate shared Swift state.
 public final class QUICUDPPort: @unchecked Sendable {
     private static let maximumUDPDatagramBytes = 65_535
 
     private let descriptor: Int32
     private let receiveLock = NSLock()
     public let localEndpoint: QUICUDPEndpoint
+
+    /// How many times the receive buffer has been (re)allocated.
+    ///
+    /// A cost probe for the regression test in `QUICUDPPortTests`: receives must
+    /// reuse one buffer instead of zero-filling a fresh one per datagram.
+    private(set) var receiveBufferAllocations = 0
+
+    /// Reused receive buffer, grown on demand.
+    ///
+    /// Only touched while ``receiveLock`` is held. Grown to the largest
+    /// `maximumBytes` seen; each call passes its own bound to `recvmsg`, so a
+    /// larger buffer never widens a smaller request.
+    private var receiveBuffer: [UInt8] = []
 
     /// Applies one integer socket option, throwing the POSIX error when it fails.
     ///
@@ -179,7 +193,10 @@ public final class QUICUDPPort: @unchecked Sendable {
         }
 
         var storage = sockaddr_storage()
-        var buffer = [UInt8](repeating: 0, count: maximumBytes)
+        if receiveBuffer.count < maximumBytes {
+            receiveBuffer = [UInt8](repeating: 0, count: maximumBytes)
+            receiveBufferAllocations += 1
+        }
         // `recvmsg` rather than `recvfrom`, because it is the only form that reports
         // truncation on this platform. macOS documents `MSG_TRUNC` as "data discarded
         // before delivery": passing it to `recvfrom` does not return the datagram's real
@@ -187,11 +204,13 @@ public final class QUICUDPPort: @unchecked Sendable {
         // Without this an oversized datagram arrives as a short payload with a valid
         // source and no indication, which for QUIC means parsing a packet that was never
         // sent.
-        let (received, truncated) = try buffer.withUnsafeMutableBytes { bytes -> (Int, Bool) in
+        let (received, truncated) = try receiveBuffer.withUnsafeMutableBytes { bytes -> (Int, Bool) in
             guard let baseAddress = bytes.baseAddress else {
                 throw QUICUDPError.invalidReceiveConfiguration("receive buffer is empty")
             }
-            var iovec = unsafe iovec(iov_base: baseAddress, iov_len: bytes.count)
+            // This request's bound, not the buffer's capacity: the buffer is
+            // reused and may be larger than this call asked for.
+            var iovec = unsafe iovec(iov_base: baseAddress, iov_len: maximumBytes)
             // SAFETY: `storage`, `iovec` and `message` all outlive the call, and each
             // pointer in `message` is derived from one of them for the duration.
             return try withUnsafeMutablePointer(to: &storage) { storagePointer in
@@ -216,12 +235,12 @@ public final class QUICUDPPort: @unchecked Sendable {
         guard !truncated else {
             throw QUICUDPError.datagramExceedsReceiveBuffer(
                 actual: received,
-                buffer: buffer.count
+                buffer: maximumBytes
             )
         }
 
         let endpoint = try Self.endpoint(from: storage)
-        return (Data(buffer.prefix(received)), endpoint)
+        return (Data(receiveBuffer[0..<received]), endpoint)
     }
 
     private struct LoopbackAddress {
