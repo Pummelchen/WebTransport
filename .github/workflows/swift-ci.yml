@@ -13,15 +13,28 @@ concurrency:
 
 jobs:
   macos-swift:
-    name: macOS 26 / Swift 6.3.3+ SwiftPM
+    name: Xcode 27 / Swift 6.4 SwiftPM
 
-    runs-on: macos-26
+    # F-repo-ops-01: the deliverable is built and audited on the mandated
+    # toolchain (Swift 6.4 / Xcode 27), so CI must exercise that toolchain, not
+    # whatever compiler the default macOS image happens to carry. `xcode-27` is
+    # the GitHub-hosted image that provides Xcode 27 / Swift 6.4 for the macOS
+    # targets this package declares; it is currently a public preview, so the
+    # explicit assertion below keeps a silent image change from building green
+    # on the wrong compiler. The job stays blocking.
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Validate Swift toolchain
         run: ./Swift/check-toolchain.sh
+
+      # Blocking. `check-toolchain.sh` takes the mandated floors as arguments;
+      # without them it keeps the project's 6.3.3 / 26.6 development floor. This
+      # step fails when `swift --version` (or Xcode) is below the mandate.
+      - name: Assert mandated toolchain (Swift 6.4 / Xcode 27)
+        run: ./Swift/check-toolchain.sh 6.4 27.0
 
       - name: Verify package manifests agree on shared targets
         run: ./Swift/check-manifest-sync.sh
@@ -90,7 +103,7 @@ jobs:
 
   fuzz-peer-input:
     name: Fuzz peer-facing parsers / ASan
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -108,7 +121,7 @@ jobs:
 
   thread-sanitizer:
     name: Thread Sanitizer / in-process tests
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v6
