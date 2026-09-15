@@ -194,9 +194,6 @@ public struct WebTransportQUICClient: Sendable {
         )
         InteroperableQUICDebug.log("client ready")
 
-        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
-        InteroperableQUICDebug.log("client datagrams usable=\(useDatagrams)")
-
         var http3 = HTTP3ConnectionState(
             role: .client,
             localSettings: settingsValidation.localSettings
@@ -232,6 +229,13 @@ public struct WebTransportQUICClient: Sendable {
         if let peerSettings = http3.remoteSettings {
             InteroperableQUICDebug.log("client peer settings: \(Self.renderSettings(peerSettings))")
         }
+        // Datagram availability is a property of the negotiated SETTINGS, so it
+        // is answered after the control-stream exchange rather than assumed.
+        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(
+            localSettings: http3.localSettings,
+            remoteSettings: http3.remoteSettings
+        )
+        InteroperableQUICDebug.log("client datagrams usable=\(useDatagrams)")
         var manager = WebTransportSessionManager(
             http3: http3,
             // makeClientQUIC advertises the default limits, so enforce the same
@@ -1318,12 +1322,11 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let session = try await acceptSession(timeoutMilliseconds: timeoutMilliseconds)
 
         // The peer picks the transport, so the server cannot. `datagramsAvailable`
-        // is reported optimistically — Network.framework does not confirm datagram
-        // support until the channel is first used, so the runtime always answers
-        // true — which meant this waited for a datagram even when the peer had
-        // opened a stream. A browser opens a stream by default, so it hung here
-        // after a successful handshake. Wait for both and echo on whichever the
-        // peer actually used.
+        // now states whether `SETTINGS_H3_DATAGRAM` was negotiated, but a peer that
+        // negotiated it can still open a stream, and a browser that did not is
+        // stream-only from the start. Waiting only for a datagram hung on a peer
+        // that had already opened a stream, so when datagrams are negotiated this
+        // waits for both and echoes on whichever the peer actually used.
         // Racing means one entrant loses and is abandoned, and an abandoned
         // entrant keeps the session alive until its own wait expires. Handing it
         // the caller's full timeout makes that window arbitrarily long: with a
@@ -1420,9 +1423,6 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let inboundStreams = accepted.inboundStreams
         let inboundTask = accepted.inboundTask
 
-        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
-        InteroperableQUICDebug.log("server datagrams usable=\(useDatagrams)")
-
         var http3 = HTTP3ConnectionState(
             role: .server,
             localSettings: settingsValidation.localSettings
@@ -1461,6 +1461,13 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         if let peerSettings = http3.remoteSettings {
             InteroperableQUICDebug.log("server peer settings: \(Self.renderSettings(peerSettings))")
         }
+        // Datagram availability is a property of the negotiated SETTINGS, so it
+        // is answered after the control-stream exchange rather than assumed.
+        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(
+            localSettings: http3.localSettings,
+            remoteSettings: http3.remoteSettings
+        )
+        InteroperableQUICDebug.log("server datagrams usable=\(useDatagrams)")
         var manager = WebTransportSessionManager(
             http3: http3,
             // Accept what the QUIC layer advertised to the peer. Leaving this at
@@ -1831,12 +1838,23 @@ enum InteroperableQUICHelpers {
         }
     }
 
-    static func datagramsUsable(_: NetworkConnection<QUIC>) -> Bool {
-        // Network.framework can report 0 here until the datagram channel is
-        // first used, even when both peers negotiated QUIC DATAGRAM support.
-        // The runtime config always advertises max_datagram_frame_size; the
-        // actual datagram channel send/receive calls remain the authoritative
-        // failure point for non-compliant peers.
+    /// Whether H3 DATAGRAM was negotiated with the peer.
+    ///
+    /// Network.framework does not expose the peer's `max_datagram_frame_size`
+    /// before the datagram channel is first used — measured: `usableDatagramFrameSize`
+    /// reports 0 on an established connection even when both peers advertised it —
+    /// so the honest pre-use answer is the HTTP/3 one. Draft-16 carries datagrams
+    /// inside HTTP/3 DATAGRAM frames, so both endpoints must have advertised
+    /// `SETTINGS_H3_DATAGRAM = 1` for the capability to be real. The framework
+    /// remains the authority for a send or receive that is actually attempted.
+    static func datagramsUsable(localSettings: HTTP3Settings, remoteSettings: HTTP3Settings?) -> Bool {
+        let identifier = WebTransportHTTP3DraftConstants.current.settingsH3Datagram
+        guard localSettings[identifier] == 1 else {
+            return false
+        }
+        guard let remoteSettings, remoteSettings[identifier] == 1 else {
+            return false
+        }
         return true
     }
 

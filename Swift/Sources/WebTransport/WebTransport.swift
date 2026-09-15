@@ -296,6 +296,13 @@ public final class WebTransportSession: @unchecked Sendable {
     public let localEndpoint: WebTransportEndpoint
     public let remoteEndpoint: WebTransportEndpoint
     public let selectedProtocol: String?
+    /// Whether H3 DATAGRAM was negotiated with the peer.
+    ///
+    /// True when both endpoints advertised `SETTINGS_H3_DATAGRAM = 1`, which is
+    /// the WebTransport datagram negotiation draft-16 requires. It is not a
+    /// promise that the underlying QUIC DATAGRAM channel will carry a frame:
+    /// Network.framework only confirms that on first use, so a datagram attempt
+    /// can still fail and callers must handle it.
     public let datagramsAvailable: Bool
 
     private let runtime: WebTransportNetworkSession
