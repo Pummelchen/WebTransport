@@ -114,6 +114,24 @@
       "commit": "",
       "notes": "",
       "blocked-reason": ""
+    },
+    {
+      "id": "A-0007",
+      "severity": "S3",
+      "project": "swift:packaging",
+      "file": "Package.swift, Swift/Package.swift",
+      "title": "The Swift manifests are not swift-format clean, and the CI format gate does not cover them",
+      "category": "style",
+      "status": "START",
+      "host-used": "local",
+      "discovered-by": "A-0001 audit pass (swift format lint)",
+      "evidence-before": "`swift format lint` on the manifest as of b80d876~1 reports ~117 findings (234 output lines); the CI step 'Verify the tree is swift-format clean' covers only Swift/Sources and Swift/Tests, so manifest formatting is unenforced.",
+      "expected": "Either the manifests are formatted and the CI lint step includes them, or the exclusion is written down with a reason (no silent partial gate).",
+      "fix-summary": "",
+      "evidence-after": "",
+      "commit": "",
+      "notes": "A-0001's own edits added 3 TrailingComma findings, fixed in the same task before this row was filed.",
+      "blocked-reason": ""
     }
   ],
   "baseline": {

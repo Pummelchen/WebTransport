@@ -62,7 +62,7 @@ let package = Package(
             dependencies: [
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime",
-                "WebTransportQUICCore"
+                "WebTransportQUICCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -74,7 +74,7 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
                 "WebTransportTLSCore",
-                "WebTransportUDPApple"
+                "WebTransportUDPApple",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -86,7 +86,7 @@ let package = Package(
                 "WebTransportQUICCore",
                 "WebTransportSecurityShim",
                 "WebTransportTLSCore",
-                "WebTransportUDPApple"
+                "WebTransportUDPApple",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -109,14 +109,14 @@ let package = Package(
         .target(
             name: "WebTransportTLSCore",
             dependencies: [
-                "WebTransportQUICCore"
+                "WebTransportQUICCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportHTTP3Core",
             dependencies: [
-                "WebTransportQUICCore"
+                "WebTransportQUICCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -125,7 +125,7 @@ let package = Package(
             dependencies: [
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
-                "WebTransportTLSCore"
+                "WebTransportTLSCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -155,7 +155,7 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
                 "WebTransportTestSupport",
-                "WebTransportUDPApple"
+                "WebTransportUDPApple",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -165,7 +165,7 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
                 "WebTransportTestSupport",
-                "WebTransportUDPApple"
+                "WebTransportUDPApple",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -175,7 +175,7 @@ let package = Package(
                 "WebTransport",
                 "WebTransportHTTP3Core",
                 "WebTransportNetworkRuntime",
-                "WebTransportQUICCore"
+                "WebTransportQUICCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -187,7 +187,7 @@ let package = Package(
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
                 "WebTransportTLSCore",
-                "WebTransportUDPApple"
+                "WebTransportUDPApple",
             ],
             resources: [
                 .copy("Resources/README.md"),
@@ -205,7 +205,7 @@ let package = Package(
             name: "WebTransportUDPAppleTests",
             dependencies: [
                 "WebTransportQUICCore",
-                "WebTransportUDPApple"
+                "WebTransportUDPApple",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -213,7 +213,7 @@ let package = Package(
             name: "WebTransportCryptoAppleTests",
             dependencies: [
                 "WebTransportCryptoApple",
-                "WebTransportTLSCore"
+                "WebTransportTLSCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -221,7 +221,7 @@ let package = Package(
             name: "WebTransportTLSCoreTests",
             dependencies: [
                 "WebTransportQUICCore",
-                "WebTransportTLSCore"
+                "WebTransportTLSCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -230,7 +230,7 @@ let package = Package(
             dependencies: [
                 "WebTransportHTTP3Core",
                 "WebTransportQUICCore",
-                "WebTransportTLSCore"
+                "WebTransportTLSCore",
             ],
             swiftSettings: strictSwiftSettings
         )
