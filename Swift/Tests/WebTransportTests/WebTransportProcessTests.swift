@@ -437,6 +437,19 @@ func webTransportCLIProcessPortBindingAndOccupiedPortHandling() throws {
 
         let badAddress = try WebTransportProcessSupport.run(server, ["--listen", "127.0.0.1"])
         #expect(badAddress.exitCode != 0)
+
+        // F-repo-ops-15: a non-positive --timeout-ms would wait forever downstream, so it is
+        // an argument error at parse time, and the space-separated and `=` forms must refuse
+        // it with the same specific message rather than accepting it or falling back to the
+        // generic "invalid payload".
+        for arguments in [
+            ["--listen", "127.0.0.1:0", "--timeout-ms", "0"],
+            ["--listen", "127.0.0.1:0", "--timeout-ms=-1"],
+        ] {
+            let rejected = try WebTransportProcessSupport.run(server, arguments)
+            #expect(rejected.exitCode != 0)
+            #expect(rejected.stderr.contains("--timeout-ms requires a positive integer in milliseconds"))
+        }
     }
 }
 

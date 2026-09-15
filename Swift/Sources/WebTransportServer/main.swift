@@ -168,8 +168,20 @@ private struct NetworkServerOptions {
                 endpoint = try WebTransportNetworkEndpoint.parse(arguments[index])
             case "--timeout-ms":
                 index += 1
-                guard index < arguments.count, let value = Int32(arguments[index]) else {
-                    throw WebTransportNetworkRuntimeError.invalidPayload
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport(
+                        "--timeout-ms requires a positive integer in milliseconds"
+                    )
+                }
+                let rawTimeout = arguments[index]
+                // F-repo-ops-15: a non-positive value is refused here, as the C99 parser
+                // refuses a zero timeout ("a zero timeout would wait forever"). Left
+                // unchecked it reaches the runtime, which reports `.timeout(0)` for every
+                // session instead of an argument error an operator can act on.
+                guard let value = Int32(rawTimeout), value > 0 else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport(
+                        "--timeout-ms requires a positive integer in milliseconds, got \"\(rawTimeout)\""
+                    )
                 }
                 timeoutMilliseconds = value
             case "--transport":
@@ -233,9 +245,15 @@ private struct NetworkServerOptions {
             default:
                 if argument.hasPrefix("--listen=") {
                     endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--listen=".count)))
-                } else if argument.hasPrefix("--timeout-ms="),
-                    let value = Int32(argument.dropFirst("--timeout-ms=".count))
-                {
+                } else if argument.hasPrefix("--timeout-ms=") {
+                    // Report the same specific error as the space-separated form, so the
+                    // two syntaxes cannot disagree about what is accepted (F-repo-ops-15).
+                    let raw = String(argument.dropFirst("--timeout-ms=".count))
+                    guard let value = Int32(raw), value > 0 else {
+                        throw WebTransportNetworkRuntimeError.invalidTransport(
+                            "--timeout-ms requires a positive integer in milliseconds, got \"\(raw)\""
+                        )
+                    }
                     timeoutMilliseconds = value
                 } else if argument.hasPrefix("--transport=") {
                     transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))
