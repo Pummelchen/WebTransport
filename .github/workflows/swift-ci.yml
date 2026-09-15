@@ -26,6 +26,12 @@ jobs:
       - name: Verify package manifests agree on shared targets
         run: ./Swift/check-manifest-sync.sh
 
+      # Blocking. Each target's `import` statements must be covered by its own
+      # declared dependencies; the manifests can agree with each other and still
+      # both omit a module a target imports (A-0001/A-0006).
+      - name: Verify every target's imports are declared as dependencies
+        run: ./Swift/check-target-imports.sh
+
       # Blocking. The tree was reformatted in one pass so that this could become a
       # gate rather than a notice nobody reads. Before pushing, run
       # `swift format --recursive --in-place Swift/Sources Swift/Tests`.
