@@ -238,7 +238,7 @@ let package = Package(
                 // link with "Undefined symbols for architecture arm64" until this became explicit.
                 // Swift/Package.swift declares the same dependency -- check-manifest-sync.sh fails when
                 // the two manifests disagree.
-                "WebTransportTLSCore"
+                "WebTransportTLSCore",
             ],
             path: "Swift/Tests/WebTransportHTTP3CoreTests",
             swiftSettings: strictSwiftSettings

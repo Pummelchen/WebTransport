@@ -256,7 +256,7 @@ let package = Package(
                 // when a shared target's dependencies diverge between the two. The root manifest
                 // carries the reason: PeerInputFuzzTests calls these parsers directly and the 6.4
                 // build system no longer resolves the transitive symbol (A-0001).
-                "WebTransportTLSCore"
+                "WebTransportTLSCore",
             ],
             swiftSettings: strictSwiftSettings
         ),
