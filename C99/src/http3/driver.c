@@ -420,15 +420,12 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
           state->payload_length = payload_length;
           state->payload_received = 0U;
           state->in_frame = 1;
-          /* The header's bytes are consumed; what is left of it in the buffer is the start of
-           * the payload, which the loop below delivers. */
-          {
-            size_t header_bytes = type_bytes + length_bytes;
-            size_t leftover = state->header_length - header_bytes;
-            size_t i;
-            for (i = 0U; i < leftover; i++) state->header[i] = state->header[header_bytes + i];
-            state->header_length = leftover;
-          }
+          /* The header loop appends ONE byte at a time and breaks the moment both varints
+           * parse, so header_length == type_bytes + length_bytes here and there is never a
+           * remainder to shift down. The clear is still required: the payload path below reads
+           * a non-zero header_length as "payload bytes arrived with the header". A copy loop
+           * sized by the (always zero) remainder was here and is gone. */
+          state->header_length = 0U;
           break;
         }
       }
@@ -739,7 +736,9 @@ static wt_status_t route_quic_frame(wt_http3_driver_t *driver, wt_quic_space_t s
                                                       out_error);
           if (status != WT_OK) return status;
           if (kind == WT_HTTP3_ENDPOINT_STREAM_UNKNOWN) {
-            /* The prefix is still not complete: the bytes are held, and nothing is routed. */
+            /* Either the prefix is still incomplete -- the bytes are held in the pending
+             * table and nothing is routed -- or it named a stream type this build does not
+             * know, which section 6.2.1 says to stop reading. Both drop the bytes. */
             return WT_OK;
           }
         }
@@ -750,14 +749,6 @@ static wt_status_t route_quic_frame(wt_http3_driver_t *driver, wt_quic_space_t s
           if (sink != NULL && sink->on_stream_data != NULL && payload_length > 0U) {
             return sink->on_stream_data(sink->context, stream_id, payload, payload_length,
                                         frame->as.stream.fin);
-          }
-          return WT_OK;
-        }
-        if (kind == WT_HTTP3_ENDPOINT_STREAM_UNKNOWN) {
-          /* A stream type this build does not know: section 6.2.1 says stop reading it, so its
-           * bytes are dropped and its end is still reported to the endpoint. */
-          if (frame->as.stream.fin != 0) {
-            return wt_http3_driver_on_uni_stream_end(driver, stream_id, out_error);
           }
           return WT_OK;
         }

@@ -146,13 +146,10 @@ wt_status_t wt_session_flow_record_data(wt_session_t *session, size_t bytes) {
     wt_session_set_error(session, WT_OK, 0U);
     return WT_OK;
   }
-  if (session->limits.max_data_set == 0) {
-    /* No limit yet: the draft's optimistic start. Usage is still counted, so the first
-     * capsule is measured against what was already sent. */
-    session->used_data += count;
-    wt_session_set_error(session, WT_OK, 0U);
-    return WT_OK;
-  }
+  /* There is no "enabled but no limit yet" state to special-case: `flow_enabled` is written
+   * only by `wt_session_flow_configure`, which resets the limits and then ALWAYS calls
+   * `wt_webtransport_flow_on_max_data`, which sets `max_data_set`. An enabled session
+   * therefore always has a limit here, so the first capsule is measured against it. */
   if (count > session->limits.max_data - session->used_data) {
     /* Refused with the code the peer would be sent for the violation, so a caller that
      * propagates it closes the session correctly instead of inventing a code. */
