@@ -68,7 +68,7 @@ let package = Package(
         .executable(
             name: "LibrarySmokeClient",
             targets: ["LibrarySmokeClient"]
-        )
+        ),
     ],
     targets: [
         .target(
@@ -122,14 +122,14 @@ let package = Package(
         .target(
             name: "WebTransportTLSCore",
             dependencies: [
-                "WebTransportQUICCore",
+                "WebTransportQUICCore"
             ],
             swiftSettings: strictSwiftSettings
         ),
         .target(
             name: "WebTransportHTTP3Core",
             dependencies: [
-                "WebTransportQUICCore",
+                "WebTransportQUICCore"
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -156,7 +156,7 @@ let package = Package(
                 "WebTransport",
                 "WebTransportCLIConformance",
                 "WebTransportHTTP3Core",
-                "WebTransportNetworkRuntime"
+                "WebTransportNetworkRuntime",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -166,7 +166,7 @@ let package = Package(
                 "WebTransport",
                 "WebTransportCLIConformance",
                 "WebTransportHTTP3Core",
-                "WebTransportNetworkRuntime"
+                "WebTransportNetworkRuntime",
             ],
             swiftSettings: strictSwiftSettings
         ),
@@ -267,7 +267,7 @@ let package = Package(
                 "WebTransportTestSupport"
             ],
             swiftSettings: strictSwiftSettings
-        )
+        ),
     ],
     swiftLanguageModes: [
         .v6

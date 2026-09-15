@@ -46,10 +46,13 @@ jobs:
         run: ./Swift/check-target-imports.sh
 
       # Blocking. The tree was reformatted in one pass so that this could become a
-      # gate rather than a notice nobody reads. Before pushing, run
-      # `swift format --recursive --in-place Swift/Sources Swift/Tests`.
+      # gate rather than a notice nobody reads. The two manifests are part of the
+      # gate as well (A-0007): they are Swift source that SwiftPM compiles, and
+      # excluding them was how 12 TrailingComma findings survived an otherwise
+      # clean tree. Before pushing, run
+      # `swift format --in-place --recursive Swift/Sources Swift/Tests Package.swift Swift/Package.swift`.
       - name: Lint formatting
-        run: swift format lint --strict --recursive --parallel Swift/Sources Swift/Tests
+        run: swift format lint --strict --recursive --parallel Swift/Sources Swift/Tests Package.swift Swift/Package.swift
 
       - name: Build both package entry points with safety diagnostics
         run: |

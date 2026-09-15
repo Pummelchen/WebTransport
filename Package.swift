@@ -60,7 +60,7 @@ let package = Package(
         .executable(
             name: "WebTransportServer",
             targets: ["WebTransportServer"]
-        )
+        ),
     ],
     targets: [
         .target(
@@ -121,7 +121,7 @@ let package = Package(
         .target(
             name: "WebTransportTLSCore",
             dependencies: [
-                "WebTransportQUICCore",
+                "WebTransportQUICCore"
             ],
             path: "Swift/Sources/WebTransportTLSCore",
             swiftSettings: strictSwiftSettings
@@ -129,7 +129,7 @@ let package = Package(
         .target(
             name: "WebTransportHTTP3Core",
             dependencies: [
-                "WebTransportQUICCore",
+                "WebTransportQUICCore"
             ],
             path: "Swift/Sources/WebTransportHTTP3Core",
             swiftSettings: strictSwiftSettings
@@ -140,7 +140,7 @@ let package = Package(
                 "WebTransport",
                 "WebTransportCLIConformance",
                 "WebTransportHTTP3Core",
-                "WebTransportNetworkRuntime"
+                "WebTransportNetworkRuntime",
             ],
             path: "Swift/Sources/WebTransportClient",
             swiftSettings: strictSwiftSettings
@@ -151,7 +151,7 @@ let package = Package(
                 "WebTransport",
                 "WebTransportCLIConformance",
                 "WebTransportHTTP3Core",
-                "WebTransportNetworkRuntime"
+                "WebTransportNetworkRuntime",
             ],
             path: "Swift/Sources/WebTransportServer",
             swiftSettings: strictSwiftSettings
@@ -238,7 +238,7 @@ let package = Package(
             ],
             path: "Swift/Tests/WebTransportHTTP3CoreTests",
             swiftSettings: strictSwiftSettings
-        )
+        ),
     ],
     swiftLanguageModes: [
         .v6
