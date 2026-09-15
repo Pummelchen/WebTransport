@@ -101,15 +101,6 @@ public struct WebTransportQUICClient: Sendable {
         self.trustPolicy = trustPolicy
     }
 
-    /// Renders HTTP/3 SETTINGS as sorted `0xid=value` pairs for the diagnostic
-    /// channel. Setting identifiers and counts only — no peer payload.
-    private static func renderSettings(_ settings: HTTP3Settings) -> String {
-        settings.entries
-            .sorted { $0.key < $1.key }
-            .map { "0x\(String($0.key, radix: 16))=\($0.value)" }
-            .joined(separator: " ")
-    }
-
     @discardableResult
     public func connectSession(
         to endpoint: WebTransportNetworkEndpoint,
@@ -224,9 +215,9 @@ public struct WebTransportQUICClient: Sendable {
             peerControlBytes,
             settingsValidation: settingsValidation
         )
-        InteroperableQUICDebug.log("client local settings: \(Self.renderSettings(http3.localSettings))")
+        InteroperableQUICDebug.log("client local settings: \(InteroperableQUICRuntime.renderSettings(http3.localSettings))")
         if let peerSettings = http3.remoteSettings {
-            InteroperableQUICDebug.log("client peer settings: \(Self.renderSettings(peerSettings))")
+            InteroperableQUICDebug.log("client peer settings: \(InteroperableQUICRuntime.renderSettings(peerSettings))")
         }
         // Datagram availability is a property of the negotiated SETTINGS, so it
         // is answered after the control-stream exchange rather than assumed.
@@ -258,7 +249,6 @@ public struct WebTransportQUICClient: Sendable {
         )
         let requestFrame = try manager.makeClientSessionRequest(streamID: requestStreamID, request: request)
         var connectPayload = try InteroperableQUICHelpers.makeRequestStreamPayload(
-            streamID: requestStreamID,
             requestFrame: requestFrame
         )
         let pendingSessionID = try WebTransportSessionID.fromRequestStreamID(requestStreamID)
@@ -1566,9 +1556,9 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         // Peer SETTINGS identify which WebTransport revision the client speaks.
         // Logging the decoded ids is what makes a "handshake failed" from an
         // opaque peer such as a browser diagnosable at all.
-        InteroperableQUICDebug.log("server local settings: \(Self.renderSettings(http3.localSettings))")
+        InteroperableQUICDebug.log("server local settings: \(InteroperableQUICRuntime.renderSettings(http3.localSettings))")
         if let peerSettings = http3.remoteSettings {
-            InteroperableQUICDebug.log("server peer settings: \(Self.renderSettings(peerSettings))")
+            InteroperableQUICDebug.log("server peer settings: \(InteroperableQUICRuntime.renderSettings(peerSettings))")
         }
         // Datagram availability is a property of the negotiated SETTINGS, so it
         // is answered after the control-stream exchange rather than assumed.
@@ -1685,15 +1675,6 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         )
     }
 
-    /// Renders HTTP/3 SETTINGS as sorted `0xid=value` pairs for the diagnostic
-    /// channel. Setting identifiers and counts only — no peer payload.
-    private static func renderSettings(_ settings: HTTP3Settings) -> String {
-        settings.entries
-            .sorted { $0.key < $1.key }
-            .map { "0x\(String($0.key, radix: 16))=\($0.value)" }
-            .joined(separator: " ")
-    }
-
     private static func resolveListenerPort(
         _ listener: NetworkListener<QUIC>,
         timeoutMilliseconds: Int32
@@ -1711,11 +1692,6 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 }
 
 enum InteroperableQUICRuntime {
-    static let defaultAuthority = "localhost"
-    static let defaultPath = "/wt"
-    static let defaultOrigin = "https://localhost"
-    static let defaultProtocol = "demo.v1"
-
     /// The ALPN identifiers every QUIC connection this runtime builds offers.
     ///
     /// The HTTP/3 token comes from ``WebTransportALPNPolicy`` rather than a
@@ -1723,6 +1699,18 @@ enum InteroperableQUICRuntime {
     /// apart: a change to the policy moves the offer with it, and a test pins the
     /// two together.
     static let alpnProtocols = [WebTransportALPNPolicy.requiredHTTP3Protocol]
+
+    /// Renders HTTP/3 SETTINGS as sorted `0xid=value` pairs for the diagnostic
+    /// channel. Setting identifiers and counts only — no peer payload.
+    ///
+    /// Shared by the client and server halves: the two used to carry
+    /// byte-identical private copies.
+    static func renderSettings(_ settings: HTTP3Settings) -> String {
+        settings.entries
+            .sorted { $0.key < $1.key }
+            .map { "0x\(String($0.key, radix: 16))=\($0.value)" }
+            .joined(separator: " ")
+    }
 
     static func host(for value: String) -> NWEndpoint.Host {
         switch value {
@@ -1906,7 +1894,7 @@ enum InteroperableQUICHelpers {
         return namedSessionID
     }
 
-    static func makeRequestStreamPayload(streamID: UInt64, requestFrame: HTTP3Frame) throws -> Data {
+    static func makeRequestStreamPayload(requestFrame: HTTP3Frame) throws -> Data {
         try requestFrame.encode()
     }
 
