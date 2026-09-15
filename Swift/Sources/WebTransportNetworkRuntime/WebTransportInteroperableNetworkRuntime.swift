@@ -846,34 +846,19 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     }
 
     fileprivate func waitForPeerClosure(timeoutMilliseconds: Int32) async {
-        let started = Date()
-        while InteroperableQUICHelpers.remainingTimeout(
-            timeoutMilliseconds: timeoutMilliseconds,
-            started: started
-        ) > 0 {
-            let isClosed = await manager.withManager { manager in
-                guard let state = manager.sessionsByID[WebTransportSessionID(rawValue: self.sessionID)]?.state else {
-                    return true
-                }
-                if case .closed = state {
-                    return true
-                }
-                return false
-            }
-            if isClosed {
-                // The peer ended the session, so this connection is no longer the
-                // runtime's to serve even if the application still holds the object.
-                lease?.release()
-                return
-            }
-            do {
-                try await Task.sleep(for: .milliseconds(5))
-            } catch {
-                // Cancelled: stop waiting rather than polling out the full
-                // deadline. `try?` here would swallow cancellation and keep the
-                // loop running after the caller has gone away.
-                return
-            }
+        // The manager resumes this wait from its mutation path when the session
+        // reaches `.closed`. The timeout is the caller's whole budget, not a poll
+        // interval: the old loop took the manager actor and read the state every
+        // 5 ms (up to 50 hops per call) to notice something the close path could
+        // simply signal.
+        await manager.waitForSessionClosure(
+            sessionID: sessionID,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
+        if await sessionIsClosed() {
+            // The peer ended the session, so this connection is no longer the
+            // runtime's to serve even if the application still holds the object.
+            lease?.release()
         }
     }
 
@@ -1008,15 +993,114 @@ private actor WebTransportNetworkStreamState {
     }
 }
 
-private actor WebTransportNetworkSessionManagerState {
+actor WebTransportNetworkSessionManagerState {
     private var manager: WebTransportSessionManager
+
+    /// A caller parked on a session reaching `.closed`.
+    private struct ClosureWaiter {
+        let id: UInt64
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private var closureWaiters: [UInt64: [ClosureWaiter]] = [:]
+    private var nextClosureWaiterID: UInt64 = 0
+
+    /// How many times the session state was inspected on behalf of a closure
+    /// wait. A cost probe for the regression test: parking a wait must not read
+    /// the manager on a timer.
+    private(set) var closureWaitStateReads = 0
+
+    /// How many closure waits are parked right now.
+    var waitingClosureCount: Int {
+        closureWaiters.values.reduce(0) { $0 + $1.count }
+    }
 
     init(manager: WebTransportSessionManager) {
         self.manager = manager
     }
 
     func withManager<T: Sendable>(_ body: @Sendable (inout WebTransportSessionManager) throws -> T) rethrows -> T {
-        try body(&manager)
+        let result = try body(&manager)
+        // Every mutation of the session state goes through here, so this is where
+        // a parked wait learns that its session closed. Nothing polls the state on
+        // a timer.
+        resumeWaitersForClosedSessions()
+        return result
+    }
+
+    /// Suspends until `sessionID` reaches `.closed` (or is gone), or the timeout
+    /// expires.
+    ///
+    /// The close path resumes this from ``withManager(_:)``; the timeout is the
+    /// only timer involved, and it is the caller's whole budget rather than a
+    /// poll interval.
+    func waitForSessionClosure(sessionID: UInt64, timeoutMilliseconds: Int32) async {
+        if isSessionClosed(sessionID) {
+            return
+        }
+        let waiterID = nextClosureWaiterID
+        nextClosureWaiterID &+= 1
+        let timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(max(0, timeoutMilliseconds))))
+            await self?.expireClosureWaiter(sessionID: sessionID, id: waiterID)
+        }
+        defer { timeoutTask.cancel() }
+        await withCheckedContinuation { continuation in
+            // Re-check while still on the actor: cancellation or a close that
+            // landed before registration must resume rather than park.
+            guard !Task.isCancelled, !isSessionClosed(sessionID) else {
+                continuation.resume()
+                return
+            }
+            closureWaiters[sessionID, default: []].append(
+                ClosureWaiter(id: waiterID, continuation: continuation)
+            )
+        }
+    }
+
+    private func isSessionClosed(_ sessionID: UInt64) -> Bool {
+        closureWaitStateReads += 1
+        guard let state = manager.sessionsByID[WebTransportSessionID(rawValue: sessionID)]?.state else {
+            return true
+        }
+        if case .closed = state {
+            return true
+        }
+        return false
+    }
+
+    private func resumeWaitersForClosedSessions() {
+        guard !closureWaiters.isEmpty else {
+            return
+        }
+        let closedSessionIDs = closureWaiters.keys.filter { isSessionClosed($0) }
+        for sessionID in closedSessionIDs {
+            guard let waiters = closureWaiters.removeValue(forKey: sessionID) else {
+                continue
+            }
+            for waiter in waiters {
+                waiter.continuation.resume()
+            }
+        }
+    }
+
+    private func expireClosureWaiter(sessionID: UInt64, id: UInt64) {
+        removeClosureWaiter(sessionID: sessionID, id: id)?.continuation.resume()
+    }
+
+    private func removeClosureWaiter(sessionID: UInt64, id: UInt64) -> ClosureWaiter? {
+        guard var waiters = closureWaiters[sessionID],
+            let index = waiters.firstIndex(where: { $0.id == id })
+        else {
+            return nil
+        }
+        let waiter = waiters.remove(at: index)
+        if waiters.isEmpty {
+            closureWaiters.removeValue(forKey: sessionID)
+        } else {
+            closureWaiters[sessionID] = waiters
+        }
+        return waiter
     }
 }
 
