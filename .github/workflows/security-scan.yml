@@ -25,13 +25,19 @@ concurrency:
   group: security-scan-${{ github.ref }}
   cancel-in-progress: true
 
+# F-repo-ops-12: both jobs only read the repository, so the token is given
+# nothing else. This workflow was added after that finding was filed and would
+# otherwise have re-introduced the same omission.
+permissions:
+  contents: read
+
 jobs:
   secret-scan:
     name: Secret scan / full history (gitleaks)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout the full history
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           # gitleaks scans commits, not the working tree, so a shallow clone
           # would scan one commit and call the history clean.
@@ -67,7 +73,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Install trivy 0.74.0
         run: |

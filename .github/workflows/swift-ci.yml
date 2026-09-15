@@ -11,6 +11,13 @@ concurrency:
   group: swift-ci-${{ github.ref }}
   cancel-in-progress: true
 
+# F-repo-ops-12: this workflow only reads the repository, so the token is given
+# nothing else. A missing block means the repository default, which may include
+# write scopes; naming the least privilege here keeps a compromised action from
+# pushing.
+permissions:
+  contents: read
+
 jobs:
   macos-swift:
     name: Xcode 27 / Swift 6.4 SwiftPM
@@ -25,7 +32,7 @@ jobs:
     runs-on: xcode-27
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Validate Swift toolchain
         run: ./Swift/check-toolchain.sh
@@ -109,7 +116,7 @@ jobs:
     runs-on: xcode-27
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       # The parsers here run on bytes from an unauthenticated peer, so a trap in
       # any of them is remotely reachable. The suite runs a small budget on every
@@ -127,7 +134,7 @@ jobs:
     runs-on: xcode-27
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       # Excludes the CLI process and release-artifact suites: those orchestrate
       # subprocesses against wall-clock timeouts that TSan's ~20x slowdown blows
