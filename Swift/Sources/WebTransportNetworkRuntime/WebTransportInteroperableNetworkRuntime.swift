@@ -456,8 +456,7 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
         )
         if let manager {
             return try await manager.withManager { manager in
-                try manager.receiveStreamPayload(streamID: self.streamID, payload: payload)
-                return manager.popStreamPayload(streamID: self.streamID) ?? Data()
+                try manager.receiveAndPopStreamPayload(streamID: self.streamID, payload: payload)
             }
         }
         return payload

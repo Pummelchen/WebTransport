@@ -1039,7 +1039,37 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     public mutating func receiveStreamPayload(streamID: UInt64, payload: Data) throws {
-        guard var stream = streamsByID[streamID] else {
+        let sessionID = try payloadDeliverySessionID(streamID: streamID)
+        try reserveData(for: sessionID, byteCount: payload.count, receiveSide: true)
+        // Mutating through the subscript reaches the value where it is stored. The
+        // old `guard var stream = ...` / `streamsByID[streamID] = stream` round trip
+        // left the dictionary holding a second reference to the payload array, so
+        // every append copied the whole buffer.
+        try streamsByID[streamID]?.receivePayload(payload)
+    }
+
+    /// Receives `payload` and returns the payload a read should observe next.
+    ///
+    /// The read path used to call ``receiveStreamPayload(streamID:payload:)`` and
+    /// then ``popStreamPayload(streamID:)``, which appended the arrival only to
+    /// pop it again through two dictionary mutations. A read that consumes its own
+    /// arrival keeps the same accounting (the QUIC offset advances, flow control
+    /// is reserved, the buffer ceiling is enforced) without the round trip, and
+    /// still returns the oldest pending payload when one is already buffered.
+    public mutating func receiveAndPopStreamPayload(streamID: UInt64, payload: Data) throws -> Data {
+        let sessionID = try payloadDeliverySessionID(streamID: streamID)
+        try reserveData(for: sessionID, byteCount: payload.count, receiveSide: true)
+        guard let delivered = try streamsByID[streamID]?.receivePayloadDeliveringImmediately(payload)
+        else {
+            throw QUICCodecError.malformed("unknown WebTransport stream")
+        }
+        return delivered
+    }
+
+    /// Validates that `streamID` names a live stream and that its session still
+    /// accepts ingress, returning the session the payload belongs to.
+    private func payloadDeliverySessionID(streamID: UInt64) throws -> WebTransportSessionID {
+        guard let stream = streamsByID[streamID] else {
             if let sessionID = closedStreamSessionIDsByStreamID[streamID],
                 let state = sessionsByID[sessionID]?.state
             {
@@ -1055,9 +1085,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             throw QUICCodecError.malformed("unknown WebTransport stream")
         }
         _ = try sessionForIngress(stream.sessionID)
-        try reserveData(for: stream.sessionID, byteCount: payload.count, receiveSide: true)
-        try stream.receivePayload(payload)
-        streamsByID[streamID] = stream
+        return stream.sessionID
     }
 
     public mutating func sendStreamPayload(
@@ -1076,12 +1104,10 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     public mutating func popStreamPayload(streamID: UInt64) -> Data? {
-        guard var stream = streamsByID[streamID] else {
+        guard streamsByID[streamID] != nil else {
             return nil
         }
-        let payload = stream.popPayload()
-        streamsByID[streamID] = stream
-        return payload
+        return streamsByID[streamID]?.popPayload()
     }
 
     public mutating func resetStream(
