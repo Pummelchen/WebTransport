@@ -92,15 +92,19 @@ struct WebTransportServerCLI {
             Foundation.exit(2)
         }
 
-        let configuration = WebTransportServerConfiguration(
-            authority: "localhost",
-            path: "/wt",
-            origin: "https://localhost",
-            supportedProtocols: ["demo.v1"]
+        // No argument selected a mode, and that is an argument error, not a running
+        // endpoint. `WebTransportServer.init` only stores its configuration; it does not
+        // bind a socket. Reporting readiness here would be a true-looking success signal
+        // for a listener that does not exist, and a supervisor or health probe that keys
+        // on the exit status would read this process as a served endpoint. Refuse
+        // instead, name the arguments that do start something, and exit non-zero.
+        writeStandardError(
+            "\(executable) started no listener: no mode was selected\n"
+                + "\(executable) needs `--listen host:port` to serve a network session, "
+                + "or `--scenario <name>` to run the conformance scenarios\n"
         )
-        _ = WebTransportServer(configuration: configuration)
-        print("WebTransportServer local demo endpoint ready: authority=\(configuration.authority) path=\(configuration.path)")
-        print("Use `swift run WebTransportClient --connect HOST:PORT` with a listening server for the Network.framework QUIC session path.")
+        writeStandardError(WebTransportCLIConformance.helpText(executableName: executable) + "\n")
+        Foundation.exit(2)
     }
 }
 

@@ -34,6 +34,35 @@ func webTransportCLIProcessCoversHelpListInvalidArgumentsAndScenarioExitCodes() 
     }
 }
 
+// MARK: - No Listener Without A Mode
+
+/// The no-argument invocation must not report a listener it never started.
+///
+/// `WebTransportServer` with no arguments used to build a configuration, store it in a
+/// discarded `WebTransportServer` value, print "local demo endpoint ready" and exit 0.
+/// `WebTransportServer.init` only stores the configuration; it does not bind a socket. A
+/// supervisor or health probe that keys on the exit status therefore read a dead process as a
+/// running endpoint, which is the "hardcoded success / surface wired to nothing" shape the
+/// audit brief bans on a production path (F-repo-ops-07).
+@Test
+func webTransportCLIProcessRefusesToClaimReadinessWithoutAListener() throws {
+    try WebTransportProcessSupport.withExclusiveProcessExecution {
+        guard try WebTransportProcessSupport.debugProductsAvailable() else {
+            return
+        }
+        let server = try WebTransportProcessSupport.productURL("WebTransportServer", configuration: "debug")
+
+        let result = try WebTransportProcessSupport.run(server, [])
+
+        // Nothing was started, so nothing may report success (2 is this tool's argument error).
+        #expect(result.exitCode == 2)
+        #expect(result.stdout.contains("ready") == false)
+        #expect(result.stdout.contains("listening") == false)
+        // The refusal names the argument that would start a listener.
+        #expect(result.stderr.contains("--listen"))
+    }
+}
+
 // MARK: - Skipped Scenarios
 
 /// A scenario that needs the repository is skipped, not failed, when there is no checkout.
