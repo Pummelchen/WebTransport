@@ -4071,7 +4071,26 @@ static void test_a_path_that_does_not_answer_is_given_up_on(void) {
   close_pair(&pair);
 }
 
+/* The space-name diagnostic. `wt_quic_space_name` is public API and, before
+ * this test, had no caller anywhere in the tree; its siblings
+ * (`wt_quic_frame_kind_name`, `wt_quic_packet_type_name`) are exercised by their
+ * own suites, so this gives it the same treatment (F-repo-ops-08). WT_QUIC_SPACE_COUNT
+ * is not a space and an out-of-range value must not be named as one. */
+static void test_quic_space_names(void) {
+  WT_EXPECT_STR("the Initial space is named", "initial",
+                wt_quic_space_name(WT_QUIC_SPACE_INITIAL));
+  WT_EXPECT_STR("the Handshake space is named", "handshake",
+                wt_quic_space_name(WT_QUIC_SPACE_HANDSHAKE));
+  WT_EXPECT_STR("the Application space is named", "application",
+                wt_quic_space_name(WT_QUIC_SPACE_APPLICATION));
+  WT_EXPECT_STR("the count sentinel is not a space", "unknown",
+                wt_quic_space_name(WT_QUIC_SPACE_COUNT));
+  WT_EXPECT_STR("and neither is an out-of-range value", "unknown",
+                wt_quic_space_name((wt_quic_space_t)99));
+}
+
 int main(void) {
+  test_quic_space_names();
   test_frame_permission();
   test_a_frame_that_is_not_a_challenge_is_not_handled_as_one();
   test_a_path_challenge_is_echoed_immediately();
