@@ -13,11 +13,19 @@ artifacts_dir=".build/release-artifacts"
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/webtransport-release.XXXXXX")"
 trap 'rm -rf "$workdir"' EXIT
 
+# SwiftPM builds only what the manifest declares, so a file named after one of the spike
+# experiments can never appear in the release OUTPUT: the previous version of this guard looked
+# for `.build/.../AppleQUICSpike` and could not fail for any input. What CAN fail is a spike
+# becoming part of the package, so this asks SwiftPM for the resolved build plan -- the same
+# resolved products and targets the build acts on -- and rejects a spike there. It runs before
+# the first build, so a re-added spike fails the release script at the point of the mistake
+# rather than after two full builds.
 check_spikes_absent() {
-  local root="$1"
+  local plan
+  plan="$(swift package describe --type json)"
   for spike in $spikes; do
-    if [ -e "$root/$spike" ]; then
-      echo "Unexpected spike binary in production release output: $spike" >&2
+    if printf '%s' "$plan" | grep -q "\"$spike\""; then
+      echo "Unexpected spike target in the package build plan: $spike" >&2
       exit 1
     fi
   done
@@ -86,9 +94,9 @@ build_pass() {
     normalized_macho_hash "$pass_dir/$product" > "$pass_dir/$product.normalized.sha256"
     file "$pass_dir/$product"
   done
-  check_spikes_absent ".build/arm64-apple-macosx/release"
-  check_spikes_absent ".build/release"
 }
+
+check_spikes_absent
 
 echo "Building production release pass 1..."
 build_pass "$workdir/pass1"
@@ -107,8 +115,6 @@ done
 rm -rf "$artifacts_dir"
 mkdir -p "$artifacts_dir"
 : > "$artifacts_dir/SHA256SUMS"
-
-check_spikes_absent "$artifacts_dir"
 
 for product in $products; do
   cp "$workdir/pass2/$product" "$artifacts_dir/$product"

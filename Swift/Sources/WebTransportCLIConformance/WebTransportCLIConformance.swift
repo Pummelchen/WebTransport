@@ -764,7 +764,13 @@ private func scenarioCatalog() -> [CLIConformanceScenario] {
             let url = FileManager.default.fileExists(atPath: scriptURL.path) ? scriptURL : fallbackURL
             let text = try String(contentsOf: url, encoding: .utf8)
             try require(text.contains("rm -rf .build/arm64-apple-macosx/release .build/release"), "release output cleaned")
-            try require(text.contains("Unexpected spike binary in production release output"), "stale spike rejection present")
+            // The rejection has to be able to fire, so the scenario requires the resolved-plan
+            // query that makes it observable, not just a message string (F-repo-ops-17).
+            try require(
+                text.contains("swift package describe --type json")
+                    && text.contains("Unexpected spike target in the package build plan"),
+                "stale spike rejection present"
+            )
             try require(text.contains("Release artifact is not reproducible"), "reproducibility failure path present")
             try require(text.contains("SHA256SUMS"), "checksum manifest is emitted")
         },
