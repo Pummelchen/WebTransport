@@ -73,9 +73,14 @@ longer "written from the inventory" but **COMPILED, LINKED and RUN** -- under Wi
 asserted on both of its paths by its own test. The one claim that is still not made is the one this document
 will not make for Wine: **it has not run on Windows itself.**
 
-`scripts/check-windows-platform.sh` compiles the branch with a mingw cross-compiler -- the same warnings the
-POSIX build turns into errors -- and reports `unsupported` with that reason on a machine that has none. CI
-installs one where it can. **It found real defects, one after another, and each was a thing the inventory had not
+`scripts/check-windows-platform.sh` compiles the branch with a mingw cross-compiler under a **seven-flag subset**
+of the project's warning set -- `-Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual` --
+and reports `unsupported` with that reason on a machine that has none. CI installs one where it can. The FULL
+project set (the twenty-four flags `cmake/WTCompilerWarnings.cmake` probes and applies to every target, with
+`-Werror`) is what the Windows **build** enforces: `scripts/check-windows-build.sh` configures the tree with the
+mingw toolchain and CMake, so every Windows translation unit is compiled under the same warnings-as-errors set
+as POSIX. The sweep is the cheaper branch check; it is not the full set, and this document said it was.
+**It found real defects, one after another, and each was a thing the inventory had not
 named:**
 
 - `FIONBIO` does not fit a signed `long` on Windows (`0x8004667E` is above `LONG_MAX`);
