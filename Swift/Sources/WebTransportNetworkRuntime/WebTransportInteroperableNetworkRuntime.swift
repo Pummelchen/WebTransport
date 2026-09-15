@@ -704,8 +704,8 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         // SAFETY: Both arrays remain alive for the synchronous Security call.
         // The UTF-8 label includes a terminator excluded from its byte count;
         // the context pointer is nonnil even when its declared length is zero.
-        let exported = unsafe labelBytes.withUnsafeBufferPointer { labelBuffer in
-            unsafe contextBytes.withUnsafeBufferPointer { contextBuffer in
+        let exported = labelBytes.withUnsafeBufferPointer { labelBuffer in
+            contextBytes.withUnsafeBufferPointer { contextBuffer in
                 unsafe sec_protocol_metadata_create_secret_with_context(
                     connection.securityProtocolMetadata,
                     labelBytes.count - 1,

@@ -2,7 +2,12 @@
 import PackageDescription
 
 let strictSwiftSettings: [SwiftSetting] = [
-    .strictMemorySafety()
+    .strictMemorySafety(),
+    // A-0004: §1 of the audit brief mandates warnings-as-errors for Swift. The
+    // setting lives here, in the project's own build settings, so a new warning
+    // fails `swift build` for every contributor and for CI, instead of being
+    // visible only on a command line that happens to pass -warnings-as-errors.
+    .treatAllWarnings(as: .error),
 ]
 
 let package = Package(
