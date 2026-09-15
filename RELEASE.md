@@ -191,13 +191,18 @@ Leave previous releases' notes and performance tables alone.
 **One repository, two libraries, one version.** This is the project the lockstep
 rule exists for.
 
-- **Identity** semantic version, single-sourced from `VERSION` at the root.
-  Mirrors: `WT_VERSION_*` in `C99/include/webtransport/version.h` and
-  `library` in `Swift/Sources/WebTransport/WebTransportVersion.swift`.
-  Enforced by `Swift/check-version-sync.sh` in CI and by the C99 CMake configure.
-  Bump with `./Swift/check-version-sync.sh --write`. **The Swift and C99 libraries
-  always carry the same number**; if only one changed, recompile the other at the
-  new number rather than leaving it behind.
+- **Identity** semantic version. **The two libraries must always carry the same
+  number** — if only one changed, recompile the other at the new number rather than
+  leaving it behind.
+- **The lockstep mechanism is not landed yet.** It is being introduced by the open
+  pull request `release/single-version-source`: a root `VERSION` file as the single
+  source, `WT_VERSION_*` in `C99/include/webtransport/version.h` and `library` in
+  `Swift/Sources/WebTransport/WebTransportVersion.swift` as its mirrors, and
+  `Swift/check-version-sync.sh` as the gate (bump with `--write`). **Until that PR
+  merges, `main` has no in-repo version at all**: the Swift side's identity is the
+  git tag and the README install pin (`1.3.8`), while the C99 side declares `0.1.0`
+  in `C99/include/webtransport/version.h` and repeats it in `C99/CMakeLists.txt`.
+  Do not describe the lockstep as landed until it is.
 - **`WT_ABI_VERSION` is not part of the lockstep.** It moves only for a breaking
   layout or signature change; a bug-fix release moves the version and not the ABI.
   `wt_protocol_draft()` is a third, separate axis.
@@ -215,11 +220,11 @@ rule exists for.
   - output lands in `.build/release-artifacts/` with a `SHA256SUMS`.
 - **Gates** `Swift/check-toolchain.sh 6.4 27.0`, `Swift/check-manifest-sync.sh`
   (19 shared targets must agree across the two manifests),
-  `Swift/check-version-sync.sh`, `check-api-compatibility.sh`, the C99
-  `C99/scripts/check-*.sh` family, and the full suite under ASan and TSan.
+  `check-api-compatibility.sh`, the C99 `C99/scripts/check-*.sh` family, and the
+  full suite under ASan and TSan — plus `Swift/check-version-sync.sh` once the pull
+  request above lands.
 - **Two manifests** — the root `Package.swift` and `Swift/Package.swift` —
   intentionally expose different product sets; shared targets must not diverge.
-- **Publishing** currently ships only the Swift products. The C99 library is new
-  and not yet built for release; when it joins, it joins **this** tag and these
-  notes rather than getting its own, and the notes must say which library is not
-  yet built.
+- **Publishing** currently ships only the Swift products. The C99 library is built
+  and tested but not released; when it joins, it joins **this** tag and these notes
+  rather than getting its own, and the notes must say which library is not yet built.
