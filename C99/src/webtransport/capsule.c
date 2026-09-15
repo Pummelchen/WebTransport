@@ -141,15 +141,17 @@ wt_status_t wt_webtransport_close_session_parse(const wt_webtransport_capsule_t 
     if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
     return WT_ERR_PROTOCOL;
   }
-  if (out_error_code != NULL) {
-    *out_error_code = ((uint32_t)capsule->value[0] << 24) | ((uint32_t)capsule->value[1] << 16) |
-                      ((uint32_t)capsule->value[2] << 8) | (uint32_t)capsule->value[3];
-  }
   /* Section 6 makes the reason a UTF-8 string, so bytes that are not one are a malformed capsule rather than a
-   * string a caller can print. An audit found the reason unvalidated. */
+   * string a caller can print. An audit found the reason unvalidated. The error code is written only after
+   * this check passes: a capsule that is refused must not leave a value from the refused capsule in a caller's
+   * out-parameter (include/webtransport/status.h states that rule). */
   if (!utf8_is_well_formed(capsule->value + 4U, capsule->value_length - 4U)) {
     if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
     return WT_ERR_PROTOCOL;
+  }
+  if (out_error_code != NULL) {
+    *out_error_code = ((uint32_t)capsule->value[0] << 24) | ((uint32_t)capsule->value[1] << 16) |
+                      ((uint32_t)capsule->value[2] << 8) | (uint32_t)capsule->value[3];
   }
   if (out_reason != NULL) *out_reason = capsule->value + 4U;
   if (out_reason_length != NULL) *out_reason_length = capsule->value_length - 4U;
