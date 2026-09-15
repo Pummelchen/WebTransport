@@ -17,7 +17,7 @@ int main(void) {
   const char *draft = wt_protocol_draft();
 
   WT_EXPECT_TRUE("the version string is not NULL", version != NULL);
-  WT_EXPECT_STR("the version string is the macros'", "0.1.0", version);
+  WT_EXPECT_STR("the version string is the macros'", WT_TEST_VERSION_STRING, version);
   WT_EXPECT_INT("the ABI version is the header's", WT_ABI_VERSION,
                 wt_abi_version());
   WT_EXPECT_TRUE("the ABI version is positive", WT_ABI_VERSION > 0);

@@ -11,8 +11,32 @@
 
 cmake_minimum_required(VERSION 3.28)
 
+# The version is single-sourced from the repository-root VERSION file.
+#
+# This library and the Swift one ship together and MUST carry the same number:
+# a caller pairing a Swift client with a C99 server has no other way to know the
+# pair is compatible. A library with no code change is recompiled and republished
+# at the new number rather than left behind on the old one, so the two never skew.
+#
+# The same value is declared in exactly two other places -- the WT_VERSION_*
+# macros in include/webtransport/version.h and the Swift constant in
+# Swift/Sources/WebTransport/WebTransportVersion.swift -- and
+# Swift/check-version-sync.sh fails if any of the three disagrees. Configure
+# fails rather than defaulting, so a missing or malformed file can never produce
+# a library whose version nobody can name.
+set(WT_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+if(NOT EXISTS "${WT_VERSION_FILE}")
+  message(FATAL_ERROR "VERSION file not found at ${WT_VERSION_FILE}")
+endif()
+file(STRINGS "${WT_VERSION_FILE}" WT_VERSION LIMIT_COUNT 1)
+string(STRIP "${WT_VERSION}" WT_VERSION)
+if(NOT WT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR
+    "VERSION must be MAJOR.MINOR.PATCH (got '${WT_VERSION}' in ${WT_VERSION_FILE})")
+endif()
+
 project(webtransport_c99
-  VERSION 0.1.0
+  VERSION ${WT_VERSION}
   DESCRIPTION "WebTransport over HTTP/3 in portable C99"
   LANGUAGES C
 )
