@@ -980,6 +980,9 @@ static void test_a_bidi_stream_is_routed_by_its_prefix(void) {
   {
     wt_http3_driver_t other;
     wt_http3_endpoint_t other_endpoint;
+    /* Initialised before the driver is handed the pointer: the driver reads the endpoint's role and walks
+     * its request table, so an uninitialised endpoint is undefined behaviour, not a shortcut. */
+    wt_http3_endpoint_init(&other_endpoint, WT_HTTP3_ROLE_SERVER);
     wt_http3_driver_init(&other, &other_endpoint);
     wt_http3_driver_set_session_id(&other, 12U);
     frame.as.stream.id = 4U;

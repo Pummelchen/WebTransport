@@ -243,6 +243,9 @@ static void test_the_driver_under_random_streams(void) {
     {
       wt_http3_driver_t second;
       wt_http3_endpoint_t second_endpoint;
+      /* The driver reads the endpoint's role and walks its request table, so this is initialised rather than
+       * left to whatever the stack held. */
+      wt_http3_endpoint_init(&second_endpoint, WT_HTTP3_ROLE_SERVER);
       wt_http3_driver_init(&second, &second_endpoint);
       (void)wt_http3_driver_on_stream_bytes(&second, 0U, bytes, length, 1, 1024U, &sink, &error);
     }
