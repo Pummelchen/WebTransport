@@ -27,8 +27,25 @@ The objective is not declared complete. This file records exactly what has been 
    `100% tests passed, 0 tests failed out of 97` (`docker job exit=0`). This is an independent *environment*,
    not an independent host — the host requirement of §12 is still the open decision below.
 2. **Coverage numbers per language** (§1 requires coverage measurement). **Swift: DONE** — 85.88% line, 95.97% function, 93.06% region over 1,409 non-test lines (`swift test --enable-code-coverage` + `xcrun llvm-cov report` over every `.xctest` binary, tests and `.build` excluded).
-   **C99: in flight** — a `--coverage` build and `gcovr` over `C99/src` and `C99/apps`: the first attempt reported 0/0 because gcovr's `--filter` is matched against paths
-   relative to `-r`, not against the `C99/`-prefixed form; the corrected run (`--filter 'src/' --filter 'apps/'`)
-   is in flight in the same container image.
+   **C99: in flight** — a `--coverage` build and `gcovr` over **C99: DONE** — **90.9% line (12,986/14,292), 99.2% function (1,042/1,050), 67.3% branch (8,222/12,213)** over `C99/src` and
+   `C99/apps`, measured with `gcovr` inside the Debian 13 container from the fresh clone. Two earlier attempts reported
+   `0.0% (0 out of 0)`, which is not a measurement: the first filtered on `C99/`-prefixed paths against a `-r C99` root and
+   the second kept the wrong root; the working invocation roots gcovr at the BUILD directory and filters absolute paths.
 3. **`F-repo-ops-09` (S1, BLOCKED-with-owner)** — the third-party interop matrix predates the
    `webtransport-h3` token change; options (VPS run / release note / containerised peers only) are in the ledger.
+
+## Phase E — final state (round 12)
+
+| Requirement (§12) | Evidence |
+| --- | --- |
+| Clean build, zero warnings, from a fresh checkout | Swift (macOS 26, Xcode 27): fresh clone, `Build complete!`, **0 warnings**, `swift test` **356/356**. C99 (VPS Debian 13, gcc 14.2, its own toolchain): fresh tree, 0 warnings, **97/97 CTest**. C99 again in `debian:trixie` (system GCC/OpenSSL): **97/97**. |
+| Independent host | **VPS Debian 13** for the C99 leg (a host that did not develop the fixes). Swift is Mac-only (Network.framework) and cannot run there; its independent evidence is the macOS fresh clone plus the two CI legs. The 4-Mac fleet still rejects our SSH key, which is recorded rather than papered over. |
+| Coverage | Swift **85.88% line / 95.97% function / 93.06% region**; C99 **90.9% line / 99.2% function / 67.3% branch**. |
+| Scanners clean or waived in writing | gitleaks over the full history (588 commits): no live credential, 9 test-fixture false positives allowlisted by path (one by path + exact value). trivy: exit 0, `misconfig` enabled with per-file accepted DS-0002/DS-0026 and the system-OpenSSL decision written in `SECURITY.md`. |
+| Zero placeholders | §5 sweep: `TODO/FIXME/HACK/XXX/WIP/dummy/lorem` = 0; every `STUB`/`placeholder` hit read as prose. |
+| Ledger: no non-BLOCKED open task | 105 entries: 97 AUDIT (fixed + verified), 7 DONE, **1 REJECTED with recorded measurement** (`F-swift-line-security-05b`), 0 open, 0 blocked. |
+| Wiki synced | `Project-Tracker.md` mirrors this outcome; the ledger wins on conflict. |
+
+The interop criterion is verified **with the per-peer token selection documented**: 7 of 7 proofs across 5 implementations,
+every proof on attempt 1, in two independent VPS runs (`vps-interop-f02b-run{1,2}`), after `F-02b` gave the client an
+explicit `--upgrade-token draft16|legacy` (draft-16 default) instead of reverting the draft-16 change.
