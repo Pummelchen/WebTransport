@@ -504,6 +504,37 @@ func webTransportDraft16ComplianceDefinitionOfDoneIsExplicitAndPassing() {
     #expect(items.allSatisfy { !$0.evidence.isEmpty })
 }
 
+/// F-swift-architecture-06: the compliance matrix must not present flow control
+/// as wired end to end when the shipped runtime never negotiates it. The claim
+/// and the runtime's advertised settings have to agree.
+@Test
+func webTransportDraft16FlowControlClaimMatchesTheShippedRuntimeBoundary() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    guard
+        let item = WebTransportDraft16ComplianceMatrix.definitionOfDone.first(where: {
+            $0.requirementFamily == "Flow-control and error codes"
+        })
+    else {
+        Issue.record("the flow-control compliance item is missing")
+        return
+    }
+    #expect(item.documentedBehavior.contains("Network.framework runtime does not advertise"))
+    #expect(item.documentedBehavior.contains("one session per connection"))
+
+    // The invariant behind the wording: no shipped validation profile advertises
+    // the WebTransport flow-control limits, so nothing running through
+    // WebTransportNetworkRuntime can negotiate flow control or a second session.
+    let profiles: [HTTP3WebTransportSettingsValidation] = [
+        .draft16Strict, .interoperable, .chromiumInterop, .pywebtransportStreamInterop,
+    ]
+    for profile in profiles {
+        let settings = profile.localSettings
+        #expect(settings[constants.settingsWTInitialMaxData] == nil)
+        #expect(settings[constants.settingsWTInitialMaxStreamsBidi] == nil)
+        #expect(settings[constants.settingsWTInitialMaxStreamsUni] == nil)
+    }
+}
+
 @Test
 func webTransportRejectsMalformedConnectDataOrderingWithRequirementsNotMet() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()

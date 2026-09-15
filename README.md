@@ -173,7 +173,8 @@ rejects peers still on earlier revisions — browsers among them.
 ## What is implemented
 
 - WebTransport extended CONNECT, protocol negotiation, streams, datagrams, close, and drain.
-- Draft-16 optimistic capsules, directional flow control, close-message limits, and TLS exporter binding.
+- Draft-16 optimistic capsules, close-message limits, and TLS exporter binding.
+- Directional flow control implemented and conformance-tested in `WebTransportHTTP3Core`; the Network.framework runtime does not negotiate the `SETTINGS_WT_INITIAL_MAX_*` limits and serves one WebTransport session per connection.
 - HTTP/3 settings and frames, QPACK, QUIC wire/state primitives, and TLS 1.3 handshake support.
 - A Network.framework-backed client/server runtime with sanitized logging and public error surfaces.
 - Server TLS identity injection (PKCS#12 or DER chain), graceful shutdown with GOAWAY and drain, connection admission limits, and tunable QUIC transport parameters.

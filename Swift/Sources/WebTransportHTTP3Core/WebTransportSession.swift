@@ -1543,6 +1543,18 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
     }
 
+    /// Refuses a second concurrent session unless WebTransport flow control was
+    /// negotiated with the peer.
+    ///
+    /// The gate is deliberate and load-bearing: a connection with more than one
+    /// WebTransport session can only demultiplex them if both endpoints exchange
+    /// the `SETTINGS_WT_INITIAL_MAX_*` limits, so this endpoint refuses the
+    /// second session rather than admitting traffic it cannot account for. The
+    /// shipped `WebTransportNetworkRuntime` never advertises those settings, so
+    /// this always refuses there and one session per connection is the effective
+    /// contract; the limit is lifted only for embedders that drive
+    /// ``WebTransportSessionManager`` directly and negotiate flow control
+    /// themselves (as the conformance suite does).
     private func validateSessionAdmission() throws {
         guard !webTransportFlowControlNegotiated else {
             return

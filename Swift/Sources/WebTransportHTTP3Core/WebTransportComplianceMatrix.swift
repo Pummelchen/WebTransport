@@ -54,7 +54,7 @@ public enum WebTransportDraft16ComplianceMatrix {
             requirementFamily: "Flow-control and error codes",
             status: .pass,
             documentedBehavior:
-                "Both-peer flow-control negotiation, directional stream-byte accounting, missing-setting zero defaults, strictly increasing WT_MAX_* capsules, the 2^60 stream ceiling, blocked capsules, and prohibited HTTP/2 capsule handling are implemented and documented.",
+                "Both-peer flow-control negotiation, directional stream-byte accounting, missing-setting zero defaults, strictly increasing WT_MAX_* capsules, the 2^60 stream ceiling, blocked capsules, and prohibited HTTP/2 capsule handling are implemented in WebTransportHTTP3Core and exercised by the conformance suite. The shipped Network.framework runtime does not advertise SETTINGS_WT_INITIAL_MAX_* and so never negotiates WebTransport flow control; it admits one session per connection, and the multi-session path that flow control gates is reachable only through WebTransportSessionManager, not through WebTransportNetworkRuntime.",
             evidence: ["WebTransportDraft16Tests", "WebTransportFlowControlTests", "WebTransportPhase13Tests"]
         ),
         WebTransportDraft16ComplianceItem(
