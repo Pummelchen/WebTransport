@@ -1,0 +1,12 @@
+{
+  "audit": {
+    "branch": "audit/2026-09-15",
+    "base_commit": "196324e",
+    "started": "2026-09-15",
+    "protocol": "pre-production audit (Phases A-E, \u00a70-\u00a712)",
+    "note": "The standing project instruction said to commit to main; this audit's protocol forbids it and takes precedence. All audit work stays on audit/2026-09-15 and reaches main only by PR after Phase E."
+  },
+  "tasks": [],
+  "baseline": {},
+  "blocked": []
+}
