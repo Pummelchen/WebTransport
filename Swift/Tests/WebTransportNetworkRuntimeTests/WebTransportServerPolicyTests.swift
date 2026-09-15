@@ -178,3 +178,32 @@ func explicitConcurrencyLimitOverridesANonDefaultPolicy() throws {
     )
     policyDefault.shutdown()
 }
+
+/// F-swift-architecture-05: `16` was used as the "argument not supplied"
+/// sentinel, so an explicit `maxConcurrentConnections: 16` was indistinguishable
+/// from the default and the policy's own limit silently won. An explicit value
+/// must always win, whatever it is; `nil` is the only "not supplied".
+@Test
+func explicitConcurrencyLimitOfExactlyTheOldSentinelStillOverridesThePolicy() throws {
+    let endpoint = WebTransportNetworkEndpoint(host: "127.0.0.1", port: 0)
+
+    let explicitSixteen = try WebTransportQUICServer(
+        endpoint: endpoint,
+        maxConcurrentConnections: 16,
+        authority: "localhost",
+        localOnly: false,
+        admission: .publicFacing
+    )
+    defer { explicitSixteen.shutdown() }
+    #expect(explicitSixteen.effectiveAdmissionPolicy.maxConcurrentConnections == 16)
+
+    // Only the absence of the argument lets the policy decide.
+    let policyDefault = try WebTransportQUICServer(
+        endpoint: endpoint,
+        authority: "localhost",
+        localOnly: false,
+        admission: .publicFacing
+    )
+    defer { policyDefault.shutdown() }
+    #expect(policyDefault.effectiveAdmissionPolicy.maxConcurrentConnections == 256)
+}

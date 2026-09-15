@@ -997,6 +997,16 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         localEndpointStorage.withLock { $0 }
     }
 
+    /// The admission policy this listener actually enforces.
+    ///
+    /// `maxConcurrentConnections` predates ``WebTransportAdmissionPolicy`` and is
+    /// folded into it at construction. Exposing the result lets tests assert the
+    /// precedence between the two without opening as many connections as the
+    /// limit.
+    var effectiveAdmissionPolicy: WebTransportAdmissionPolicy {
+        admission
+    }
+
     public let certificateSHA256: Data
 
     /// Expiry of the certificate this listener presents, when it could be read.
@@ -1037,7 +1047,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
     public convenience init(
         bindPort: UInt16,
-        maxConcurrentConnections: Int = 16,
+        maxConcurrentConnections: Int? = nil,
         authority: String = "localhost",
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
@@ -1065,7 +1075,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
     public init(
         endpoint: WebTransportNetworkEndpoint,
-        maxConcurrentConnections: Int = 16,
+        maxConcurrentConnections: Int? = nil,
         authority: String = "localhost",
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
@@ -1078,17 +1088,18 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
         // `maxConcurrentConnections` predates the admission policy. An explicit value
-        // overrides whatever the policy carries, and the default is left alone so a
-        // policy's own limit still applies when the caller did not ask for one.
+        // overrides whatever the policy carries, and `nil` (the argument not being
+        // supplied) leaves the policy's own limit alone.
         //
-        // The condition used to be `admission == .default`, which meant that a caller
-        // passing both a policy and an explicit limit had its limit silently ignored.
-        // Tying the override to the default argument instead makes the precedence the
-        // same for every policy, and the value is validated on the same terms as the
-        // policy field so an out-of-range override is refused rather than accepted here
-        // and rejected elsewhere.
+        // The override used to be tied to the default argument `16`, so an operator
+        // who explicitly asked for 16 while supplying another policy got the policy's
+        // number instead — 256 for `.publicFacing`. Representing "not supplied" as
+        // `nil` rather than as a valid value is what makes the two distinguishable.
+        // The value is validated on the same terms as the policy field so an
+        // out-of-range override is refused rather than accepted here and rejected
+        // elsewhere.
         var admission = try admission.validated()
-        if maxConcurrentConnections != 16 {
+        if let maxConcurrentConnections {
             guard maxConcurrentConnections > 0 else {
                 throw WebTransportNetworkRuntimeError.invalidTransport(
                     "maxConcurrentConnections must be positive"

@@ -441,9 +441,13 @@ public actor WebTransportServer {
 
     /// Starts a network listener. The returned server owns the underlying
     /// listener and can serve accepted WebTransport sessions.
+    ///
+    /// `maxConcurrentConnections` is a legacy override of
+    /// ``WebTransportServerConfiguration/admission``. Pass `nil` (the default) to
+    /// let the configured policy decide, or a positive value to override it.
     public func listen(
         on endpoint: WebTransportEndpoint,
-        maxConcurrentConnections: Int = 16
+        maxConcurrentConnections: Int? = nil
     ) async throws -> WebTransportListeningServer {
         let server = try WebTransportQUICServer(
             endpoint: endpoint.networkEndpoint,
