@@ -1819,7 +1819,7 @@ enum WebTransportSessionHeaders {
 
     static func status(from fields: [HTTPFieldLine]) throws -> UInt16 {
         guard let statusValue = try optionalUniqueField(":status", from: fields),
-            let status = UInt16(statusValue),
+            let status = WebTransportHTTP3Headers.parseStatusCode(statusValue),
             (100...599).contains(status)
         else {
             throw QUICCodecError.malformed("WebTransport response requires a valid :status")
