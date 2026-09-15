@@ -1,0 +1,134 @@
+[
+  {
+    "id": "F-swift-perf-tests-01",
+    "severity": "S2",
+    "category": "perf",
+    "file": "Swift/Sources/WebTransportHTTP3Core/WebTransportSession.swift",
+    "line": 1034,
+    "title": "Draining a buffered WebTransport stream is quadratic: the manager copies the stream struct out of and back into the dictionary and shifts its [Data] buffer on every payload operation",
+    "evidence": "receiveStreamPayload (997-1017) and popStreamPayload (1034-1041) both do `guard var stream = streamsByID[streamID]` ... `streamsByID[streamID] = stream`, so each mutation copy-on-write copies the stream's `bufferedPayloads` array. WebTransportStreams.swift:177-184 `popPayload()` uses `bufferedPayloads.removeFirst()`. WebTransportSession.swift:288 caps a stream at maxBufferedBytes = 64 KiB, i.e. up to 65,536 one-byte Data entries. Micro-benchmark of the exact Array/CoW pattern (`swift -e`): array 8192 elements/4096 pops = 0.002585 s, 32768/16384 = 0.038075 s (quadratic); dictionary copy-in/copy-out variant 0.005741 s and 0.080259 s. The runtime read path (WebTransportInteroperableNetworkRuntime.swift:459-463) appends then immediately pops, paying two CoW allocations per read to accomplish nothing net; the manager API is used with real buffering in WebTransportLibrarySmoke.swift:228-231/257 and LibrarySmokeServer/main.swift:222-223.",
+    "expected": "Draining a stream costs O(total bytes), not O(entries^2), and a payload read that is immediately returned is not copied through a value-typed dictionary twice.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-02",
+    "severity": "S2",
+    "category": "perf",
+    "file": "Swift/Sources/WebTransportQUICCore/QUICCoreState.swift",
+    "line": 469,
+    "title": "QUICLossRecovery.processAck sorts the outstanding packet set twice per ACK and linearly scans every peer-supplied ACK range for every sent packet",
+    "evidence": "processAck (455-492): `for packetNumber in packets.keys.sorted() where acknowledgedRanges.contains(where: { packetNumber >= $0.low && packetNumber <= $0.high })` at 469 and a second `packets.keys.sorted()` at 475. The first loop is O(n*m): n outstanding packets and m peer ranges, with m bounded only by maximumExpandedAckedPacketNumbers = 16_384 (line 228) and no early exit on match. Public library API; grep shows no production call site (the shipped runtime uses Network.framework QUIC).",
+    "expected": "Sort the packet keys once and classify packets against the already-ordered range list with a cursor/bisect, so the pass is O(n log m) instead of O(n*m) plus two sorts.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-03",
+    "severity": "S2",
+    "category": "perf",
+    "file": "Swift/Sources/WebTransportQUICCore/QUICCoreState.swift",
+    "line": 328,
+    "title": "makeAckFrame sorts the entire tracked packet-number set (up to 16,384 numbers) on every call, and the doc-comment that claims the window removed that cost is only covered by a set-size assertion",
+    "evidence": "makeAckFrame line 328: `let ranges = contiguousRangesDescending(Array(receivedPacketNumbers).sorted(by: >))`. The tracking window is maximumTrackedReceivedPacketNumbers = 8_192 (line 243) with a trim only above 2x (line 299), so up to 16,384 numbers are copied and sorted per ACK. The doc comment at 230-243 asserts the window fixed the per-call sort cost, but the regression test Tests/WebTransportQUICCoreTests/QUICCoreStateTests.swift:324-336 only asserts `receivedPacketNumbers.count <= window * 2`, `largestReceived` and `discardedBelow > 0`; it never measures makeAckFrame cost.",
+    "expected": "Acknowledgement generation costs roughly what is being acknowledged; the received set is maintained so ranges can be produced without a full sort, or the claim in the comment is corrected and a cost bound is asserted.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-04",
+    "severity": "S2",
+    "category": "perf",
+    "file": "Swift/Sources/WebTransportHTTP3Core/WebTransportSession.swift",
+    "line": 1131,
+    "title": "Fixed-size 4096-entry stream bookkeeping arrays are scanned and front-shifted on every stream close and every inbound stream delivery",
+    "evidence": "recordClosedStream (1130-1139) does `closedStreamOrder.firstIndex(of: streamID)` then `remove(at:)`/`removeFirst()` with maxRetainedClosedStreams = 4_096 (line 296). WebTransportInteroperableNetworkRuntime.swift:2378 does `deliveredKeys.remove(deliveryOrder.removeFirst())` with maxRememberedDeliveries = 4_096 (line 2333). Once saturated, each peer-driven event is O(4096); Array.removeFirst is O(n) (benchmark in finding 01: 32,768 elements over 16,384 pops = 38 ms vs 2.6 ms for 8,192) and the delivery count is unbounded over a connection's life (see F-swift-line-security-03).",
+    "expected": "Membership test and eviction from the recent-stream caches are O(1) per event, e.g. a fixed-size ring buffer or a head index with occasional compaction.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-05",
+    "severity": "S3",
+    "category": "perf",
+    "file": "Swift/Sources/WebTransportUDPApple/QUICUDPPort.swift",
+    "line": 158,
+    "title": "QUICUDPPort.receive allocates and zeroes a fresh maximumBytes buffer (default 65,535 bytes) per datagram and blocks in poll from async callers",
+    "evidence": "Line 158 `var buffer = [UInt8](repeating: 0, count: maximumBytes)`; default maximumBytes is 65_535 (line 136); the call then blocks synchronously in `poll` (149) and `recvmsg` (184) and copies out with `Data(buffer.prefix(received))` (200). The type's own doc comment scopes it to 'QUIC runtime tests and local packet probes' (39-41) and receives are serialized by receiveLock (49,144).",
+    "expected": "The receive buffer is allocated once and reused across calls under receiveLock instead of being zero-filled per datagram.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-06",
+    "severity": "S3",
+    "category": "perf",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 775,
+    "title": "waitForPeerClosure busy-polls the manager actor every 5 ms until its deadline",
+    "evidence": "waitForPeerClosure (775-805) loops while the timeout remains, taking the manager actor each iteration (781 `await manager.withManager { ... }`) and sleeping 5 ms (797 `try await Task.sleep(for: .milliseconds(5))`). Called from serveOne at line 1320 with min(timeoutMilliseconds, 250), i.e. up to ~50 actor hops plus dictionary lookups per echo.",
+    "expected": "The wait is resumed by the close path (a continuation) or uses backoff, rather than polling shared state on a fixed 5 ms timer.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-07",
+    "severity": "S1",
+    "category": "test",
+    "file": "Swift/Tests/WebTransportHTTP3CoreTests/PeerInputFuzzTests.swift",
+    "line": 186,
+    "title": "The peer-input test named 'RejectOversizedInputWithoutExhaustingMemory' contains zero assertions and swallows every parser outcome",
+    "evidence": "peerFacingParsersRejectOversizedInputWithoutExhaustingMemory (186-214) runs two loops of `do { try parser.run(...) } catch { /* Expected. */ }` (194-200 and 207-213) with no #expect, #require or Issue.record; it cannot fail for the memory property it is named after and only guards against traps, which peerFacingParsersNeverTrapOnArbitraryInput already covers with a larger corpus. The file's only explicit assertion, `#expect(inputs.count > iterations)` (182), is a tautology about the local corpus (inputs.count == 12 + 6*iterations). Command evidence: `swift test --filter peerFacingParsersRejectOversizedInputWithoutExhaustingMemory` passes in 0.002 seconds.",
+    "expected": "The test asserts the observable contract (each parser that must reject an absurd declared length throws; none returns a value carrying that length), or runs under a bounded allocator with a recorded ceiling; the tautological corpus assertion is removed.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-08",
+    "severity": "S1",
+    "category": "test",
+    "file": "Swift/Tests/WebTransportNetworkRuntimeTests/WebTransportNetworkRuntimeTests.swift",
+    "line": 28,
+    "title": "No test covers the bounded-read contract of the shipped stream API, which is why receive(maximumBytes:) returning the whole buffered initial payload survived",
+    "evidence": "`grep -rn \"maximumBytes\" Swift/Tests` matches only Tests/WebTransportUDPAppleTests/QUICUDPPortTests.swift (55,58,61,64,109,115); no test calls WebTransportNetworkBidirectionalStream.receive(maximumBytes:) or the session read with a bound. Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift:442-453 returns `initialPayload` (buffered up to 64 KiB by acceptBidirectionalStream) before consulting maximumBytes, which is F-swift-architecture-04; the runtime-level stream API is otherwise exercised only through CLI subprocess tests that pass small messages.",
+    "expected": "A test accepts a stream whose initial chunk exceeds k, asserts receive(maximumBytes: k) returns at most k bytes, and asserts the unread remainder is delivered by the next read.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-09",
+    "severity": "S2",
+    "category": "test",
+    "file": "Swift/Tests/WebTransportUDPAppleTests/QUICUDPPortTests.swift",
+    "line": 69,
+    "title": "The UDP cancellation test asserts only Task.isCancelled and swallows every receive error, so it passes with a no-op or blocking receive",
+    "evidence": "udpPortCancellationObservedWithShortReceiveTimeout (69-92): the task loop catches and ignores all errors from `port.receive(timeoutMilliseconds: 10)` (75-79), sets `looped = true` solely from `Task.isCancelled` (80-83), and asserts that flag (91). Task.isCancelled is set by `task.cancel()` (89) regardless of what the port does, and there is no timing assertion, so a receive stubbed to throw immediately passes and a receive that blocks for its full timeout also passes. Command evidence: the test passes in 0.073 s, matching the 60 ms sleep.",
+    "expected": "The assertion depends on the port: at least one QUICUDPError.timeout was observed, and the post-cancel latency is bounded, so a no-op or permanently-blocking receive fails.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-10",
+    "severity": "S2",
+    "category": "test",
+    "file": "Swift/Tests/WebTransportNetworkRuntimeTests/WebTransportNetworkRuntimeTests.swift",
+    "line": 474,
+    "title": "The cross-process loopback test lock is a fixed /tmp directory with a 180 s wait and no stale-owner detection, duplicated in a second test target",
+    "evidence": "WebTransportRuntimeLoopbackGate uses a hard-coded `/tmp/webtransport-loopback-tests.dirlock` (474), maximumWait = 180 s (476), `mkdir` acquisition with a `usleep(10_000)` poll (504,518) and release only via `defer` on normal return (535-540). Nothing checks whether the recorded owner PID is alive. A run killed while holding the lock leaves the directory behind and every gated test in both targets then blocks 180 s and fails; the identical protocol is reimplemented at Tests/WebTransportTests/WebTransportProcessTests.swift:945-1016.",
+    "expected": "The lock is released by the kernel on process death (flock/F_SETLK on a lock file) or is reclaimed when the recorded owner PID no longer exists, and there is a single shared implementation.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-11",
+    "severity": "S2",
+    "category": "test",
+    "file": "Swift/Tests/WebTransportNetworkRuntimeTests/WebTransportServerPolicyTests.swift",
+    "line": 146,
+    "title": "The explicit-concurrency-limit precedence test constructs a listener but never asserts that the limit was applied",
+    "evidence": "explicitConcurrencyLimitOverridesANonDefaultPolicy (146-180) builds a server with `maxConcurrentConnections: 1` and `admission: .publicFacing` (150-156), immediately calls shutdown (157), and has no assertion about the effective limit; the body's only #expect is the throws check for 0/-1 (160-170). The comment says 'the limit is applied' but nothing observes it, and the test only uses 1, never the sentinel 16, so the bug in F-swift-architecture-05 (explicit 16 silently overridden by the policy) passes unchanged.",
+    "expected": "The test observes the effective limit, e.g. with maxConcurrentConnections: 16 and a non-default policy assert that a 17th session is refused, or read the applied limit back from the listener.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-perf-tests-12",
+    "severity": "S3",
+    "category": "test",
+    "file": "Swift/Tests/WebTransportTests/WebTransportPublicAPITests.swift",
+    "line": 154,
+    "title": "Unconditional 2-second sleeps on the success path of the public-API exchange helpers",
+    "evidence": "runLoopbackPublicAPIExchange sleeps 2 s after the exchange has completed and the listener has been shut down, immediately before `return` (154-155); runLoopbackPublicAPISessionCloseExchange sleeps 2 s on success (208) and 2 s per failed attempt inside an 8-iteration retry loop (212), i.e. up to ~18 s. makeLoopbackPublicAPIPair binds port 0 (127), so no port-reuse wait is needed and no assertion depends on the delay.",
+    "expected": "No fixed sleep on the success path; if a teardown must complete it is awaited explicitly, and retry backoff is tied to the condition being retried rather than a constant 2 s.",
+    "confidence": "confirmed"
+  }
+]
