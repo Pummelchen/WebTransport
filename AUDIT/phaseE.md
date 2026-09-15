@@ -22,11 +22,13 @@ The objective is not declared complete. This file records exactly what has been 
 
 1. **Independent host for Phase E.** The fresh-clone run above was on the machine that developed the fixes.
    `node1`, `node2` and `node4` reject our SSH key (`Permission denied (publickey,password,keyboard-interactive)`;
-   `node3` is this host) and the brief (§1b) requires approval before provisioning work onto the VPS. A
-   **Debian 13 container run** of the C99 leg is in flight from a fresh clone at `/Users/node3/Downloads/wt-phaseE-clone`
-   (the first attempt failed only because Docker Desktop does not share `/tmp`; the clone lives under `/Users` now).
-   It is an independent *environment*, not an independent host.
+   `node3` is this host) and the brief (§1b) requires approval before provisioning work onto the VPS. **Debian 13 container run: DONE** — from a fresh clone at `/Users/node3/Downloads/wt-phaseE-clone`, inside
+   `debian:trixie` with system GCC 14.2 and system OpenSSL 3, no host toolchain: configure, build and
+   `100% tests passed, 0 tests failed out of 97` (`docker job exit=0`). This is an independent *environment*,
+   not an independent host — the host requirement of §12 is still the open decision below.
 2. **Coverage numbers per language** (§1 requires coverage measurement). **Swift: DONE** — 85.88% line, 95.97% function, 93.06% region over 1,409 non-test lines (`swift test --enable-code-coverage` + `xcrun llvm-cov report` over every `.xctest` binary, tests and `.build` excluded).
-   **C99: in flight** — a `--coverage` build and `gcovr` over `C99/src` and `C99/apps` are running inside the Debian 13 container (`/tmp/cov-c99-report.txt`).
+   **C99: in flight** — a `--coverage` build and `gcovr` over `C99/src` and `C99/apps`: the first attempt reported 0/0 because gcovr's `--filter` is matched against paths
+   relative to `-r`, not against the `C99/`-prefixed form; the corrected run (`--filter 'src/' --filter 'apps/'`)
+   is in flight in the same container image.
 3. **`F-repo-ops-09` (S1, BLOCKED-with-owner)** — the third-party interop matrix predates the
    `webtransport-h3` token change; options (VPS run / release note / containerised peers only) are in the ledger.
