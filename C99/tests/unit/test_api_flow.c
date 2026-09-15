@@ -190,10 +190,40 @@ static void test_configuration_bounds(void) {
   wt_session_destroy(session, NULL);
 }
 
+/* Draft-16 section 5.4 PROHIBITS the stream-level flow-control capsules. WebTransport's flow control is
+ * session-wide, so a peer that sends WT_MAX_STREAM_DATA or WT_STREAM_DATA_BLOCKED is describing a per-stream
+ * limit this endpoint must not act on, and receipt is a session error of type WT_FLOW_CONTROL_ERROR rather than
+ * an unknown capsule to ignore. This is why the matrix row for "limits strictly increase" cannot name
+ * WT_MAX_STREAM_DATA as tested by the flow module: the session refuses that capsule instead. */
+static void test_prohibited_stream_capsules(void) {
+  wt_session_t *session = make_session();
+  uint8_t bytes[32];
+  wt_writer_t w;
+
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_OK("a MAX_STREAM_DATA capsule writes",
+               wt_webtransport_max_stream_data_write(&w, 4U, 2048U));
+  WT_EXPECT_STATUS("and is refused as prohibited", WT_ERR_PROTOCOL,
+                   wt_session_on_capsule(session, bytes, wt_writer_offset(&w)));
+  WT_EXPECT_U64("with the draft's flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR,
+                (uint64_t)wt_session_last_error(session).code);
+
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_OK("a STREAM_DATA_BLOCKED capsule writes",
+               wt_webtransport_stream_data_blocked_write(&w, 4U, 2048U));
+  WT_EXPECT_STATUS("and is refused too", WT_ERR_PROTOCOL,
+                   wt_session_on_capsule(session, bytes, wt_writer_offset(&w)));
+  WT_EXPECT_U64("with the same code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR,
+                (uint64_t)wt_session_last_error(session).code);
+
+  wt_session_destroy(session, NULL);
+}
+
 int main(void) {
   test_advertised();
   test_disabled_ignores_capsules();
   test_limits_and_allowances();
+  test_prohibited_stream_capsules();
   test_configuration_bounds();
   WT_TEST_MAIN_END("wt_api_flow");
 }

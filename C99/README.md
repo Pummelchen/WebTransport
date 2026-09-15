@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-16`, dated 2026-07-06.
 
-Draft-16 score: **34 of 34 requirements**, every one exercised by a test in this tree.
+Draft-16 score: **35 of 35 requirements**, every one exercised by a test in this tree.
 The number is measured rather than remembered: `scripts/score-matrix.sh` counts it from
 `docs/COMPLIANCE-MATRIX.md`, and `scripts/check-matrix.sh` fails the build if a symbol the
 matrix names stops existing, so the document cannot drift away from the code.
@@ -300,7 +300,7 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **34 of 34 draft-16 requirements in
+  `scripts/score-matrix.sh` rather than from memory: **35 of 35 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 8 of the plan's 9 completion
   criteria are met, with 1 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
   which is not the same as being done. The one partial criterion is outside the matrix: the FreeBSD

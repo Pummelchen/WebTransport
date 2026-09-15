@@ -32,7 +32,8 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | 4.4 | The PROTOCOL error codes the draft registers travel unmapped, because they are HTTP/3 codes rather than application ones | `WT_WEBTRANSPORT_ERROR_SESSION_GONE`, `WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED` | `test_webtransport_error` | tested |
 | 4.3 | A datagram that does not hold its quarter ID is malformed rather than short | `wt_webtransport_datagram_parse` | `test_webtransport_framing`, `test_http3_malformed` | tested |
 | 5 | Capsules are the session's control channel on the CONNECT stream | `wt_webtransport_capsule_decode`, `wt_webtransport_capsule_encode` | `test_webtransport_capsule` | tested |
-| 5.1 | WT_MAX_DATA / WT_MAX_STREAM_DATA / WT_MAX_STREAMS strictly increase | `wt_webtransport_flow_on_max_data`, `wt_webtransport_flow_on_max_streams` | `test_webtransport_flow` | tested |
+| 5.1 | WT_MAX_DATA / WT_MAX_STREAMS strictly increase | `wt_webtransport_flow_on_max_data`, `wt_webtransport_flow_on_max_streams` | `test_webtransport_flow`, `test_api_flow` | tested |
+| 5.4 | WT_MAX_STREAM_DATA and WT_STREAM_DATA_BLOCKED are PROHIBITED: stream-level flow control is WebTransport's own, so receipt is a flow-control error rather than an unknown capsule to ignore | `wt_session_on_capsule` | `test_api_flow` | tested |
 | 5.1 | A stream count above the draft's 2^60 ceiling is a flow-control error | `WT_WEBTRANSPORT_MAX_STREAMS_VALUE` | `test_webtransport_flow` | tested |
 | 5.1 | Flow control is enabled by SETTINGS and applies to what this endpoint sends | `wt_session_flow_advertised`, `wt_session_flow_configure` | `test_api_flow` | tested |
 | 5.1 | The limits an endpoint advertises are the ones it enforces | `wt_runtime_session_advertise` | `test_runtime_session_pair` | tested |
