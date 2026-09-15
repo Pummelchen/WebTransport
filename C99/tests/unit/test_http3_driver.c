@@ -696,7 +696,10 @@ static wt_status_t fake_open(void *context, int bidirectional, uint64_t *out_str
   fake_transport_t *fake = context;
   (void)now;
   if (fake->refuse_open != 0) return WT_ERR_AGAIN;
-  WT_EXPECT_INT("streams this endpoint opens are unidirectional", 0, bidirectional ? 0 : 0);
+  /* The endpoint's OWN streams (control, QPACK encoder, QPACK decoder) are unidirectional, and this test
+   * only ever reaches this fake through `wt_http3_driver_start_own_streams`. The assertion used to read
+   * `bidirectional ? 0 : 0`, which is 0 for every value and therefore could never fail. */
+  WT_EXPECT_INT("streams this endpoint opens are unidirectional", 0, bidirectional);
   fake->streams_opened++;
   *out_stream_id = 4U * (uint64_t)fake->streams_opened;
   fake->last_stream_id = *out_stream_id;
