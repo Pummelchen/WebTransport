@@ -457,8 +457,12 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
         state->payload_received += (uint64_t)from_header;
         state->header_length = 0U;
         if (state->payload_received == state->payload_length) {
-          if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS) settle_capsule_stream(driver, stream_id);
+          /* The frame is over, so the flag is cleared BEFORE the stream may be settled below. Settling calls
+           * `wt_http3_driver_forget_frame`, which RELEASES this stream's slot and fills it with the table's last
+           * entry -- another live stream, possibly mid-frame. Writing `state->in_frame = 0` after that would
+           * clear THAT stream's flag through the stale pointer and desynchronise its framing. */
           state->in_frame = 0;
+          if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS) settle_capsule_stream(driver, stream_id);
           continue;
         }
       }
@@ -483,8 +487,10 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
                                                       0U, 1);
           if (status != WT_OK) return status;
         }
-        if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS) settle_capsule_stream(driver, stream_id);
+        /* Cleared BEFORE the settle, for the reason given at the other completion point above: the settle
+         * releases this slot and refills it from the table's tail. */
         state->in_frame = 0;
+        if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS) settle_capsule_stream(driver, stream_id);
       }
     }
   }
