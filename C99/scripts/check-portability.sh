@@ -12,7 +12,15 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 doc="$root/docs/PORTABILITY.md"
 [ -f "$doc" ] || { echo "portability: $doc is missing"; exit 1; }
 
-posix_names="fcntl poll recvmsg sendmsg inet_pton recvfrom sendto close O_NONBLOCK"
+# The inventory of platform-adapted calls: every name here is a call, a flag or a
+# macro whose spelling or declaration differs on Windows, so each one has to be named
+# in docs/PORTABILITY.md. The list is the check's source of truth; a new platform call
+# added to src/runtime/udp_platform.h or src/runtime/udp.c must be added here AND to
+# the document, which is what makes the document and the tree fail together when one
+# of them drifts. The list used to hold nine names while the library also called
+# inet_ntop, setsockopt, getsockopt, socket and bind, so those five could never fail
+# the check (F-26).
+posix_names="close fcntl O_NONBLOCK poll errno recvmsg sendmsg MSG_PEEK MSG_TRUNC sendto recvfrom snprintf inet_pton inet_ntop setsockopt getsockopt socket bind"
 missing=0
 for name in $posix_names; do
   # Where the name is USED, in the library and the apps (a test may use it freely; the library is what ships).

@@ -17,6 +17,9 @@ Windows is the real work. Every item below is a place where the current code ass
 | Library initialisation | none today | `WSAStartup`/`WSACleanup` once per process, which the runtime has no place for yet |
 | Linking | none today | `ws2_32` |
 | The socket type | `int fd` inside `wt_udp_socket_t` | `SOCKET`, which is unsigned and has `INVALID_SOCKET` rather than `-1` |
+| Creating a socket | `socket` | exists in Winsock, but only after `WSAStartup`, and it returns a `SOCKET` |
+| Binding | `bind` | exists in Winsock with the same name and the same `sockaddr` shape |
+| Socket options | `setsockopt`, `getsockopt` | the same names; the option value is `const char *` on Windows and `const void *` on POSIX, and the length type differs |
 | Closing | `close` | `closesocket` |
 | Non-blocking mode | `fcntl(fd, F_SETFL, O_NONBLOCK)` | `ioctlsocket(fd, FIONBIO, &one)`, a different function with a different failure mode |
 | Readiness | `poll` | `WSAPoll` (same shape, `pollfd` spelled the same way) |
