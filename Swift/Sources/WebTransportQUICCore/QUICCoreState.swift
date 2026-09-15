@@ -239,10 +239,10 @@ public struct QUICAckTracker: Equatable, Sendable {
     /// tracked.
     ///
     /// Something has to bound this. A connection receives packets for as long as
-    /// it lives, and retaining every number seen would grow without limit and
-    /// make `makeAckFrame` sort the entire history on each call, so the cost of
-    /// acknowledging would rise with the age of the connection rather than with
-    /// what is being acknowledged. RFC 9000 section 13.2.4 anticipates exactly
+    /// it lives, and retaining every number seen would grow without limit and make
+    /// acknowledgement generation walk the entire history on each call, so the
+    /// cost of acknowledging would rise with the age of the connection rather than
+    /// with what is being acknowledged. RFC 9000 section 13.2.4 anticipates exactly
     /// this and permits an endpoint to limit what it tracks.
     ///
     /// The window doubles as the replay boundary: a packet number below it is
@@ -259,6 +259,17 @@ public struct QUICAckTracker: Equatable, Sendable {
     /// Packet numbers below this are no longer tracked and are refused on sight.
     public private(set) var discardedBelow: UInt64
 
+    /// The tracked numbers as descending, non-overlapping, non-adjacent ranges.
+    ///
+    /// Maintained as numbers arrive so that ``makeAckFrame(nowMicros:)`` can emit
+    /// an acknowledgement without copying and sorting the whole tracked set: an
+    /// endpoint builds an ACK per ACK-eliciting packet, and ordering 16,384
+    /// numbers per call made acknowledgement cost grow with the window rather
+    /// than with what is being acknowledged. Insertion extends the nearest range
+    /// in place, which is O(1) for the in-order arrival that dominates, and only
+    /// the amortised window trim rebuilds the list.
+    private var receivedRangesDescending: [ClosedRange<UInt64>]
+
     public init(packetNumberSpace: QUICPacketNumberSpace, ackDelayExponent: UInt8 = 3) {
         self.packetNumberSpace = packetNumberSpace
         self.ackDelayExponent = ackDelayExponent
@@ -266,6 +277,7 @@ public struct QUICAckTracker: Equatable, Sendable {
         self.receivedPacketNumbers = []
         self.largestReceived = nil
         self.largestAckElicitingReceiveTimeMicros = nil
+        self.receivedRangesDescending = []
     }
 
     @discardableResult
@@ -282,16 +294,92 @@ public struct QUICAckTracker: Equatable, Sendable {
         }
 
         let inserted = receivedPacketNumbers.insert(packetNumber).inserted
-        if inserted && shouldUpdateLargestReceived(packetNumber) {
-            largestReceived = packetNumber
-            if ackEliciting {
-                largestAckElicitingReceiveTimeMicros = nowMicros
+        if inserted {
+            insertReceivedRange(packetNumber)
+            if shouldUpdateLargestReceived(packetNumber) {
+                largestReceived = packetNumber
+                if ackEliciting {
+                    largestAckElicitingReceiveTimeMicros = nowMicros
+                }
             }
         }
         if inserted {
             discardOutsideTrackingWindow()
         }
         return inserted
+    }
+
+    /// Adds one packet number to ``receivedRangesDescending``.
+    ///
+    /// The list stays sorted high to low with no two ranges adjacent, so
+    /// ``makeAckFrame(nowMicros:)`` can translate it directly into ACK ranges.
+    private mutating func insertReceivedRange(_ packetNumber: UInt64) {
+        guard !receivedRangesDescending.isEmpty else {
+            receivedRangesDescending.append(packetNumber...packetNumber)
+            return
+        }
+        // In-order arrival is the common case and costs O(1): extend the newest
+        // range, or open a new one above it.
+        if let highest = receivedRangesDescending.first, packetNumber > highest.upperBound {
+            if highest.upperBound != UInt64.max, packetNumber == highest.upperBound + 1 {
+                receivedRangesDescending[0] = highest.lowerBound...packetNumber
+            } else {
+                receivedRangesDescending.insert(packetNumber...packetNumber, at: 0)
+            }
+            return
+        }
+        if let lowest = receivedRangesDescending.last, packetNumber < lowest.lowerBound {
+            if packetNumber + 1 == lowest.lowerBound {
+                receivedRangesDescending[receivedRangesDescending.count - 1] = packetNumber...lowest.upperBound
+            } else {
+                receivedRangesDescending.append(packetNumber...packetNumber)
+            }
+            return
+        }
+
+        // A gap in the middle: find the first range whose lower bound is at or
+        // below the number. Ranges descend, so that range is the one below the
+        // insertion point and the one before it is the range above.
+        var low = 0
+        var high = receivedRangesDescending.count
+        while low < high {
+            let mid = low + (high - low) / 2
+            if receivedRangesDescending[mid].lowerBound > packetNumber {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        guard low < receivedRangesDescending.count else {
+            // The end cases above make this unreachable, but a number the set has
+            // accepted must never be dropped from the range list.
+            receivedRangesDescending.append(packetNumber...packetNumber)
+            return
+        }
+        if receivedRangesDescending[low].contains(packetNumber) {
+            return
+        }
+
+        let aboveIndex = low - 1
+        let touchesAbove =
+            low > 0 && receivedRangesDescending[aboveIndex].lowerBound > 0
+            && packetNumber == receivedRangesDescending[aboveIndex].lowerBound - 1
+        let belowUpperBound = receivedRangesDescending[low].upperBound
+        let touchesBelow = belowUpperBound != UInt64.max && packetNumber == belowUpperBound + 1
+
+        if touchesAbove && touchesBelow {
+            // The range below supplies the lower bound, the one above the upper.
+            receivedRangesDescending[aboveIndex] =
+                receivedRangesDescending[low].lowerBound...receivedRangesDescending[aboveIndex].upperBound
+            receivedRangesDescending.remove(at: low)
+        } else if touchesAbove {
+            receivedRangesDescending[aboveIndex] =
+                packetNumber...receivedRangesDescending[aboveIndex].upperBound
+        } else if touchesBelow {
+            receivedRangesDescending[low] = receivedRangesDescending[low].lowerBound...packetNumber
+        } else {
+            receivedRangesDescending.insert(packetNumber...packetNumber, at: low)
+        }
     }
 
     /// Drops packet numbers that have fallen out of the tracking window and
@@ -319,6 +407,11 @@ public struct QUICAckTracker: Equatable, Sendable {
         }
         discardedBelow = floor
         receivedPacketNumbers = receivedPacketNumbers.filter { $0 >= floor }
+        // This runs once per window's worth of packets, so rebuilding the range
+        // list by sorting here amortises to nothing per packet.
+        receivedRangesDescending = contiguousClosedRangesDescending(
+            receivedPacketNumbers.sorted(by: >)
+        )
     }
 
     private func shouldUpdateLargestReceived(_ packetNumber: UInt64) -> Bool {
@@ -333,18 +426,20 @@ public struct QUICAckTracker: Equatable, Sendable {
             return nil
         }
 
-        let ranges = contiguousRangesDescending(Array(receivedPacketNumbers).sorted(by: >))
+        // The ranges are already ordered high to low and non-adjacent, so this is
+        // a walk over the gaps rather than a copy and sort of the whole window.
+        let ranges = receivedRangesDescending
         guard let first = ranges.first else {
             return nil
         }
 
-        let firstAckRange = first.high - first.low
+        let firstAckRange = first.upperBound - first.lowerBound
         var extraRanges: [QUICAckRange] = []
-        var previousLow = first.low
+        var previousLow = first.lowerBound
         for range in ranges.dropFirst() {
-            let gap = previousLow - range.high - 2
-            extraRanges.append(QUICAckRange(gap: gap, length: range.high - range.low))
-            previousLow = range.low
+            let gap = previousLow - range.upperBound - 2
+            extraRanges.append(QUICAckRange(gap: gap, length: range.upperBound - range.lowerBound))
+            previousLow = range.lowerBound
         }
 
         let delayMicros = largestAckElicitingReceiveTimeMicros.map { nowMicros >= $0 ? nowMicros - $0 : 0 } ?? 0
@@ -1008,6 +1103,12 @@ private func contiguousRangesDescending(_ numbers: [UInt64]) -> [(high: UInt64, 
     }
     ranges.append((high: high, low: low))
     return ranges
+}
+
+/// The same grouping as ``contiguousRangesDescending(_:)``, in the closed-range
+/// form ``QUICAckTracker`` maintains between trims.
+private func contiguousClosedRangesDescending(_ numbers: [UInt64]) -> [ClosedRange<UInt64>] {
+    contiguousRangesDescending(numbers).map { $0.low...$0.high }
 }
 
 private func insertClosedRange(low: UInt64, high: UInt64, into numbers: inout Set<UInt64>) {

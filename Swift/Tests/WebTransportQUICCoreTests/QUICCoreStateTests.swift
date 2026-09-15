@@ -46,6 +46,96 @@ func connectionIDStoreRetiresOlderConnectionIDs() throws {
     }
 }
 
+/// F-swift-perf-tests-03: building an ACK must not re-order the tracked window.
+///
+/// `makeAckFrame` did `Array(receivedPacketNumbers).sorted(by: >)` on every call,
+/// and an endpoint builds an ACK per ACK-eliciting packet. The tracking window
+/// caps the set at 16,384 numbers but the per-call copy and sort remained, so the
+/// doc-comment's claim that the window removed that cost was not covered by any
+/// test — the existing window test only asserted set size, `largestReceived` and
+/// `discardedBelow`.
+///
+/// The bound is a wall-clock one because the sort happens inside the standard
+/// library; the margin is large (the old implementation takes seconds on this
+/// workload, the maintained ranges take microseconds).
+@Test
+func acknowledgementFramesDoNotReorderTheTrackedWindowPerCall() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+    let window = QUICAckTracker.maximumTrackedReceivedPacketNumbers * 2
+    for number in 0..<UInt64(window) {
+        tracker.recordReceived(packetNumber: number, nowMicros: 0)
+    }
+    #expect(tracker.receivedPacketNumbers.count == window)
+
+    let start = ContinuousClock.now
+    for _ in 0..<1_000 {
+        _ = tracker.makeAckFrame(nowMicros: 1_000_000)
+    }
+    let elapsed = ContinuousClock.now - start
+    #expect(
+        elapsed < .seconds(1),
+        "1,000 ACK frames over a \(window)-number window took \(elapsed); an ACK must not re-sort the window"
+    )
+}
+
+/// The maintained ranges must survive out-of-order arrival, duplicates and the
+/// window trim: whatever `makeAckFrame` emits must decode back to exactly the
+/// tracked set.
+@Test
+func acknowledgementFrameRangesMatchTheTrackedSetAfterOutOfOrderArrivalAndTrim() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+
+    // Even numbers first, then the odd neighbours that bridge every gap.
+    for number in stride(from: 0, to: 600, by: 2) {
+        let inserted = tracker.recordReceived(packetNumber: UInt64(number), nowMicros: 0)
+        #expect(inserted)
+    }
+    for number in stride(from: 1, to: 600, by: 2) {
+        let inserted = tracker.recordReceived(packetNumber: UInt64(number), nowMicros: 0)
+        #expect(inserted)
+    }
+    // Duplicates are refused and must not disturb the ranges.
+    let duplicateLow = tracker.recordReceived(packetNumber: 0, nowMicros: 0)
+    let duplicateHigh = tracker.recordReceived(packetNumber: 599, nowMicros: 0)
+    #expect(!duplicateLow)
+    #expect(!duplicateHigh)
+    let frame = try #require(tracker.makeAckFrame(nowMicros: 0))
+    #expect(try QUICAckTracker.acknowledgedPacketNumbers(from: frame) == tracker.receivedPacketNumbers)
+
+    // Push past the window so the trim rewrites the range list, then round-trip again.
+    for number in 600..<UInt64(QUICAckTracker.maximumTrackedReceivedPacketNumbers * 2 + 100) {
+        tracker.recordReceived(packetNumber: number, nowMicros: 0)
+    }
+    #expect(tracker.discardedBelow > 0)
+    let trimmed = try #require(tracker.makeAckFrame(nowMicros: 0))
+    #expect(try QUICAckTracker.acknowledgedPacketNumbers(from: trimmed) == tracker.receivedPacketNumbers)
+}
+
+/// The incremental range list has four insertion positions (extend either end,
+/// bridge one gap, open a new range) and a trim rebuild; a deterministic
+/// pseudo-random arrival order exercises all of them against a decode round-trip.
+@Test
+func acknowledgementFrameRangesSurviveArbitraryInsertionOrder() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+    var generator: UInt64 = 0x9e37_79b9_7f4a_7c15
+    var seen: Set<UInt64> = []
+    for step in 0..<4_000 {
+        generator = generator &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        let number = generator % 2_048
+        let inserted = tracker.recordReceived(packetNumber: number, nowMicros: 0)
+        #expect(inserted == !seen.contains(number))
+        seen.insert(number)
+        if step % 97 == 0 {
+            let frame = try #require(tracker.makeAckFrame(nowMicros: 0))
+            #expect(
+                try QUICAckTracker.acknowledgedPacketNumbers(from: frame) == tracker.receivedPacketNumbers
+            )
+        }
+    }
+    let frame = try #require(tracker.makeAckFrame(nowMicros: 0))
+    #expect(try QUICAckTracker.acknowledgedPacketNumbers(from: frame) == tracker.receivedPacketNumbers)
+}
+
 @Test
 func ackTrackerBuildsAckRangesAndDecodesThem() throws {
     var zeroTracker = QUICAckTracker(packetNumberSpace: .initial)
