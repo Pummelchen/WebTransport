@@ -7,11 +7,11 @@ The protocol target is [draft-ietf-webtrans-http3-16](https://datatracker.ietf.o
 ## Requirements
 
 - macOS 26 or later
-- Xcode 26.6 or later
+- Xcode 27 or later
 - Swift 6.4 or later, using Swift language mode 6
 - Apple Silicon for release artifact generation
 
-Every SwiftPM target opts into strict memory-safety checking. CI additionally treats warnings as errors and requires complete concurrency diagnostics with explicit `Sendable` declarations.
+Every SwiftPM target opts into strict memory-safety checking and treats all warnings as errors in the package manifests themselves, so a new warning fails `swift build` for a developer and for CI alike. CI additionally builds both entry points with `-strict-concurrency=complete` and `-require-explicit-sendable`.
 
 ## Package structure
 
