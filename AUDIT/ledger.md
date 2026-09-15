@@ -70,8 +70,9 @@ Remaining: 5 S1 (one blocked), 47 S2, 26 S3.
 
 ## Round 13 — the Swift-on-Linux boundary, measured (`F-repo-ops-20`, S3)
 
-The owner asked for Swift 6.4 from swift.org on the VPS. The toolchain is installed there and, more
-usefully, it turns Phase E's blanket "Swift cannot run on Linux" into a per-target measurement.
+Committed at `d1c4b78` on `audit/2026-09-15`. The owner asked for Swift 6.4 from swift.org on the VPS.
+The toolchain is installed there and, more usefully, it turns Phase E's blanket "Swift cannot run on
+Linux" into a per-target measurement.
 
 - **Installed, signature-verified**: `swift-6.4.0-RELEASE-debian13.tar.gz` (sha256
   `b623947404e7ea9843cfc315ed8624e85410fae571eb353339780ed222243737`), GPG `GOODSIG` from
