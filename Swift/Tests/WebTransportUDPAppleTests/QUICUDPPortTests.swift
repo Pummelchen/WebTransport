@@ -66,30 +66,50 @@ func udpPortRejectsInvalidReceiveConfiguration() throws {
     }
 }
 
+/// F-swift-perf-tests-09: the cancellation observation must depend on the port.
+///
+/// The old body caught and discarded every `receive` error and asserted only
+/// `Task.isCancelled`, which `task.cancel()` sets whatever the port does. It
+/// therefore passed with a receive stubbed to return immediately (no timeout was
+/// ever observed) and could not detect the failure it was written for, a call
+/// that keeps blocking for its full timeout. This counts the timeouts the port
+/// actually reports and bounds how long the loop takes to stop after
+/// cancellation, so a no-op receive fails on the count and a receive that
+/// outlives its timeout fails on the latency.
 @Test
 func udpPortCancellationObservedWithShortReceiveTimeout() async throws {
     let port = try QUICUDPPort()
 
-    let task = Task { () -> Bool in
-        var looped = false
+    let task = Task { () -> Int in
+        var timeouts = 0
         while true {
             do {
                 _ = try port.receive(timeoutMilliseconds: 10)
+            } catch QUICUDPError.timeout {
+                timeouts += 1
             } catch {
-                // expected for timeout
+                Issue.record("receive failed with \(error) while waiting for its timeout")
             }
             if Task.isCancelled {
-                looped = true
-                break
+                return timeouts
             }
         }
-        return looped
     }
 
     try await Task.sleep(for: .milliseconds(60))
+    let cancelledAt = ContinuousClock.now
     task.cancel()
-    let observedCancellation = await task.value
-    #expect(observedCancellation)
+    let timeouts = await task.value
+    let stopLatency = ContinuousClock.now - cancelledAt
+
+    #expect(
+        timeouts >= 1,
+        "the port reported no timeout in 60 ms of 10 ms receives, so the loop was not reading it"
+    )
+    #expect(
+        stopLatency < .milliseconds(500),
+        "the loop took \(stopLatency) to observe cancellation; a receive that outlives its 10 ms timeout shows up here"
+    )
 }
 
 /// A datagram larger than the caller's buffer must be reported, not silently truncated.
