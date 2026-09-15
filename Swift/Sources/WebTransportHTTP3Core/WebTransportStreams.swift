@@ -128,9 +128,21 @@ public struct WebTransportStreamState: Equatable, Sendable {
     public let sessionID: WebTransportSessionID
     public let form: WebTransportStreamForm
     public private(set) var quicStream: QUICStreamState
-    public private(set) var bufferedPayloads: [Data]
+    /// Pending payloads in receive order, oldest first.
+    ///
+    /// A computed view over the storage below: the consumed prefix is retained in
+    /// place until it is worth reclaiming, so the cost of removing the oldest
+    /// payload is not proportional to how many are still buffered.
+    public var bufferedPayloads: [Data] {
+        Array(payloadStorage[payloadHead...])
+    }
     public private(set) var bufferedPayloadBytes: Int
     public let maxBufferedBytes: Int
+
+    /// Payloads in receive order, including the consumed prefix below ``payloadHead``.
+    private var payloadStorage: [Data]
+    /// How many leading entries of ``payloadStorage`` have already been popped.
+    private var payloadHead: Int
 
     public init(
         streamID: UInt64,
@@ -154,19 +166,53 @@ public struct WebTransportStreamState: Equatable, Sendable {
             maxSendOffset: maxSendOffset,
             maxReceiveOffset: maxReceiveOffset
         )
-        self.bufferedPayloads = []
         self.bufferedPayloadBytes = 0
         self.maxBufferedBytes = maxBufferedBytes
+        self.payloadStorage = []
+        self.payloadHead = 0
     }
 
     public mutating func receivePayload(_ data: Data) throws {
+        try bufferPayload(data)
+    }
+
+    /// Receives `data` and returns the payload the caller must observe next.
+    ///
+    /// This is what a read that immediately consumes its own arrival needs: the
+    /// QUIC stream bookkeeping and the buffer ceiling are applied exactly as in
+    /// ``receivePayload(_:)``, but a payload that arrives on an otherwise empty
+    /// buffer is handed straight back instead of being appended and popped again.
+    /// When an earlier payload is still pending the FIFO order is preserved: the
+    /// arrival is buffered and the oldest pending payload is returned instead.
+    public mutating func receivePayloadDeliveringImmediately(_ data: Data) throws -> Data {
         guard data.count <= max(0, maxBufferedBytes - bufferedPayloadBytes) else {
             throw QUICCodecError.malformed("WebTransport stream receive buffer limit exceeded")
         }
 
         let frame = QUICFrame.stream(id: streamID, offset: quicStream.receiveOffset, fin: false, data: data)
         _ = try quicStream.receive(frame)
-        bufferedPayloads.append(data)
+
+        guard payloadHead < payloadStorage.count else {
+            // Nothing pending, so this arrival is the read result. Drop the consumed
+            // prefix so the storage does not keep a dead tail behind it.
+            payloadStorage.removeAll(keepingCapacity: true)
+            payloadHead = 0
+            return data
+        }
+
+        payloadStorage.append(data)
+        bufferedPayloadBytes += data.count
+        return popPayload() ?? data
+    }
+
+    private mutating func bufferPayload(_ data: Data) throws {
+        guard data.count <= max(0, maxBufferedBytes - bufferedPayloadBytes) else {
+            throw QUICCodecError.malformed("WebTransport stream receive buffer limit exceeded")
+        }
+
+        let frame = QUICFrame.stream(id: streamID, offset: quicStream.receiveOffset, fin: false, data: data)
+        _ = try quicStream.receive(frame)
+        payloadStorage.append(data)
         bufferedPayloadBytes += data.count
     }
 
@@ -175,12 +221,50 @@ public struct WebTransportStreamState: Equatable, Sendable {
     }
 
     public mutating func popPayload() -> Data? {
-        guard let first = bufferedPayloads.first else {
+        guard payloadHead < payloadStorage.count else {
             return nil
         }
-        bufferedPayloads.removeFirst()
+        let first = payloadStorage[payloadHead]
+        payloadHead += 1
         bufferedPayloadBytes -= first.count
+        compactPayloadStorageIfWorthwhile()
         return first
+    }
+
+    /// Reclaims the consumed prefix once it is at least half the storage.
+    ///
+    /// Removing from the front moves every remaining element, so doing it per pop
+    /// is what made draining a buffer quadratic. Waiting until the consumed prefix
+    /// is as large as the live tail bounds the move to the work already paid for,
+    /// which makes each pop amortised O(1).
+    private mutating func compactPayloadStorageIfWorthwhile() {
+        guard payloadHead > 0 else {
+            return
+        }
+        guard payloadHead == payloadStorage.count || payloadHead * 2 >= payloadStorage.count else {
+            return
+        }
+        payloadStorage.removeFirst(payloadHead)
+        payloadHead = 0
+    }
+
+    /// Whether this endpoint owns the stream's send half (RFC 9000 section 2.1).
+    ///
+    /// A bulk teardown has to consult this before producing a RESET_STREAM: for
+    /// a unidirectional stream the peer initiated, this endpoint is the receiver
+    /// only, and a RESET_STREAM on a send-only stream is a STREAM_STATE_ERROR
+    /// (RFC 9000 section 19.4).
+    public var hasSendHalf: Bool {
+        quicStream.hasSendHalf
+    }
+
+    /// Whether this endpoint owns the stream's receive half (RFC 9000 section 2.1).
+    ///
+    /// The mirror of ``hasSendHalf``, guarding STOP_SENDING: RFC 9000 section
+    /// 19.5 makes a STOP_SENDING frame for a receive-only stream a
+    /// STREAM_STATE_ERROR.
+    public var hasReceiveHalf: Bool {
+        quicStream.hasReceiveHalf
     }
 
     public mutating func reset(applicationErrorCode: UInt64) -> QUICFrame {

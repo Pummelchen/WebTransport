@@ -200,6 +200,10 @@ typedef struct wt_quic_tx_frame {
 
 typedef struct wt_quic_control_frame {
   int in_use;
+  /* Set when a re-send of this retained frame could not go out. The obligation stands -- the slot is still
+   * in_use -- but no packet is in flight that a later loss could name it by, because the descriptor is freed
+   * with the failed send. `wt_quic_connection_flush` re-drives every flagged slot. */
+  int resend_pending;
   wt_quic_space_t space;
   uint8_t wire[WT_QUIC_CONTROL_WIRE_MAX];
   size_t wire_length;
@@ -248,6 +252,14 @@ typedef struct wt_quic_connection {
    * client has the server's own Source Connection ID and stops using this one. */
   uint8_t original_destination_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
   size_t original_destination_id_length;
+  /* The Source Connection ID of the first authenticated long-header (Initial or Handshake) packet this
+   * endpoint received from the peer. RFC 9000 section 7.3 requires the peer's `initial_source_connection_id`
+   * transport parameter to match it, so it is recorded here from the packet itself rather than taken from the
+   * parameter it is supposed to validate. `..._set` is 0 for a connection that was never handed a real packet
+   * (the synthetic objects tests and some callers build), where there is nothing to compare. */
+  uint8_t peer_source_connection_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  size_t peer_source_connection_id_length;
+  int peer_source_connection_id_set;
 
   /* One key set per space and direction. A direction that has not been installed -- the Handshake
    * keys before the handshake produces them -- means a packet for that space cannot be read or sent,
@@ -328,6 +340,10 @@ typedef struct wt_quic_connection {
   /* Control frames sent WITHOUT a slot, because the table was full: a bound this endpoint enforces rather than
    * a table it grows, counted so that "the retransmission did not happen" is visible. */
   uint64_t control_frames_unretained;
+  /* Retained control frames whose re-send could not go out (congestion, a full sent list or descriptor table,
+   * the path's datagram limit, an I/O error). They are still owed and `flush` re-drives them; counted so that
+   * "the retransmission has not happened YET" is visible rather than silent. */
+  uint64_t control_frames_resend_deferred;
 
   wt_quic_frame_handler_fn handler;
   void *handler_context;

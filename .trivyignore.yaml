@@ -1,0 +1,33 @@
+# Accepted misconfiguration findings, per file (F-repo-ops-13).
+#
+# The six interop Dockerfiles are TEST images: `scripts/run-container-interop*.sh`
+# starts them on a private Docker bridge network next to each other, waits on the
+# test, and tears them down. They are never published, never exposed, and never
+# shipped, so DS-0002 (image user is root) is accepted rather than fixed -- a
+# non-root rewrite that the interop runner cannot exercise is a change with no
+# measurement behind it. DS-0026 (no HEALTHCHECK) is accepted for the same reason:
+# the only consumer of these containers is the script that starts them, which
+# polls the protocol rather than `docker inspect`.
+#
+# The acceptance is scoped by `paths`, so a NEW Dockerfile is still checked and a
+# new image that DOES run as root for a real deployment fails the scan. The
+# reasoning is repeated in `.trivy.yaml`, which enables and points at this file.
+misconfigurations:
+  - id: DS-0002
+    paths:
+      - C99/tests/interop/client/Dockerfile
+      - C99/tests/interop/peer/Dockerfile
+      - C99/tests/interop/peer/Dockerfile.aioquic
+      - Swift/interop-docker/pywebtransport/Dockerfile
+      - Swift/interop-docker/quiche/Dockerfile
+      - Swift/interop-docker/quinn/Dockerfile
+    statement: Test-only interop image on a private bridge network; root inside it is accepted.
+  - id: DS-0026
+    paths:
+      - C99/tests/interop/client/Dockerfile
+      - C99/tests/interop/peer/Dockerfile
+      - C99/tests/interop/peer/Dockerfile.aioquic
+      - Swift/interop-docker/pywebtransport/Dockerfile
+      - Swift/interop-docker/quiche/Dockerfile
+      - Swift/interop-docker/quinn/Dockerfile
+    statement: Test-only interop image started and polled by a script; no HEALTHCHECK consumer.

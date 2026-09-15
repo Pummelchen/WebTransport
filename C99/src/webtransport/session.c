@@ -105,6 +105,17 @@ wt_status_t wt_webtransport_session_on_capsule_bytes(wt_webtransport_session_t *
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
   if (session == NULL || cursor == NULL) return WT_ERR_INVALID_ARGUMENT;
 
+  if (session->state == WT_WEBTRANSPORT_SESSION_CLOSED && wt_cursor_remaining(cursor) > 0U) {
+    /* Section 5.4: a WT_CLOSE_SESSION capsule is the LAST thing on the CONNECT stream. A caller that rebuilds a
+     * cursor per delivery -- apps/support/capsule_stream.c does, once per STREAM frame -- would otherwise apply a
+     * capsule that arrived in a LATER frame after the close, because the close branch's own tail check only sees
+     * the remainder of the buffer the close capsule itself was in. The state is therefore checked on ENTRY too.
+     * An EMPTY delivery is left alone: a CONNECT stream that merely ends after the close is the ordinary FIN, not
+     * a capsule, and refusing it would turn a normal end into a message error. */
+    if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
+
   for (;;) {
     wt_webtransport_capsule_t capsule;
     /* Walked in a COPY, so that a capsule which has not fully arrived leaves the caller's cursor on its first

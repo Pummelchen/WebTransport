@@ -26,17 +26,20 @@ trap 'rm -rf "$work"' EXIT
 # A machine without the analyzer reports that, the way the Windows checks report a missing cross-compiler: the
 # check is skipped with its reason rather than failing a build for a tool that is not installed. Where clang IS
 # present -- every macOS runner, and any Linux runner with it -- a finding fails the job, which is the point.
+# The status is 77 -- CTest's skip code, and a NON-PASSING status for a plain CI step -- because `exit 0` made
+# "the check could not run" indistinguishable from "the check ran and found nothing", which is the one thing a
+# hard check must not do.
 if ! "$analyzer" --analyze -x c /dev/null -o /dev/null >/dev/null 2>&1; then
   echo "static analysis: unsupported -- $analyzer has no --analyze, so this machine cannot check the paths"
-  exit 0
+  exit 77
 fi
 
 # The analysis is driven by python3, which reads the compilation database and replays each entry with the analyzer
 # in place of the compiler. A machine without it cannot check a path, and says so rather than reporting success
-# (WT-201).
+# (WT-201). Status 77 for the reason above.
 if ! command -v python3 >/dev/null 2>&1; then
   echo "static analysis: unsupported -- python3 is not installed, so the compilation database cannot be replayed"
-  exit 0
+  exit 77
 fi
 
 (cd "$root" && cmake -S . -B "$build" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Debug >/dev/null)

@@ -11,7 +11,7 @@ public struct QUICUDPEndpoint: Equatable, Sendable {
     }
 }
 
-public enum QUICUDPError: Error, CustomStringConvertible, Sendable {
+public enum QUICUDPError: Error, Equatable, CustomStringConvertible, Sendable {
     case posix(operation: String, code: Int32)
     case timeout
     case invalidAddress
@@ -40,14 +40,47 @@ public enum QUICUDPError: Error, CustomStringConvertible, Sendable {
 /// probes. It intentionally accepts only `localhost`, `127.0.0.1`, and `::1`;
 /// production remote networking is handled by `WebTransportNetworkRuntime`.
 // SAFETY: The file descriptor is immutable after bind and closed exactly once in
-// `deinit`. Receive calls are serialized with `receiveLock`; send calls use
-// `sendto` on the immutable descriptor and do not mutate shared Swift state.
+// `deinit`. Receive calls are serialized with `receiveLock`, which also guards the
+// reused receive buffer and its allocation count; send calls use `sendto` on the
+// immutable descriptor and do not mutate shared Swift state.
 public final class QUICUDPPort: @unchecked Sendable {
     private static let maximumUDPDatagramBytes = 65_535
 
     private let descriptor: Int32
     private let receiveLock = NSLock()
     public let localEndpoint: QUICUDPEndpoint
+
+    /// How many times the receive buffer has been (re)allocated.
+    ///
+    /// A cost probe for the regression test in `QUICUDPPortTests`: receives must
+    /// reuse one buffer instead of zero-filling a fresh one per datagram.
+    private(set) var receiveBufferAllocations = 0
+
+    /// Reused receive buffer, grown on demand.
+    ///
+    /// Only touched while ``receiveLock`` is held. Grown to the largest
+    /// `maximumBytes` seen; each call passes its own bound to `recvmsg`, so a
+    /// larger buffer never widens a smaller request.
+    private var receiveBuffer: [UInt8] = []
+
+    /// Applies one integer socket option, throwing the POSIX error when it fails.
+    ///
+    /// Internal rather than inlined so the failure branch is testable: SO_REUSEADDR
+    /// does not fail on a fresh socket, so `init` alone can never reach it. The
+    /// caller owns closing the descriptor on failure, matching the other syscall
+    /// guards in this file.
+    static func applySocketOption(
+        _ descriptor: Int32,
+        level: Int32,
+        name: Int32,
+        value: inout Int32
+    ) throws {
+        // SAFETY: The pointer references one initialized Int32 for exactly the
+        // duration and byte count passed to setsockopt.
+        guard unsafe setsockopt(descriptor, level, name, &value, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            throw QUICUDPError.posix(operation: "setsockopt", code: errno)
+        }
+    }
 
     public init(bindHost: String = "127.0.0.1", bindPort: UInt16 = 0) throws {
         let bindAddress = try Self.loopbackAddress(host: bindHost, port: bindPort)
@@ -57,15 +90,20 @@ public final class QUICUDPPort: @unchecked Sendable {
         }
 
         var reuse: Int32 = 1
-        // SAFETY: The pointer references one initialized Int32 for exactly the
-        // duration and byte count passed to setsockopt.
-        unsafe setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        do {
+            try Self.applySocketOption(fd, level: SOL_SOCKET, name: SO_REUSEADDR, value: &reuse)
+        } catch {
+            // The descriptor is not stored yet, so this initializer owns closing it
+            // on every failure path, exactly as the bind and getsockname guards do.
+            close(fd)
+            throw error
+        }
 
         var address = bindAddress.storage
         // SAFETY: sockaddr_storage is large and aligned enough for sockaddr;
         // the rebound pointer is scoped to this synchronous bind call and the
         // length matches the initialized address family.
-        let bindResult = unsafe withUnsafePointer(to: &address) { pointer in
+        let bindResult = withUnsafePointer(to: &address) { pointer in
             unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
                 unsafe Darwin.bind(fd, sockaddrPointer, bindAddress.length)
             }
@@ -80,7 +118,7 @@ public final class QUICUDPPort: @unchecked Sendable {
         var boundLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
         // SAFETY: boundAddress owns a correctly aligned sockaddr_storage and
         // boundLength advertises its full writable capacity for getsockname.
-        let nameResult = unsafe withUnsafeMutablePointer(to: &boundAddress) { pointer in
+        let nameResult = withUnsafeMutablePointer(to: &boundAddress) { pointer in
             unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
                 unsafe getsockname(fd, sockaddrPointer, &boundLength)
             }
@@ -110,7 +148,7 @@ public final class QUICUDPPort: @unchecked Sendable {
         // SAFETY: Data and sockaddr storage remain alive for the synchronous
         // sendto call; the supplied byte counts are bounded by those values.
         let sent = try unsafe data.withUnsafeBytes { bytes in
-            try unsafe withUnsafePointer(to: &address) { pointer in
+            try withUnsafePointer(to: &address) { pointer in
                 try unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
                     let result = unsafe sendto(
                         descriptor,
@@ -155,7 +193,10 @@ public final class QUICUDPPort: @unchecked Sendable {
         }
 
         var storage = sockaddr_storage()
-        var buffer = [UInt8](repeating: 0, count: maximumBytes)
+        if receiveBuffer.count < maximumBytes {
+            receiveBuffer = [UInt8](repeating: 0, count: maximumBytes)
+            receiveBufferAllocations += 1
+        }
         // `recvmsg` rather than `recvfrom`, because it is the only form that reports
         // truncation on this platform. macOS documents `MSG_TRUNC` as "data discarded
         // before delivery": passing it to `recvfrom` does not return the datagram's real
@@ -163,15 +204,17 @@ public final class QUICUDPPort: @unchecked Sendable {
         // Without this an oversized datagram arrives as a short payload with a valid
         // source and no indication, which for QUIC means parsing a packet that was never
         // sent.
-        let (received, truncated) = try unsafe buffer.withUnsafeMutableBytes { bytes -> (Int, Bool) in
+        let (received, truncated) = try receiveBuffer.withUnsafeMutableBytes { bytes -> (Int, Bool) in
             guard let baseAddress = bytes.baseAddress else {
                 throw QUICUDPError.invalidReceiveConfiguration("receive buffer is empty")
             }
-            var iovec = unsafe iovec(iov_base: baseAddress, iov_len: bytes.count)
+            // This request's bound, not the buffer's capacity: the buffer is
+            // reused and may be larger than this call asked for.
+            var iovec = unsafe iovec(iov_base: baseAddress, iov_len: maximumBytes)
             // SAFETY: `storage`, `iovec` and `message` all outlive the call, and each
             // pointer in `message` is derived from one of them for the duration.
-            return try unsafe withUnsafeMutablePointer(to: &storage) { storagePointer in
-                try unsafe withUnsafeMutablePointer(to: &iovec) { iovecPointer in
+            return try withUnsafeMutablePointer(to: &storage) { storagePointer in
+                try withUnsafeMutablePointer(to: &iovec) { iovecPointer in
                     var message = unsafe msghdr(
                         msg_name: UnsafeMutableRawPointer(storagePointer),
                         msg_namelen: socklen_t(MemoryLayout<sockaddr_storage>.size),
@@ -192,12 +235,12 @@ public final class QUICUDPPort: @unchecked Sendable {
         guard !truncated else {
             throw QUICUDPError.datagramExceedsReceiveBuffer(
                 actual: received,
-                buffer: buffer.count
+                buffer: maximumBytes
             )
         }
 
         let endpoint = try Self.endpoint(from: storage)
-        return (Data(buffer.prefix(received)), endpoint)
+        return (Data(receiveBuffer[0..<received]), endpoint)
     }
 
     private struct LoopbackAddress {
@@ -247,7 +290,7 @@ public final class QUICUDPPort: @unchecked Sendable {
         var storage = sockaddr_storage()
         // SAFETY: sockaddr_storage is large and aligned enough for sockaddr_in;
         // the rebound pointer cannot escape this synchronous initialization.
-        unsafe withUnsafeMutablePointer(to: &storage) { storagePointer in
+        withUnsafeMutablePointer(to: &storage) { storagePointer in
             unsafe storagePointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { pointer in
                 unsafe pointer.pointee = address
             }
@@ -259,7 +302,7 @@ public final class QUICUDPPort: @unchecked Sendable {
         var storage = sockaddr_storage()
         // SAFETY: sockaddr_storage is large and aligned enough for sockaddr_in6;
         // the rebound pointer cannot escape this synchronous initialization.
-        unsafe withUnsafeMutablePointer(to: &storage) { storagePointer in
+        withUnsafeMutablePointer(to: &storage) { storagePointer in
             unsafe storagePointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { pointer in
                 unsafe pointer.pointee = address
             }
@@ -272,7 +315,7 @@ public final class QUICUDPPort: @unchecked Sendable {
         case AF_INET:
             // SAFETY: The family tag proves the storage contains sockaddr_in;
             // all rebound pointers remain scoped to this conversion.
-            return try unsafe withUnsafePointer(to: storage) { pointer in
+            return try withUnsafePointer(to: storage) { pointer in
                 try unsafe pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { addressPointer in
                     var address = unsafe addressPointer.pointee.sin_addr
                     var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
@@ -288,7 +331,7 @@ public final class QUICUDPPort: @unchecked Sendable {
         case AF_INET6:
             // SAFETY: The family tag proves the storage contains sockaddr_in6;
             // all rebound pointers remain scoped to this conversion.
-            return try unsafe withUnsafePointer(to: storage) { pointer in
+            return try withUnsafePointer(to: storage) { pointer in
                 try unsafe pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { addressPointer in
                     var address = unsafe addressPointer.pointee.sin6_addr
                     var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))

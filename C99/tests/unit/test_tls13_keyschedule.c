@@ -477,10 +477,15 @@ static void test_transcript_refusals(void) {
   WT_EXPECT_STATUS("a NULL transcript is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_tls13_transcript_append(NULL, truncated, sizeof(truncated)));
 
-  /* A cleared transcript is unusable and holds nothing. */
+  /* A cleared transcript is unusable and holds nothing. Clearing NULL is a
+   * no-op rather than a way to clear the live transcript, which a bare call
+   * cannot show. */
   WT_EXPECT_OK("the ServerHello is absorbed",
                wt_tls13_transcript_append(&transcript, WT_RFC8448_SERVER_HELLO,
                                           WT_RFC8448_SERVER_HELLO_LEN));
+  wt_tls13_transcript_clear(NULL);
+  WT_EXPECT_TRUE("and clearing NULL leaves the message absorbed",
+                 transcript.messages != 0UL);
   wt_tls13_transcript_clear(&transcript);
   WT_EXPECT_STATUS("a cleared transcript cannot be hashed", WT_ERR_STATE,
                    wt_tls13_transcript_hash(&transcript, hash));
@@ -489,8 +494,6 @@ static void test_transcript_refusals(void) {
                                               WT_RFC8448_SERVER_HELLO_LEN));
   WT_EXPECT_TRUE("and holds no message count",
                  transcript.messages == 0UL);
-  wt_tls13_transcript_clear(NULL);
-  WT_EXPECT_INT("clearing NULL is harmless", 1, 1);
 }
 
 int main(void) {

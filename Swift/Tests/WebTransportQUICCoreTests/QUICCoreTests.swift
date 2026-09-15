@@ -154,6 +154,36 @@ func shortHeaderPacketRoundTrips() throws {
     #expect(decodedFrames == packetFrames)
 }
 
+/// RFC 9001 section 5.4: the short header's two reserved bits (0x18) must be
+/// zero once header protection is removed, and a non-zero value is a
+/// PROTOCOL_VIOLATION. The long-header and Retry decoders already reject theirs;
+/// this pins the short-header decoder to the same rule rather than letting it
+/// parse the packet number straight through.
+@Test
+func shortHeaderPacketRejectsNonZeroReservedBits() throws {
+    // 0x40 fixed bit, 0x18 both reserved bits, packet-number length 1.
+    var malformed = Data([0x58, 0xde, 0xad, 0xbe, 0xef])
+    malformed.append(Data("payload".utf8))
+    #expect(throws: QUICCodecError.malformed("short header reserved bits are not zero")) {
+        _ = try QUICShortHeaderPacket.decode(
+            malformed,
+            destinationConnectionIDLength: 4,
+            largestAcknowledged: nil
+        )
+    }
+
+    // The identical packet with reserved bits clear must still decode.
+    var valid = Data([0x40, 0xde, 0xad, 0xbe, 0xef])
+    valid.append(Data("payload".utf8))
+    let decoded = try QUICShortHeaderPacket.decode(
+        valid,
+        destinationConnectionIDLength: 4,
+        largestAcknowledged: nil
+    )
+    #expect(decoded.destinationConnectionID == Data([0xde, 0xad, 0xbe, 0xef]))
+    #expect(decoded.packetNumberLength == 1)
+}
+
 @Test
 func packetNumberReconstructionFollowsExpectedWindow() throws {
     #expect(try QUICPacketNumber.decodeTruncated(0x9b32, byteCount: 2, largestAcknowledged: 0xa82e) == 0x9b32)

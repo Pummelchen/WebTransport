@@ -46,6 +46,96 @@ func connectionIDStoreRetiresOlderConnectionIDs() throws {
     }
 }
 
+/// F-swift-perf-tests-03: building an ACK must not re-order the tracked window.
+///
+/// `makeAckFrame` did `Array(receivedPacketNumbers).sorted(by: >)` on every call,
+/// and an endpoint builds an ACK per ACK-eliciting packet. The tracking window
+/// caps the set at 16,384 numbers but the per-call copy and sort remained, so the
+/// doc-comment's claim that the window removed that cost was not covered by any
+/// test — the existing window test only asserted set size, `largestReceived` and
+/// `discardedBelow`.
+///
+/// The bound is a wall-clock one because the sort happens inside the standard
+/// library; the margin is large (the old implementation takes seconds on this
+/// workload, the maintained ranges take microseconds).
+@Test
+func acknowledgementFramesDoNotReorderTheTrackedWindowPerCall() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+    let window = QUICAckTracker.maximumTrackedReceivedPacketNumbers * 2
+    for number in 0..<UInt64(window) {
+        tracker.recordReceived(packetNumber: number, nowMicros: 0)
+    }
+    #expect(tracker.receivedPacketNumbers.count == window)
+
+    let start = ContinuousClock.now
+    for _ in 0..<1_000 {
+        _ = tracker.makeAckFrame(nowMicros: 1_000_000)
+    }
+    let elapsed = ContinuousClock.now - start
+    #expect(
+        elapsed < .seconds(1),
+        "1,000 ACK frames over a \(window)-number window took \(elapsed); an ACK must not re-sort the window"
+    )
+}
+
+/// The maintained ranges must survive out-of-order arrival, duplicates and the
+/// window trim: whatever `makeAckFrame` emits must decode back to exactly the
+/// tracked set.
+@Test
+func acknowledgementFrameRangesMatchTheTrackedSetAfterOutOfOrderArrivalAndTrim() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+
+    // Even numbers first, then the odd neighbours that bridge every gap.
+    for number in stride(from: 0, to: 600, by: 2) {
+        let inserted = tracker.recordReceived(packetNumber: UInt64(number), nowMicros: 0)
+        #expect(inserted)
+    }
+    for number in stride(from: 1, to: 600, by: 2) {
+        let inserted = tracker.recordReceived(packetNumber: UInt64(number), nowMicros: 0)
+        #expect(inserted)
+    }
+    // Duplicates are refused and must not disturb the ranges.
+    let duplicateLow = tracker.recordReceived(packetNumber: 0, nowMicros: 0)
+    let duplicateHigh = tracker.recordReceived(packetNumber: 599, nowMicros: 0)
+    #expect(!duplicateLow)
+    #expect(!duplicateHigh)
+    let frame = try #require(tracker.makeAckFrame(nowMicros: 0))
+    #expect(try QUICAckTracker.acknowledgedPacketNumbers(from: frame) == tracker.receivedPacketNumbers)
+
+    // Push past the window so the trim rewrites the range list, then round-trip again.
+    for number in 600..<UInt64(QUICAckTracker.maximumTrackedReceivedPacketNumbers * 2 + 100) {
+        tracker.recordReceived(packetNumber: number, nowMicros: 0)
+    }
+    #expect(tracker.discardedBelow > 0)
+    let trimmed = try #require(tracker.makeAckFrame(nowMicros: 0))
+    #expect(try QUICAckTracker.acknowledgedPacketNumbers(from: trimmed) == tracker.receivedPacketNumbers)
+}
+
+/// The incremental range list has four insertion positions (extend either end,
+/// bridge one gap, open a new range) and a trim rebuild; a deterministic
+/// pseudo-random arrival order exercises all of them against a decode round-trip.
+@Test
+func acknowledgementFrameRangesSurviveArbitraryInsertionOrder() throws {
+    var tracker = QUICAckTracker(packetNumberSpace: .applicationData)
+    var generator: UInt64 = 0x9e37_79b9_7f4a_7c15
+    var seen: Set<UInt64> = []
+    for step in 0..<4_000 {
+        generator = generator &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        let number = generator % 2_048
+        let inserted = tracker.recordReceived(packetNumber: number, nowMicros: 0)
+        #expect(inserted == !seen.contains(number))
+        seen.insert(number)
+        if step % 97 == 0 {
+            let frame = try #require(tracker.makeAckFrame(nowMicros: 0))
+            #expect(
+                try QUICAckTracker.acknowledgedPacketNumbers(from: frame) == tracker.receivedPacketNumbers
+            )
+        }
+    }
+    let frame = try #require(tracker.makeAckFrame(nowMicros: 0))
+    #expect(try QUICAckTracker.acknowledgedPacketNumbers(from: frame) == tracker.receivedPacketNumbers)
+}
+
 @Test
 func ackTrackerBuildsAckRangesAndDecodesThem() throws {
     var zeroTracker = QUICAckTracker(packetNumberSpace: .initial)
@@ -152,6 +242,62 @@ func lossRecoveryReturnsRetransmittableFrames() throws {
             .stream(id: 0, offset: 0, fin: false, data: Data("lost".utf8))
         ])
     #expect(recovery.sentPackets[.applicationData]?.keys.sorted() == [2])
+}
+
+/// F-swift-perf-tests-02: classifying an ACK must not sort the outstanding packet
+/// set twice nor scan every peer-supplied ACK range for every outstanding packet.
+///
+/// `processAck` built `packets.keys.sorted()` once per pass, and the first pass
+/// used `acknowledgedRanges.contains(where:)`, which re-tested every range for
+/// every packet — O(packets x ranges), with the range count bounded only by the
+/// 16,384 expanded packet numbers a peer may put in one ACK frame. The probes
+/// below are the same operations counted, so the bound is on work rather than on
+/// wall-clock time.
+@Test
+func lossRecoveryClassifiesAckRangesWithoutScanningEveryRangePerPacket() throws {
+    let packetCount = 8_193
+    let rangeCount = 1_024
+    var recovery = QUICLossRecovery(packetThreshold: 3)
+    for number in 0..<UInt64(packetCount) {
+        recovery.recordSent(
+            QUICSentPacket(
+                packetNumberSpace: .applicationData,
+                packetNumber: number,
+                sentTimeMicros: 0,
+                bytes: 1,
+                frames: [.ping]
+            ))
+    }
+
+    // Single-packet ranges two apart: the peer acknowledges every even packet in
+    // the top 2,048 numbers. Every odd packet below them must be tested against
+    // the whole range list by a per-range scan. One range comes from
+    // `firstAckRange`, the rest from the gaps.
+    let largest = UInt64(packetCount - 1)
+    let result = try recovery.processAck(
+        .ack(
+            largestAcknowledged: largest,
+            ackDelay: 0,
+            firstAckRange: 0,
+            ranges: Array(repeating: QUICAckRange(gap: 0, length: 0), count: rangeCount - 1)
+        ),
+        in: .applicationData
+    )
+
+    #expect(result.acknowledged.count == rangeCount)
+    #expect(result.acknowledged.allSatisfy { $0.packetNumber % 2 == largest % 2 })
+    #expect(recovery.sentPackets[.applicationData]?.keys.sorted() == [largest - 1])
+
+    // One ordering pass over the outstanding set, not one sort per loop.
+    #expect(
+        recovery.acknowledgementOrderingSteps <= packetCount + 1,
+        "the outstanding set was ordered \(recovery.acknowledgementOrderingSteps) times for \(packetCount) packets"
+    )
+    // One range comparison per packet at worst, plus the ranges stepped over once.
+    #expect(
+        recovery.acknowledgementRangeProbes <= 4 * (packetCount + rangeCount),
+        "classifying \(packetCount) packets against \(rangeCount) ranges took \(recovery.acknowledgementRangeProbes) range comparisons"
+    )
 }
 
 @Test
@@ -478,4 +624,80 @@ func connectionIDStoreKeepsRetiredSequencesBelowTheWatermark() throws {
         statelessResetToken: Data(repeating: 3, count: 16)
     )
     #expect(store.active.keys.sorted() == [10, 11])
+}
+
+/// RFC 9000 section 4.5: once a final size is known it cannot change, so a
+/// STREAM frame that would exceed it and a FIN that would redefine it are both
+/// FINAL_SIZE_ERROR. Both checks live in `QUICStreamState.receive`, and both
+/// used to sit after the receive-closed gate that the very FIN which records
+/// the final size closes, so neither branch could ever run.
+@Test
+func streamStateEnforcesARecordedFinalSize() throws {
+    var stream = QUICStreamState(
+        id: 0,
+        localRole: .client,
+        maxSendOffset: 0,
+        maxReceiveOffset: 64
+    )
+    #expect(
+        try stream.receive(.stream(id: 0, offset: 0, fin: true, data: Data("hello".utf8)))
+            == Data("hello".utf8))
+    #expect(stream.finalReceiveSize == 5)
+    #expect(stream.receiveClosed)
+
+    // A STREAM frame past the recorded final size is FINAL_SIZE_ERROR even
+    // though the receive half is already closed.
+    #expect(throws: QUICStateError.finalSizeViolation("STREAM data exceeds final size")) {
+        _ = try stream.receive(.stream(id: 0, offset: 5, fin: false, data: Data("x".utf8)))
+    }
+    // A FIN whose size disagrees with the recorded final size is FINAL_SIZE_ERROR.
+    #expect(throws: QUICStateError.finalSizeViolation("inconsistent final stream size")) {
+        _ = try stream.receive(.stream(id: 0, offset: 0, fin: true, data: Data("hi".utf8)))
+    }
+}
+
+/// RFC 9000 sections 4.5 and 19.4: a RESET_STREAM frame carries the sender's
+/// Final Size, which is the receive half's final size. The state machine used to
+/// ignore RESET_STREAM entirely, so a reset stream had no recorded final size
+/// and the section 4.5 checks never had a value to compare against.
+@Test
+func streamStateRecordsFinalSizeFromResetStream() throws {
+    var stream = QUICStreamState(
+        id: 0,
+        localRole: .client,
+        maxSendOffset: 0,
+        maxReceiveOffset: 64
+    )
+    _ = try stream.receive(.stream(id: 0, offset: 0, fin: false, data: Data("hello".utf8)))
+    #expect(stream.finalReceiveSize == nil)
+
+    _ = try stream.receive(.resetStream(id: 0, applicationErrorCode: 0x10, finalSize: 5))
+    #expect(stream.finalReceiveSize == 5)
+    #expect(stream.receiveClosed)
+
+    // The reset's final size now bounds later STREAM frames.
+    #expect(throws: QUICStateError.finalSizeViolation("STREAM data exceeds final size")) {
+        _ = try stream.receive(.stream(id: 0, offset: 5, fin: false, data: Data("x".utf8)))
+    }
+    // A second RESET_STREAM that changes the final size is FINAL_SIZE_ERROR.
+    #expect(throws: QUICStateError.finalSizeViolation("inconsistent final stream size")) {
+        _ = try stream.receive(.resetStream(id: 0, applicationErrorCode: 0x10, finalSize: 9))
+    }
+
+    // A RESET_STREAM below the bytes already received is FINAL_SIZE_ERROR.
+    var short = QUICStreamState(
+        id: 0,
+        localRole: .client,
+        maxSendOffset: 0,
+        maxReceiveOffset: 64
+    )
+    _ = try short.receive(.stream(id: 0, offset: 0, fin: false, data: Data("hello".utf8)))
+    #expect(
+        throws: QUICStateError.finalSizeViolation(
+            "RESET_STREAM final size is below the bytes already received")
+    ) {
+        _ = try short.receive(.resetStream(id: 0, applicationErrorCode: 0x10, finalSize: 3))
+    }
+    // The rejected reset left no final size behind.
+    #expect(short.finalReceiveSize == nil)
 }

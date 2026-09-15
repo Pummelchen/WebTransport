@@ -30,9 +30,14 @@ fi
 output="$(mktemp -d)"
 trap 'rm -rf "$output"' EXIT
 
-# The warnings are the point: the same set the POSIX build uses, because a branch that only compiles without
-# warnings would not be evidence of much. Found this way already: FIONBIO does not fit a signed long on Windows,
-# and the cross-compile said so on its first run.
+# The warnings are the point: a branch that only compiles without warnings would not be evidence of much. These
+# four command lines use a deliberate SEVEN-FLAG SUBSET of the project's warning set
+# (-Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual). The full set -- the twenty-four
+# flags cmake/WTCompilerWarnings.cmake probes and applies to every target -- is what the Windows BUILD enforces,
+# because scripts/check-windows-build.sh configures the tree with CMake and the mingw toolchain; docs/PORTABILITY.md
+# states the same subset. The comment here used to claim this sweep used "the same set the POSIX build uses",
+# which was false. Found this way already: FIONBIO does not fit a signed long on Windows, and the cross-compile
+# said so on its first run.
 "$compiler" -std=c99 -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual \
   -I "$root/src/runtime" -I "$root/include" -c "$probe" -o "$output/platform_probe.o"
 

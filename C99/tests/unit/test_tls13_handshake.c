@@ -740,6 +740,35 @@ static void test_certificate_messages(void) {
   WT_EXPECT_BYTES("and the same bytes", WT_RFC8448_CERTIFICATE_VERIFY, rebuilt,
                   WT_RFC8448_CERTIFICATE_VERIFY_LEN);
 
+  /* The build convenience form. It composes the same message from its parts, and
+   * before this test nothing in the tree called it (F-repo-ops-08). The RFC's own
+   * message is the expectation, so a builder that agrees with the encoder but not
+   * with the document fails here. */
+  {
+    uint8_t message[WT_RFC8448_CERTIFICATE_VERIFY_LEN];
+    size_t message_len = 0U;
+
+    WT_EXPECT_OK("the CertificateVerify builder reproduces the RFC's message",
+                 wt_tls_certificate_verify_build(
+                     verify.scheme, verify.signature, verify.signature_len, message,
+                     sizeof(message), &message_len));
+    WT_EXPECT_U64("as the same length",
+                  (uint64_t)WT_RFC8448_CERTIFICATE_VERIFY_LEN,
+                  (uint64_t)message_len);
+    WT_EXPECT_BYTES("and the same bytes", WT_RFC8448_CERTIFICATE_VERIFY, message,
+                    WT_RFC8448_CERTIFICATE_VERIFY_LEN);
+
+    WT_EXPECT_STATUS("a buffer too small for the message is refused", WT_ERR_LIMIT,
+                     wt_tls_certificate_verify_build(
+                         verify.scheme, verify.signature, verify.signature_len,
+                         message, 4U, &message_len));
+    WT_EXPECT_U64("and no length is reported", 0U, (uint64_t)message_len);
+    WT_EXPECT_STATUS("a NULL output buffer is refused", WT_ERR_INVALID_ARGUMENT,
+                     wt_tls_certificate_verify_build(
+                         verify.scheme, verify.signature, verify.signature_len, NULL,
+                         sizeof(message), &message_len));
+  }
+
   /* Finished: the RFC's message carries the verify data the key schedule test uses. */
   WT_EXPECT_OK("the RFC's Finished parses",
                wt_tls_finished_parse(WT_RFC8448_SERVER_FINISHED_MESSAGE,
@@ -856,6 +885,65 @@ static void test_certificate_messages(void) {
   }
 }
 
+/* EncryptedExtensions is a bare extension list with a parser, an encoder and a
+ * builder. Nothing called the builder before this test (F-repo-ops-08), so this
+ * checks its contract directly: the full handshake message, byte for byte as the
+ * encoder writes it, and it parses back into the same extensions. */
+static void test_encrypted_extensions_build(void) {
+  static const uint8_t alpn[] = {0x00U, 0x03U, 0x02U, 'h', '3'};
+  static const uint8_t transport_parameters[] = {0x01U, 0x02U};
+  wt_tls_extension_list_t list;
+  wt_tls_extension_list_t parsed;
+  uint8_t message[64];
+  uint8_t encoded[64];
+  size_t message_len = 0U;
+  size_t encoded_len = 0U;
+  wt_writer_t w;
+  const wt_tls_extension_t *extension;
+
+  memset(&list, 0, sizeof(list));
+  list.count = 2U;
+  list.entries[0].type = WT_TLS_EXTENSION_ALPN;
+  list.entries[0].data = alpn;
+  list.entries[0].len = sizeof(alpn);
+  list.entries[1].type = WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS;
+  list.entries[1].data = transport_parameters;
+  list.entries[1].len = sizeof(transport_parameters);
+
+  WT_EXPECT_OK("EncryptedExtensions builds",
+               wt_tls_encrypted_extensions_build(&list, message, sizeof(message),
+                                                 &message_len));
+  w = wt_writer_init(encoded, sizeof(encoded));
+  WT_EXPECT_OK("the encoder writes the same message",
+               wt_tls_encrypted_extensions_encode(&list, &w));
+  encoded_len = wt_writer_offset(&w);
+  WT_EXPECT_U64("to the same length", (uint64_t)encoded_len, (uint64_t)message_len);
+  WT_EXPECT_BYTES("and the same bytes", message, encoded, message_len);
+
+  WT_EXPECT_OK("and it parses back",
+               wt_tls_encrypted_extensions_parse(message, message_len, &parsed));
+  WT_EXPECT_U64("with both extensions", 2U, (uint64_t)parsed.count);
+  extension = wt_tls_extensions_find(&parsed, WT_TLS_EXTENSION_ALPN);
+  WT_EXPECT_TRUE("including the ALPN", extension != NULL);
+  if (extension != NULL) {
+    WT_EXPECT_BYTES("whose body round-trips", alpn, extension->data, sizeof(alpn));
+  }
+  extension = wt_tls_extensions_find(&parsed, WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS);
+  WT_EXPECT_TRUE("and the transport parameters", extension != NULL);
+  if (extension != NULL) {
+    WT_EXPECT_BYTES("whose body round-trips too", transport_parameters,
+                    extension->data, sizeof(transport_parameters));
+  }
+
+  WT_EXPECT_STATUS("a NULL extension list is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_tls_encrypted_extensions_build(NULL, message, sizeof(message),
+                                                     &message_len));
+  WT_EXPECT_STATUS("a short buffer is refused", WT_ERR_LIMIT,
+                   wt_tls_encrypted_extensions_build(&list, message, 4U,
+                                                     &message_len));
+  WT_EXPECT_U64("and no length is reported", 0U, (uint64_t)message_len);
+}
+
 int main(void) {
   test_handshake_framing();
   test_client_hello_from_rfc();
@@ -864,6 +952,7 @@ int main(void) {
   test_extension_refusals();
   test_message_refusals();
   test_certificate_messages();
+  test_encrypted_extensions_build();
 
   WT_TEST_MAIN_END("wt_tls13_handshake");
 }

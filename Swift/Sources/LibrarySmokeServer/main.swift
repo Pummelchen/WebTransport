@@ -93,10 +93,19 @@ enum LibrarySmokeServer {
             let http3 = HTTP3ConnectionState(role: .server)
             self.manager = WebTransportSessionManager(http3: http3)
 
-            print("LibrarySmokeServer listening on 127.0.0.1:\(server.localEndpoint.port)")
-            print("LibrarySmokeServer ready for stream + datagram smoke checks")
+            // The readiness lines go through FileHandle, not print: Swift's print is
+            // block-buffered when stdout is a pipe or a file, and the runner
+            // (Swift/run-library-smoke.sh) waits for the readiness line before starting the
+            // client, so a buffered line would make that wait time out while the server sat
+            // ready (F-repo-ops-16). FileHandle writes to the descriptor directly.
+            FileHandle.standardOutput.write(
+                Data("LibrarySmokeServer listening on 127.0.0.1:\(server.localEndpoint.port)\n".utf8)
+            )
+            FileHandle.standardOutput.write(
+                Data("LibrarySmokeServer ready for stream + datagram smoke checks\n".utf8)
+            )
             if config.suiteMode {
-                print("LibrarySmokeServer running in suite mode")
+                FileHandle.standardOutput.write(Data("LibrarySmokeServer running in suite mode\n".utf8))
             }
         }
 

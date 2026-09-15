@@ -101,15 +101,6 @@ public struct WebTransportQUICClient: Sendable {
         self.trustPolicy = trustPolicy
     }
 
-    /// Renders HTTP/3 SETTINGS as sorted `0xid=value` pairs for the diagnostic
-    /// channel. Setting identifiers and counts only — no peer payload.
-    private static func renderSettings(_ settings: HTTP3Settings) -> String {
-        settings.entries
-            .sorted { $0.key < $1.key }
-            .map { "0x\(String($0.key, radix: 16))=\($0.value)" }
-            .joined(separator: " ")
-    }
-
     @discardableResult
     public func connectSession(
         to endpoint: WebTransportNetworkEndpoint,
@@ -159,11 +150,10 @@ public struct WebTransportQUICClient: Sendable {
             do {
                 await inboundRegistration.markEntered()
                 try await connection.inboundStreams { stream in
-                    InteroperableQUICDebug.log("client inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
-                    await inboundStreams.enqueue(
+                    await InteroperableQUICHelpers.enqueueInboundStream(
                         stream,
-                        direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality),
-                        streamID: UInt64(stream.streamID)
+                        into: inboundStreams,
+                        role: "client"
                     )
                 }
             } catch {
@@ -193,9 +183,6 @@ public struct WebTransportQUICClient: Sendable {
             timeoutMilliseconds: remainingTimeout()
         )
         InteroperableQUICDebug.log("client ready")
-
-        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
-        InteroperableQUICDebug.log("client datagrams usable=\(useDatagrams)")
 
         var http3 = HTTP3ConnectionState(
             role: .client,
@@ -228,10 +215,17 @@ public struct WebTransportQUICClient: Sendable {
             peerControlBytes,
             settingsValidation: settingsValidation
         )
-        InteroperableQUICDebug.log("client local settings: \(Self.renderSettings(http3.localSettings))")
+        InteroperableQUICDebug.log("client local settings: \(InteroperableQUICRuntime.renderSettings(http3.localSettings))")
         if let peerSettings = http3.remoteSettings {
-            InteroperableQUICDebug.log("client peer settings: \(Self.renderSettings(peerSettings))")
+            InteroperableQUICDebug.log("client peer settings: \(InteroperableQUICRuntime.renderSettings(peerSettings))")
         }
+        // Datagram availability is a property of the negotiated SETTINGS, so it
+        // is answered after the control-stream exchange rather than assumed.
+        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(
+            localSettings: http3.localSettings,
+            remoteSettings: http3.remoteSettings
+        )
+        InteroperableQUICDebug.log("client datagrams usable=\(useDatagrams)")
         var manager = WebTransportSessionManager(
             http3: http3,
             // makeClientQUIC advertises the default limits, so enforce the same
@@ -255,7 +249,6 @@ public struct WebTransportQUICClient: Sendable {
         )
         let requestFrame = try manager.makeClientSessionRequest(streamID: requestStreamID, request: request)
         var connectPayload = try InteroperableQUICHelpers.makeRequestStreamPayload(
-            streamID: requestStreamID,
             requestFrame: requestFrame
         )
         let pendingSessionID = try WebTransportSessionID.fromRequestStreamID(requestStreamID)
@@ -443,8 +436,13 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
         maximumBytes: Int = 64 * 1024,
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
     ) async throws -> Data {
-        if let initialPayload = await state.consumeInitialPayload(), !initialPayload.isEmpty {
-            if let manager {
+        // A stream accepted from the wire carries the prefix-stripped remainder of
+        // its first chunk. That buffer is served first, and it is a read like any
+        // other: it must return at most `maximumBytes` and keep the unread
+        // remainder for the next call, or the bound the caller asked for is only
+        // honoured on the network path.
+        if let initialPayload = await state.consumeInitialPayload(maximumBytes: maximumBytes) {
+            if !initialPayload.isEmpty, let manager {
                 _ = await manager.withManager { manager in
                     manager.popStreamPayload(streamID: self.streamID)
                 }
@@ -458,11 +456,120 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
         )
         if let manager {
             return try await manager.withManager { manager in
-                try manager.receiveStreamPayload(streamID: self.streamID, payload: payload)
-                return manager.popStreamPayload(streamID: self.streamID) ?? Data()
+                try manager.receiveAndPopStreamPayload(streamID: self.streamID, payload: payload)
             }
         }
         return payload
+    }
+}
+
+/// A peer-initiated unidirectional WebTransport stream, accepted from the wire.
+///
+/// RFC 9000 section 2.1 gives a unidirectional stream to its initiator only, so a
+/// stream the peer initiated is receive-only here: this type has no send method,
+/// and the session manager refuses a send-side call on the same stream (see
+/// `WebTransportSessionManager.sendStreamPayload`). That is the difference from
+/// ``WebTransportNetworkBidirectionalStream``, which owns both halves. No abort
+/// operation is exposed either: the only signal the receive half could produce is
+/// STOP_SENDING, and Network.framework offers no per-stream STOP_SENDING.
+public final class WebTransportNetworkUnidirectionalStream: Sendable {
+    public let streamID: UInt64
+
+    private let stream: QUIC.Stream<QUICStream>
+    private let timeoutMilliseconds: Int32
+    private let state: WebTransportNetworkStreamState
+    private let manager: WebTransportNetworkSessionManagerState?
+
+    fileprivate init(
+        stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        initialPayload: Data = Data(),
+        manager: WebTransportNetworkSessionManagerState? = nil
+    ) {
+        self.streamID = stream.streamID
+        self.stream = stream
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.state = WebTransportNetworkStreamState(prefix: nil, initialPayload: initialPayload)
+        self.manager = manager
+    }
+
+    /// Reads the next bytes of the peer's stream.
+    ///
+    /// The arguments and the buffered-first-chunk behaviour mirror
+    /// ``WebTransportNetworkBidirectionalStream/receive(maximumBytes:timeoutMilliseconds:)``;
+    /// only the send half is absent.
+    public func receive(
+        maximumBytes: Int = 64 * 1024,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> Data {
+        if let initialPayload = await state.consumeInitialPayload(maximumBytes: maximumBytes) {
+            if !initialPayload.isEmpty, let manager {
+                _ = await manager.withManager { manager in
+                    manager.popStreamPayload(streamID: self.streamID)
+                }
+            }
+            return initialPayload
+        }
+        let payload = try await InteroperableQUICHelpers.readStream(
+            stream,
+            timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
+            maxBytes: maximumBytes
+        )
+        if let manager {
+            return try await manager.withManager { manager in
+                try manager.receiveAndPopStreamPayload(streamID: self.streamID, payload: payload)
+            }
+        }
+        return payload
+    }
+}
+
+/// Test-support handle for a peer-side unidirectional stream.
+///
+/// The shipped runtime accepts peer-initiated unidirectional streams
+/// (``WebTransportNetworkSession/acceptUnidirectionalStream(maximumInitialBytes:timeoutMilliseconds:)``)
+/// but does not open them, so a loopback test that needs a peer to initiate one
+/// has no producer. This retains the local QUIC stream for as long as the
+/// receiver is reading it — releasing the last handle would let the transport
+/// cancel the receive side before the bytes arrive — and writes the WebTransport
+/// unidirectional prefix once, before the first payload.
+///
+/// Internal on purpose: opening a unidirectional stream is not part of the
+/// shipped surface, and the finding this supports is about accepting one.
+final class WebTransportNetworkUnidirectionalStreamProducer: Sendable {
+    let streamID: UInt64
+
+    private let stream: QUIC.Stream<QUICStream>
+    private let timeoutMilliseconds: Int32
+    private let state: WebTransportNetworkStreamState
+
+    fileprivate init(
+        stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        prefix: Data
+    ) {
+        self.streamID = stream.streamID
+        self.stream = stream
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.state = WebTransportNetworkStreamState(prefix: prefix, initialPayload: Data())
+    }
+
+    /// Sends `data`, writing the WebTransport stream prefix first on the first
+    /// call so the peer's `acceptUnidirectionalStream` sees a prefixed stream.
+    func send(
+        _ data: Data,
+        endOfStream: Bool = false,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws {
+        var payload = Data()
+        if let prefix = await state.consumeOutboundPrefix() {
+            payload.append(prefix)
+        }
+        payload.append(data)
+        let outbound = payload
+        try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await self.stream.send(outbound, endOfStream: endOfStream)
+        }
     }
 }
 
@@ -611,18 +718,51 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
             maxBytes: maximumInitialBytes
         )
+        // The prefix is classified before the session manager sees the bytes. A
+        // stream for another session must not be registered or buffered for a
+        // session this connection never serves: the manager's server role has to
+        // buffer a stream whose CONNECT may still be in flight, so it cannot tell
+        // that case from a foreign one, but this runtime serves exactly one
+        // session and can.
+        if let foreignSessionID = InteroperableQUICHelpers.foreignSessionID(
+            inPrefixedStream: firstChunk,
+            expectedSessionID: sessionID
+        ) {
+            stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+            InteroperableQUICDebug.log(
+                "refusing inbound stream \(stream.streamID): prefix names session \(foreignSessionID), "
+                    + "this connection serves \(sessionID)"
+            )
+            throw WebTransportDraft16Error(
+                kind: .sessionGone,
+                message: "WebTransport inbound stream names session \(foreignSessionID), not \(sessionID)"
+            )
+        }
         let accepted = try await manager.withManager { manager in
             try manager.acceptBidirectionalStreamWithActions(
                 streamID: stream.streamID,
                 firstBytes: firstChunk
             )
         }
-        guard let prefix = accepted.prefix,
-            accepted.rejectionFrame == nil,
-            prefix.form == .bidirectional,
-            prefix.sessionID.rawValue == sessionID
-        else {
-            throw WebTransportNetworkRuntimeError.unexpectedFrame
+        guard let prefix = accepted.prefix, accepted.rejectionFrame == nil else {
+            // The manager refused the stream — a buffered-ingress limit or an
+            // over-long initial payload — and returned the reset frame the peer
+            // must observe. The runtime resets through the framework's stream
+            // error code rather than by writing a frame, so name the refusal code
+            // and let go of the handle instead of dropping the stream silently.
+            stream.streamApplicationErrorCode =
+                WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
+            throw WebTransportDraft16Error(
+                kind: .bufferedStreamRejected,
+                message: "WebTransport inbound stream was refused by the session manager"
+            )
+        }
+        guard prefix.form == .bidirectional, prefix.sessionID.rawValue == sessionID else {
+            stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+            throw WebTransportDraft16Error(
+                kind: .sessionGone,
+                message: "WebTransport inbound stream names session \(prefix.sessionID.rawValue), not \(sessionID)"
+            )
         }
         return WebTransportNetworkBidirectionalStream(
             stream: stream,
@@ -630,6 +770,151 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             initialPayload: prefix.remainingPayload,
             manager: manager
         )
+    }
+
+    /// Accepts a peer-initiated unidirectional stream and returns it receive-only.
+    ///
+    /// The runtime serves exactly one WebTransport session per connection (see
+    /// `validateSessionAdmission`), so the demultiplex is by direction plus the
+    /// session ID in the stream prefix: a unidirectional stream whose prefix names
+    /// this session is delivered here, and one whose prefix names any other
+    /// session is refused with `WT_SESSION_GONE` before the session manager can
+    /// register or buffer it. There is no multi-session routing on this
+    /// connection and none is invented.
+    ///
+    /// The returned stream has no send half: RFC 9000 section 2.1 gives a
+    /// unidirectional stream to the endpoint that initiated it, which here is the
+    /// peer. A caller that needs to send must open its own unidirectional stream.
+    ///
+    /// The peer must have been granted `initialMaxUnidirectionalStreams`: the QUIC
+    /// transport enforces that advertisement, and a stream beyond the runtime's
+    /// per-direction inbound ceiling is refused with `WT_BUFFERED_STREAM_REJECTED`
+    /// (F-swift-line-security-03).
+    public func acceptUnidirectionalStream(
+        maximumInitialBytes: Int = 64 * 1024,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> WebTransportNetworkUnidirectionalStream {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        let started = Date()
+        while true {
+            let remaining = InteroperableQUICHelpers.remainingTimeout(
+                timeoutMilliseconds: timeout,
+                started: started
+            )
+            let stream = try await inboundStreams.next(
+                direction: InteroperableQUICHelpers.unidirectionalStreamDirection,
+                timeoutMilliseconds: remaining
+            )
+            let firstChunk = try await InteroperableQUICHelpers.readFirstChunk(
+                stream,
+                timeoutMilliseconds: remaining,
+                maxBytes: maximumInitialBytes
+            )
+            // The peer's HTTP/3 control and QPACK streams share the
+            // unidirectional direction with WebTransport streams, and
+            // establishment returns as soon as it reads the control stream, so a
+            // QPACK stream that arrived behind it is still queued here. Those
+            // streams are critical and must not be closed, so they are retained
+            // and the wait for a WebTransport stream continues.
+            guard WebTransportStreamSignaling.hasStreamPrefix(firstChunk) else {
+                if await InteroperableQUICHelpers.retainPeerCriticalUnidirectionalStream(
+                    stream,
+                    firstBytes: firstChunk,
+                    in: inboundStreams
+                ) {
+                    continue
+                }
+                throw WebTransportNetworkRuntimeError.unexpectedFrame
+            }
+            if let foreignSessionID = InteroperableQUICHelpers.foreignSessionID(
+                inPrefixedStream: firstChunk,
+                expectedSessionID: sessionID,
+                form: .unidirectional
+            ) {
+                stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+                InteroperableQUICDebug.log(
+                    "refusing inbound unidirectional stream \(stream.streamID): prefix names session "
+                        + "\(foreignSessionID), this connection serves \(sessionID)"
+                )
+                throw WebTransportDraft16Error(
+                    kind: .sessionGone,
+                    message: "WebTransport inbound stream names session \(foreignSessionID), not \(sessionID)"
+                )
+            }
+            let accepted = try await manager.withManager { manager in
+                try manager.acceptUnidirectionalStreamWithActions(
+                    streamID: stream.streamID,
+                    firstBytes: firstChunk
+                )
+            }
+            guard let prefix = accepted.prefix, accepted.rejectionFrame == nil else {
+                stream.streamApplicationErrorCode =
+                    WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
+                throw WebTransportDraft16Error(
+                    kind: .bufferedStreamRejected,
+                    message: "WebTransport inbound unidirectional stream was refused by the session manager"
+                )
+            }
+            guard prefix.form == .unidirectional, prefix.sessionID.rawValue == sessionID else {
+                stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+                throw WebTransportDraft16Error(
+                    kind: .sessionGone,
+                    message: "WebTransport inbound stream names session \(prefix.sessionID.rawValue), not \(sessionID)"
+                )
+            }
+            return WebTransportNetworkUnidirectionalStream(
+                stream: stream,
+                timeoutMilliseconds: timeout,
+                initialPayload: prefix.remainingPayload,
+                manager: manager
+            )
+        }
+    }
+
+    /// Test support: opens a locally initiated unidirectional stream and returns a
+    /// handle the loopback tests can send on, so the peer has a stream to accept.
+    ///
+    /// `writingSessionID` overrides the session the stream prefix names. The
+    /// default is this connection's session; any other value writes that session's
+    /// prefix without registering the stream with this session's manager, because
+    /// the stream does not belong to the session this endpoint serves. That is the
+    /// foreign-session case ``acceptUnidirectionalStream(maximumInitialBytes:timeoutMilliseconds:)``
+    /// must refuse. It exists only for tests: the shipped surface accepts
+    /// peer-initiated unidirectional streams but does not open one, so there is no
+    /// production caller.
+    func openUnidirectionalStreamForTesting(
+        writingSessionID sessionID: UInt64? = nil,
+        firstPayload: Data = Data(),
+        endOfStream: Bool = false,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> WebTransportNetworkUnidirectionalStreamProducer {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
+            try await self.connection.openStream(directionality: .unidirectional)
+        }
+        let targetSessionID = sessionID ?? self.sessionID
+        let prefix: Data
+        if targetSessionID == self.sessionID {
+            prefix = try await manager.withManager { manager in
+                try manager.openUnidirectionalStream(
+                    streamID: stream.streamID,
+                    sessionID: WebTransportSessionID(rawValue: self.sessionID)
+                )
+            }
+        } else {
+            prefix = try WebTransportStreamSignaling.serializeUnidirectionalPrefix(
+                sessionID: targetSessionID
+            )
+        }
+        let producer = WebTransportNetworkUnidirectionalStreamProducer(
+            stream: stream,
+            timeoutMilliseconds: timeout,
+            prefix: prefix
+        )
+        if !firstPayload.isEmpty || endOfStream {
+            try await producer.send(firstPayload, endOfStream: endOfStream)
+        }
+        return producer
     }
 
     public func sendDatagram(
@@ -667,6 +952,25 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         let receivedDatagram = try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
             try await datagrams.receive().content
         }
+        // The datagram has already left the connection-scoped channel and cannot
+        // be put back, so the session it names is checked before the manager can
+        // retain its payload for a session this connection does not serve. The
+        // runtime serves exactly one session per connection (see
+        // `validateSessionAdmission`), so a datagram naming a different session is
+        // a peer error — not an invalid payload — and must be named as such.
+        if let foreignSessionID = try InteroperableQUICHelpers.foreignDatagramSessionID(
+            inDatagram: receivedDatagram,
+            expectedSessionID: sessionID
+        ) {
+            InteroperableQUICDebug.log(
+                "refusing inbound datagram: prefix names session \(foreignSessionID), "
+                    + "this connection serves \(sessionID)"
+            )
+            throw WebTransportDraft16Error(
+                kind: .sessionGone,
+                message: "WebTransport datagram names session \(foreignSessionID), not \(sessionID)"
+            )
+        }
         return try await manager.withManager { manager in
             let responseSessionID = try manager.receiveDatagramFrame(.datagram(receivedDatagram))
             guard responseSessionID.rawValue == self.sessionID,
@@ -696,8 +1000,8 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         // SAFETY: Both arrays remain alive for the synchronous Security call.
         // The UTF-8 label includes a terminator excluded from its byte count;
         // the context pointer is nonnil even when its declared length is zero.
-        let exported = unsafe labelBytes.withUnsafeBufferPointer { labelBuffer in
-            unsafe contextBytes.withUnsafeBufferPointer { contextBuffer in
+        let exported = labelBytes.withUnsafeBufferPointer { labelBuffer in
+            contextBytes.withUnsafeBufferPointer { contextBuffer in
                 unsafe sec_protocol_metadata_create_secret_with_context(
                     connection.securityProtocolMetadata,
                     labelBytes.count - 1,
@@ -740,6 +1044,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     }
 
     public func drain(timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil) async throws {
+        if await sessionIsClosed() {
+            InteroperableQUICDebug.log("session drain ignored: session is already closed")
+            return
+        }
         let capsule = try await manager.withManager { manager in
             try manager.makeDrainSessionCapsule(sessionID: WebTransportSessionID(rawValue: self.sessionID))
         }
@@ -760,6 +1068,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         // QUIC connection itself until the peer closes it or it idles out — the
         // framework exposes no way to cancel a started `NetworkConnection`.
         defer { lease?.release() }
+        if await sessionIsClosed() {
+            InteroperableQUICDebug.log("session close ignored: session is already closed")
+            return
+        }
         let capsule = try await manager.withManager { manager in
             try manager.makeCloseSessionCapsule(
                 sessionID: WebTransportSessionID(rawValue: self.sessionID),
@@ -772,37 +1084,53 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
     }
 
-    fileprivate func waitForPeerClosure(timeoutMilliseconds: Int32) async {
-        let started = Date()
-        while InteroperableQUICHelpers.remainingTimeout(
-            timeoutMilliseconds: timeoutMilliseconds,
-            started: started
-        ) > 0 {
-            let isClosed = await manager.withManager { manager in
-                guard let state = manager.sessionsByID[WebTransportSessionID(rawValue: self.sessionID)]?.state else {
-                    return true
-                }
-                if case .closed = state {
-                    return true
-                }
-                return false
+    /// Whether the session manager has already terminated this session.
+    ///
+    /// The manager treats a second close/drain as a no-op and still returns the
+    /// capsule, but writing that capsule a second time would put a duplicate
+    /// WT_CLOSE_SESSION on a CONNECT stream that is already finishing. Checking
+    /// here keeps the public teardown a true no-op, which is what an application
+    /// that closes on an error path and again in a `defer` relies on.
+    private func sessionIsClosed() async -> Bool {
+        await manager.withManager { manager in
+            if case .closed = manager.sessionsByID[WebTransportSessionID(rawValue: self.sessionID)]?.state {
+                return true
             }
-            if isClosed {
-                // The peer ended the session, so this connection is no longer the
-                // runtime's to serve even if the application still holds the object.
-                lease?.release()
-                return
-            }
-            do {
-                try await Task.sleep(for: .milliseconds(5))
-            } catch {
-                // Cancelled: stop waiting rather than polling out the full
-                // deadline. `try?` here would swallow cancellation and keep the
-                // loop running after the caller has gone away.
-                return
-            }
+            return false
         }
     }
+
+    fileprivate func waitForPeerClosure(timeoutMilliseconds: Int32) async {
+        // The manager resumes this wait from its mutation path when the session
+        // reaches `.closed`. The timeout is the caller's whole budget, not a poll
+        // interval: the old loop took the manager actor and read the state every
+        // 5 ms (up to 50 hops per call) to notice something the close path could
+        // simply signal.
+        await manager.waitForSessionClosure(
+            sessionID: sessionID,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
+        if await sessionIsClosed() {
+            // The peer ended the session, so this connection is no longer the
+            // runtime's to serve even if the application still holds the object.
+            lease?.release()
+        }
+    }
+
+    /// The largest CONNECT-stream capsule payload permitted by
+    /// draft-ietf-webtrans-http3-16, in bytes.
+    ///
+    /// The only CONNECT-stream capsule whose payload is neither empty nor a
+    /// single QUIC varint is WT_CLOSE_SESSION: it carries a 32-bit application
+    /// error code followed by a UTF-8 message that the draft (Section 6) caps
+    /// at `wtCloseSessionMaxMessageBytes` (1024) bytes. Flow-control capsules
+    /// carry one varint and WT_DRAIN_SESSION is empty, so a conforming peer
+    /// can never declare a larger payload. The reader rejects a declared
+    /// length above this bound on the capsule header alone — before waiting
+    /// for, and therefore before buffering, the payload — so a peer cannot
+    /// pin unbounded memory by announcing a huge capsule and then stalling.
+    static let maximumConnectStreamCapsulePayloadBytes =
+        WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes + 4
 
     private static func receiveConnectCapsules(
         from stream: QUIC.Stream<QUICStream>,
@@ -849,7 +1177,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
     }
 
-    private static func popCompleteCapsule(from buffer: inout Data) throws -> Data? {
+    /// Internal rather than private so the draft-16 capsule-size bound can be
+    /// regression-tested directly: `receiveConnectCapsules` needs a live
+    /// `Network.framework` `QUIC.Stream` that a unit test cannot fabricate.
+    static func popCompleteCapsule(from buffer: inout Data) throws -> Data? {
         guard !buffer.isEmpty else {
             return nil
         }
@@ -859,6 +1190,15 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             let payloadLength = try QUICVarInt.decode(from: &cursor)
             guard payloadLength <= UInt64(Int.max) else {
                 throw QUICCodecError.valueOutOfRange("CONNECT capsule length exceeds Int.max")
+            }
+            // Reject an over-long declaration on the header alone. Waiting for
+            // the announced payload would let a peer keep this loop buffering
+            // (and re-opening flow-control credit) without bound.
+            guard payloadLength <= UInt64(Self.maximumConnectStreamCapsulePayloadBytes) else {
+                throw QUICCodecError.valueOutOfRange(
+                    "CONNECT capsule payload length \(payloadLength) exceeds the draft-16 maximum of "
+                        + "\(Self.maximumConnectStreamCapsulePayloadBytes) bytes"
+                )
             }
             let headerLength = buffer.count - cursor.remaining
             let (capsuleLength, overflow) = headerLength.addingReportingOverflow(Int(payloadLength))
@@ -892,22 +1232,130 @@ private actor WebTransportNetworkStreamState {
         return value
     }
 
-    func consumeInitialPayload() -> Data? {
-        let value = initialPayload
-        initialPayload = nil
-        return value
+    func consumeInitialPayload(maximumBytes: Int) -> Data? {
+        guard let buffered = initialPayload, !buffered.isEmpty else {
+            return nil
+        }
+        let limit = max(0, maximumBytes)
+        guard buffered.count > limit else {
+            initialPayload = nil
+            return buffered
+        }
+        let returned = Data(buffered.prefix(limit))
+        let remainder = Data(buffered.dropFirst(limit))
+        initialPayload = remainder.isEmpty ? nil : remainder
+        return returned
     }
 }
 
-private actor WebTransportNetworkSessionManagerState {
+actor WebTransportNetworkSessionManagerState {
     private var manager: WebTransportSessionManager
+
+    /// A caller parked on a session reaching `.closed`.
+    private struct ClosureWaiter {
+        let id: UInt64
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private var closureWaiters: [UInt64: [ClosureWaiter]] = [:]
+    private var nextClosureWaiterID: UInt64 = 0
+
+    /// How many times the session state was inspected on behalf of a closure
+    /// wait. A cost probe for the regression test: parking a wait must not read
+    /// the manager on a timer.
+    private(set) var closureWaitStateReads = 0
+
+    /// How many closure waits are parked right now.
+    var waitingClosureCount: Int {
+        closureWaiters.values.reduce(0) { $0 + $1.count }
+    }
 
     init(manager: WebTransportSessionManager) {
         self.manager = manager
     }
 
     func withManager<T: Sendable>(_ body: @Sendable (inout WebTransportSessionManager) throws -> T) rethrows -> T {
-        try body(&manager)
+        let result = try body(&manager)
+        // Every mutation of the session state goes through here, so this is where
+        // a parked wait learns that its session closed. Nothing polls the state on
+        // a timer.
+        resumeWaitersForClosedSessions()
+        return result
+    }
+
+    /// Suspends until `sessionID` reaches `.closed` (or is gone), or the timeout
+    /// expires.
+    ///
+    /// The close path resumes this from ``withManager(_:)``; the timeout is the
+    /// only timer involved, and it is the caller's whole budget rather than a
+    /// poll interval.
+    func waitForSessionClosure(sessionID: UInt64, timeoutMilliseconds: Int32) async {
+        if isSessionClosed(sessionID) {
+            return
+        }
+        let waiterID = nextClosureWaiterID
+        nextClosureWaiterID &+= 1
+        let timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(max(0, timeoutMilliseconds))))
+            await self?.expireClosureWaiter(sessionID: sessionID, id: waiterID)
+        }
+        defer { timeoutTask.cancel() }
+        await withCheckedContinuation { continuation in
+            // Re-check while still on the actor: cancellation or a close that
+            // landed before registration must resume rather than park.
+            guard !Task.isCancelled, !isSessionClosed(sessionID) else {
+                continuation.resume()
+                return
+            }
+            closureWaiters[sessionID, default: []].append(
+                ClosureWaiter(id: waiterID, continuation: continuation)
+            )
+        }
+    }
+
+    private func isSessionClosed(_ sessionID: UInt64) -> Bool {
+        closureWaitStateReads += 1
+        guard let state = manager.sessionsByID[WebTransportSessionID(rawValue: sessionID)]?.state else {
+            return true
+        }
+        if case .closed = state {
+            return true
+        }
+        return false
+    }
+
+    private func resumeWaitersForClosedSessions() {
+        guard !closureWaiters.isEmpty else {
+            return
+        }
+        let closedSessionIDs = closureWaiters.keys.filter { isSessionClosed($0) }
+        for sessionID in closedSessionIDs {
+            guard let waiters = closureWaiters.removeValue(forKey: sessionID) else {
+                continue
+            }
+            for waiter in waiters {
+                waiter.continuation.resume()
+            }
+        }
+    }
+
+    private func expireClosureWaiter(sessionID: UInt64, id: UInt64) {
+        removeClosureWaiter(sessionID: sessionID, id: id)?.continuation.resume()
+    }
+
+    private func removeClosureWaiter(sessionID: UInt64, id: UInt64) -> ClosureWaiter? {
+        guard var waiters = closureWaiters[sessionID],
+            let index = waiters.firstIndex(where: { $0.id == id })
+        else {
+            return nil
+        }
+        let waiter = waiters.remove(at: index)
+        if waiters.isEmpty {
+            closureWaiters.removeValue(forKey: sessionID)
+        } else {
+            closureWaiters[sessionID] = waiters
+        }
+        return waiter
     }
 }
 
@@ -952,6 +1400,16 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         localEndpointStorage.withLock { $0 }
     }
 
+    /// The admission policy this listener actually enforces.
+    ///
+    /// `maxConcurrentConnections` predates ``WebTransportAdmissionPolicy`` and is
+    /// folded into it at construction. Exposing the result lets tests assert the
+    /// precedence between the two without opening as many connections as the
+    /// limit.
+    var effectiveAdmissionPolicy: WebTransportAdmissionPolicy {
+        admission
+    }
+
     public let certificateSHA256: Data
 
     /// Expiry of the certificate this listener presents, when it could be read.
@@ -992,7 +1450,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
     public convenience init(
         bindPort: UInt16,
-        maxConcurrentConnections: Int = 16,
+        maxConcurrentConnections: Int? = nil,
         authority: String = "localhost",
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
@@ -1020,7 +1478,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
 
     public init(
         endpoint: WebTransportNetworkEndpoint,
-        maxConcurrentConnections: Int = 16,
+        maxConcurrentConnections: Int? = nil,
         authority: String = "localhost",
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
@@ -1033,17 +1491,18 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
         // `maxConcurrentConnections` predates the admission policy. An explicit value
-        // overrides whatever the policy carries, and the default is left alone so a
-        // policy's own limit still applies when the caller did not ask for one.
+        // overrides whatever the policy carries, and `nil` (the argument not being
+        // supplied) leaves the policy's own limit alone.
         //
-        // The condition used to be `admission == .default`, which meant that a caller
-        // passing both a policy and an explicit limit had its limit silently ignored.
-        // Tying the override to the default argument instead makes the precedence the
-        // same for every policy, and the value is validated on the same terms as the
-        // policy field so an out-of-range override is refused rather than accepted here
-        // and rejected elsewhere.
+        // The override used to be tied to the default argument `16`, so an operator
+        // who explicitly asked for 16 while supplying another policy got the policy's
+        // number instead — 256 for `.publicFacing`. Representing "not supplied" as
+        // `nil` rather than as a valid value is what makes the two distinguishable.
+        // The value is validated on the same terms as the policy field so an
+        // out-of-range override is refused rather than accepted here and rejected
+        // elsewhere.
         var admission = try admission.validated()
-        if maxConcurrentConnections != 16 {
+        if let maxConcurrentConnections {
             guard maxConcurrentConnections > 0 else {
                 throw WebTransportNetworkRuntimeError.invalidTransport(
                     "maxConcurrentConnections must be positive"
@@ -1100,6 +1559,9 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let acceptedConnections = self.acceptedConnections
         let rateLimiter = self.rateLimiter
         let connectionBudget = self.connectionBudget
+        // The listener task must not retain the server to read these, and each
+        // accepted connection builds its own collector from them.
+        let advertisedStreamLimits = transportLimits
         listenerTask = Task {
             do {
                 try await listener.run { connection in
@@ -1126,17 +1588,23 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                     // The peer opens its control stream as soon as the handshake
                     // completes, which is typically while this connection is
                     // still queued and long before anything calls `serveOne`.
-                    let inboundStreams = InteroperableQUICInboundStreamCollector()
+                    // The collector's per-direction ceiling is the stream count
+                    // this listener advertised: retaining more would hold stream
+                    // objects the peer was never allowed to open, and fewer would
+                    // refuse streams the advertisement promised.
+                    let inboundStreams = InteroperableQUICInboundStreamCollector(
+                        bidirectionalLimit: advertisedStreamLimits.initialMaxBidirectionalStreams,
+                        unidirectionalLimit: advertisedStreamLimits.initialMaxUnidirectionalStreams
+                    )
                     let inboundRegistration = InteroperableQUICInboundRegistration()
                     let inboundTask = Task {
                         do {
                             await inboundRegistration.markEntered()
                             try await connection.inboundStreams { stream in
-                                InteroperableQUICDebug.log("server inbound stream direction=\(stream.directionality) id=\(stream.streamID)")
-                                await inboundStreams.enqueue(
+                                await InteroperableQUICHelpers.enqueueInboundStream(
                                     stream,
-                                    direction: InteroperableQUICHelpers.streamDirectionKey(stream.directionality),
-                                    streamID: UInt64(stream.streamID)
+                                    into: inboundStreams,
+                                    role: "server"
                                 )
                             }
                         } catch {
@@ -1291,12 +1759,11 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let session = try await acceptSession(timeoutMilliseconds: timeoutMilliseconds)
 
         // The peer picks the transport, so the server cannot. `datagramsAvailable`
-        // is reported optimistically — Network.framework does not confirm datagram
-        // support until the channel is first used, so the runtime always answers
-        // true — which meant this waited for a datagram even when the peer had
-        // opened a stream. A browser opens a stream by default, so it hung here
-        // after a successful handshake. Wait for both and echo on whichever the
-        // peer actually used.
+        // now states whether `SETTINGS_H3_DATAGRAM` was negotiated, but a peer that
+        // negotiated it can still open a stream, and a browser that did not is
+        // stream-only from the start. Waiting only for a datagram hung on a peer
+        // that had already opened a stream, so when datagrams are negotiated this
+        // waits for both and echoes on whichever the peer actually used.
         // Racing means one entrant loses and is abandoned, and an abandoned
         // entrant keeps the session alive until its own wait expires. Handing it
         // the caller's full timeout makes that window arbitrarily long: with a
@@ -1393,9 +1860,6 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         let inboundStreams = accepted.inboundStreams
         let inboundTask = accepted.inboundTask
 
-        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(connection)
-        InteroperableQUICDebug.log("server datagrams usable=\(useDatagrams)")
-
         var http3 = HTTP3ConnectionState(
             role: .server,
             localSettings: settingsValidation.localSettings
@@ -1430,10 +1894,17 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         // Peer SETTINGS identify which WebTransport revision the client speaks.
         // Logging the decoded ids is what makes a "handshake failed" from an
         // opaque peer such as a browser diagnosable at all.
-        InteroperableQUICDebug.log("server local settings: \(Self.renderSettings(http3.localSettings))")
+        InteroperableQUICDebug.log("server local settings: \(InteroperableQUICRuntime.renderSettings(http3.localSettings))")
         if let peerSettings = http3.remoteSettings {
-            InteroperableQUICDebug.log("server peer settings: \(Self.renderSettings(peerSettings))")
+            InteroperableQUICDebug.log("server peer settings: \(InteroperableQUICRuntime.renderSettings(peerSettings))")
         }
+        // Datagram availability is a property of the negotiated SETTINGS, so it
+        // is answered after the control-stream exchange rather than assumed.
+        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(
+            localSettings: http3.localSettings,
+            remoteSettings: http3.remoteSettings
+        )
+        InteroperableQUICDebug.log("server datagrams usable=\(useDatagrams)")
         var manager = WebTransportSessionManager(
             http3: http3,
             // Accept what the QUIC layer advertised to the peer. Leaving this at
@@ -1542,15 +2013,6 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         )
     }
 
-    /// Renders HTTP/3 SETTINGS as sorted `0xid=value` pairs for the diagnostic
-    /// channel. Setting identifiers and counts only — no peer payload.
-    private static func renderSettings(_ settings: HTTP3Settings) -> String {
-        settings.entries
-            .sorted { $0.key < $1.key }
-            .map { "0x\(String($0.key, radix: 16))=\($0.value)" }
-            .joined(separator: " ")
-    }
-
     private static func resolveListenerPort(
         _ listener: NetworkListener<QUIC>,
         timeoutMilliseconds: Int32
@@ -1567,11 +2029,26 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     }
 }
 
-private enum InteroperableQUICRuntime {
-    static let defaultAuthority = "localhost"
-    static let defaultPath = "/wt"
-    static let defaultOrigin = "https://localhost"
-    static let defaultProtocol = "demo.v1"
+enum InteroperableQUICRuntime {
+    /// The ALPN identifiers every QUIC connection this runtime builds offers.
+    ///
+    /// The HTTP/3 token comes from ``WebTransportALPNPolicy`` rather than a
+    /// literal so the offer and the negotiated-ALPN validation cannot drift
+    /// apart: a change to the policy moves the offer with it, and a test pins the
+    /// two together.
+    static let alpnProtocols = [WebTransportALPNPolicy.requiredHTTP3Protocol]
+
+    /// Renders HTTP/3 SETTINGS as sorted `0xid=value` pairs for the diagnostic
+    /// channel. Setting identifiers and counts only — no peer payload.
+    ///
+    /// Shared by the client and server halves: the two used to carry
+    /// byte-identical private copies.
+    static func renderSettings(_ settings: HTTP3Settings) -> String {
+        settings.entries
+            .sorted { $0.key < $1.key }
+            .map { "0x\(String($0.key, radix: 16))=\($0.value)" }
+            .joined(separator: " ")
+    }
 
     static func host(for value: String) -> NWEndpoint.Host {
         switch value {
@@ -1597,7 +2074,7 @@ private enum InteroperableQUICRuntime {
     }
 
     static func makeBaseQUIC(limits: WebTransportTransportLimits = .default) -> QUIC {
-        QUIC(alpn: ["h3"]) {
+        QUIC(alpn: alpnProtocols) {
             UDP()
         }
         .idleTimeout(limits.idleTimeoutMilliseconds)
@@ -1610,7 +2087,7 @@ private enum InteroperableQUICRuntime {
         .maxDatagramFrameSize(limits.maxDatagramFrameSize)
     }
 
-    static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
+    fileprivate static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
         switch trustConfiguration {
         case .systemTrust:
             return makeBaseQUIC()
@@ -1646,7 +2123,121 @@ enum InteroperableQUICHelpers {
         }
     }
 
-    static func makeRequestStreamPayload(streamID: UInt64, requestFrame: HTTP3Frame) throws -> Data {
+    /// Hands an inbound stream to its connection's collector, refusing it at the
+    /// transport when the collector will not retain it.
+    ///
+    /// The collector bounds how many streams it holds per direction so a peer
+    /// cannot make this endpoint retain stream objects, and the buffers behind
+    /// them, for the connection's whole life. A stream the collector declines is
+    /// not merely dropped: the peer still believes it is open and keeps writing
+    /// into it. RFC 9000 section 3.5 gives a receiver STOP_SENDING for exactly
+    /// this, and the WebTransport draft's `WT_BUFFERED_STREAM_REJECTED` is the
+    /// refusal code the session layer already uses for an over-limit buffered
+    /// stream.
+    ///
+    /// Network.framework exposes neither stop-sending nor a per-stream reset, but
+    /// documents enough for both halves of the refusal: the application error
+    /// code set on the stream is the one sent to the peer when the stream is
+    /// closed, and releasing the last handle lets the transport cancel the
+    /// receive side — which the peer observes as STOP_SENDING. The refusal is
+    /// therefore to set the code and return without retaining the stream.
+    @discardableResult
+    static func enqueueInboundStream(
+        _ stream: QUIC.Stream<QUICStream>,
+        into inboundStreams: InteroperableQUICStreamQueue<QUIC.Stream<QUICStream>>,
+        role: String
+    ) async -> InteroperableQUICInboundStreamDisposition {
+        let direction = streamDirectionKey(stream.directionality)
+        let disposition = await inboundStreams.enqueue(
+            stream,
+            direction: direction,
+            streamID: UInt64(stream.streamID)
+        )
+        switch disposition {
+        case .accepted:
+            InteroperableQUICDebug.log(
+                "\(role) inbound stream direction=\(stream.directionality) id=\(stream.streamID)"
+            )
+        case .refusedQueueFull(let limit):
+            InteroperableQUICDebug.log(
+                "\(role) refusing inbound stream id=\(stream.streamID): "
+                    + "direction \(direction) already holds its \(limit)-stream ceiling"
+            )
+            stream.streamApplicationErrorCode =
+                WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
+        case .refusedInboundDeliveryFailed:
+            InteroperableQUICDebug.log(
+                "\(role) refusing inbound stream id=\(stream.streamID): inbound delivery has already failed"
+            )
+            stream.streamApplicationErrorCode =
+                WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
+        }
+        return disposition
+    }
+
+    /// The session a peer-prefixed stream names, when that session is not the one
+    /// this connection serves.
+    ///
+    /// A WebTransport stream starts with a marker and a session ID. The runtime
+    /// serves exactly one session per connection, so a prefix naming any other
+    /// session is a peer error the draft requires be refused at the stream level.
+    /// The bytes have already been consumed from the transport by the time the
+    /// prefix is available, so the stream cannot be handed back; it must be reset
+    /// rather than silently dropped. A caller that sees `nil` leaves the bytes to
+    /// `WebTransportSessionManager`, which owns the prefix grammar and reports the
+    /// appropriate protocol error for a missing, malformed, or wrong-form prefix.
+    ///
+    /// `form` is the direction the caller accepted the stream on. A prefix whose
+    /// form does not match is a grammar error owned by the session manager, not a
+    /// foreign-session report, so it is deliberately left alone: only a
+    /// well-formed prefix of the expected form naming another session is foreign.
+    static func foreignSessionID(
+        inPrefixedStream firstBytes: Data,
+        expectedSessionID: UInt64,
+        form: WebTransportStreamForm = .bidirectional
+    ) -> UInt64? {
+        guard WebTransportStreamSignaling.hasStreamPrefix(firstBytes),
+            let prefix = try? WebTransportStreamSignaling.parsePrefix(firstBytes),
+            prefix.form == form
+        else {
+            return nil
+        }
+        let namedSessionID = prefix.sessionID.rawValue
+        guard namedSessionID != expectedSessionID else {
+            return nil
+        }
+        return namedSessionID
+    }
+
+    /// The session a WebTransport datagram names, when that session is not the
+    /// one this connection serves.
+    ///
+    /// The QUIC datagram channel is connection-scoped: a datagram read from it
+    /// cannot be put back, so the session ID in its prefix has to be checked
+    /// before the session manager can retain the payload for a session this
+    /// connection never serves. The runtime serves exactly one session per
+    /// connection, so a datagram naming any other session is a peer error that
+    /// must be named rather than reported as an invalid payload and discarded.
+    /// A malformed datagram prefix throws the `.h3ID` error the session manager
+    /// reports for the same bytes, so a caller propagates it unchanged.
+    static func foreignDatagramSessionID(
+        inDatagram payload: Data,
+        expectedSessionID: UInt64
+    ) throws -> UInt64? {
+        let parsed: WebTransportDatagramPrefix
+        do {
+            parsed = try WebTransportDatagramSignaling.parse(payload)
+        } catch {
+            throw WebTransportDraft16Error(kind: .h3ID, message: "invalid WebTransport datagram session ID")
+        }
+        let namedSessionID = parsed.sessionID.rawValue
+        guard namedSessionID != expectedSessionID else {
+            return nil
+        }
+        return namedSessionID
+    }
+
+    static func makeRequestStreamPayload(requestFrame: HTTP3Frame) throws -> Data {
         try requestFrame.encode()
     }
 
@@ -1749,64 +2340,78 @@ enum InteroperableQUICHelpers {
         }
 
         try await withTimeout(timeoutMilliseconds) {
-            try await withCheckedThrowingContinuation { continuation in
-                let completion = OneShotContinuation()
-                let handleState: @Sendable (NetworkConnection<QUIC>.State) -> Void = { state in
-                    InteroperableQUICDebug.log("\(role) connection state observed: \(state)")
-                    switch state {
-                    case .ready:
-                        Task {
-                            await completion.complete {
-                                InteroperableQUICDebug.log("\(role) connection became ready")
-                                continuation.resume()
-                            }
-                        }
-                    case .failed(let error):
-                        Task {
-                            await completion.complete {
-                                InteroperableQUICDebug.log("\(role) connection failed: \(error)")
-                                continuation.resume(throwing: establishmentFailure(role: role, error: error))
-                            }
-                        }
-                    case .cancelled:
-                        Task {
-                            await completion.complete {
-                                InteroperableQUICDebug.log("\(role) connection cancelled")
-                                continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
-                            }
-                        }
-                    default:
-                        break
+            let gate = InteroperableQUICWaitGate()
+            let handleState: @Sendable (NetworkConnection<QUIC>.State) -> Void = { state in
+                InteroperableQUICDebug.log("\(role) connection state observed: \(state)")
+                switch state {
+                case .ready:
+                    InteroperableQUICDebug.log("\(role) connection became ready")
+                    gate.resolveReady()
+                case .failed(let error):
+                    InteroperableQUICDebug.log("\(role) connection failed: \(error)")
+                    gate.resolveFailure(establishmentFailure(role: role, error: error))
+                case .cancelled:
+                    InteroperableQUICDebug.log("\(role) connection cancelled")
+                    gate.resolveFailure(WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
+                default:
+                    break
+                }
+            }
+
+            // `withCheckedThrowingContinuation` does not observe task cancellation,
+            // and `withTimeout` abandons (rather than drains) the operation when its
+            // deadline fires. Without this handler the timeout path cancelled the
+            // task but never resumed the inner continuation, so the abandoned task —
+            // and the observer and `start` closure it held — stayed suspended until
+            // the connection independently reached `.failed`/`.cancelled`, or for the
+            // life of the process if it never did. `gate` makes the observer's resume
+            // and the cancellation's resume mutually exclusive and exactly-once,
+            // including when the cancellation arrives before the wait has parked.
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    gate.park(continuation)
+                    InteroperableQUICDebug.log("\(role) connection state monitor start=\(connection.state)")
+
+                    // Register the observer before sampling the current state. A
+                    // transition that lands between the two is then delivered twice
+                    // rather than missed, and `gate` is one-shot so the duplicate is
+                    // discarded. Sampling first would leave a window where a terminal
+                    // transition is observed by nobody.
+                    connection.onStateUpdate { _, state in
+                        InteroperableQUICDebug.log("connection state update: \(state)")
+                        handleState(state)
+                    }
+                    handleState(connection.state)
+
+                    if let start {
+                        InteroperableQUICDebug.log("\(role) connection start requested")
+                        start()
                     }
                 }
-
-                InteroperableQUICDebug.log("\(role) connection state monitor start=\(connection.state)")
-
-                // Register the observer before sampling the current state. A
-                // transition that lands between the two is then delivered twice
-                // rather than missed, and `completion` is one-shot so the
-                // duplicate is discarded. Sampling first would leave a window
-                // where a terminal transition is observed by nobody.
-                connection.onStateUpdate { _, state in
-                    InteroperableQUICDebug.log("connection state update: \(state)")
-                    handleState(state)
-                }
-                handleState(connection.state)
-
-                if let start {
-                    InteroperableQUICDebug.log("\(role) connection start requested")
-                    start()
-                }
+            } onCancel: {
+                InteroperableQUICDebug.log("\(role) wait for ready cancelled")
+                gate.resolveFailure(WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
             }
         }
     }
 
-    static func datagramsUsable(_: NetworkConnection<QUIC>) -> Bool {
-        // Network.framework can report 0 here until the datagram channel is
-        // first used, even when both peers negotiated QUIC DATAGRAM support.
-        // The runtime config always advertises max_datagram_frame_size; the
-        // actual datagram channel send/receive calls remain the authoritative
-        // failure point for non-compliant peers.
+    /// Whether H3 DATAGRAM was negotiated with the peer.
+    ///
+    /// Network.framework does not expose the peer's `max_datagram_frame_size`
+    /// before the datagram channel is first used — measured: `usableDatagramFrameSize`
+    /// reports 0 on an established connection even when both peers advertised it —
+    /// so the honest pre-use answer is the HTTP/3 one. Draft-16 carries datagrams
+    /// inside HTTP/3 DATAGRAM frames, so both endpoints must have advertised
+    /// `SETTINGS_H3_DATAGRAM = 1` for the capability to be real. The framework
+    /// remains the authority for a send or receive that is actually attempted.
+    static func datagramsUsable(localSettings: HTTP3Settings, remoteSettings: HTTP3Settings?) -> Bool {
+        let identifier = WebTransportHTTP3DraftConstants.current.settingsH3Datagram
+        guard localSettings[identifier] == 1 else {
+            return false
+        }
+        guard let remoteSettings, remoteSettings[identifier] == 1 else {
+            return false
+        }
         return true
     }
 
@@ -1877,6 +2482,38 @@ enum InteroperableQUICHelpers {
             throw WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID: stream.streamID)
         }
         return bytes
+    }
+
+    /// Retains an HTTP/3 critical unidirectional stream the WebTransport accept
+    /// path encountered, reporting whether it did.
+    ///
+    /// The peer's control and QPACK streams share the unidirectional direction
+    /// with WebTransport streams. ``readPeerControlStream(from:role:timeoutMilliseconds:)``
+    /// returns as soon as it reads the control stream, so a QPACK stream that
+    /// arrived behind it is still queued when the application starts accepting
+    /// WebTransport streams. RFC 9114 section 6.2.1 and RFC 9204 section 4.2 make
+    /// those streams critical — they must not be closed — so the accept path
+    /// retains them and waits on. Anything else is not a stream this runtime
+    /// serves, and the caller reports it rather than handing it to the
+    /// application as if it were a WebTransport stream.
+    fileprivate static func retainPeerCriticalUnidirectionalStream(
+        _ stream: QUIC.Stream<QUICStream>,
+        firstBytes: Data,
+        in inboundStreams: InteroperableQUICInboundStreamCollector
+    ) async -> Bool {
+        guard let prefix = try? HTTP3StreamTypeParser.parsePrefix(firstBytes) else {
+            return false
+        }
+        switch prefix.type {
+        case HTTP3StreamType.control, HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
+            await inboundStreams.retainCritical(stream)
+            Task {
+                await drainPeerCriticalStream(stream)
+            }
+            return true
+        default:
+            return false
+        }
     }
 
     fileprivate static func readPeerControlStream(
@@ -2306,6 +2943,26 @@ private actor InteroperableQUICInboundRegistration {
     }
 }
 
+/// What the inbound-stream collector did with a stream offered to it.
+///
+/// Spelled out rather than returned as a `Bool` so a caller cannot ignore a
+/// refusal by accident. A stream the collector did not retain is one the peer
+/// still believes is open, so the caller has to refuse it at the transport; see
+/// ``InteroperableQUICStreamQueue/enqueue(_:direction:streamID:)``.
+enum InteroperableQUICInboundStreamDisposition: Equatable, Sendable {
+    /// The stream was handed to a parked caller, queued for the next one, or
+    /// recognised as a repeat of a stream already delivered. In every one of
+    /// those cases the caller must leave the stream alone — a duplicate is the
+    /// live stream, not a new one, so refusing it would signal an error on a
+    /// stream a reader is using.
+    case accepted
+    /// The per-direction ceiling is already reached, so nothing was retained.
+    case refusedQueueFull(limit: Int)
+    /// Inbound delivery for this connection has already failed, so nothing more
+    /// can be retained.
+    case refusedInboundDeliveryFailed
+}
+
 private typealias InteroperableQUICInboundStreamCollector = InteroperableQUICStreamQueue<QUIC.Stream<QUICStream>>
 
 /// Delivers inbound streams to whoever is waiting for one of that direction.
@@ -2333,7 +2990,41 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     private let maxRememberedDeliveries = 4096
     private var deliveredKeys: Set<DeliveredStream> = []
     private var deliveryOrder: [DeliveredStream] = []
+    /// How many leading entries of ``deliveryOrder`` have been evicted.
+    private var deliveryHead = 0
+
+    /// How many elements the delivery history moved while evicting.
+    ///
+    /// A cost probe for the regression test in `WebTransportInboundStreamQueueTests`:
+    /// remembering a delivery must not shift the whole history.
+    private(set) var deliveryOrderMoves = 0
     private var failure: Error?
+
+    /// Ceiling on streams held at once for one direction.
+    ///
+    /// Taken from the transport limits this endpoint advertised, because that is
+    /// the number of streams the peer was told it may have open. It is a
+    /// *retention* bound rather than an enforcement of the advertisement — QUIC
+    /// enforces that itself — so each entry keeps at least one slot: the CONNECT
+    /// request stream and the peer's control stream can both arrive before a
+    /// reader parks, and refusing those because an operator advertised zero
+    /// streams would break the connection instead of bounding it.
+    private let ceilingByDirection: [Int: Int]
+
+    init(
+        bidirectionalLimit: Int = WebTransportTransportLimits.default.initialMaxBidirectionalStreams,
+        unidirectionalLimit: Int = WebTransportTransportLimits.default.initialMaxUnidirectionalStreams
+    ) {
+        ceilingByDirection = [
+            InteroperableQUICHelpers.bidirectionalStreamDirection: max(1, bidirectionalLimit),
+            InteroperableQUICHelpers.unidirectionalStreamDirection: max(1, unidirectionalLimit),
+        ]
+    }
+
+    private func ceiling(for direction: Int) -> Int {
+        ceilingByDirection[direction]
+            ?? max(1, WebTransportTransportLimits.default.initialMaxBidirectionalStreams)
+    }
 
     /// Peer control and QPACK streams, held for the lifetime of the connection.
     ///
@@ -2363,20 +3054,47 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     /// follows its original almost immediately, and a connection is free to open
     /// unboundedly many streams over its lifetime, so retaining every identifier
     /// would trade this defect for unbounded growth.
-    func enqueue(_ stream: Element, direction: Int, streamID: UInt64) {
+    ///
+    /// ## Retention bound and refusal
+    ///
+    /// At most ``ceiling(for:)`` streams are held per direction. RFC 9000
+    /// section 4.6 stops counting a stream against `initial_max_streams_*` once
+    /// it is closed, and a stream the peer FINs is closed whether or not the
+    /// application read it, so the advertised stream limit does not bound how
+    /// many stream objects a long-lived connection accumulates. Without a
+    /// ceiling, a peer that opens streams this endpoint has no consumer for —
+    /// post-establishment unidirectional streams in particular — makes the
+    /// runtime retain each one, and the buffers behind it, until the connection
+    /// ends.
+    ///
+    /// A stream that does not fit is **not** retained and is reported as
+    /// ``InteroperableQUICInboundStreamDisposition/refusedQueueFull(limit:)``.
+    /// The caller owns refusing it: dropping the handle alone tells the peer
+    /// nothing, and the peer keeps writing into a stream this endpoint has
+    /// forgotten. ``InteroperableQUICHelpers/enqueueInboundStream(_:into:role:)``
+    /// is that caller for the runtime and performs the transport-level refusal.
+    @discardableResult
+    func enqueue(
+        _ stream: Element,
+        direction: Int,
+        streamID: UInt64
+    ) -> InteroperableQUICInboundStreamDisposition {
         guard failure == nil else {
-            return
+            return .refusedInboundDeliveryFailed
         }
         let key = DeliveredStream(direction: direction, streamID: streamID)
         guard !deliveredKeys.contains(key) else {
             InteroperableQUICDebug.log("ignoring duplicate inbound stream delivery id=\(streamID)")
-            return
+            return .accepted
         }
         deliveredKeys.insert(key)
         deliveryOrder.append(key)
-        if deliveryOrder.count > maxRememberedDeliveries {
-            deliveredKeys.remove(deliveryOrder.removeFirst())
+        while deliveryOrder.count - deliveryHead > maxRememberedDeliveries {
+            let evicted = deliveryOrder[deliveryHead]
+            deliveryHead += 1
+            deliveredKeys.remove(evicted)
         }
+        compactDeliveryOrderIfWorthwhile()
         if var waiters = waiting[direction], !waiters.isEmpty {
             let waiter = waiters.removeFirst()
             if waiters.isEmpty {
@@ -2385,9 +3103,32 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
                 waiting[direction] = waiters
             }
             waiter.continuation.resume(returning: stream)
-            return
+            return .accepted
+        }
+        let limit = ceiling(for: direction)
+        guard (queued[direction]?.count ?? 0) < limit else {
+            return .refusedQueueFull(limit: limit)
         }
         queued[direction, default: []].append(stream)
+        return .accepted
+    }
+
+    /// Reclaims the evicted prefix once it is at least half the history.
+    ///
+    /// Removing from the front moves every remaining entry, so doing it per
+    /// delivery is what made recording a delivery past the cap cost O(4,096).
+    /// Waiting until the evicted prefix is as large as the live tail makes the
+    /// move amortised O(1) per delivery.
+    private func compactDeliveryOrderIfWorthwhile() {
+        guard deliveryHead > 0 else {
+            return
+        }
+        guard deliveryHead == deliveryOrder.count || deliveryHead * 2 >= deliveryOrder.count else {
+            return
+        }
+        deliveryOrderMoves += deliveryOrder.count - deliveryHead
+        deliveryOrder.removeFirst(deliveryHead)
+        deliveryHead = 0
     }
 
     /// Removes and returns the oldest queued stream for `direction`.
@@ -2442,6 +3183,11 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         failure = error
         let waitingByDirection = waiting
         waiting.removeAll()
+        // A failed collector can never deliver what it still holds: every later
+        // `next` throws `error` before reaching the queue. Keeping the queued
+        // streams would only pin the peer's stream objects and their buffers for
+        // the remaining life of the connection.
+        queued.removeAll()
         for (_, waiters) in waitingByDirection {
             for waiter in waiters {
                 waiter.continuation.resume(throwing: error)
@@ -2558,5 +3304,78 @@ private actor OneShotContinuation {
         }
         resumed = true
         operation()
+    }
+}
+
+/// Parks one checked continuation and resumes it exactly once.
+///
+/// `withCheckedThrowingContinuation` does not observe task cancellation, so a
+/// timeout has to resume the wait explicitly, while a state observer may resume
+/// it at the same moment. This gate makes those two resumes mutually exclusive
+/// and also survives the cancellation arriving before the wait has parked its
+/// continuation: the later `park` sees the earlier resolution and resumes
+/// immediately, so no caller is left suspended.
+private final class InteroperableQUICWaitGate: @unchecked Sendable {
+    private enum Resolution {
+        case pending
+        case ready
+        case failure(any Error)
+    }
+
+    private let state = Mutex<(resolution: Resolution, continuation: CheckedContinuation<Void, any Error>?)>(
+        (.pending, nil)
+    )
+
+    func park(_ continuation: CheckedContinuation<Void, any Error>) {
+        let resolution = state.withLock { state -> Resolution? in
+            guard case .pending = state.resolution else {
+                let resolution = state.resolution
+                state.resolution = .pending
+                return resolution
+            }
+            state.continuation = continuation
+            return nil
+        }
+        if let resolution {
+            Self.resume(continuation, with: resolution)
+        }
+    }
+
+    func resolveReady() {
+        resolve(.ready)
+    }
+
+    func resolveFailure(_ error: any Error) {
+        resolve(.failure(error))
+    }
+
+    private func resolve(_ resolution: Resolution) {
+        let continuation = state.withLock { state -> CheckedContinuation<Void, any Error>? in
+            guard case .pending = state.resolution else {
+                return nil
+            }
+            state.resolution = resolution
+            let continuation = state.continuation
+            state.continuation = nil
+            return continuation
+        }
+        guard let continuation else {
+            return
+        }
+        Self.resume(continuation, with: resolution)
+    }
+
+    private static func resume(
+        _ continuation: CheckedContinuation<Void, any Error>,
+        with resolution: Resolution
+    ) {
+        switch resolution {
+        case .pending:
+            break
+        case .ready:
+            continuation.resume()
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
     }
 }

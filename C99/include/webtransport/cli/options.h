@@ -48,6 +48,16 @@ typedef enum wt_cli_exchange {
   WT_CLI_EXCHANGE_DATAGRAM = 2
 } wt_cli_exchange_t;
 
+/* CLIENT only: which `:protocol` token the CONNECT carries. The values match
+ * `wt_webtransport_upgrade_token_t` (zero is the draft-16 token) so the loop's configuration does not have to
+ * translate them, and the DEFAULT is draft-16 for the reason that enum gives: draft-ietf-webtrans-http3-16
+ * section 3.2 names `webtransport-h3`, while a pre-draft peer refuses that value with H3_MESSAGE_ERROR and knows
+ * only `webtransport` (F-02b). */
+typedef enum wt_cli_upgrade_token {
+  WT_CLI_UPGRADE_TOKEN_DRAFT16 = 0,
+  WT_CLI_UPGRADE_TOKEN_LEGACY = 1
+} wt_cli_upgrade_token_t;
+
 typedef struct wt_cli_options {
   wt_cli_mode_t mode;
   /* Where: "host:port" for either mode, as it was given. Views into argv, so they live as long
@@ -68,6 +78,11 @@ typedef struct wt_cli_options {
    * is refused by `wt_cli_options_check`, because a client cannot make its server validate it. */
   int retry;
   wt_cli_exchange_t exchange;
+  /* CLIENT only: which `:protocol` token the CONNECT carries (F-02b). `upgrade_token_set` distinguishes the
+   * draft-16 default from a caller who asked for it, so `wt_cli_options_check` can refuse the flag for a mode
+   * that does not send a CONNECT without refusing every listener that simply left it alone. */
+  wt_cli_upgrade_token_t upgrade_token;
+  int upgrade_token_set;
   /* CLIENT only: send the message as a WebTransport stream (or datagram) BEFORE the CONNECT, which is the
    * single flight draft-16 section 4.6 describes and the order that reaches the server's parking path (WT-189). */
   int early_stream;
@@ -111,6 +126,7 @@ const char *wt_cli_mode_name(wt_cli_mode_t mode);
 const char *wt_cli_transport_name(wt_cli_transport_t transport);
 const char *wt_cli_trust_name(wt_cli_trust_t trust);
 const char *wt_cli_exchange_name(wt_cli_exchange_t exchange);
+const char *wt_cli_upgrade_token_name(wt_cli_upgrade_token_t upgrade_token);
 
 /* Print the parsed options as one JSON object, so a script reads them rather than parsing
  * prose. Written straight to `stream`; the caller owns the file. */

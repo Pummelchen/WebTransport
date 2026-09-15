@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import WebTransportCryptoApple
+import WebTransportQUICCore
 import WebTransportTLSCore
 
 @Test
@@ -156,6 +157,37 @@ func packetProtectionRejectsTamperedAssociatedData() throws {
             associatedData: Data("tampered-header".utf8),
             keys: oneRTTKeys
         )
+    }
+}
+
+/// RFC 5869 section 2.3 caps the HKDF output at 255 * HashLen, which is 8160
+/// bytes for SHA-256. The expand loop's block counter is a single byte, so a
+/// longer request wraps it to zero and silently stops producing the RFC's stream
+/// while every guard still passes. The TLSCore copy of the same function already
+/// refuses such a request.
+@Test
+func packetProtectionRejectsHkdfOutputBeyondTheRfc5869BlockLimit() throws {
+    let secret = Data(repeating: 0x5a, count: 32)
+
+    // 8160 bytes is the largest RFC 5869 stream and must still be produced.
+    let longest = try QUICPacketProtection.deriveKeys(trafficSecret: secret, keyByteCount: 255 * 32)
+    #expect(longest.key.count == 255 * 32)
+
+    // One byte more is not representable and must be refused, not wrapped.
+    #expect(
+        throws: QUICCodecError.valueOutOfRange(
+            "HKDF output must be 0...8160 bytes for SHA-256 (RFC 5869 section 2.3)")
+    ) {
+        _ = try QUICPacketProtection.deriveKeys(trafficSecret: secret, keyByteCount: 255 * 32 + 1)
+    }
+
+    // A negative count is not a length at all: the old guard let it through and
+    // the expand loop trapped on `prefix(-1)`.
+    #expect(
+        throws: QUICCodecError.valueOutOfRange(
+            "HKDF output must be 0...8160 bytes for SHA-256 (RFC 5869 section 2.3)")
+    ) {
+        _ = try QUICPacketProtection.deriveKeys(trafficSecret: secret, keyByteCount: -1)
     }
 }
 

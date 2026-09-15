@@ -29,6 +29,9 @@ peers="${*:-pywebtransport quinn quiche}"
 network="wt-interop-net"
 client_image="wt-interop-c99-client"
 timeout_ms="${WT_CONTAINER_INTEROP_TIMEOUT_MS:-8000}"
+# A check that reports success whatever the client did is not a check: every peer starts at "failed" and only
+# the client's own exit status clears it, so the script's status is the interop result rather than a log line.
+failures=0
 
 # The client's own gated dumps (C99/docs/DIAGNOSTICS.md). They write INSIDE the container, so the log directory is
 # mounted from the host: a diagnostic that dies with the container is a diagnostic nobody reads. Set
@@ -65,6 +68,7 @@ for peer in $peers; do
   context="$swift_interop/$peer"
   if [ ! -d "$context" ]; then
     echo "container interop: $peer: no build context at $context"
+    failures=$((failures + 1))
     continue
   fi
   echo "== $peer"
@@ -88,10 +92,18 @@ for peer in $peers; do
   # address on the command line is the loopback one a developer would use anyway.
   # A message is NAMED, because an empty WebTransport stream body carries nothing a peer can observe: `--exchange
   # stream` without `--message` sends the prefix and FIN alone, which is a valid stream and a silent one.
+  # The client's exit status IS the result: `|| true` here discarded it and the script always exited 0, so a
+  # session that never completed read exactly like one that did.
   # shellcheck disable=SC2086
-  docker run --rm --network "container:wt-interop-$peer" -v "$log_dir:/logs" $client_env "$client_image" \
-    --connect "127.0.0.1:$port" --trust local-development --exchange stream \
-    --message "${WT_INTEROP_MESSAGE:-hello-interop}" --timeout-ms "$timeout_ms" || true
+  if docker run --rm --network "container:wt-interop-$peer" -v "$log_dir:/logs" $client_env "$client_image" \
+       --connect "127.0.0.1:$port" --trust local-development --exchange stream \
+       --message "${WT_INTEROP_MESSAGE:-hello-interop}" --timeout-ms "$timeout_ms"; then
+    echo "container interop: $peer: the client completed the exchange"
+  else
+    client_status=$?
+    echo "container interop: $peer: the client FAILED (exit $client_status)" >&2
+    failures=$((failures + 1))
+  fi
   for dump in packets secrets transcript stream; do
     if [ -s "$log_dir/$dump.log" ]; then
       echo "-- client $dump log (last 30 lines):"
@@ -108,4 +120,8 @@ for peer in $peers; do
   docker rm -f "wt-interop-$peer" >/dev/null 2>&1 || true
 done
 
-echo "container interop: done (the client tool's own output above is the result)"
+if [ "$failures" -ne 0 ]; then
+  echo "container interop: $failures peer(s) failed (see the client output above)" >&2
+  exit 1
+fi
+echo "container interop: done (every peer's client completed the exchange)"

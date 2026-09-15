@@ -1,9 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/tmp/wt-clone/build/cmake_install.cmake",
-		"/tmp/wt-clone/build/apps/cmake_install.cmake",
-		"/tmp/wt-clone/build/tests/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

@@ -1,8 +1,17 @@
 #!/bin/sh
+#
+# Checks the active toolchain against a floor.
+#
+# With no arguments the project's development floor (Swift 6.3.3 / Xcode 26.6)
+# is used, so a developer on the oldest supported toolchain still gets a clear
+# answer. CI passes the mandated floors explicitly
+# (`./Swift/check-toolchain.sh 6.4 27.0`) so a runner image that silently
+# downgrades the toolchain fails the job instead of building green on a compiler
+# the mandate does not name.
 set -eu
 
-minimum_swift="6.3.3"
-minimum_xcode="26.6"
+minimum_swift="${1:-6.3.3}"
+minimum_xcode="${2:-26.6}"
 
 version_at_least() {
     awk -v current="$1" -v minimum="$2" 'BEGIN {

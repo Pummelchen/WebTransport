@@ -17,6 +17,9 @@ Windows is the real work. Every item below is a place where the current code ass
 | Library initialisation | none today | `WSAStartup`/`WSACleanup` once per process, which the runtime has no place for yet |
 | Linking | none today | `ws2_32` |
 | The socket type | `int fd` inside `wt_udp_socket_t` | `SOCKET`, which is unsigned and has `INVALID_SOCKET` rather than `-1` |
+| Creating a socket | `socket` | exists in Winsock, but only after `WSAStartup`, and it returns a `SOCKET` |
+| Binding | `bind` | exists in Winsock with the same name and the same `sockaddr` shape |
+| Socket options | `setsockopt`, `getsockopt` | the same names; the option value is `const char *` on Windows and `const void *` on POSIX, and the length type differs |
 | Closing | `close` | `closesocket` |
 | Non-blocking mode | `fcntl(fd, F_SETFL, O_NONBLOCK)` | `ioctlsocket(fd, FIONBIO, &one)`, a different function with a different failure mode |
 | Readiness | `poll` | `WSAPoll` (same shape, `pollfd` spelled the same way) |
@@ -73,9 +76,14 @@ longer "written from the inventory" but **COMPILED, LINKED and RUN** -- under Wi
 asserted on both of its paths by its own test. The one claim that is still not made is the one this document
 will not make for Wine: **it has not run on Windows itself.**
 
-`scripts/check-windows-platform.sh` compiles the branch with a mingw cross-compiler -- the same warnings the
-POSIX build turns into errors -- and reports `unsupported` with that reason on a machine that has none. CI
-installs one where it can. **It found real defects, one after another, and each was a thing the inventory had not
+`scripts/check-windows-platform.sh` compiles the branch with a mingw cross-compiler under a **seven-flag subset**
+of the project's warning set -- `-Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow -Wcast-qual` --
+and reports `unsupported` with that reason on a machine that has none. CI installs one where it can. The FULL
+project set (the twenty-four flags `cmake/WTCompilerWarnings.cmake` probes and applies to every target, with
+`-Werror`) is what the Windows **build** enforces: `scripts/check-windows-build.sh` configures the tree with the
+mingw toolchain and CMake, so every Windows translation unit is compiled under the same warnings-as-errors set
+as POSIX. The sweep is the cheaper branch check; it is not the full set, and this document said it was.
+**It found real defects, one after another, and each was a thing the inventory had not
 named:**
 
 - `FIONBIO` does not fit a signed `long` on Windows (`0x8004667E` is above `LONG_MAX`);
@@ -123,7 +131,8 @@ is a check nobody has tested; this one is on its second real find.
 
 **The tree RUNS for Windows, under Wine.** `scripts/check-windows-wine.sh` executes every linked test binary
 through Wine and reports the aggregate. On the VPS, in an `ubuntu:24.04` container with the mingw cross-build:
-**85 test executables ran, 85 passed, 0 failed, 0 hung, and the reported checks sum to 91,674.** That is the
+**85 test executables ran, 85 passed, 0 failed, 0 hung; the runner sums the per-binary check counts and
+reports 91,674 checks.** That is the
 claim the section above could not make — "linked, not run" — and it is the first time this tree has executed on
 a Windows target at all. The count moved twice since the first Wine run, and both moves are the point of the
 paragraphs below: **84 → 85** because a new Windows-only test now measures the datagram layer directly, and

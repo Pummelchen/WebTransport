@@ -112,6 +112,11 @@ foreach(test IN LISTS WT_UNIT_TESTS)
   add_test(NAME ${test} COMMAND ${test})
 endforeach()
 
+# The monotonic clock's tick-to-microsecond conversion is private to the library, but the test drives it with a
+# tick count past the point where the naive form wraps -- which cannot be produced through the public clock on a
+# POSIX host, and is exactly the Windows bug F-28 records.
+target_include_directories(test_time PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/core)
+
 # Parser fuzzing (WT-175): the plan's "parser fuzzing for QUIC varints, QUIC frames, transport parameters, HTTP/3
 # frames, QPACK, capsules, and WebTransport stream prefixes", in one harness (`tests/fuzz/fuzz_parsers.c` picks a
 # family by the input's first byte).

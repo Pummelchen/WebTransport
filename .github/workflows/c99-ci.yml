@@ -2,10 +2,12 @@
 # share nothing but the repository: no toolchain overlap, no dependency overlap,
 # and a failure in one should not mask the other.
 #
-# Four jobs, and the plan's Phase 12 list is what they are for. macOS 26 and Debian
-# run the tree in CI as they always have; the FreeBSD leg is still to be added; and
-# the Windows leg is here twice, because there are two different claims to make and
-# only one of them needs a Windows machine:
+# Four jobs, and the plan's Phase 12 list is what they are for. macOS 26 and Ubuntu
+# 24.04 run the tree in CI as they always have -- the Linux legs are GitHub's
+# `ubuntu-24.04` image (GCC and Clang), not a Debian container; the plan's Phase 12
+# matrix names Debian 13 for those two legs, which they do not yet run. The FreeBSD
+# leg is still to be added; and the Windows leg is here twice, because there are two
+# different claims to make and only one of them needs a Windows machine:
 #
 #   * `windows-wine` cross-builds the whole tree with mingw on Linux and RUNS every
 #     test executable under Wine. That is what found `WT-199` and `WT-200` -- a
@@ -35,6 +37,13 @@ concurrency:
   group: c99-ci-${{ github.ref }}
   cancel-in-progress: true
 
+# F-repo-ops-12: this workflow only reads the repository, so the token is given
+# nothing else. A missing block means the repository default, which may include
+# write scopes; naming the least privilege here keeps a compromised action from
+# pushing.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: C99 / ${{ matrix.os }} / ${{ matrix.cc }}
@@ -51,7 +60,7 @@ jobs:
             cc: clang
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       # The workflow files themselves, checked before anything else runs: a step with two `env:` blocks is a
       # workflow GitHub rejects outright, and the failure has no job list and only "This run likely failed because
@@ -215,7 +224,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Install Ninja, the cross-compiler, Wine and zstd
         # `wine64` is the package Ubuntu ships and the binary inside it is /usr/lib/wine/wine64 -- there is no
@@ -270,10 +279,10 @@ jobs:
         shell: msys2 {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Set up MSYS2 with the MINGW64 toolchain
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
         with:
           msystem: MINGW64
           update: false

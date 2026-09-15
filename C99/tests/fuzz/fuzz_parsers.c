@@ -79,7 +79,7 @@ static void fuzz_transport_parameters(const uint8_t *data, size_t size) {
   uint64_t offender = 0U;
 
   if (wt_quic_transport_parameters_decode(data, size, &params, &error) != WT_OK) return;
-  (void)wt_quic_transport_parameters_check(&params, &error, &offender);
+  (void)wt_quic_transport_parameters_check(&params, 0, &error, &offender);
   /* And a lookup for a parameter that is usually absent, because the getter walks the list. */
   {
     const uint8_t *value = NULL;

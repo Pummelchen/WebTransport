@@ -83,6 +83,52 @@ func webTransportCloseSessionResultCarriesFINStopSendingAndStreamCleanupActions(
     #expect(pair.client.stream(for: 4) == nil)
 }
 
+/// F-swift-architecture-11: a close/drain teardown must be idempotent. An
+/// application that closes on an error path and again in a `defer` previously
+/// got a spurious `sessionGone` from the second call, and a `drain()` after a
+/// close failed the same way.
+@Test
+func webTransportCloseAndDrainAreIdempotent() throws {
+    var pair = try WebTransportPhase13Support.makeReadyManagers()
+    let sessionID = try WebTransportPhase13Support.establishSession(client: &pair.client, server: &pair.server)
+    let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+    _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
+
+    let first = try pair.client.makeCloseSessionCapsuleResult(
+        sessionID: sessionID,
+        applicationErrorCode: 7,
+        message: "done"
+    )
+    #expect(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 7, message: "done"))
+    #expect(!first.terminationActions.streamResetFrames.isEmpty)
+
+    // A second close returns the same capsule and re-runs no teardown.
+    let second = try pair.client.makeCloseSessionCapsuleResult(
+        sessionID: sessionID,
+        applicationErrorCode: 7,
+        message: "done"
+    )
+    #expect(second.capsuleBytes == first.capsuleBytes)
+    #expect(second.terminationActions.streamResetFrames.isEmpty)
+    #expect(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 7, message: "done"))
+
+    // Draining an already-closed session is a no-op too.
+    let drain = try pair.client.makeDrainSessionCapsule(sessionID: sessionID)
+    #expect(try WebTransportFlowCapsuleCodec.parse(drain).capsule == .drainSession)
+    #expect(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 7, message: "done"))
+
+    // Draining a live session twice stays in the draining state.
+    var secondPair = try WebTransportPhase13Support.makeReadyManagers()
+    let liveSessionID = try WebTransportPhase13Support.establishSession(
+        client: &secondPair.client,
+        server: &secondPair.server
+    )
+    _ = try secondPair.client.makeDrainSessionCapsule(sessionID: liveSessionID)
+    #expect(secondPair.client.sessionsByID[liveSessionID]?.state == .draining)
+    _ = try secondPair.client.makeDrainSessionCapsule(sessionID: liveSessionID)
+    #expect(secondPair.client.sessionsByID[liveSessionID]?.state == .draining)
+}
+
 @Test
 func webTransportReceivedCloseCleansStreamsAndDatagrams() throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
@@ -487,9 +533,8 @@ func webTransportLibrarySmokeMatrixCoversPhase13IScenarios() throws {
 }
 
 @Test
-func webTransportDraft16ComplianceDefinitionOfDoneIsExplicitAndPassing() {
+func webTransportDraft16ComplianceDefinitionOfDoneIsExplicitAndHonest() {
     let items = WebTransportDraft16ComplianceMatrix.definitionOfDone
-    #expect(WebTransportDraft16ComplianceMatrix.allPass)
     #expect(
         items.map(\.requirementFamily) == [
             "Session establishment and application protocol negotiation",
@@ -499,9 +544,72 @@ func webTransportDraft16ComplianceDefinitionOfDoneIsExplicitAndPassing() {
             "H3 control and request stream constraints",
             "Security and identity handling without prompts",
         ])
-    #expect(items.allSatisfy { $0.status == .pass })
     #expect(items.allSatisfy { !$0.documentedBehavior.isEmpty })
     #expect(items.allSatisfy { !$0.evidence.isEmpty })
+    // Every claim is either a full pass or a recorded partial gap; nothing is
+    // left not-implemented or unstated. Compared by raw value so the assertion
+    // states the contract without depending on the case set.
+    #expect(
+        items.allSatisfy {
+            $0.status.rawValue == "PASS" || $0.status.rawValue == "PARTIAL"
+        })
+}
+
+/// F-swift-architecture-14: the compliance status must be able to describe
+/// something other than a full pass, and the matrix must use that where the
+/// shipped product falls short.
+///
+/// With `pass` as the only case, `allPass` was a tautology: every row was a
+/// literal `.pass`, so the public type could never report a gap. The flow-control
+/// family is the concrete case — implemented and conformance-tested in
+/// `WebTransportHTTP3Core`, but not negotiated by the Network.framework runtime
+/// (F-swift-architecture-06) — so it is `.partial`.
+@Test
+func webTransportDraft16ComplianceMatrixCanReportAGap() {
+    let items = WebTransportDraft16ComplianceMatrix.definitionOfDone
+    #expect(!items.isEmpty)
+    #expect(
+        items.contains { $0.status.rawValue != "PASS" },
+        "every compliance family is a literal PASS, so allPass cannot detect a gap")
+    guard
+        let flowControl = items.first(where: { $0.requirementFamily == "Flow-control and error codes" })
+    else {
+        Issue.record("the flow-control compliance item is missing")
+        return
+    }
+    #expect(flowControl.status.rawValue == "PARTIAL")
+    #expect(!WebTransportDraft16ComplianceMatrix.allPass)
+}
+
+/// F-swift-architecture-06: the compliance matrix must not present flow control
+/// as wired end to end when the shipped runtime never negotiates it. The claim
+/// and the runtime's advertised settings have to agree.
+@Test
+func webTransportDraft16FlowControlClaimMatchesTheShippedRuntimeBoundary() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    guard
+        let item = WebTransportDraft16ComplianceMatrix.definitionOfDone.first(where: {
+            $0.requirementFamily == "Flow-control and error codes"
+        })
+    else {
+        Issue.record("the flow-control compliance item is missing")
+        return
+    }
+    #expect(item.documentedBehavior.contains("Network.framework runtime does not advertise"))
+    #expect(item.documentedBehavior.contains("one session per connection"))
+
+    // The invariant behind the wording: no shipped validation profile advertises
+    // the WebTransport flow-control limits, so nothing running through
+    // WebTransportNetworkRuntime can negotiate flow control or a second session.
+    let profiles: [HTTP3WebTransportSettingsValidation] = [
+        .draft16Strict, .interoperable, .chromiumInterop, .pywebtransportStreamInterop,
+    ]
+    for profile in profiles {
+        let settings = profile.localSettings
+        #expect(settings[constants.settingsWTInitialMaxData] == nil)
+        #expect(settings[constants.settingsWTInitialMaxStreamsBidi] == nil)
+        #expect(settings[constants.settingsWTInitialMaxStreamsUni] == nil)
+    }
 }
 
 @Test

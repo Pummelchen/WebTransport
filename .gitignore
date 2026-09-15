@@ -2,3 +2,7 @@
 .build/
 Swift/.build/
 .webtransport-cli-logs/
+# The C99 build output lives under C99/out/<platform>/; a CMake build directory
+# started at the repository root (the historical `cmake -S C99 -B build`) is
+# machine-specific output and must never be committed again.
+/build/

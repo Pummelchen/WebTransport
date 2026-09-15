@@ -75,8 +75,16 @@ static void fuzz_varint(wt_rng_t *rng) {
       WT_EXPECT_TRUE("and the cursor agrees", c.offset == size);
       WT_EXPECT_TRUE("and the value is in range", value <= WT_QUIC_VARINT_MAX);
     } else {
-      WT_EXPECT_TRUE("a failed varint consumed nothing",
-                     c.offset <= length);
+      /* `c.offset <= length` was vacuous -- the cursor's own invariant makes it true of every cursor,
+       * failed or not. The contract is exact: a failed decode on an empty buffer leaves the cursor
+       * alone, and otherwise it has consumed ONLY the length byte it read before it could know the
+       * rest was missing, and left the cursor failed so a later read sees nothing (varint.c). */
+      if (length == 0U) {
+        WT_EXPECT_U64("a failed varint on an empty buffer consumed nothing", 0U, (uint64_t)c.offset);
+      } else {
+        WT_EXPECT_U64("a failed varint consumed only its length byte", 1U, (uint64_t)c.offset);
+        WT_EXPECT_TRUE("and left the cursor failed", wt_cursor_failed(&c) != 0);
+      }
     }
   }
 }
@@ -158,11 +166,14 @@ static void fuzz_packet(wt_rng_t *rng) {
         WT_EXPECT_TRUE("a parsed short header fits its buffer",
                        short_header.total_len <= cut);
       }
-      /* A Retry is decoded from its own buffer. */
+      /* A Retry is decoded from its own buffer. The assertion is gated on the decode having
+       * SUCCEEDED, as the long- and short-header blocks above are: `retry.total_len <= cut` held
+       * trivially on failure because the decoder zeroes `retry`, so the only Retry check in the
+       * corpus could not fail. */
       {
         wt_quic_retry_packet_t retry;
-        (void)wt_quic_retry_packet_decode(buffer, cut, &retry, &error);
-        if (cut != 0U) {
+        wt_quic_error_t retry_error = 0U;
+        if (wt_quic_retry_packet_decode(buffer, cut, &retry, &retry_error) == WT_OK) {
           WT_EXPECT_TRUE("a parsed Retry fits its buffer",
                          retry.total_len <= cut);
         }
@@ -199,7 +210,7 @@ static void fuzz_transport_parameters(wt_rng_t *rng) {
       /* The check either accepts it or names an offender that is in the list. */
       {
         uint64_t offender = 0U;
-        if (wt_quic_transport_parameters_check(&params, &error, &offender) !=
+        if (wt_quic_transport_parameters_check(&params, 0, &error, &offender) !=
             WT_OK) {
           size_t i;
           int found = 0;

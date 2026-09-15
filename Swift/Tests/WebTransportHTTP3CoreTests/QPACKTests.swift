@@ -412,3 +412,64 @@ func fieldSectionsStillRoundTripWithNoDynamicTable() throws {
     #expect(decoded == fields)
     #expect(encoded.first == 0x00, "Required Insert Count must be zero with no dynamic table")
 }
+
+/// RFC 9110 section 5.5: a field value is `field-content`, so the C0 controls
+/// other than HTAB, and DEL, are not legal value bytes; RFC 9114 section 4.1.2
+/// makes a field section that carries one malformed. `HTTPFieldLine.init`
+/// validated only the name and stored the value verbatim, and the decoder stopped
+/// at UTF-8 validity, which every C0 control satisfies.
+@Test
+func httpFieldLineRejectsControlBytesInValues() throws {
+    for forbidden in ["\r", "\n", "\r\n", "\u{0}", "\u{1}", "\u{1f}", "\u{7f}", "a\r\nb", "ok\u{0}end"] {
+        #expect(throws: QUICCodecError.malformed("HTTP field value contains a forbidden byte")) {
+            _ = try HTTPFieldLine(name: "x-test", value: forbidden)
+        }
+    }
+    // The bytes RFC 9110 section 5.5 does allow still pass: SP, HTAB and obs-text.
+    #expect(try HTTPFieldLine(name: "x-test", value: "a b\tc").value == "a b\tc")
+    #expect(try HTTPFieldLine(name: "x-test", value: "caf\u{e9}").value == "caf\u{e9}")
+}
+
+/// The decoder is the peer-facing entry point, so a literal field line whose
+/// value carries CR/LF must be refused rather than handed to a caller that may
+/// re-emit or log it. The bytes are hand-encoded because the encoder now refuses
+/// to produce the same value.
+@Test
+func qpackDecodeRejectsControlBytesInPeerFieldValues() throws {
+    // Field-section prefix (Required Insert Count 0, Base 0), then a literal field
+    // line with the literal name "x-evil" and the value "a\r\nb".
+    var encoded = Data([0x00, 0x00, 0x26])
+    encoded.append(Data("x-evil".utf8))
+    encoded.append(0x04)
+    encoded.append(Data("a\r\nb".utf8))
+
+    #expect(throws: QUICCodecError.malformed("HTTP field value contains a forbidden byte")) {
+        _ = try QPACK.decodeFieldSection(encoded)
+    }
+}
+
+/// RFC 9110 section 15 defines `status-code = 3DIGIT`, but `UInt16("+200")` and
+/// `UInt16("0200")` both succeed, so a `:status` the RFC forbids was accepted as
+/// a 200 response by both status readers.
+@Test
+func webTransportStatusRejectsNonThreeDigitForms() throws {
+    for forbidden in ["+200", "0200", "-200", "200 ", " 200", "20", "2000", "2oo"] {
+        let fields = [try HTTPFieldLine(name: ":status", value: forbidden)]
+        #expect(throws: QUICCodecError.malformed("WebTransport response requires a valid :status")) {
+            _ = try WebTransportSessionHeaders.status(from: fields)
+        }
+        #expect(throws: QUICCodecError.malformed("WebTransport response requires 2xx :status")) {
+            try WebTransportHTTP3Headers.validateSuccessfulResponse(fields)
+        }
+    }
+
+    // Exactly three digits still parse, and the range rule is unchanged.
+    let ok = [try HTTPFieldLine(name: ":status", value: "200")]
+    #expect(try WebTransportSessionHeaders.status(from: ok) == 200)
+    try WebTransportHTTP3Headers.validateSuccessfulResponse(ok)
+    #expect(
+        throws: QUICCodecError.malformed("WebTransport response requires a valid :status")
+    ) {
+        _ = try WebTransportSessionHeaders.status(from: [try HTTPFieldLine(name: ":status", value: "600")])
+    }
+}

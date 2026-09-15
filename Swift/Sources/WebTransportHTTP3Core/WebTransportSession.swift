@@ -282,6 +282,23 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     /// Tombstone insertion order, oldest first, so eviction is deterministic.
     private var closedSessionOrder: [WebTransportSessionID]
     private var closedStreamOrder: [UInt64]
+    /// How many leading entries of ``closedStreamOrder`` have been evicted.
+    private var closedStreamHead: Int
+    /// Membership for the tombstones still retained, so a duplicate close is
+    /// recognised without scanning ``closedStreamOrder``.
+    private var retainedClosedStreamIDs: Set<UInt64>
+
+    /// How many elements ``recordClosedStream(_:)`` moved while evicting.
+    ///
+    /// A cost probe for the regression test in `WebTransportSessionTests`: a
+    /// stream close must not shift the whole retention window.
+    private(set) var closedStreamTombstoneMoves = 0
+
+    /// How many stream tombstones are retained, as distinct from the storage they
+    /// occupy.
+    var retainedClosedStreamCount: Int {
+        closedStreamOrder.count - closedStreamHead
+    }
 
     public init(
         http3: HTTP3ConnectionState,
@@ -324,6 +341,8 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.requestStreamIDsClosedByReceivedCloseCapsule = []
         self.closedSessionOrder = []
         self.closedStreamOrder = []
+        self.closedStreamHead = 0
+        self.retainedClosedStreamIDs = []
     }
 
     public mutating func makeClientSessionRequest(
@@ -664,11 +683,28 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         )
     }
 
+    /// Builds the WT_DRAIN_SESSION capsule for a session.
+    ///
+    /// Draining a session that has already been closed is a no-op: the capsule is
+    /// returned without touching state, because a teardown that runs on an error
+    /// path and again in a `defer` must not fail the second time. Only a session
+    /// that is gone for another reason (rejected, or never established) throws.
     public mutating func makeDrainSessionCapsule(sessionID: WebTransportSessionID) throws -> Data {
         try validateSettingsReady()
-        _ = try writableSession(for: sessionID)
-        try markSessionDraining(sessionID)
-        return try WebTransportFlowCapsuleCodec.serialize(.drainSession)
+        guard let session = sessionsByID[sessionID] else {
+            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+        }
+        switch session.state {
+        case .closed:
+            return try WebTransportFlowCapsuleCodec.serialize(.drainSession)
+        case .rejected:
+            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+        case .requested:
+            throw QUICCodecError.malformed("WT_DRAIN_SESSION requires an established session")
+        case .accepted, .draining:
+            try markSessionDraining(sessionID)
+            return try WebTransportFlowCapsuleCodec.serialize(.drainSession)
+        }
     }
 
     public func makeOptimisticConnectStreamCapsule(
@@ -696,28 +732,55 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         ).capsuleBytes
     }
 
+    /// Builds the WT_CLOSE_SESSION capsule for a session and terminates it.
+    ///
+    /// Closing a session that is already closed is a no-op: the capsule is
+    /// returned without re-running teardown, because an application that closes on
+    /// an error path and again in a `defer` must not get a spuriously failing
+    /// teardown. Only a session that is gone for another reason (rejected, or
+    /// never established) throws.
     public mutating func makeCloseSessionCapsuleResult(
         sessionID: WebTransportSessionID,
         applicationErrorCode: UInt32,
         message: String
     ) throws -> WebTransportCloseSessionCapsuleResult {
         try validateSettingsReady()
-        _ = try sessionForIngress(sessionID)
+        guard let session = sessionsByID[sessionID] else {
+            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+        }
         let capsuleBytes = try WebTransportFlowCapsuleCodec.serialize(
             .closeSession(
                 applicationErrorCode: applicationErrorCode,
                 message: message
             ))
-        let terminationActions = try markSessionClosed(
-            sessionID,
-            applicationErrorCode: applicationErrorCode,
-            message: message,
-            closeCapsuleReceived: false
-        )
-        return WebTransportCloseSessionCapsuleResult(
-            capsuleBytes: capsuleBytes,
-            terminationActions: terminationActions
-        )
+        switch session.state {
+        case .closed:
+            // The streams were terminated by the first close, so there is nothing
+            // to reset again; only the CONNECT FIN is re-derived, and a duplicate
+            // FIN on an already-finishing stream is not a protocol violation.
+            return WebTransportCloseSessionCapsuleResult(
+                capsuleBytes: capsuleBytes,
+                terminationActions: WebTransportSessionTerminationActions(
+                    connectFINFrame: .stream(id: session.requestStreamID, offset: nil, fin: true, data: Data()),
+                    connectStopSendingFrame: nil,
+                    streamResetFrames: [],
+                    streamStopSendingFrames: []
+                )
+            )
+        case .rejected:
+            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+        case .requested, .accepted, .draining:
+            let terminationActions = try markSessionClosed(
+                sessionID,
+                applicationErrorCode: applicationErrorCode,
+                message: message,
+                closeCapsuleReceived: false
+            )
+            return WebTransportCloseSessionCapsuleResult(
+                capsuleBytes: capsuleBytes,
+                terminationActions: terminationActions
+            )
+        }
     }
 
     @discardableResult
@@ -995,7 +1058,37 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     public mutating func receiveStreamPayload(streamID: UInt64, payload: Data) throws {
-        guard var stream = streamsByID[streamID] else {
+        let sessionID = try payloadDeliverySessionID(streamID: streamID)
+        try reserveData(for: sessionID, byteCount: payload.count, receiveSide: true)
+        // Mutating through the subscript reaches the value where it is stored. The
+        // old `guard var stream = ...` / `streamsByID[streamID] = stream` round trip
+        // left the dictionary holding a second reference to the payload array, so
+        // every append copied the whole buffer.
+        try streamsByID[streamID]?.receivePayload(payload)
+    }
+
+    /// Receives `payload` and returns the payload a read should observe next.
+    ///
+    /// The read path used to call ``receiveStreamPayload(streamID:payload:)`` and
+    /// then ``popStreamPayload(streamID:)``, which appended the arrival only to
+    /// pop it again through two dictionary mutations. A read that consumes its own
+    /// arrival keeps the same accounting (the QUIC offset advances, flow control
+    /// is reserved, the buffer ceiling is enforced) without the round trip, and
+    /// still returns the oldest pending payload when one is already buffered.
+    public mutating func receiveAndPopStreamPayload(streamID: UInt64, payload: Data) throws -> Data {
+        let sessionID = try payloadDeliverySessionID(streamID: streamID)
+        try reserveData(for: sessionID, byteCount: payload.count, receiveSide: true)
+        guard let delivered = try streamsByID[streamID]?.receivePayloadDeliveringImmediately(payload)
+        else {
+            throw QUICCodecError.malformed("unknown WebTransport stream")
+        }
+        return delivered
+    }
+
+    /// Validates that `streamID` names a live stream and that its session still
+    /// accepts ingress, returning the session the payload belongs to.
+    private func payloadDeliverySessionID(streamID: UInt64) throws -> WebTransportSessionID {
+        guard let stream = streamsByID[streamID] else {
             if let sessionID = closedStreamSessionIDsByStreamID[streamID],
                 let state = sessionsByID[sessionID]?.state
             {
@@ -1011,9 +1104,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             throw QUICCodecError.malformed("unknown WebTransport stream")
         }
         _ = try sessionForIngress(stream.sessionID)
-        try reserveData(for: stream.sessionID, byteCount: payload.count, receiveSide: true)
-        try stream.receivePayload(payload)
-        streamsByID[streamID] = stream
+        return stream.sessionID
     }
 
     public mutating func sendStreamPayload(
@@ -1032,12 +1123,10 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     public mutating func popStreamPayload(streamID: UInt64) -> Data? {
-        guard var stream = streamsByID[streamID] else {
+        guard streamsByID[streamID] != nil else {
             return nil
         }
-        let payload = stream.popPayload()
-        streamsByID[streamID] = stream
-        return payload
+        return streamsByID[streamID]?.popPayload()
     }
 
     public mutating func resetStream(
@@ -1046,6 +1135,14 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     ) throws -> QUICFrame {
         guard var stream = streamsByID[streamID] else {
             throw QUICCodecError.malformed("unknown WebTransport stream")
+        }
+        // RFC 9000 section 19.4: RESET_STREAM aborts the sender's send half, so a
+        // stream whose send half this endpoint does not own (a peer-initiated
+        // unidirectional stream) must not carry one. Emitting it anyway is a
+        // STREAM_STATE_ERROR at the peer, so refuse it at the API boundary.
+        guard stream.hasSendHalf else {
+            throw QUICStateError.streamStateViolation(
+                "cannot reset a stream half this endpoint does not own")
         }
         let frame = stream.reset(applicationErrorCode: try mapApplicationErrorCode(applicationErrorCode))
         streamsByID[streamID] = stream
@@ -1058,6 +1155,13 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     ) throws -> QUICFrame {
         guard var stream = streamsByID[streamID] else {
             throw QUICCodecError.malformed("unknown WebTransport stream")
+        }
+        // RFC 9000 section 19.5: STOP_SENDING aborts the receive half, so a stream
+        // this endpoint only sends on (a locally initiated unidirectional stream)
+        // must not carry one, for the same reason as RESET_STREAM above.
+        guard stream.hasReceiveHalf else {
+            throw QUICStateError.streamStateViolation(
+                "cannot stop a stream half this endpoint does not own")
         }
         let frame = stream.stopSending(applicationErrorCode: try mapApplicationErrorCode(applicationErrorCode))
         streamsByID[streamID] = stream
@@ -1127,15 +1231,35 @@ public struct WebTransportSessionManager: Equatable, Sendable {
     }
 
     /// Records a terminated stream and evicts the oldest beyond the bound.
-    private mutating func recordClosedStream(_ streamID: UInt64) {
-        if let existing = closedStreamOrder.firstIndex(of: streamID) {
-            closedStreamOrder.remove(at: existing)
+    ///
+    /// Membership is a set lookup and eviction advances a head index, so neither
+    /// costs anything proportional to the retention window. The consumed prefix is
+    /// reclaimed in one move once it is at least half the storage, which makes the
+    /// reclaim amortised O(1) per recorded close.
+    mutating func recordClosedStream(_ streamID: UInt64) {
+        guard retainedClosedStreamIDs.insert(streamID).inserted else {
+            return
         }
         closedStreamOrder.append(streamID)
-        while closedStreamOrder.count > maxRetainedClosedStreams {
-            let evicted = closedStreamOrder.removeFirst()
+        while retainedClosedStreamCount > maxRetainedClosedStreams {
+            let evicted = closedStreamOrder[closedStreamHead]
+            closedStreamHead += 1
+            retainedClosedStreamIDs.remove(evicted)
             closedStreamSessionIDsByStreamID.removeValue(forKey: evicted)
         }
+        compactClosedStreamOrderIfWorthwhile()
+    }
+
+    private mutating func compactClosedStreamOrderIfWorthwhile() {
+        guard closedStreamHead > 0 else {
+            return
+        }
+        guard closedStreamHead == closedStreamOrder.count || closedStreamHead * 2 >= closedStreamOrder.count else {
+            return
+        }
+        closedStreamTombstoneMoves += retainedClosedStreamCount
+        closedStreamOrder.removeFirst(closedStreamHead)
+        closedStreamHead = 0
     }
 
     private mutating func register(_ stream: WebTransportStreamState) {
@@ -1424,6 +1548,20 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         return terminationActions
     }
 
+    /// Resets and stops the streams associated with a session that is ending.
+    ///
+    /// Each frame is produced only for a half this endpoint owns (RFC 9000
+    /// section 2.1): a RESET_STREAM for a stream whose send half is ours and a
+    /// STOP_SENDING for one whose receive half is ours. A bidirectional stream
+    /// owns both; a unidirectional stream owns exactly the direction its
+    /// initiator gave it. Emitting the other frame is not merely useless — RFC
+    /// 9000 section 19.4 makes RESET_STREAM on a send-only stream a
+    /// STREAM_STATE_ERROR and section 19.5 makes STOP_SENDING on a receive-only
+    /// stream the same, so the peer would close the connection while this
+    /// endpoint is trying to end the session cleanly. A teardown reaches both
+    /// shapes because ``openUnidirectionalStream`` registers locally initiated
+    /// streams and ``acceptUnidirectionalStreamWithActions`` registers
+    /// peer-initiated ones.
     private mutating func terminateAssociatedStreams(
         for sessionID: WebTransportSessionID,
         requestStreamID: UInt64
@@ -1437,8 +1575,12 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             guard var stream = streamsByID[streamID] else {
                 continue
             }
-            streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
-            streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            if stream.hasSendHalf {
+                streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
+            }
+            if stream.hasReceiveHalf {
+                streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            }
             closedStreamSessionIDsByStreamID[streamID] = sessionID
             recordClosedStream(streamID)
             streamsByID.removeValue(forKey: streamID)
@@ -1449,8 +1591,12 @@ public struct WebTransportSessionManager: Equatable, Sendable {
             guard var stream = bufferedStreamsByID[streamID] else {
                 continue
             }
-            streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
-            streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            if stream.hasSendHalf {
+                streamResetFrames.append(stream.reset(applicationErrorCode: wtSessionGone))
+            }
+            if stream.hasReceiveHalf {
+                streamStopSendingFrames.append(stream.stopSending(applicationErrorCode: wtSessionGone))
+            }
             closedStreamSessionIDsByStreamID[streamID] = sessionID
             recordClosedStream(streamID)
             bufferedStreamsByID.removeValue(forKey: streamID)
@@ -1521,6 +1667,18 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         }
     }
 
+    /// Refuses a second concurrent session unless WebTransport flow control was
+    /// negotiated with the peer.
+    ///
+    /// The gate is deliberate and load-bearing: a connection with more than one
+    /// WebTransport session can only demultiplex them if both endpoints exchange
+    /// the `SETTINGS_WT_INITIAL_MAX_*` limits, so this endpoint refuses the
+    /// second session rather than admitting traffic it cannot account for. The
+    /// shipped `WebTransportNetworkRuntime` never advertises those settings, so
+    /// this always refuses there and one session per connection is the effective
+    /// contract; the limit is lifted only for embedders that drive
+    /// ``WebTransportSessionManager`` directly and negotiate flow control
+    /// themselves (as the conformance suite does).
     private func validateSessionAdmission() throws {
         guard !webTransportFlowControlNegotiated else {
             return
@@ -1726,7 +1884,7 @@ enum WebTransportSessionHeaders {
 
     static func status(from fields: [HTTPFieldLine]) throws -> UInt16 {
         guard let statusValue = try optionalUniqueField(":status", from: fields),
-            let status = UInt16(statusValue),
+            let status = WebTransportHTTP3Headers.parseStatusCode(statusValue),
             (100...599).contains(status)
         else {
             throw QUICCodecError.malformed("WebTransport response requires a valid :status")

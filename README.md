@@ -8,7 +8,6 @@
 [![Release](https://img.shields.io/github/v/release/Pummelchen/WebTransport?display_name=tag)](https://github.com/Pummelchen/WebTransport/releases/latest)
 [![License](https://img.shields.io/github/license/Pummelchen/WebTransport)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Pummelchen/WebTransport?style=flat-square&logo=github&label=Stars&color=e3b341)](https://github.com/Pummelchen/WebTransport/stargazers)
-[![Views (14d)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Pummelchen/WebTransport/main/.github/traffic.json)](https://github.com/Pummelchen/WebTransport)
 [![Last Commit](https://img.shields.io/github/last-commit/Pummelchen/WebTransport?style=flat-square&logo=git&label=Last%20Commit&color=2ea44f)](https://github.com/Pummelchen/WebTransport/commits/main)
 [![Contact](https://img.shields.io/badge/Contact-0xa0b1%40gmail.com-blue?style=flat-square&logo=gmail&logoColor=white)](mailto:0xa0b1@gmail.com)
 
@@ -45,14 +44,18 @@ an independent implementation (`pywebtransport`/`aioquic`) in a container -- the
 container, `C99/scripts/run-vps-third-party-interop.sh` completes all seven Phase 11 proofs against
 **five independent implementations** on a routable host with `--trust system`, so the certificate
 chain is validated against the platform trust store and the name is checked rather than bypassed.
-84 test programs and 91,552 checks pass (plus a 200,000-input parser fuzz run and a Clang Static
+84 test programs and 64,731 checks pass (plus a 200,000-input parser fuzz run and a Clang Static
 Analyzer pass over all 94 sources), and every suite runs again under AddressSanitizer and
 UndefinedBehaviorSanitizer, on macOS and Linux in CI: **97 CTest tests pass on macOS 26 and
-Debian 13**. The tree also compiles, links and **runs** on two platforms GitHub provides no runner
-for -- Windows (85 of 85 test executables under Wine, including a Windows-only test of the datagram
-layer) and FreeBSD 15.1 (the whole suite on a real kernel) -- and running the Windows branch is what
-found and fixed `WT-199` and `WT-200`. Of the plan's nine completion criteria **8 are met and 1 is
-partial** (the CI *job* for the Windows and FreeBSD legs, not the code on them). All 34 of the
+Ubuntu 24.04** (the workflow's two `ubuntu-24.04` legs). The tree also compiles, links and
+**runs** on Windows (85 of 85 test executables
+under Wine, including a Windows-only test of the datagram layer) and FreeBSD 15.1 (the whole suite
+on a real kernel) -- and running the Windows branch is what found and fixed `WT-199` and `WT-200`.
+Windows is covered by two CI legs: `windows-wine` (enforced -- mingw cross-build, then every test
+under Wine) and `windows-native` on `windows-latest` (MSYS2 MINGW64, present but
+`continue-on-error: true` until it has been seen green). FreeBSD 15.1 has no CI leg. Of the plan's
+nine completion criteria **8 are met and 1 is partial** (the CI *job* for the FreeBSD leg and an
+enforced native Windows leg, not the code on them). All 34 of the
 draft-16 compliance-matrix rows are exercised by a test. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).
@@ -173,7 +176,8 @@ rejects peers still on earlier revisions — browsers among them.
 ## What is implemented
 
 - WebTransport extended CONNECT, protocol negotiation, streams, datagrams, close, and drain.
-- Draft-16 optimistic capsules, directional flow control, close-message limits, and TLS exporter binding.
+- Draft-16 optimistic capsules, close-message limits, and TLS exporter binding.
+- Directional flow control implemented and conformance-tested in `WebTransportHTTP3Core`; the Network.framework runtime does not negotiate the `SETTINGS_WT_INITIAL_MAX_*` limits and serves one WebTransport session per connection.
 - HTTP/3 settings and frames, QPACK, QUIC wire/state primitives, and TLS 1.3 handshake support.
 - A Network.framework-backed client/server runtime with sanitized logging and public error surfaces.
 - Server TLS identity injection (PKCS#12 or DER chain), graceful shutdown with GOAWAY and drain, connection admission limits, and tunable QUIC transport parameters.

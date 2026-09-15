@@ -11,26 +11,55 @@ concurrency:
   group: swift-ci-${{ github.ref }}
   cancel-in-progress: true
 
+# F-repo-ops-12: this workflow only reads the repository, so the token is given
+# nothing else. A missing block means the repository default, which may include
+# write scopes; naming the least privilege here keeps a compromised action from
+# pushing.
+permissions:
+  contents: read
+
 jobs:
   macos-swift:
-    name: macOS 26 / Swift 6.3.3+ SwiftPM
+    name: Xcode 27 / Swift 6.4 SwiftPM
 
-    runs-on: macos-26
+    # F-repo-ops-01: the deliverable is built and audited on the mandated
+    # toolchain (Swift 6.4 / Xcode 27), so CI must exercise that toolchain, not
+    # whatever compiler the default macOS image happens to carry. `xcode-27` is
+    # the GitHub-hosted image that provides Xcode 27 / Swift 6.4 for the macOS
+    # targets this package declares; it is currently a public preview, so the
+    # explicit assertion below keeps a silent image change from building green
+    # on the wrong compiler. The job stays blocking.
+    runs-on: xcode-27
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Validate Swift toolchain
         run: ./Swift/check-toolchain.sh
 
+      # Blocking. `check-toolchain.sh` takes the mandated floors as arguments;
+      # without them it keeps the project's 6.3.3 / 26.6 development floor. This
+      # step fails when `swift --version` (or Xcode) is below the mandate.
+      - name: Assert mandated toolchain (Swift 6.4 / Xcode 27)
+        run: ./Swift/check-toolchain.sh 6.4 27.0
+
       - name: Verify package manifests agree on shared targets
         run: ./Swift/check-manifest-sync.sh
 
+      # Blocking. Each target's `import` statements must be covered by its own
+      # declared dependencies; the manifests can agree with each other and still
+      # both omit a module a target imports (A-0001/A-0006).
+      - name: Verify every target's imports are declared as dependencies
+        run: ./Swift/check-target-imports.sh
+
       # Blocking. The tree was reformatted in one pass so that this could become a
-      # gate rather than a notice nobody reads. Before pushing, run
-      # `swift format --recursive --in-place Swift/Sources Swift/Tests`.
+      # gate rather than a notice nobody reads. The two manifests are part of the
+      # gate as well (A-0007): they are Swift source that SwiftPM compiles, and
+      # excluding them was how 12 TrailingComma findings survived an otherwise
+      # clean tree. Before pushing, run
+      # `swift format --in-place --recursive Swift/Sources Swift/Tests Package.swift Swift/Package.swift`.
       - name: Lint formatting
-        run: swift format lint --strict --recursive --parallel Swift/Sources Swift/Tests
+        run: swift format lint --strict --recursive --parallel Swift/Sources Swift/Tests Package.swift Swift/Package.swift
 
       - name: Build both package entry points with safety diagnostics
         run: |
@@ -76,6 +105,19 @@ jobs:
           -Xswiftc -strict-concurrency=complete
           -Xswiftc -require-explicit-sendable
 
+      # F-repo-ops-16: the nested manifest's test targets that the root manifest also
+      # declares compile the same sources -- `Swift/check-manifest-sync.sh` proves the
+      # shared targets agree on path, type and dependencies -- so running the whole
+      # nested suite would only duplicate the step above. Its ONE nested-only test
+      # target is run here instead, and the nested manifest's two smoke executables,
+      # which no workflow, test or script built or ran before, are executed against
+      # each other by the script below.
+      - name: Run the nested manifest's own test target
+        run: swift test --package-path Swift --filter WebTransportTestSupportTests
+
+      - name: Run the nested manifest's library smoke pair
+        run: ./Swift/run-library-smoke.sh
+
       - name: Run client CLI conformance
         run: swift run WebTransportClient --scenario all
 
@@ -84,10 +126,10 @@ jobs:
 
   fuzz-peer-input:
     name: Fuzz peer-facing parsers / ASan
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       # The parsers here run on bytes from an unauthenticated peer, so a trap in
       # any of them is remotely reachable. The suite runs a small budget on every
@@ -102,10 +144,10 @@ jobs:
 
   thread-sanitizer:
     name: Thread Sanitizer / in-process tests
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       # Excludes the CLI process and release-artifact suites: those orchestrate
       # subprocesses against wall-clock timeouts that TSan's ~20x slowdown blows

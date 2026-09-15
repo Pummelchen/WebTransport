@@ -161,6 +161,82 @@ static void test_a_retry_is_named_only_when_one_was_sent(void) {
   WT_EXPECT_STATUS("and a client cannot name one at all", WT_ERR_INVALID_ARGUMENT, status);
 }
 
+/* F-04: the reliable-stream-reset extension's transport parameter is registered as 0x1d by
+ * draft-ietf-quic-reliable-stream-reset-09 section 8.1, and draft-ietf-webtrans-http3-16 section 3.1 makes an
+ * empty `reset_stream_at` a requirement of EVERY WebTransport endpoint. The pre-registration value this tree
+ * advertised (0x17f7586d2cb570, a greased 8-byte varint) is not the identifier a conforming draft-16 peer
+ * looks for, so the extension was never negotiated. The assertion is on the WIRE byte and not on the C
+ * constant: a test that compared `WT_QUIC_TP_RESET_STREAM_AT` with itself would pass while the wire stayed
+ * wrong. */
+static void test_reset_stream_at_is_the_registered_identifier(void) {
+  wt_quic_transport_parameters_t params;
+  uint8_t encoded[16];
+  wt_writer_t w = wt_writer_init(encoded, sizeof(encoded));
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("the reliable-stream-reset parameter is added",
+               wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
+  WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
+  /* The registered identifier is 0x1d, a one-byte varint, followed by the empty value's zero length. */
+  WT_EXPECT_U64("to exactly two bytes", 2U, (uint64_t)wt_writer_offset(&w));
+  WT_EXPECT_BYTES("with 0x1d as the identifier on the wire", (const uint8_t *)"\x1d\x00", encoded, 2U);
+}
+
+/* F-05: two RFC 9000 section 18.2 rules the check did not have. Section 4.6: a max_streams transport
+ * parameter above 2^60 MUST be closed with TRANSPORT_PARAMETER_ERROR ("2^60" itself is allowed; only greater
+ * is an error). Section 18.2: stateless_reset_token is valid only for a server, so a server MUST treat receipt
+ * from a client as TRANSPORT_PARAMETER_ERROR -- which is why the check now takes the sending role. */
+static void test_stream_limits_and_a_clients_reset_token(void) {
+  wt_quic_transport_parameters_t check;
+  static const uint8_t sixteen[16] = {0};
+  const uint64_t over_two_to_sixty = (UINT64_C(1) << 60) + 1U;
+  wt_quic_error_t error = 0U;
+  uint64_t offender = 0U;
+
+  /* 2^60 is the boundary and is legal; one above it is not, in either direction. */
+  wt_quic_transport_parameters_init(&check);
+  (void)wt_quic_transport_parameters_add_integer(&check, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI,
+                                                 UINT64_C(1) << 60);
+  WT_EXPECT_STATUS("initial_max_streams_bidi of 2^60 is accepted", WT_OK,
+                   wt_quic_transport_parameters_check(&check, 0, &error, &offender));
+  wt_quic_transport_parameters_init(&check);
+  (void)wt_quic_transport_parameters_add_integer(&check, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI,
+                                                 over_two_to_sixty);
+  error = 0U;
+  offender = 0U;
+  WT_EXPECT_STATUS("initial_max_streams_bidi above 2^60 is refused", WT_ERR_PROTOCOL,
+                   wt_quic_transport_parameters_check(&check, 0, &error, &offender));
+  WT_EXPECT_U64("  as a transport parameter error", WT_QUIC_TRANSPORT_PARAMETER_ERROR, error);
+  WT_EXPECT_U64("  naming the parameter", WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, offender);
+
+  wt_quic_transport_parameters_init(&check);
+  (void)wt_quic_transport_parameters_add_integer(&check, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI,
+                                                 UINT64_C(1) << 60);
+  WT_EXPECT_STATUS("initial_max_streams_uni of 2^60 is accepted", WT_OK,
+                   wt_quic_transport_parameters_check(&check, 0, &error, &offender));
+  wt_quic_transport_parameters_init(&check);
+  (void)wt_quic_transport_parameters_add_integer(&check, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI,
+                                                 over_two_to_sixty);
+  error = 0U;
+  offender = 0U;
+  WT_EXPECT_STATUS("initial_max_streams_uni above 2^60 is refused", WT_ERR_PROTOCOL,
+                   wt_quic_transport_parameters_check(&check, 0, &error, &offender));
+  WT_EXPECT_U64("  naming the parameter", WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, offender);
+
+  /* A sixteen-byte token is well formed either way; only a CLIENT sending one is the error. */
+  wt_quic_transport_parameters_init(&check);
+  (void)wt_quic_transport_parameters_add_bytes(&check, WT_QUIC_TP_STATELESS_RESET_TOKEN, sixteen,
+                                               sizeof(sixteen));
+  WT_EXPECT_STATUS("a server's stateless_reset_token is accepted", WT_OK,
+                   wt_quic_transport_parameters_check(&check, 0, &error, &offender));
+  error = 0U;
+  offender = 0U;
+  WT_EXPECT_STATUS("a client's stateless_reset_token is refused", WT_ERR_PROTOCOL,
+                   wt_quic_transport_parameters_check(&check, 1, &error, &offender));
+  WT_EXPECT_U64("  as a transport parameter error", WT_QUIC_TRANSPORT_PARAMETER_ERROR, error);
+  WT_EXPECT_U64("  naming the parameter", WT_QUIC_TP_STATELESS_RESET_TOKEN, offender);
+}
+
 int main(void) {
   wt_quic_transport_parameters_t params;
   wt_quic_error_t error = 0U;
@@ -406,7 +482,7 @@ int main(void) {
     error = 0U;
     offender = 0U;
     WT_EXPECT_STATUS("max_udp_payload_size of 1199 is refused", WT_ERR_PROTOCOL,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
     WT_EXPECT_U64("  as a transport parameter error",
                   WT_QUIC_TRANSPORT_PARAMETER_ERROR, error);
@@ -416,7 +492,7 @@ int main(void) {
     (void)wt_quic_transport_parameters_add_integer(
         &check, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE, 1200U);
     WT_EXPECT_STATUS("max_udp_payload_size of 1200 is accepted", WT_OK,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
 
     /* reset_stream_at is a FLAG: one byte of value is a TRANSPORT_PARAMETER_ERROR, because a value nobody reads is
@@ -426,14 +502,14 @@ int main(void) {
     wt_quic_transport_parameters_init(&check);
     (void)wt_quic_transport_parameters_add_bytes(&check, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U);
     WT_EXPECT_STATUS("an empty reset_stream_at is accepted", WT_OK,
-                     wt_quic_transport_parameters_check(&check, &error, &offender));
+                     wt_quic_transport_parameters_check(&check, 0, &error, &offender));
     wt_quic_transport_parameters_init(&check);
     (void)wt_quic_transport_parameters_add_bytes(&check, WT_QUIC_TP_RESET_STREAM_AT, k_not_empty,
                                                  sizeof(k_not_empty));
     error = 0U;
     offender = 0U;
     WT_EXPECT_STATUS("a non-empty reset_stream_at is refused", WT_ERR_PROTOCOL,
-                     wt_quic_transport_parameters_check(&check, &error, &offender));
+                     wt_quic_transport_parameters_check(&check, 0, &error, &offender));
     WT_EXPECT_U64("  as a transport parameter error", WT_QUIC_TRANSPORT_PARAMETER_ERROR, error);
     WT_EXPECT_U64("  naming the parameter", WT_QUIC_TP_RESET_STREAM_AT, offender);
   }
@@ -443,13 +519,13 @@ int main(void) {
     (void)wt_quic_transport_parameters_add_integer(
         &check, WT_QUIC_TP_ACK_DELAY_EXPONENT, 20U);
     WT_EXPECT_STATUS("ack_delay_exponent of 20 is accepted", WT_OK,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
     wt_quic_transport_parameters_init(&check);
     (void)wt_quic_transport_parameters_add_integer(
         &check, WT_QUIC_TP_ACK_DELAY_EXPONENT, 21U);
     WT_EXPECT_STATUS("ack_delay_exponent of 21 is refused", WT_ERR_PROTOCOL,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
 
     /* max_ack_delay of 2^14 - 1 is fine, 2^14 is not. */
@@ -457,13 +533,13 @@ int main(void) {
     (void)wt_quic_transport_parameters_add_integer(
         &check, WT_QUIC_TP_MAX_ACK_DELAY, (UINT64_C(1) << 14) - 1U);
     WT_EXPECT_STATUS("max_ack_delay of 16383 is accepted", WT_OK,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
     wt_quic_transport_parameters_init(&check);
     (void)wt_quic_transport_parameters_add_integer(
         &check, WT_QUIC_TP_MAX_ACK_DELAY, UINT64_C(1) << 14);
     WT_EXPECT_STATUS("max_ack_delay of 16384 is refused", WT_ERR_PROTOCOL,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
 
     /* active_connection_id_limit of 1 is a violation; 2 is the minimum. */
@@ -472,13 +548,13 @@ int main(void) {
         &check, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 1U);
     WT_EXPECT_STATUS("active_connection_id_limit of 1 is refused",
                      WT_ERR_PROTOCOL,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
     wt_quic_transport_parameters_init(&check);
     (void)wt_quic_transport_parameters_add_integer(
         &check, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 2U);
     WT_EXPECT_STATUS("active_connection_id_limit of 2 is accepted", WT_OK,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
 
     /* A stateless reset token that is not sixteen bytes. */
@@ -491,14 +567,14 @@ int main(void) {
           sizeof(short_token));
       WT_EXPECT_STATUS("a 15-byte stateless reset token is refused",
                        WT_ERR_PROTOCOL,
-                       wt_quic_transport_parameters_check(&check, &error,
+                       wt_quic_transport_parameters_check(&check, 0, &error,
                                                           &offender));
       wt_quic_transport_parameters_init(&check);
       (void)wt_quic_transport_parameters_add_bytes(
           &check, WT_QUIC_TP_STATELESS_RESET_TOKEN, exactly_sixteen,
           sizeof(exactly_sixteen));
       WT_EXPECT_STATUS("a 16-byte stateless reset token is accepted", WT_OK,
-                       wt_quic_transport_parameters_check(&check, &error,
+                       wt_quic_transport_parameters_check(&check, 0, &error,
                                                           &offender));
     }
 
@@ -511,7 +587,7 @@ int main(void) {
           &check, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, NULL, 0U);
       WT_EXPECT_STATUS("an empty original destination ID is refused",
                        WT_ERR_PROTOCOL,
-                       wt_quic_transport_parameters_check(&check, &error,
+                       wt_quic_transport_parameters_check(&check, 0, &error,
                                                           &offender));
       WT_EXPECT_U64("  naming the parameter",
                     WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, offender);
@@ -521,14 +597,14 @@ int main(void) {
           sizeof(twenty_one));
       WT_EXPECT_STATUS("a 21-byte original destination ID is refused",
                        WT_ERR_PROTOCOL,
-                       wt_quic_transport_parameters_check(&check, &error,
+                       wt_quic_transport_parameters_check(&check, 0, &error,
                                                           &offender));
       wt_quic_transport_parameters_init(&check);
       (void)wt_quic_transport_parameters_add_bytes(
           &check, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, eight,
           sizeof(eight));
       WT_EXPECT_STATUS("an 8-byte original destination ID is accepted", WT_OK,
-                       wt_quic_transport_parameters_check(&check, &error,
+                       wt_quic_transport_parameters_check(&check, 0, &error,
                                                           &offender));
     }
 
@@ -541,7 +617,7 @@ int main(void) {
           &check, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID, NULL, 0U);
       WT_EXPECT_STATUS("an empty initial source connection ID is accepted",
                        WT_OK,
-                       wt_quic_transport_parameters_check(&check, &error,
+                       wt_quic_transport_parameters_check(&check, 0, &error,
                                                           &offender));
       wt_quic_transport_parameters_init(&check);
       (void)wt_quic_transport_parameters_add_bytes(
@@ -549,7 +625,7 @@ int main(void) {
           sizeof(twenty_one));
       WT_EXPECT_STATUS("a 21-byte retry source connection ID is refused",
                        WT_ERR_PROTOCOL,
-                       wt_quic_transport_parameters_check(&check, &error,
+                       wt_quic_transport_parameters_check(&check, 0, &error,
                                                           &offender));
     }
 
@@ -560,7 +636,7 @@ int main(void) {
     (void)wt_quic_transport_parameters_add_integer(
         &check, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 0U);
     WT_EXPECT_STATUS("max_datagram_frame_size of 0 is accepted", WT_OK,
-                     wt_quic_transport_parameters_check(&check, &error,
+                     wt_quic_transport_parameters_check(&check, 0, &error,
                                                         &offender));
   }
 
@@ -636,7 +712,7 @@ int main(void) {
                      wt_quic_transport_parameters_integer(&params, 0U, NULL));
     WT_EXPECT_STATUS("a check with a NULL list is refused",
                      WT_ERR_INVALID_ARGUMENT,
-                     wt_quic_transport_parameters_check(NULL, &error,
+                     wt_quic_transport_parameters_check(NULL, 0, &error,
                                                         &offender));
     WT_EXPECT_STATUS("adding to a NULL list is refused",
                      WT_ERR_INVALID_ARGUMENT,
@@ -663,5 +739,7 @@ int main(void) {
 
   test_build_sends_the_mandatory_connection_ids();
   test_a_retry_is_named_only_when_one_was_sent();
+  test_reset_stream_at_is_the_registered_identifier();
+  test_stream_limits_and_a_clients_reset_token();
   WT_TEST_MAIN_END("wt_quic_transport_parameters");
 }

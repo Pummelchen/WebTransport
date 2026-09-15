@@ -3,8 +3,10 @@
  * The table itself is generated from the RFC and checked by `check-vectors.sh`,
  * so these tests are about the lookups over it and about the entries a mistake
  * would be most visible in: the first entry's empty value, a name that appears
- * twice with different values (x-frame-options), and the pseudo-headers, whose
- * repeated names are what `wt_qpack_static_find_name` has to answer for. */
+ * twice with different values (x-frame-options), the pseudo-headers, whose
+ * repeated names are what `wt_qpack_static_find_name` has to answer for, and the
+ * ten values appendix A wraps over two printed lines, which the extractor used to
+ * truncate at the break. */
 
 #include "wt_test.h"
 
@@ -92,9 +94,45 @@ static void test_name_lookups(void) {
                    wt_qpack_static_find_name(NULL, 0U, &index));
 }
 
+/* Check one entry's name and value in full. The lengths are asserted as well as the bytes so that a value that
+ * was truncated at the RFC's line break -- a well-formed shorter C string -- cannot pass. */
+static void expect_full_entry(uint64_t index, const char *name, const char *value) {
+  wt_qpack_static_entry_t entry;
+  WT_EXPECT_OK("the wrapped entry reads", wt_qpack_static_entry(index, &entry));
+  WT_EXPECT_U64("with the whole name's length", (uint64_t)strlen(name),
+                (uint64_t)entry.name_length);
+  WT_EXPECT_BYTES("and the whole name", (const uint8_t *)name, (const uint8_t *)entry.name,
+                  strlen(name));
+  WT_EXPECT_U64("and the whole value's length", (uint64_t)strlen(value),
+                (uint64_t)entry.value_length);
+  WT_EXPECT_BYTES("and the whole value", (const uint8_t *)value, (const uint8_t *)entry.value,
+                  strlen(value));
+}
+
+/* RFC 9204 appendix A prints a long cell over two (or three) lines and says the break is formatting only. The
+ * extractor matched only rows whose first column was a number, so it dropped every continuation line and
+ * silently committed TEN truncated values -- and because it produced the truncation itself, its `--check`
+ * re-derived the same wrong table and passed. Each wrapped cell is asserted here in FULL, because a truncated
+ * value is still a well-formed C string that every other test in the tree would accept. */
+static void test_wrapped_entries_are_full(void) {
+  expect_full_entry(30U, "accept", "application/dns-message");
+  expect_full_entry(41U, "cache-control", "public, max-age=31536000");
+  expect_full_entry(44U, "content-type", "application/dns-message");
+  expect_full_entry(45U, "content-type", "application/javascript");
+  expect_full_entry(47U, "content-type", "application/x-www-form-urlencoded");
+  expect_full_entry(52U, "content-type", "text/html; charset=utf-8");
+  expect_full_entry(54U, "content-type", "text/plain;charset=utf-8");
+  expect_full_entry(57U, "strict-transport-security", "max-age=31536000; includesubdomains");
+  expect_full_entry(58U, "strict-transport-security",
+                    "max-age=31536000; includesubdomains; preload");
+  expect_full_entry(85U, "content-security-policy",
+                    "script-src 'none'; object-src 'none'; base-uri 'none'");
+}
+
 int main(void) {
   test_entries();
   test_exact_lookups();
   test_name_lookups();
+  test_wrapped_entries_are_full();
   WT_TEST_MAIN_END("wt_qpack_static");
 }

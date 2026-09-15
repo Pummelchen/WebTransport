@@ -667,6 +667,11 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
       return status;
     }
   }
+  /* Which `:protocol` token the CONNECT below carries. The caller's configuration says so because the token
+   * cannot be negotiated: a peer written against a pre-rename draft knows only `webtransport` and refuses the
+   * extended CONNECT with H3_MESSAGE_ERROR before any SETTINGS exchange. 0 is the draft-16 default, which is
+   * what the library sends unless this is overridden (F-02b). */
+  wt_http3_driver_set_upgrade_token(&loop.side.driver, (wt_webtransport_upgrade_token_t)config->upgrade_token);
   /* The request stream is opened and the session ID is known, but the CONNECT has not been sent: this is the
    * window section 4.6 is about, and `--early-stream` is what puts a message in it (WT-189). */
   {

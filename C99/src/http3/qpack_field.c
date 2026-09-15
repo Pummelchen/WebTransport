@@ -2,6 +2,8 @@
 
 #include "webtransport/http3/qpack.h"
 
+#include "webtransport/checked.h"
+
 /* The first byte's pattern decides which representation follows: the section's
  * figures are a small prefix code, and reading it in that order is what keeps a
  * decoder from having to try each form in turn. */
@@ -53,9 +55,17 @@ wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *ou
     if (wt_qpack_integer_decode(c, 3U, &name_length) != WT_OK) return WT_ERR_PROTOCOL;
     out->never_indexed = (first & 0x10U) != 0U;
     out->name_huffman = (first & 0x08U) != 0U;
-    out->name = wt_cursor_bytes(c, (size_t)name_length);
-    if (out->name == NULL && name_length != 0U) return WT_ERR_TRUNCATED;
-    out->name_length = (size_t)name_length;
+    /* The name length is a peer's varint (up to 2^62-1) and `name_length` here is a size_t, so the narrowing is
+     * CHECKED rather than cast, exactly as `wt_qpack_string_decode` checks the value's length. A bare
+     * `(size_t)name_length` truncates on a target whose size_t is narrower than 64 bits: a name of 2^32+1 bytes
+     * becomes a one-byte name and the value that follows is read from the wrong offset, which mis-parses the whole
+     * field line. A length that cannot be represented cannot be present in the cursor either, so it is a malformed
+     * line rather than a wait that more bytes would end. */
+    if (wt_checked_narrow_u64_to_size(name_length, &out->name_length) != WT_OK) {
+      return WT_ERR_PROTOCOL;
+    }
+    out->name = wt_cursor_bytes(c, out->name_length);
+    if (out->name == NULL && out->name_length != 0U) return WT_ERR_TRUNCATED;
     out->kind = WT_QPACK_FIELD_LITERAL_LITERAL_NAME;
     if (wt_qpack_string_decode(c, &out->value, &out->value_length, &out->value_huffman) != WT_OK) {
       return WT_ERR_TRUNCATED;
@@ -102,7 +112,6 @@ wt_status_t wt_qpack_field_line_encode_coded(wt_writer_t *w, const wt_qpack_fiel
       size_t name_wire_length = line->name_length;
 
       if (line->never_indexed) flags |= 0x10U;
-      if (line->never_indexed != 0) flags |= 0x00U;
       if (line->name == NULL && line->name_length != 0U) return WT_ERR_INVALID_ARGUMENT;
       if (line->name_huffman) {
         size_t needed = 0U;

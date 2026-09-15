@@ -16,6 +16,9 @@ wt_cli_options_t wt_cli_options_default(void) {
   options.transport = WT_CLI_TRANSPORT_PACKET;
   options.trust = WT_CLI_TRUST_SYSTEM;
   options.exchange = WT_CLI_EXCHANGE_STREAM;
+  /* Named rather than left to the memset, so the draft-16 default is a decision stated here rather than a zero
+   * that happens to mean the current token (F-02b). */
+  options.upgrade_token = WT_CLI_UPGRADE_TOKEN_DRAFT16;
   options.timeout_ms = WT_CLI_TIMEOUT_DEFAULT;
   return options;
 }
@@ -48,6 +51,14 @@ const char *wt_cli_exchange_name(wt_cli_exchange_t exchange) {
   switch (exchange) {
     case WT_CLI_EXCHANGE_STREAM: return "stream";
     case WT_CLI_EXCHANGE_DATAGRAM: return "datagram";
+  }
+  return "unknown";
+}
+
+const char *wt_cli_upgrade_token_name(wt_cli_upgrade_token_t upgrade_token) {
+  switch (upgrade_token) {
+    case WT_CLI_UPGRADE_TOKEN_DRAFT16: return "draft16";
+    case WT_CLI_UPGRADE_TOKEN_LEGACY: return "legacy";
   }
   return "unknown";
 }
@@ -116,6 +127,7 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
                is_flag(argument, "--origin") || is_flag(argument, "--authority") ||
                is_flag(argument, "--protocol") ||
                is_flag(argument, "--exchange") || is_flag(argument, "--message") ||
+               is_flag(argument, "--upgrade-token") ||
                is_flag(argument, "--timeout-ms") || is_flag(argument, "--scenario") ||
                is_flag(argument, "--hostile") || is_flag(argument, "--address")) {
       const char *value;
@@ -162,6 +174,19 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
         } else {
           return fail("unsupported exchange", value, out_error, out_error_argument);
         }
+      } else if (is_flag(argument, "--upgrade-token")) {
+        /* The token cannot be negotiated on the wire -- a pre-draft peer rejects the CONNECT before it reads any
+         * setting -- so it is selected here, and a value that is neither name is refused rather than left at the
+         * default: a caller who asked for a token this tool does not send would otherwise get a report claiming
+         * one it never offered (F-02b). */
+        if (strcmp(value, "draft16") == 0) {
+          options->upgrade_token = WT_CLI_UPGRADE_TOKEN_DRAFT16;
+        } else if (strcmp(value, "legacy") == 0) {
+          options->upgrade_token = WT_CLI_UPGRADE_TOKEN_LEGACY;
+        } else {
+          return fail("unsupported upgrade token", value, out_error, out_error_argument);
+        }
+        options->upgrade_token_set = 1;
       } else if (is_flag(argument, "--scenario")) {
         if (strcmp(value, "all") != 0) {
           return fail("unsupported scenario", value, out_error, out_error_argument);
@@ -241,6 +266,14 @@ wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **o
     if (out_error != NULL) *out_error = "--early-stream is a client's option: it sends before its CONNECT";
     return WT_ERR_INVALID_ARGUMENT;
   }
+  /* And the token is a property of the client's own CONNECT: a listener never sends one, so a listener that
+   * asked for a token would be stating something about a request it does not make. Refused, not ignored, for the
+   * same reason as the two above -- and only when the caller actually passed the flag, because the DEFAULT is a
+   * valid token for every mode that does send one. */
+  if (options->upgrade_token_set != 0 && options->mode != WT_CLI_MODE_CONNECT) {
+    if (out_error != NULL) *out_error = "--upgrade-token is a client's option: it names the CONNECT's :protocol";
+    return WT_ERR_INVALID_ARGUMENT;
+  }
   /* The development bypass is tied to a loopback name in the API as well, but a tool that
    * accepts it for any address would be offering something the library will refuse later;
    * saying so here is the cheap place to say it. */
@@ -298,6 +331,9 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
           options->settings_validation != 0 ? "true" : "false",
           options->retry != 0 ? ",\"retry\":true" : "",
           wt_cli_exchange_name(options->exchange), (unsigned long long)options->timeout_ms);
+  /* Which `:protocol` token the CONNECT carries, so the interop runner's per-peer selection is in the report a
+   * reader weighs rather than only in the command line that produced it (F-02b). */
+  fprintf(stream, ",\"upgradeToken\":\"%s\"", wt_cli_upgrade_token_name(options->upgrade_token));
   fprintf(stream, ",\"scenario\":%s,\"hostile\":", options->scenario_all != 0 ? "\"all\"" : "null");
   if (options->hostile == NULL) {
     fprintf(stream, "null");

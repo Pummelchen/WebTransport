@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-16`, dated 2026-07-06.
 
-Draft-16 score: **34 of 34 requirements**, every one exercised by a test in this tree.
+Draft-16 score: **35 of 35 requirements**, every one exercised by a test in this tree.
 The number is measured rather than remembered: `scripts/score-matrix.sh` counts it from
 `docs/COMPLIANCE-MATRIX.md`, and `scripts/check-matrix.sh` fails the build if a symbol the
 matrix names stops existing, so the document cannot drift away from the code.
@@ -20,19 +20,23 @@ layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1
 runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
 dynamic table, the draft-16 WebTransport session layer, and the public consumer API.
 
-**97 CTest tests pass on macOS 26 and on Debian 13**, and the tree also runs on two platforms
-GitHub provides no runner for: **Windows** (85 test executables executed under Wine, 85 passing,
-plus a Windows-only test of the datagram layer itself) and **FreeBSD 15.1** (the whole suite on a
-real kernel). Running the Windows branch is what found and fixed `WT-199` and `WT-200` — a datagram
+**97 CTest tests pass on macOS 26 and on Ubuntu 24.04** (the two `ubuntu-24.04` CI
+legs), and the tree also runs on **Windows** (85
+test executables executed under Wine, 85 passing, plus a Windows-only test of the datagram layer
+itself) and **FreeBSD 15.1** (the whole suite on a real kernel). Running the Windows branch is what
+found and fixed `WT-199` and `WT-200` — a datagram
 receive that reported a truncated packet as a limit error and dropped the sender, and a
 hand-written `WSARecvMsg` prototype with one parameter too many, which a cross-compile cannot see
-because the declaration was this tree's own. What Phase 12 still lacks is a CI *job* for those two
-legs; Phase 10 (the test port) is under way, and Phases 13 and 14 are the hardening and
+because the declaration was this tree's own. Windows already has two CI legs — `windows-wine`
+(enforced) and `windows-native` on `windows-latest` (MSYS2 MINGW64, not yet enforced) — so what
+Phase 12 still lacks is a CI *job* for FreeBSD and an enforced native Windows leg; Phase 10 (the
+test port) is under way, and Phases 13 and 14 are the hardening and
 release-readiness work tracked in the
 [project tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker).
 
 Of the plan's nine Definition-of-Done criteria **eight are met and one is partial** — and the
-partial one is the CI *job* for the Windows and FreeBSD legs, not the code on them.
+partial one is CI *job* coverage (no FreeBSD leg, and the native Windows leg not yet enforced),
+not the code on them.
 `scripts/score-matrix.sh` prints that state from the matrix rather than from memory.
 
 What is here:
@@ -58,8 +62,9 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- 84 test programs and 91,552 checks, plus a 200,000-input parser fuzz run, run by `ctest` and again under
-  AddressSanitizer and UndefinedBehaviorSanitizer. Most of that count is the
+- The `ctest` suite (97 tests, the count `ctest` itself reports), plus a 200,000-input parser fuzz run, run by
+  `ctest` and again under
+  AddressSanitizer and UndefinedBehaviorSanitizer. Most of the checks are the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
   byte stream: a random buffer is a better generator of the case nobody thought
   of than a list of cases somebody did, and under the sanitizers an out-of-bounds
@@ -287,10 +292,10 @@ What is here:
   **it now compiles for Windows**, which is the claim that check is measured by. The cross-compile
   found four real differences the inventory had not named, including `EHOSTDOWN` not existing there
   (which is why the error *classification*, not just the number, is per platform) and `inet_ntop`'s
-  length type. The check now sweeps the **whole tree** — 72 library sources and 92 test/app sources —
+  length type. The check now sweeps the **whole tree** — 76 library sources and 108 test/app sources —
   and they all compile for Windows, which is the claim a runner needs before it is worth adding. Two
   more defects came out of that sweep, both invisible to clang. It goes further than compiling now: with
-  a mingw toolchain and a Windows OpenSSL the whole tree **links** — 84 PE32+ executables and
+  a mingw toolchain and a Windows OpenSSL the whole tree **links** — 91 PE32+ executables and
   `libwebtransport.dll` — and CI does that on the legs it already has, because the MSYS2 OpenSSL
   package is a plain tarball. That link found a defect the compile could not (`-Wstringop-overflow` in
   a Release build, which clang never reported). What remains is *running* those binaries, which needs
@@ -300,7 +305,7 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **34 of 34 draft-16 requirements in
+  `scripts/score-matrix.sh` rather than from memory: **35 of 35 draft-16 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 8 of the plan's 9 completion
   criteria are met, with 1 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
   which is not the same as being done. The one partial criterion is outside the matrix: the FreeBSD

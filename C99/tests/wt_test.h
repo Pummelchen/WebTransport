@@ -5,7 +5,9 @@
  * allocation, and no output on success beyond one line per file. A test file is
  * a main() that calls functions full of WT_EXPECT macros and ends with
  * WT_TEST_MAIN_END, which prints the count and returns non-zero if anything
- * failed.
+ * failed -- or if NOTHING ran: a file that asserts nothing is a file that
+ * checks nothing, and reporting it as passing is how a deleted corpus goes
+ * unnoticed.
  *
  * WHY THE EXPECT MACROS TAKE A LABEL. A bare `assert(a == b)` tells you that a
  * test failed and not what it was checking, and the label is what makes a CI log
@@ -115,6 +117,10 @@ static inline void wt_test_expect_status(const char *label, wt_status_t want,
 
 #define WT_TEST_MAIN_END(name)                                              \
   do {                                                                      \
+    if (wt_test_checks == 0) {                                              \
+      printf("%s: NO CHECKS RAN (0 checks)\n", name);                       \
+      return 1;                                                             \
+    }                                                                       \
     if (wt_test_failures != 0) {                                            \
       printf("%s: %d of %d checks FAILED\n", name, wt_test_failures,        \
              wt_test_checks);                                               \

@@ -37,7 +37,37 @@ ROWS
 
 echo "compliance matrix: $draft_tested of $draft_total draft-16 requirements exercised by a test in this tree"
 echo "compliance matrix: $draft_partial of $draft_total partial, and $layer_total row(s) describing lower layers"
-echo "definition of done: 8 of 9 criteria met, 1 partial, 0 not met"
+
+# The nine Definition-of-Done criteria are counted from IMPLEMENTATION_PLAN.md's own audit table, whose State
+# column is `**met**`, `**partial**` or `**not met**`. The count used to be a hardcoded echo -- "8 of 9 criteria
+# met" -- so it kept reporting 8 of 9 after the table it describes had changed, which is the number-nobody-can-
+# reproduce failure the criterion itself is about. A table that is missing, empty or not nine rows is reported
+# rather than counted from memory.
+plan="$root/IMPLEMENTATION_PLAN.md"
+[ -f "$plan" ] || { echo "score: $plan is missing"; exit 1; }
+criteria="$(sed -n '/^## Definition of Done audit/,/^## /p' "$plan" | grep '^| ' \
+            | grep -v '^| Criterion ' | grep -v '^| --- ')"
+dod_total=0
+dod_met=0
+dod_partial=0
+dod_not_met=0
+while IFS= read -r row; do
+  [ -n "$row" ] || continue
+  state="$(printf '%s' "$row" | cut -d'|' -f3 | tr -d ' *')"
+  dod_total=$((dod_total + 1))
+  case "$state" in
+    met) dod_met=$((dod_met + 1)) ;;
+    partial) dod_partial=$((dod_partial + 1)) ;;
+    notmet|unmet) dod_not_met=$((dod_not_met + 1)) ;;
+    *) echo "score: unexpected Definition-of-Done state '$state' in $plan"; exit 1 ;;
+  esac
+done <<CRITERIA
+$criteria
+CRITERIA
+[ "$dod_total" -eq 9 ] || { echo "score: the Definition-of-Done table has $dod_total rows, not nine"; exit 1; }
+echo "definition of done: $dod_met of $dod_total criteria met, $dod_partial partial, $dod_not_met not met"
+echo "  (counted from the table under 'Definition of Done audit' in IMPLEMENTATION_PLAN.md; the matrix coverage"
+echo "   above is the matrix's status cells, whose Evidence names scripts/check-matrix.sh resolves)"
 echo "  met:     CLI local IPv4/IPv6 sessions; sanitizers and static checks; public API documented; no"
 echo "           placeholder exposed as production; the draft-16 matrix itself; all Swift-equivalent"
 echo "           conformance coverage (WT-133, closed by the audit that walked the Swift suite scenario by"

@@ -201,14 +201,15 @@ static void test_ack_frame(void) {
   WT_EXPECT_STATUS("a NULL state is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_quic_ack_build(NULL, 0U, ranges, sizeof(ranges), &ranges_len, &frame));
 
-  /* Sending the acknowledgement clears the debt. */
+  /* Sending the acknowledgement clears the debt. Clearing NULL is a no-op
+   * rather than a way to clear the live state, which a bare call cannot show. */
   WT_EXPECT_INT("an acknowledgement is owed", 1, state.ack_pending);
+  wt_quic_ack_sent(NULL);
+  WT_EXPECT_INT("and clearing NULL leaves the debt owed", 1, state.ack_pending);
   wt_quic_ack_sent(&state);
   WT_EXPECT_INT("and is no longer", 0, state.ack_pending);
   WT_EXPECT_U64("with the counter reset", 0U,
                 (uint64_t)state.ack_eliciting_since_ack);
-  wt_quic_ack_sent(NULL);
-  WT_EXPECT_INT("clearing NULL is harmless", 1, 1);
 
   /* Whether to send now or wait: two ack-eliciting packets, or a gap, make it now. */
   wt_quic_ack_state_init(&state);

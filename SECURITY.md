@@ -7,8 +7,8 @@ Security fixes are provided for the current `main` branch and the latest tagged 
 | Version | Supported |
 | --- | --- |
 | `main` | Yes |
-| `1.1.x` | Yes |
-| Earlier releases | No |
+| `1.3.x` | Yes |
+| `1.2.x` and earlier (including `1.1.x`) | No |
 
 ## Reporting a Vulnerability
 
@@ -23,6 +23,32 @@ Expected response:
 - Initial acknowledgement as soon as possible.
 - Triage and reproduction before public disclosure.
 - Fix, tests, and release notes before disclosure when the report is valid.
+
+## Automated Scanning
+
+Every pull request and every push to `main` runs two blocking scans
+(`.github/workflows/security-scan.yml`):
+
+- **Secrets over the full commit history** with gitleaks. The two audited
+  false-positive classes -- the test-only fixtures under
+  `C99/tests/vectors/trust/` and one Swift enum label in a test -- are allowlisted
+  by path and value in `.gitleaks.toml`; anything else fails the job.
+- **Vulnerable dependencies, secrets, and container/IaC configuration** in the
+  tree with trivy (`.trivy.yaml`). `vuln` and `secret` are absolute; the
+  `misconfig` findings that are accepted rather than fixed are listed, per file,
+  in `.trivyignore.yaml` -- today DS-0002 (no non-root `USER`) and DS-0026 (no
+  `HEALTHCHECK`) on the six interop TEST Dockerfiles. Those containers run only
+  on a private bridge network started and polled by
+  `scripts/run-container-interop*.sh`, are never published and never shipped, and
+  the exception is scoped by path, so a new Dockerfile is still checked.
+
+**The one dependency, system OpenSSL.** The C99 library links the platform's
+OpenSSL 3.x -- `find_package(OpenSSL 3.0 REQUIRED)`, `C99/CMakeLists.txt:38` -- and
+does not vendor it or pin it in a lockfile, so a filesystem scan has nothing to
+inventory and cannot report a CVE against it. The control for that dependency is
+the platform: the build gets OpenSSL from the operating system's package
+repositories, so security fixes arrive through the distributor's package updates.
+Vendoring or pinning OpenSSL must arrive together with a scan that can see it.
 
 ## Sensitive Data
 

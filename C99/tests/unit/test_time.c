@@ -13,6 +13,41 @@
 
 #include "webtransport/time.h"
 
+#include "time_internal.h"
+
+/* F-28: the Windows monotonic clock converted a tick count to microseconds by multiplying first, so it wrapped
+ * once the counter passed 2^64 / 10^6 ~ 1.84e13 -- about 21 days of uptime at the usual 10 MHz
+ * QueryPerformanceFrequency, and minutes to hours where that frequency reports the TSC rate. After the wrap
+ * `wt_now_micros` returned a SMALLER value than before, which every QUIC deadline, idle timeout and probe
+ * timeout depends on not happening. The conversion is a function so this can be driven on any platform. */
+static void test_a_large_counter_converts_without_wrapping(void) {
+  const uint64_t frequency = 10000000U; /* the usual QueryPerformanceFrequency, 10 MHz */
+  /* The first tick count whose product with 10^6 does not fit uint64: exactly where the old form wrapped. */
+  const uint64_t counter = (UINT64_MAX / 1000000U) + 1U;
+  uint64_t previous = wt_time_counter_to_micros(counter, frequency);
+  size_t i;
+
+  /* The exact quotient without ever forming the overflowing product: 10^6 / 10^7 is 1/10, so it is counter/10. */
+  WT_EXPECT_U64("a counter past the old wrap converts to the exact value", counter / (frequency / 1000000U),
+                previous);
+
+  /* And it keeps increasing across the region the old form wrapped in. */
+  for (i = 0U; i < 64U; i++) {
+    uint64_t next = wt_time_counter_to_micros(counter + i + 1U, frequency);
+    WT_EXPECT_TRUE("the converted value does not go backwards", next >= previous);
+    previous = next;
+  }
+
+  /* The property the wrap broke, stated directly: a later counter must convert to a later time even across the
+   * threshold. */
+  WT_EXPECT_TRUE("a counter past the wrap is later than one before it",
+                 wt_time_counter_to_micros(counter, frequency) >
+                     wt_time_counter_to_micros(counter - (frequency / 1000000U) * 1000000U, frequency));
+
+  /* A zero frequency is the "API failed" case, answered with zero rather than a division by zero. */
+  WT_EXPECT_U64("a zero frequency converts to zero", 0U, wt_time_counter_to_micros(UINT64_MAX, 0U));
+}
+
 int main(void) {
   uint64_t first = wt_now_micros();
   uint64_t second = 0U;
@@ -82,6 +117,8 @@ int main(void) {
     WT_EXPECT_U64("with nothing remaining", 0U,
                   wt_deadline_remaining(start, 200U, now));
   }
+
+  test_a_large_counter_converts_without_wrapping();
 
   WT_TEST_MAIN_END("wt_time");
 }

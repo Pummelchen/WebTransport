@@ -1270,6 +1270,7 @@ static void test_stream_retransmit_descriptor(void) {
   wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
   wt_quic_transport_parameters_t params;
   size_t i;
+  uint64_t stream_id = 0U;
   uint64_t now = 101000000U;
 
   memset(&witness, 0, sizeof(witness));
@@ -1292,12 +1293,16 @@ static void test_stream_retransmit_descriptor(void) {
   WT_EXPECT_OK("and is parsed by the client",
                wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
   WT_EXPECT_OK("the client sends stream data",
-               wt_quic_connection_open_stream(&pair.client, 1, &now));
+               wt_quic_connection_open_stream(&pair.client, 1, &stream_id));
+  WT_EXPECT_U64("and the first client-initiated stream is number 0", 0U, stream_id);
+  /* The out-parameter is a stream id, NOT a clock: passing `&now` here (as this test used to) overwrote the
+   * synthetic clock with the stream id 0 and ran the whole loss scenario at time 0. */
+  WT_EXPECT_U64("and the synthetic clock is untouched by it", 101000000U, now);
   wt_quic_connection_set_handlers(&pair.client, NULL, NULL, record_stream_loss, &witness);
   for (i = 0U; i < 4U; i++) {
     uint8_t data[2] = {(uint8_t)i, (uint8_t)(0xf0U + i)};
     WT_EXPECT_OK("a stream payload is sent",
-                 wt_quic_connection_send_stream(&pair.client, 0U, i * 2U, data, sizeof(data), 0,
+                 wt_quic_connection_send_stream(&pair.client, stream_id, i * 2U, data, sizeof(data), 0,
                                                 now));
     now += 100U;
   }
@@ -3679,6 +3684,73 @@ static void test_an_acknowledged_control_frame_is_not_sent_again(void) {
   close_pair(&pair);
 }
 
+/* And the third half of "until acknowledged": a re-send that CANNOT go out. `send_encoded_frame` frees the
+ * descriptor when the send fails, and the descriptor is the only handle a later loss names the obligation by --
+ * so a discarded failure drops the frame for the life of the connection AND keeps its slot occupied forever.
+ * Here the path's datagram limit is too small at the instant the loss is declared (one of the ways `send_packet`
+ * fails), and the slot must stay owed so the next flush re-drives it. */
+static void test_a_failed_control_resend_is_redriven_by_flush(void) {
+  connection_pair_t pair;
+  wt_quic_frame_t ping = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+  uint64_t now = 111500000U;
+  uint64_t packets_before;
+  unsigned i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  arm_application(&pair, 0x90U);
+
+  WT_EXPECT_OK("a grant is in force", wt_quic_connection_set_max_data(&pair.client, 100000U));
+  WT_EXPECT_OK("a MAX_DATA frame goes out", wt_quic_connection_send_max_data(&pair.client, 200000U, now));
+  now += 1000U;
+  /* The network drops it. */
+  discard_one_datagram(&pair.server_socket);
+
+  /* Three more packets, delivered, so the dropped one is three below what gets acknowledged. */
+  for (i = 0U; i < 3U; i++) {
+    WT_EXPECT_OK("a later packet goes out",
+                 wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1,
+                                               now + i * 1000U));
+    WT_EXPECT_OK("and is flushed", wt_quic_connection_flush(&pair.client, now + i * 1000U));
+    now += 1000U;
+    receive_on(&pair.server, &pair.server_socket, now);
+  }
+
+  now += 40000U;
+  WT_EXPECT_OK("the peer's timer acknowledges", wt_quic_connection_on_timeout(&pair.server, now));
+  now += 1000U;
+
+  /* The path's limit is too small for ANY packet right now, so the re-send that the acknowledgement's loss
+   * detection triggers cannot go out. */
+  packets_before = pair.client.packets_sent;
+  pair.client.config.max_datagram_size = 8U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_TRUE("the dropped packet was declared lost",
+                 pair.client.packets_declared_lost[WT_QUIC_SPACE_APPLICATION] > 0U);
+  WT_EXPECT_U64("and the failed re-send put nothing new on the wire", packets_before,
+                pair.client.packets_sent);
+
+  /* The path recovers, and the next flush re-drives the retained obligation. */
+  pair.client.config.max_datagram_size = WT_QUIC_MAX_PACKET;
+  WT_EXPECT_OK("the next flush runs", wt_quic_connection_flush(&pair.client, now + 1000U));
+  WT_EXPECT_U64("and re-sends the retained control frame", packets_before + 1U,
+                pair.client.packets_sent);
+
+  /* The peer sees the raised limit only now, carried by the re-driven copy. */
+  WT_EXPECT_U64("which the dropped packet never delivered", 0U, pair.server.peer_limits.initial_max_data);
+  {
+    unsigned round;
+    for (round = 0U; round < 50U && pair.server.peer_limits.initial_max_data != 200000U; round++) {
+      now += 1000U;
+      if (wt_udp_wait(&pair.server_socket, 20000U) != WT_OK) continue;
+      (void)wt_quic_connection_receive(&pair.server, now);
+    }
+  }
+  WT_EXPECT_U64("but the re-driven copy does", 200000U, pair.server.peer_limits.initial_max_data);
+  WT_EXPECT_INT("with nobody closed", 0, wt_quic_connection_is_closed(&pair.client));
+
+  close_pair(&pair);
+}
+
 /* RFC 9000 section 13.3 is a list of exceptions in BOTH directions. Lost PING and PADDING frames "do not require
  * repair", an old ACK must not be resent (it would inflate the peer's RTT sample) and is replaced rather than
  * repeated, a CONNECTION_CLOSE "is not sent again when packet loss is detected", and a DATAGRAM is never
@@ -3999,7 +4071,26 @@ static void test_a_path_that_does_not_answer_is_given_up_on(void) {
   close_pair(&pair);
 }
 
+/* The space-name diagnostic. `wt_quic_space_name` is public API and, before
+ * this test, had no caller anywhere in the tree; its siblings
+ * (`wt_quic_frame_kind_name`, `wt_quic_packet_type_name`) are exercised by their
+ * own suites, so this gives it the same treatment (F-repo-ops-08). WT_QUIC_SPACE_COUNT
+ * is not a space and an out-of-range value must not be named as one. */
+static void test_quic_space_names(void) {
+  WT_EXPECT_STR("the Initial space is named", "initial",
+                wt_quic_space_name(WT_QUIC_SPACE_INITIAL));
+  WT_EXPECT_STR("the Handshake space is named", "handshake",
+                wt_quic_space_name(WT_QUIC_SPACE_HANDSHAKE));
+  WT_EXPECT_STR("the Application space is named", "application",
+                wt_quic_space_name(WT_QUIC_SPACE_APPLICATION));
+  WT_EXPECT_STR("the count sentinel is not a space", "unknown",
+                wt_quic_space_name(WT_QUIC_SPACE_COUNT));
+  WT_EXPECT_STR("and neither is an out-of-range value", "unknown",
+                wt_quic_space_name((wt_quic_space_t)99));
+}
+
 int main(void) {
+  test_quic_space_names();
   test_frame_permission();
   test_a_frame_that_is_not_a_challenge_is_not_handled_as_one();
   test_a_path_challenge_is_echoed_immediately();
@@ -4039,6 +4130,7 @@ int main(void) {
   test_a_retransmission_descriptor_is_released_on_acknowledgement();
   test_a_lost_control_frame_is_sent_again();
   test_an_acknowledged_control_frame_is_not_sent_again();
+  test_a_failed_control_resend_is_redriven_by_flush();
   test_only_retransmittable_frames_keep_a_slot();
 
   test_open_stream();

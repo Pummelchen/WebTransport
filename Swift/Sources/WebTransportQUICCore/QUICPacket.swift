@@ -306,6 +306,15 @@ public struct QUICShortHeaderPacket: Equatable, Sendable {
         guard (first & 0x40) != 0 else {
             throw QUICCodecError.malformed("short header fixed bit is not set")
         }
+        // RFC 9001 section 5.4: the short header's two reserved bits (0x18) must
+        // be zero once header protection has been removed. A non-zero value is a
+        // PROTOCOL_VIOLATION, and it is rejected here for the same reason the
+        // long-header and Retry decoders reject their reserved bits. That this
+        // decoder runs after header protection removal is the caller's step, as
+        // the long-header comment states.
+        guard (first & 0x18) == 0 else {
+            throw QUICCodecError.malformed("short header reserved bits are not zero")
+        }
 
         let packetNumberLength = Int(first & 0x03) + 1
         let keyPhase = (first & 0x04) != 0

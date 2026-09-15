@@ -32,7 +32,7 @@ struct WebTransportClientCLI {
                 )
                 let session = result.sessionEstablished ? " session=established" : ""
                 print(
-                    "network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) exchange=\(options.exchangeMode.rawValue) message=\"\(result.message)\""
+                    "network \(result.transport.rawValue) session connected: local=\(result.localEndpoint.commandLineValue) remote=\(result.remoteEndpoint.commandLineValue)\(session) exchange=\(options.exchangeMode.rawValue) message=\"\(WebTransportLogText.escaped(result.message))\""
                 )
                 return
             } catch {

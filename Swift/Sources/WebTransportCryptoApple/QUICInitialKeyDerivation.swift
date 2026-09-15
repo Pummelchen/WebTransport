@@ -59,8 +59,16 @@ public enum QUICInitialKeyDerivation {
     }
 
     static func hkdfExpandLabel(secret: Data, label: String, outputByteCount: Int) throws -> Data {
-        guard outputByteCount <= UInt16.max else {
-            throw QUICCodecError.valueOutOfRange("HKDF output too large")
+        // RFC 5869 section 2.3 caps L at 255 * HashLen, which is 255 * 32 for the
+        // SHA-256 this module uses. The expand loop's block counter is one byte, so
+        // a longer request wraps it to zero and the output silently stops being the
+        // RFC's HKDF stream while every guard passes. A negative count is refused
+        // too: `prefix(_:)` traps on it. TLS13KeySchedule.hkdfExpandLabel carries
+        // the same bound.
+        guard outputByteCount >= 0, outputByteCount <= 255 * 32 else {
+            throw QUICCodecError.valueOutOfRange(
+                "HKDF output must be 0...\(255 * 32) bytes for SHA-256 (RFC 5869 section 2.3)"
+            )
         }
 
         let fullLabel = "tls13 " + label

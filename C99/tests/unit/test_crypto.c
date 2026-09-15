@@ -736,9 +736,17 @@ static void test_constant_time_and_zero(void) {
       if (secret[i] == 0U) zeroes++;
     }
     WT_EXPECT_U64("every byte was cleared", sizeof(secret), (uint64_t)zeroes);
+    /* A NULL buffer and a zero length are no-ops: the bytes that were there
+     * must still be there, which is what tells a no-op from a clear. */
+    memset(secret, 0xCCU, sizeof(secret));
     wt_secure_zero(NULL, 16U);
     wt_secure_zero(secret, 0U);
-    WT_EXPECT_INT("zeroing NULL and zero is harmless", 1, 1);
+    zeroes = 0U;
+    for (i = 0U; i < sizeof(secret); i++) {
+      if (secret[i] == 0xCCU) zeroes++;
+    }
+    WT_EXPECT_U64("zeroing NULL and zero clears nothing", sizeof(secret),
+                  (uint64_t)zeroes);
   }
 }
 

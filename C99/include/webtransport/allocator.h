@@ -76,7 +76,10 @@ void *wt_alloc(const wt_allocator_t *a, size_t size);
 void *wt_calloc_array(const wt_allocator_t *a, size_t count, size_t elem_size,
                       wt_status_t *out_status);
 
-/* Allocation of count elements, with the same checked multiplication. */
+/* Allocation of count elements, with the same checked multiplication. `out_status`
+ * is WT_ERR_OVERFLOW when the product wraps and WT_ERR_OUT_OF_MEMORY when the
+ * allocator returns NULL; NULL is returned in both failing cases, so a caller can
+ * tell a refused size from an exhausted allocator. */
 void *wt_alloc_array(const wt_allocator_t *a, size_t count, size_t elem_size,
                      wt_status_t *out_status);
 

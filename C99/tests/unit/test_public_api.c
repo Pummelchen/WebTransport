@@ -93,7 +93,7 @@ static void test_the_layers_are_reachable(void) {
 
 int main(void) {
   test_the_layers_are_reachable();
-  WT_EXPECT_STR("the version is reported", wt_version_string(), wt_version_string());
+  WT_EXPECT_STR("the version is reported", "0.1.0", wt_version_string());
   WT_EXPECT_STR("and the draft", "draft-ietf-webtrans-http3-16", wt_protocol_draft());
   WT_TEST_MAIN_END("wt_public_api");
 }

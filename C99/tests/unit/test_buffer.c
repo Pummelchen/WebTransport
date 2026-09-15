@@ -82,9 +82,10 @@ int main(void) {
   WT_EXPECT_U64("a fresh buffer allocates nothing", 0U,
                 counter.total_allocations);
   WT_EXPECT_U64("with no bytes outstanding", 0U, counter.outstanding_bytes);
-  WT_EXPECT_OK("and a cursor over it", WT_OK);
   {
     wt_cursor_t c = wt_buf_cursor(&b);
+    WT_EXPECT_U64("and a cursor over it reads nothing", 0U,
+                  (uint64_t)wt_cursor_remaining(&c));
     WT_EXPECT_INT("an empty buffer's cursor is at its end", 1,
                   wt_cursor_at_end(&c));
   }

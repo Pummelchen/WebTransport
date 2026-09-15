@@ -326,7 +326,7 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
         switch error {
         case .flowControlViolation:
             _ = closeTransport(error: .flowControlError, frameType: nil, reason: error.description)
-        case .streamStateViolation(let message) where message.contains("final size"):
+        case .finalSizeViolation:
             _ = closeTransport(error: .finalSizeError, frameType: nil, reason: error.description)
         case .streamStateViolation:
             _ = closeTransport(error: .streamStateError, frameType: nil, reason: error.description)
@@ -347,9 +347,9 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
         let (attempted, overflow) = frameOffset.addingReportingOverflow(UInt64(data.count))
         let error: QUICStateError?
         if overflow {
-            error = .streamStateViolation("STREAM data exceeds final size")
+            error = .finalSizeViolation("STREAM data exceeds final size")
         } else if attempted > finalReceiveSize {
-            error = .streamStateViolation("STREAM data exceeds final size")
+            error = .finalSizeViolation("STREAM data exceeds final size")
         } else {
             error = nil
         }

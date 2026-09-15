@@ -49,7 +49,7 @@ struct WebTransportServerCLI {
                 for result in results {
                     let session = result.sessionEstablished ? " session=established" : ""
                     print(
-                        "network \(result.transport.rawValue) session served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(result.message)\""
+                        "network \(result.transport.rawValue) session served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(WebTransportLogText.escaped(result.message))\""
                     )
                 }
                 // Serving nothing is a failure, not a success. Every session attempt
@@ -92,15 +92,19 @@ struct WebTransportServerCLI {
             Foundation.exit(2)
         }
 
-        let configuration = WebTransportServerConfiguration(
-            authority: "localhost",
-            path: "/wt",
-            origin: "https://localhost",
-            supportedProtocols: ["demo.v1"]
+        // No argument selected a mode, and that is an argument error, not a running
+        // endpoint. `WebTransportServer.init` only stores its configuration; it does not
+        // bind a socket. Reporting readiness here would be a true-looking success signal
+        // for a listener that does not exist, and a supervisor or health probe that keys
+        // on the exit status would read this process as a served endpoint. Refuse
+        // instead, name the arguments that do start something, and exit non-zero.
+        writeStandardError(
+            "\(executable) started no listener: no mode was selected\n"
+                + "\(executable) needs `--listen host:port` to serve a network session, "
+                + "or `--scenario <name>` to run the conformance scenarios\n"
         )
-        _ = WebTransportServer(configuration: configuration)
-        print("WebTransportServer local demo endpoint ready: authority=\(configuration.authority) path=\(configuration.path)")
-        print("Use `swift run WebTransportClient --connect HOST:PORT` with a listening server for the Network.framework QUIC session path.")
+        writeStandardError(WebTransportCLIConformance.helpText(executableName: executable) + "\n")
+        Foundation.exit(2)
     }
 }
 
@@ -164,8 +168,20 @@ private struct NetworkServerOptions {
                 endpoint = try WebTransportNetworkEndpoint.parse(arguments[index])
             case "--timeout-ms":
                 index += 1
-                guard index < arguments.count, let value = Int32(arguments[index]) else {
-                    throw WebTransportNetworkRuntimeError.invalidPayload
+                guard index < arguments.count else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport(
+                        "--timeout-ms requires a positive integer in milliseconds"
+                    )
+                }
+                let rawTimeout = arguments[index]
+                // F-repo-ops-15: a non-positive value is refused here, as the C99 parser
+                // refuses a zero timeout ("a zero timeout would wait forever"). Left
+                // unchecked it reaches the runtime, which reports `.timeout(0)` for every
+                // session instead of an argument error an operator can act on.
+                guard let value = Int32(rawTimeout), value > 0 else {
+                    throw WebTransportNetworkRuntimeError.invalidTransport(
+                        "--timeout-ms requires a positive integer in milliseconds, got \"\(rawTimeout)\""
+                    )
                 }
                 timeoutMilliseconds = value
             case "--transport":
@@ -229,9 +245,15 @@ private struct NetworkServerOptions {
             default:
                 if argument.hasPrefix("--listen=") {
                     endpoint = try WebTransportNetworkEndpoint.parse(String(argument.dropFirst("--listen=".count)))
-                } else if argument.hasPrefix("--timeout-ms="),
-                    let value = Int32(argument.dropFirst("--timeout-ms=".count))
-                {
+                } else if argument.hasPrefix("--timeout-ms=") {
+                    // Report the same specific error as the space-separated form, so the
+                    // two syntaxes cannot disagree about what is accepted (F-repo-ops-15).
+                    let raw = String(argument.dropFirst("--timeout-ms=".count))
+                    guard let value = Int32(raw), value > 0 else {
+                        throw WebTransportNetworkRuntimeError.invalidTransport(
+                            "--timeout-ms requires a positive integer in milliseconds, got \"\(raw)\""
+                        )
+                    }
                     timeoutMilliseconds = value
                 } else if argument.hasPrefix("--transport=") {
                     transport = try WebTransportNetworkTransport.parse(String(argument.dropFirst("--transport=".count)))

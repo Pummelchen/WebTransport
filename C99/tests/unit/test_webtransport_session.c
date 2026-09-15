@@ -246,10 +246,58 @@ static void test_closing_and_the_first_code(void) {
                    wt_webtransport_session_on_stream_end(&session));
 }
 
+/* Section 5.4: WT_CLOSE_SESSION is the last thing on the CONNECT stream. The caller rebuilds a cursor once per
+ * delivery (one per STREAM frame), so a peer can put the close in one frame and a flow-control grant in the
+ * next; the walker must refuse the later frame's capsules rather than apply them. The tail check inside the
+ * close branch cannot see that case -- it only sees what is left of the buffer the close arrived in -- so this
+ * test delivers the close and the grant as two separate calls on the same session. */
+static void test_a_capsule_after_the_close_is_refused(void) {
+  uint8_t buffer[64];
+  wt_webtransport_session_t session;
+  capsule_observer_t log;
+  wt_writer_t w;
+  wt_cursor_t cursor;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  size_t grant_length;
+
+  memset(&log, 0, sizeof(log));
+  wt_webtransport_session_init(&session);
+  WT_EXPECT_OK("a session establishes", wt_webtransport_session_established(&session));
+
+  /* The close arrives in one frame and ends the session. */
+  w = wt_writer_init(buffer, sizeof(buffer));
+  WT_EXPECT_OK("the close capsule encodes", wt_webtransport_close_session_write(&w, 0x22U, NULL, 0U));
+  cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
+  WT_EXPECT_OK("and closes the session",
+               wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow, &log,
+                                                        &error));
+  WT_EXPECT_INT("which is now closed", (int)WT_WEBTRANSPORT_SESSION_CLOSED, (int)session.state);
+
+  /* A LATER STREAM frame carries a flow-control grant. Nothing about it may be applied. */
+  w = wt_writer_init(buffer, sizeof(buffer));
+  WT_EXPECT_OK("a grant encodes into a later frame", wt_webtransport_max_data_write(&w, 65536U));
+  grant_length = wt_writer_offset(&w);
+  cursor = wt_cursor_init(buffer, grant_length);
+  WT_EXPECT_STATUS("and the closed session refuses it", WT_ERR_PROTOCOL,
+                   wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow, &log,
+                                                            &error));
+  WT_EXPECT_U64("naming a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  WT_EXPECT_U64("with the observer never called", 0U, (uint64_t)log.calls);
+  WT_EXPECT_U64("and the cursor left where it was", (uint64_t)grant_length,
+                (uint64_t)wt_cursor_remaining(&cursor));
+
+  /* An empty delivery is the ordinary FIN after the close, not a new capsule: it is not refused. */
+  cursor = wt_cursor_init(buffer, 0U);
+  WT_EXPECT_OK("an empty delivery after the close is still fine",
+               wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow, &log,
+                                                        &error));
+}
+
 int main(void) {
   test_the_establishing_and_established_states();
   test_draining();
   test_closing_and_the_first_code();
   test_the_connect_streams_capsules_are_walked();
+  test_a_capsule_after_the_close_is_refused();
   WT_TEST_MAIN_END("wt_webtransport_session");
 }

@@ -132,14 +132,35 @@ public enum TLS13KeySchedule {
 }
 
 public struct TLS13Transcript: Equatable, Sendable {
-    public private(set) var encodedMessages: Data
+    /// Ceiling on the retained transcript bytes.
+    ///
+    /// The handshake transcript has to be kept to derive Finished and
+    /// CertificateVerify material, but nothing bounded how much of it a peer could
+    /// make this endpoint hold: a peer that kept sending well-formed handshake
+    /// messages grew it for the connection's lifetime. The CRYPTO reassembler
+    /// already caps a single handshake message at roughly its own
+    /// `defaultMaximumBufferedBytes`, so this ceiling allows many such messages
+    /// while still bounding retention.
+    public static let defaultMaximumEncodedBytes = 1024 * 1024
 
-    public init() {
+    public private(set) var encodedMessages: Data
+    public let maximumEncodedBytes: Int
+
+    public init(maximumEncodedBytes: Int = TLS13Transcript.defaultMaximumEncodedBytes) {
         self.encodedMessages = Data()
+        self.maximumEncodedBytes = max(1, maximumEncodedBytes)
     }
 
     public mutating func append(_ message: TLSHandshakeMessage) throws {
-        encodedMessages.append(try message.encode())
+        let encoded = try message.encode()
+        guard encoded.count <= maximumEncodedBytes,
+            encodedMessages.count <= maximumEncodedBytes - encoded.count
+        else {
+            throw QUICCodecError.valueOutOfRange(
+                "TLS transcript exceeds \(maximumEncodedBytes) bytes"
+            )
+        }
+        encodedMessages.append(encoded)
     }
 
     public var hash: Data {

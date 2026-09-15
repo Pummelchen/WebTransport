@@ -10,6 +10,10 @@ anything is written:
 
   - the indices are 0..98 with no gap and no repeat, so a row read twice or a
     mis-parsed index stops generation;
+  - a row PRINTED OVER SEVERAL LINES is joined rather than dropped: appendix A
+    wraps a long cell and warns that "any line breaks that appear within field
+    names or values are due to formatting", so a continuation line belongs to the
+    row above it and is never a row of its own;
   - every name is non-empty, has no whitespace around it and no '|' in it, which
     is what a row split in the wrong place would produce;
   - a name that starts with ':' is a pseudo-header, which is a valid name and not a
@@ -36,8 +40,23 @@ HEADER = HERE.parent.parent / "src" / "http3" / "qpack_static_table.h"
 
 TABLE_SIZE = 99
 
-# One row of appendix A's ASCII table: | index | name | value |
-ROW = re.compile(r"^\s*\|\s*(\d+)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*$")
+# One PHYSICAL line of appendix A's ASCII table: | index | name | value |. Only the first line of a row carries
+# the index: the RFC wraps a long cell and leaves the index and the other cell blank on the continuation, so
+# `\d*` rather than `\d+` is what lets a wrapped row be recognised instead of dropped.
+ROW = re.compile(r"^\s*\|\s*(\d*)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*$")
+
+
+def join_wrapped(previous: str, fragment: str) -> str:
+    """Append one continuation of a wrapped cell to the cell it continues.
+
+    The break is the text renderer's, not the value's. It happens after a '-' or a '/' with nothing inserted
+    (`application/dns-` then `message`), and at a space, which the break consumes and the join therefore has to
+    put back (`text/html;` then `charset=utf-8` is `text/html; charset=utf-8`). So a fragment that ends in a
+    delimiter continues with no separator and anything else continues with the space the break stood for.
+    """
+    if previous.endswith(("-", "/")):
+        return previous + fragment
+    return previous + " " + fragment
 
 
 def extract(text: str) -> list[tuple[str, str]]:
@@ -56,9 +75,22 @@ def extract(text: str) -> list[tuple[str, str]]:
         match = ROW.match(line)
         if match is None:
             continue
-        index = int(match.group(1))
+        index_text = match.group(1)
         name = match.group(2)
         value = match.group(3)
+        if not index_text:
+            # A continuation line, which belongs to the row above it. It repeats whichever cell the RFC
+            # wrapped; a line that continues neither cell is not something to skip silently.
+            if not rows:
+                raise ValueError("the table begins with a continuation line")
+            if not name and not value:
+                raise ValueError("a continuation line continues neither the name nor the value")
+            if name:
+                rows[-1] = (rows[-1][0], join_wrapped(rows[-1][1], name), rows[-1][2])
+            if value:
+                rows[-1] = (rows[-1][0], rows[-1][1], join_wrapped(rows[-1][2], value))
+            continue
+        index = int(index_text)
         if index == 0 and not name:
             continue  # the column headings are not a row
         rows.append((index, name, value))

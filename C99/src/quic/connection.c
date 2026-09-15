@@ -130,8 +130,11 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   status = wt_quic_transport_parameters_decode(data, length, &params, &error);
   if (status != WT_OK) return status;
   /* RFC 9000 section 18.2's own rules -- a max_udp_payload_size below 1200, an ack delay exponent
-   * above 20, a stream limit above 2^60 -- are an error rather than something to clamp. */
-  status = wt_quic_transport_parameters_check(&params, &error, &offender);
+   * above 20, a stream limit above 2^60 -- are an error rather than something to clamp. `peer_is_client`
+   * is this endpoint's own role inverted: the parameters being checked are the peer's, and the
+   * stateless_reset_token rule depends on which end sent them. */
+  status = wt_quic_transport_parameters_check(
+      &params, connection->config.role == WT_QUIC_ROLE_SERVER ? 1 : 0, &error, &offender);
   if (status != WT_OK) return status;
 
   memset(&limits, 0, sizeof(limits));
@@ -183,10 +186,25 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
     const uint8_t *peer_source = NULL;
     size_t peer_source_length = 0U;
     if (wt_quic_transport_parameters_get(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID, &peer_source,
-                                         &peer_source_length) == WT_OK &&
-        peer_source != NULL && peer_source_length > 0U &&
-        peer_source_length <= (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
-      adopt_peer_connection_id(connection, peer_source, peer_source_length);
+                                         &peer_source_length) == WT_OK) {
+      /* RFC 9000 section 7.3: "Endpoints MUST validate that received transport parameters match received
+       * connection ID values", and a mismatch is a connection error of type TRANSPORT_PARAMETER_ERROR or
+       * PROTOCOL_VIOLATION. The reference value is the Source Connection ID of the Initial packets the peer
+       * sent, which the receive path recorded; the parameter is compared with it BEFORE it is adopted,
+       * because adopting it is what aims everything this endpoint sends at the ID it names. A connection that
+       * was never handed a real packet has nothing to compare -- the same rule the original_destination
+       * check below uses -- so a synthetic object or a caller that supplies parameters out of band is not
+       * made to satisfy a requirement it has no data for. */
+      if (connection->peer_source_connection_id_set != 0 &&
+          (peer_source_length != connection->peer_source_connection_id_length ||
+           (peer_source_length != 0U &&
+            memcmp(peer_source, connection->peer_source_connection_id, peer_source_length) != 0))) {
+        return WT_ERR_PROTOCOL;
+      }
+      if (peer_source != NULL && peer_source_length > 0U &&
+          peer_source_length <= (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
+        adopt_peer_connection_id(connection, peer_source, peer_source_length);
+      }
     }
   }
 
@@ -381,9 +399,18 @@ static void on_lost(void *context, const wt_quic_sent_packet_t *packet) {
       size_t slot = (size_t)descriptor.offset;
       if (slot < WT_QUIC_CONTROL_FRAMES_MAX && connection->control_frames[slot].in_use) {
         wt_quic_control_frame_t *kept = &connection->control_frames[slot];
-        int sent = 0;
-        (void)send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1,
-                                 tag_for_control(connection, slot), &sent, connection->last_activity);
+        /* The re-sent packet has to be ANSWERABLE: the descriptor is what a later loss names this obligation
+         * by, and `send_encoded_frame` frees the one it was given when the send fails. A discarded failure
+         * would therefore drop the frame for the life of the connection AND leave the slot occupied forever --
+         * nothing later names it. The slot is flagged instead, and `wt_quic_connection_flush` re-drives it (the
+         * bytes are still the frame, which is why the slot is kept at all). */
+        wt_status_t resent = send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1,
+                                                tag_for_control(connection, slot), NULL,
+                                                connection->last_activity);
+        if (resent != WT_OK) {
+          kept->resend_pending = 1;
+          connection->control_frames_resend_deferred++;
+        }
       }
     } else if (connection->lost_handler != NULL) {
       connection->lost_handler(connection->lost_context, &descriptor);
@@ -698,6 +725,7 @@ static wt_status_t send_control_frame(wt_quic_connection_t *connection, wt_quic_
   }
 
   connection->control_frames[slot].in_use = 1;
+  connection->control_frames[slot].resend_pending = 0;
   connection->control_frames[slot].space = space;
   connection->control_frames[slot].wire_length = wt_writer_offset(&kept);
   memcpy(connection->control_frames[slot].wire, wire, wt_writer_offset(&kept));
@@ -918,6 +946,7 @@ static wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t 
       if (connection->frames[snapshot[i].tag].stream_id == WT_QUIC_CONTROL_STREAM_ID &&
           connection->frames[snapshot[i].tag].offset < (uint64_t)WT_QUIC_CONTROL_FRAMES_MAX) {
         connection->control_frames[connection->frames[snapshot[i].tag].offset].in_use = 0;
+        connection->control_frames[connection->frames[snapshot[i].tag].offset].resend_pending = 0;
       }
       free_frame(connection, snapshot[i].tag);
     }
@@ -2407,6 +2436,39 @@ wt_status_t wt_quic_connection_send_frame(wt_quic_connection_t *connection, wt_q
   return sent ? WT_OK : WT_ERR_STATE;
 }
 
+/* One retained control frame whose earlier re-send could not go out. The slot is still owed but no packet is in
+ * flight that a loss could name it by, so it is re-driven here. The descriptor is allocated BEFORE the bytes are
+ * sent, so a packet that does go out is answerable; a full descriptor table defers the frame to the next flush
+ * rather than putting bytes on the wire that nothing would ever retransmit. A failure leaves `resend_pending`
+ * set, so the obligation survives as many flushes as it takes. */
+static void resume_control_frame(wt_quic_connection_t *connection, size_t slot, uint64_t now) {
+  wt_quic_control_frame_t *kept = &connection->control_frames[slot];
+  uint64_t tag = tag_for_control(connection, slot);
+
+  if (tag >= (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX) {
+    connection->control_frames_resend_deferred++;
+    return;
+  }
+  if (send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1, tag, NULL, now) != WT_OK) {
+    connection->control_frames_resend_deferred++;
+    return;
+  }
+  kept->resend_pending = 0;
+}
+
+/* Every retained control frame a failed re-send left flagged. Called from `wt_quic_connection_flush`, which is the
+ * pump the caller already runs, so the obligation is retried by ordinary progress rather than by a loss event that
+ * will never come. */
+static void resume_pending_control_frames(wt_quic_connection_t *connection, uint64_t now) {
+  size_t slot;
+
+  for (slot = 0U; slot < WT_QUIC_CONTROL_FRAMES_MAX; slot++) {
+    if (connection->control_frames[slot].in_use && connection->control_frames[slot].resend_pending != 0) {
+      resume_control_frame(connection, slot, now);
+    }
+  }
+}
+
 /* An acknowledgement for a space, if one is owed. `probe` asks for an ack-eliciting PING instead,
  * which is what a probe timeout sends: something the peer must acknowledge, so that the round trip
  * estimate can recover. */
@@ -2498,6 +2560,10 @@ wt_status_t wt_quic_connection_flush(wt_quic_connection_t *connection, uint64_t 
     status = flush_space(connection, (wt_quic_space_t)i, 0, 0, now);
     if (status != WT_OK) return status;
   }
+  /* A retained control frame whose re-send failed is still owed, and no loss event names it: re-drive it before
+   * the path challenge, because it is the connection's own frame and the challenge is a question, not an
+   * obligation. */
+  resume_pending_control_frames(connection, now);
   /* And a PATH_CHALLENGE this connection owes (WT-172), after the spaces: a challenge is a probe, not a
    * handshake message, and a flush that sent it before an owed acknowledgement would delay the peer's own
    * progress to ask it a question of our own. */
@@ -3026,6 +3092,23 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
                                         &destination_sequence)) {
         connection->packets_discarded++;
         return WT_OK;
+      }
+      /* RFC 9000 section 7.3: "Endpoints MUST validate that received transport parameters match received
+       * connection ID values", where the value for `initial_source_connection_id` is "the value that an
+       * endpoint used in the ... Source Connection ID fields of Initial packets that it sent". The parameters
+       * arrive in CRYPTO frames carried by these very packets, so the SCID is recorded from the first
+       * authenticated long-header packet addressed to this endpoint, and `set_peer_parameters` compares the
+       * parameter with it before adopting it as this connection's destination. A short header carries no
+       * SCID, and a packet for another connection proves nothing about this one, which is why this sits
+       * after the destination check. */
+      if (packet.short_header == 0 && connection->peer_source_connection_id_set == 0 &&
+          packet.source_connection_id_len <= (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
+        if (packet.source_connection_id_len > 0U) {
+          memcpy(connection->peer_source_connection_id, packet.source_connection_id,
+                 packet.source_connection_id_len);
+        }
+        connection->peer_source_connection_id_length = packet.source_connection_id_len;
+        connection->peer_source_connection_id_set = 1;
       }
       status = process_packet(connection, space, packet.payload, packet.payload_len, &ack_eliciting,
                               now, destination_sequence);

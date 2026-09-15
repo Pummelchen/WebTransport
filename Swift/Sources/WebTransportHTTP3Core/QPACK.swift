@@ -20,6 +20,19 @@ public struct HTTPFieldLine: Equatable, Sendable {
         else {
             throw QUICCodecError.malformed("HTTP field name contains invalid bytes")
         }
+        // RFC 9110 section 5.5: a field value is `field-content`, so every byte
+        // must be visible, SP or HTAB; the other C0 controls and DEL are not value
+        // bytes and RFC 9114 section 4.1.2 makes a field section carrying one
+        // malformed. CR, LF and NUL are the bytes that turn a value into a second
+        // field, and every one of them is valid UTF-8, so the decoder's UTF-8 check
+        // alone let them through. Bytes at or above 0x80 are `obs-text` and legal.
+        guard
+            value.utf8.allSatisfy({ byte in
+                byte == 0x09 || byte == 0x20 || (byte >= 0x21 && byte != 0x7f)
+            })
+        else {
+            throw QUICCodecError.malformed("HTTP field value contains a forbidden byte")
+        }
         self.name = name
         self.value = value
     }

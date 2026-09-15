@@ -1,0 +1,27 @@
+# trivy configuration for the repository filesystem scan (the `dependency-scan`
+# job in `.github/workflows/security-scan.yml`).
+#
+# `vuln`, `secret` and `misconfig` are enabled and every finding fails the job
+# (`exit-code`):
+#   * `vuln` covers anything vendored or locked in the tree -- a future
+#     `Package.resolved`, `Cargo.lock`, `requirements.txt`, and so on.
+#   * `secret` is a second engine beside gitleaks.
+#   * `misconfig` covers Dockerfile and IaC hardening. It was off while the tree
+#     had 12 findings; `.trivyignore.yaml` is now the written policy that accepts
+#     exactly those two checks on exactly those six files (F-repo-ops-13), so the
+#     scanner runs and any NEW Dockerfile or new check still fails the job.
+#
+# The one real dependency, OpenSSL 3.x, is the platform's: it is found with
+# `find_package(OpenSSL 3.0 REQUIRED)` (C99/CMakeLists.txt:40), never vendored,
+# and there is no lockfile, so a filesystem scan cannot inventory it. That
+# decision is written down in SECURITY.md, "Automated Scanning"; vendoring or
+# pinning OpenSSL later must arrive with a scan that can see it. Its Apache-2.0
+# notice is retained in THIRD_PARTY_NOTICES.md.
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+ignorefile: .trivyignore.yaml
+exit-code: 1
+format: table

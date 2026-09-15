@@ -144,8 +144,28 @@ private func makeSequentialClient() -> WebTransportClient {
 /// implementation also refused this, for a reason that turned out to be fatal to the
 /// listener; the test is here so that dropping the ceiling altogether cannot pass
 /// unnoticed.
+///
+/// F-swift-perf-tests-12: this test timed out once under parallel load and passed
+/// alone and on re-runs. Every wait in it is now explicitly bounded and a
+/// load-induced establishment failure is retried a fixed number of times, after
+/// which the last error is rethrown, so a busy machine cannot hang the test while
+/// a listener that really accepts past its ceiling still fails it.
 @Test
 func listenerRefusesConnectionsBeyondItsConcurrencyLimit() async throws {
+    var lastError: (any Error)?
+    for _ in 1...3 {
+        do {
+            try await observeRefusalBeyondTheConcurrencyCeiling()
+            return
+        } catch {
+            lastError = error
+            try await Task.sleep(for: .milliseconds(200))
+        }
+    }
+    throw lastError ?? WebTransportNetworkRuntimeError.timeout(0)
+}
+
+private func observeRefusalBeyondTheConcurrencyCeiling() async throws {
     let server = WebTransportServer(
         configuration: WebTransportServerConfiguration(
             authority: "localhost",
@@ -159,37 +179,50 @@ func listenerRefusesConnectionsBeyondItsConcurrencyLimit() async throws {
     let listener = try await server.listen(on: WebTransportEndpoint(host: "127.0.0.1", port: 0))
     defer { listener.shutdown() }
 
-    func makeClient() -> WebTransportClient {
-        WebTransportClient(
-            configuration: WebTransportClientConfiguration(
-                authority: "localhost",
-                path: "/wt",
-                origin: "https://localhost",
-                availableProtocols: ["demo.v1"],
-                trustPolicy: .localDevelopmentSelfSigned,
-                timeoutMilliseconds: 5_000
-            )
-        )
-    }
-
+    // The first session has to exist before the ceiling can be reached. A loaded
+    // runner can fail this establishment at the transport level, which is not
+    // what this test is about; the retry budget in the caller covers that.
     async let firstAccepted = listener.acceptSession()
-    let firstSession = try await makeClient().connect(to: listener.localEndpoint)
+    let firstSession = try await connectWithTransientRetry(listener: listener)
     let firstServerSession = try await firstAccepted
     #expect(firstSession.selectedProtocol == "demo.v1")
     #expect(firstServerSession.selectedProtocol == "demo.v1")
 
-    // The ceiling is reached, so this connection is refused at the accept handler.
-    async let secondConnect: Void = {
+    // The ceiling is reached, so this connection is refused at the accept handler
+    // and its handshake never completes.
+    let secondConnect = Task { () -> Bool in
         do {
-            _ = try await makeClient().connect(to: listener.localEndpoint)
+            _ = try await makeSequentialClient().connect(to: listener.localEndpoint)
+            return true
         } catch {
-            // Refused at the transport level: the handshake never completed.
+            return false
         }
-    }()
+    }
     await #expect(throws: (any Error).self) {
         _ = try await listener.acceptSession()
     }
-    await secondConnect
+    // Bound the refused client's wait explicitly instead of awaiting it
+    // unconditionally: `nil` means the transport never resolved within the bound,
+    // which is itself a refusal, and it cannot hang the test.
+    let secondEstablished = await boundedValue(secondConnect, milliseconds: 2_000)
+    #expect(
+        secondEstablished != true,
+        "the listener established a second session past its concurrency ceiling"
+    )
 
     try await firstSession.close(applicationErrorCode: 0, reason: "done")
+}
+
+/// Waits for `task` for at most `milliseconds`, then cancels it and returns `nil`.
+private func boundedValue<T: Sendable>(_ task: Task<T, Never>, milliseconds: Int) async -> T? {
+    await withTaskGroup(of: T?.self) { group in
+        group.addTask { await task.value }
+        group.addTask { () -> T? in
+            try? await Task.sleep(for: .milliseconds(milliseconds))
+            return nil
+        }
+        let first = await group.next() ?? nil
+        group.cancelAll()
+        return first
+    }
 }

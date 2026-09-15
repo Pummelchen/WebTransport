@@ -146,13 +146,20 @@ func invalidPoliciesFailListenerConstructionRatherThanBindingSilently() {
 func explicitConcurrencyLimitOverridesANonDefaultPolicy() throws {
     let endpoint = WebTransportNetworkEndpoint(host: "127.0.0.1", port: 0)
 
-    // A policy plus an explicit limit constructs, and the limit is applied.
+    // A policy plus an explicit limit constructs, and the limit is applied. The
+    // assertion is what makes this the precedence test: with the old
+    // `admission == .default` gate the explicit 1 was ignored and the policy's
+    // 256 was enforced instead.
     let overriding = try WebTransportQUICServer(
         endpoint: endpoint,
         maxConcurrentConnections: 1,
         authority: "localhost",
         localOnly: false,
         admission: .publicFacing
+    )
+    #expect(
+        overriding.effectiveAdmissionPolicy.maxConcurrentConnections == 1,
+        "an explicit limit must override a non-default policy"
     )
     overriding.shutdown()
 
@@ -176,5 +183,38 @@ func explicitConcurrencyLimitOverridesANonDefaultPolicy() throws {
         localOnly: false,
         admission: .publicFacing
     )
+    #expect(
+        policyDefault.effectiveAdmissionPolicy.maxConcurrentConnections == 256,
+        "with no explicit limit the policy's own value must be enforced"
+    )
     policyDefault.shutdown()
+}
+
+/// F-swift-architecture-05: `16` was used as the "argument not supplied"
+/// sentinel, so an explicit `maxConcurrentConnections: 16` was indistinguishable
+/// from the default and the policy's own limit silently won. An explicit value
+/// must always win, whatever it is; `nil` is the only "not supplied".
+@Test
+func explicitConcurrencyLimitOfExactlyTheOldSentinelStillOverridesThePolicy() throws {
+    let endpoint = WebTransportNetworkEndpoint(host: "127.0.0.1", port: 0)
+
+    let explicitSixteen = try WebTransportQUICServer(
+        endpoint: endpoint,
+        maxConcurrentConnections: 16,
+        authority: "localhost",
+        localOnly: false,
+        admission: .publicFacing
+    )
+    defer { explicitSixteen.shutdown() }
+    #expect(explicitSixteen.effectiveAdmissionPolicy.maxConcurrentConnections == 16)
+
+    // Only the absence of the argument lets the policy decide.
+    let policyDefault = try WebTransportQUICServer(
+        endpoint: endpoint,
+        authority: "localhost",
+        localOnly: false,
+        admission: .publicFacing
+    )
+    defer { policyDefault.shutdown() }
+    #expect(policyDefault.effectiveAdmissionPolicy.maxConcurrentConnections == 256)
 }

@@ -179,4 +179,55 @@ struct WebTransportInboundStreamQueueTests {
         #expect(try await queue.next(direction: 0, timeoutMilliseconds: 5_000) == 1)
         #expect(try await queue.next(direction: 1, timeoutMilliseconds: 5_000) == 2)
     }
+
+    /// The queue is a retention bound, not an unbounded inbox.
+    ///
+    /// RFC 9000 section 4.6 counts a stream against `initial_max_streams_*` only
+    /// until it is closed, and a stream the peer FINs is closed whether or not
+    /// the application ever read it, so the advertised stream limit does not
+    /// bound how many `QUIC.Stream` objects a connection accumulates over its
+    /// life. The per-direction ceiling — taken from those same advertised
+    /// limits — is what does, so a stream beyond it must not be retained.
+    @Test
+    func streamsBeyondThePerDirectionCeilingAreNotRetained() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+        let limit = WebTransportTransportLimits.default.initialMaxUnidirectionalStreams
+        #expect(limit > 0)
+
+        for index in 0..<limit {
+            await queue.enqueue(index, direction: Self.direction, streamID: UInt64(index))
+        }
+        // The queue holds its ceiling now, so this stream must be refused
+        // rather than retained behind the others.
+        await queue.enqueue(limit, direction: Self.direction, streamID: UInt64(limit))
+
+        for index in 0..<limit {
+            #expect(try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000) == index)
+        }
+        await #expect(throws: (any Error).self) {
+            try await queue.next(direction: Self.direction, timeoutMilliseconds: 50)
+        }
+    }
+
+    /// F-swift-perf-tests-04: remembering a delivery must not shift the history.
+    ///
+    /// `enqueue` appended the delivery key and, once the 4,096-entry history was
+    /// full, called `deliveryOrder.removeFirst()`, which moves every remaining
+    /// element. The number of deliveries is peer-driven and unbounded over a
+    /// connection's life, so each delivery past the cap cost O(4,096). The probe
+    /// counts elements physically moved, so the assertion is independent of load.
+    @Test
+    func deliveryHistoryIsNotShiftedPerDelivery() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+        let deliveries = 40_000
+        for index in 0..<deliveries {
+            await queue.enqueue(index, direction: Self.direction, streamID: UInt64(index))
+        }
+
+        let moves = await queue.deliveryOrderMoves
+        #expect(
+            moves <= deliveries * 2,
+            "recording \(deliveries) deliveries moved \(moves) history elements"
+        )
+    }
 }

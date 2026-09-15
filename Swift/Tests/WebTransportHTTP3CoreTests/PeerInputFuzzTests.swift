@@ -18,8 +18,10 @@ import WebTransportTLSCore
 // established.
 //
 // The generator is seeded and fully deterministic, so a failure reproduces
-// exactly. `WEBTRANSPORT_FUZZ_ITERATIONS` raises the per-parser budget for
-// longer local runs; CI uses the default.
+// exactly. `WEBTRANSPORT_FUZZ_ITERATIONS` raises the per-parser budget above the
+// 400-iteration default in ``fuzzIterations``: the AddressSanitizer fuzz job in
+// `.github/workflows/swift-ci.yml` sets it to 20,000, so unlike a local
+// `swift test` (which uses the default) CI runs the larger budget.
 
 /// Deterministic PRNG. Reproducibility matters more than statistical quality:
 /// a crash found in CI has to be replayable from the seed alone.
@@ -182,35 +184,151 @@ func peerFacingParsersNeverTrapOnArbitraryInput() throws {
     #expect(inputs.count > iterations)
 }
 
+/// The largest value a QUIC varint can carry (2^62 - 1). A peer can declare it
+/// in eight bytes, so every parser that reads a length-prefixed frame has to
+/// decide what to do with a claim that no datagram could ever satisfy.
+private let absurdDeclaredLength: UInt64 = 4_611_686_018_427_387_903
+
+/// What a peer-facing parser is required to do with an input whose declared
+/// length is ``absurdDeclaredLength`` while only a handful of bytes follow.
+private enum OversizedInputOutcome: Sendable {
+    /// The parser reads a length-prefixed frame. The frame claims more bytes
+    /// than exist, so the parser must throw — not allocate against the claim
+    /// and not return a truncated frame as if it were complete.
+    case rejectsDeclaredLength
+    /// The parser reads only the leading field of the input; the absurd length
+    /// is ordinary trailing payload to it. Returning is correct, and nothing
+    /// sized from the claimed length may be materialized.
+    case consumesLeadingFieldOnly
+}
+
+/// Per-parser contract for the two oversized inputs. Having one entry per
+/// ``peerInputParsers`` entry is asserted by the test, so a parser added later
+/// cannot silently escape the contract.
+private struct OversizedInputContract: Sendable {
+    let withBody: OversizedInputOutcome
+    let headerOnly: OversizedInputOutcome
+}
+
+// The outcomes below are the observable contract, established per parser and
+// pinned here: a parser that starts accepting a 2^62-1 declared length fails
+// the test, and so does one that starts rejecting a valid leading field.
+private let oversizedInputContracts: [String: OversizedInputContract] = [
+    "QUICVarInt.decode": OversizedInputContract(withBody: .consumesLeadingFieldOnly, headerOnly: .consumesLeadingFieldOnly),
+    "QUICFrame.decodeFrames": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "QUICTransportParameters.decode": OversizedInputContract(
+        withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "QUICLongHeaderPacket.decode": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "QUICRetryPacket.decode": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "HTTP3Frame.decodeFrames": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "HTTP3Frame.decodePrefix": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "HTTP3Settings.decodePayload": OversizedInputContract(
+        withBody: .rejectsDeclaredLength, headerOnly: .consumesLeadingFieldOnly),
+    "HTTP3StreamTypeParser.parsePrefix": OversizedInputContract(
+        withBody: .consumesLeadingFieldOnly, headerOnly: .consumesLeadingFieldOnly),
+    "QPACK.decodeFieldSection": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "QPACK.decodeEncoderStreamInstructions": OversizedInputContract(
+        withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "QPACK.decodeDecoderStreamInstructions": OversizedInputContract(
+        withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "QPACKHuffman.decode": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "WebTransportFlowCapsuleCodec.parse": OversizedInputContract(
+        withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "WebTransportDatagramSignaling.parse": OversizedInputContract(
+        withBody: .consumesLeadingFieldOnly, headerOnly: .consumesLeadingFieldOnly),
+    "WebTransportStreamSignaling.parsePrefix": OversizedInputContract(
+        withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "WebTransportStreamSignaling.hasStreamPrefix": OversizedInputContract(
+        withBody: .consumesLeadingFieldOnly, headerOnly: .consumesLeadingFieldOnly),
+    "TLSHandshakeMessage.decodeAll": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "TLSExtension.decodeList": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "TLSClientHello.decode": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "TLSServerHello.decode": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "TLSCertificate.decode": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+    "TLSCertificateVerify.decode": OversizedInputContract(withBody: .rejectsDeclaredLength, headerOnly: .rejectsDeclaredLength),
+]
+
+/// Runs one parser against one oversized input and records an issue unless it
+/// produces the required outcome.
+private func assertOversizedOutcome(
+    _ outcome: OversizedInputOutcome,
+    parser: (name: String, run: @Sendable (Data) throws -> Void),
+    input: Data,
+    inputDescription: String
+) {
+    var thrownError: Error?
+    do {
+        try parser.run(input)
+    } catch {
+        thrownError = error
+    }
+    switch outcome {
+    case .rejectsDeclaredLength:
+        // The parser must fail against the bytes it has rather than honouring
+        // the claim; returning means the declared length was accepted.
+        #expect(
+            thrownError != nil,
+            "\(parser.name) accepted \(inputDescription) instead of rejecting the declared length")
+    case .consumesLeadingFieldOnly:
+        // This parser reads only the leading field, so the input is well formed
+        // for it. Throwing would be a new, unintended rejection.
+        #expect(
+            thrownError == nil,
+            "\(parser.name) rejected \(inputDescription): \(String(describing: thrownError))")
+    }
+}
+
 @Test
 func peerFacingParsersRejectOversizedInputWithoutExhaustingMemory() throws {
     // A peer can claim an enormous length in a few bytes. The parser must not
-    // pre-allocate on that claim; it must fail against the bytes it actually has.
+    // pre-allocate on that claim; it must fail against the bytes it actually has
+    // (or, where the input is only a leading field, return without materializing
+    // anything sized from the claim).
     var oversized = Data()
     oversized.append(try QUICVarInt.encode(0x3f))  // type
-    oversized.append(try QUICVarInt.encode(4_611_686_018_427_387_903))  // absurd length
+    oversized.append(try QUICVarInt.encode(absurdDeclaredLength))
     oversized.append(Data(repeating: 0x41, count: 64))  // tiny body
 
-    for parser in peerInputParsers {
-        do {
-            try parser.run(oversized)
-        } catch {
-            // Expected.
-        }
-    }
-
-    // Same claim, zero body. The length is the largest a QUIC varint can carry;
-    // Int.max does not fit in 62 bits and the encoder rightly rejects it.
+    // Same claim, zero body: the frame header alone.
     var headerOnly = Data()
     headerOnly.append(try QUICVarInt.encode(0x01))
-    headerOnly.append(try QUICVarInt.encode(4_611_686_018_427_387_903))
+    headerOnly.append(try QUICVarInt.encode(absurdDeclaredLength))
+
+    #expect(
+        Set(oversizedInputContracts.keys) == Set(peerInputParsers.map(\.name)),
+        "every peer-facing parser needs an oversized-input contract")
+
     for parser in peerInputParsers {
-        do {
-            try parser.run(headerOnly)
-        } catch {
-            // Expected.
+        guard let contract = oversizedInputContracts[parser.name] else {
+            Issue.record("\(parser.name) has no oversized-input contract")
+            continue
         }
+        assertOversizedOutcome(
+            contract.withBody,
+            parser: parser,
+            input: oversized,
+            inputDescription: "a \(oversized.count)-byte frame claiming \(absurdDeclaredLength) bytes")
+        assertOversizedOutcome(
+            contract.headerOnly,
+            parser: parser,
+            input: headerOnly,
+            inputDescription: "a \(headerOnly.count)-byte header claiming \(absurdDeclaredLength) bytes")
     }
+
+    // The parsers above that consume only the leading field must not carry the
+    // claim into what they return: every returned buffer is sized by the bytes
+    // that were actually present, and the leading field decodes to its real
+    // value. `HTTP3Settings` is the one case where the number itself is the
+    // result — a setting value is a scalar, not a length, so it allocates
+    // nothing.
+    var cursor = QUICByteCursor(oversized)
+    #expect(try QUICVarInt.decode(from: &cursor) == 0x3f)
+    #expect(try HTTP3StreamTypeParser.parsePrefix(oversized).remainingBytes.count == oversized.count - 1)
+    #expect(try WebTransportDatagramSignaling.parse(oversized).bytesConsumed == 1)
+    #expect(try WebTransportDatagramSignaling.parse(oversized).payload.count == oversized.count - 1)
+    #expect(WebTransportStreamSignaling.hasStreamPrefix(oversized) == false)
+    #expect(try HTTP3Settings.decodePayload(headerOnly).entries == [1: absurdDeclaredLength])
+    #expect(try HTTP3Settings.decodePayload(headerOnly).encodePayload().count <= headerOnly.count)
 }
 
 @Test

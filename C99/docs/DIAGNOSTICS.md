@@ -12,7 +12,7 @@ library should be a documented one rather than an accumulation.
 | Variable | Written by | Records | The question it answers |
 | --- | --- | --- | --- |
 | `WT_QUIC_PACKET_LOG` | `src/quic/connection.c` | one line per packet **sent**: space, header type bits, first byte, length, packet number, and the whole packet in hex (up to 1300 bytes) | "did this endpoint send anything, and was it the packet I think it built?" |
-| `WT_TLS_SECRET_LOG` | `src/tls/session.c` (at derivation) and `apps/support/session_loop.c` (the client's keylog line) | the handshake traffic secrets: `# at-derivation client=... server=...` from the library, and `CLIENT_HANDSHAKE_TRAFFIC_SECRET ...` in NSS keylog form from the client tool | "are the two ends deriving the SAME secret, or is one of them wrong?" |
+| `WT_TLS_SECRET_LOG` | `apps/support/session_loop.c` (the client's keylog line) | the client's handshake traffic secrets in NSS keylog form (`CLIENT_HANDSHAKE_TRAFFIC_SECRET ...`) | "are the two ends deriving the SAME secret, or is one of them wrong?" |
 | `WT_TLS_TRANSCRIPT_LOG` | `src/tls/session.c` (both ClientHello entry points) | the ClientHello bytes this client **hashed** into the transcript | "did the transcript hash the bytes that went out on the wire?" |
 | `WT_HTTP3_SECTION_LOG` | `apps/support/session_loop.c` | the request's field section in hex, and every HTTP/3 frame payload on the request stream (`stream= type= length= last= bytes=`) | "what did the peer actually send after the response, and what did this endpoint parse it as?" |
 | `WT_HTTP3_STREAM_LOG` | `src/http3/driver.c` | every STREAM frame the driver is asked to route: `stream= offset= has_length= length= fin= bytes=` | "was that stream routed as a WebTransport data stream or parsed as HTTP/3 frames?" |
@@ -50,8 +50,8 @@ keeping them:
 ## The cost, and why it is acceptable
 
 * **Off means off, and nearly free**: one `getenv` per call on the paths that already exist — a packet
-  send, a secret derivation, a frame payload — and one `fopen`/`fclose` pair per record when a variable
-  is set. Nothing is formatted, allocated or opened when the variables are unset.
+  send, a ClientHello transcript hash, a frame payload — and one `fopen`/`fclose` pair per record when a
+  variable is set. Nothing is formatted, allocated or opened when the variables are unset.
 * **These write secrets.** `WT_TLS_SECRET_LOG` writes traffic secrets in the clear, and the packet log
   writes whole packets; both are only ever set by the interop and investigation workflows, never by the
   tools themselves and never in CI.

@@ -30,6 +30,7 @@
 #include "webtransport/http3/settings.h"
 #include "webtransport/quic/connection.h"
 #include "webtransport/status.h"
+#include "webtransport/webtransport/session_request.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -161,6 +162,14 @@ typedef struct wt_http3_driver {
    * belongs to. */
   uint64_t session_id;
   int session_id_set;
+  /* The `:protocol` token the extended CONNECT of `wt_http3_driver_send_session_request` carries. The draft-16
+   * value is the default (see `wt_webtransport_upgrade_token_t`, where zero is that value, and
+   * `wt_http3_driver_init` zeroes this whole structure), because draft-ietf-webtrans-http3-16 section 3.2 names
+   * `webtransport-h3` and that is what a conforming client sends. The token is not negotiable on the wire: a peer
+   * written against an earlier draft knows only `webtransport` and rejects the CONNECT with H3_MESSAGE_ERROR
+   * before it reads any setting, so reaching such a peer means being TOLD to send the old value -- which is what
+   * `wt_http3_driver_set_upgrade_token` is for, and what the C99 CLI's `--upgrade-token legacy` selects (F-02b). */
+  wt_webtransport_upgrade_token_t upgrade_token;
   /* The request this endpoint sent, so it can be sent AGAIN when a probe timeout reports it lost (RFC 9002
    * section 6.2.4). The bytes are the ones `send_message` left in `scratch`, so they stay valid until the
    * driver sends another message -- which for a client's CONNECT is the rest of the handshake, and which the
@@ -202,6 +211,16 @@ void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoi
 
 /* Say which session this endpoint serves, so a WebTransport stream's prefix can be checked against it. */
 void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_id);
+
+/* Say which `:protocol` token this endpoint's own CONNECT carries.
+ *
+ * The default -- and what `wt_http3_driver_init` leaves in place -- is the draft-16 token, `webtransport-h3`
+ * (draft-ietf-webtrans-http3-16 section 3.2). `WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY` selects the pre-draft
+ * `webtransport` for a peer that predates the rename. The selection is explicit rather than negotiated because it
+ * cannot be negotiated: the peer refuses the extended CONNECT with H3_MESSAGE_ERROR before any SETTINGS exchange,
+ * which is how four of the five third-party peers rejected the draft-16 token (F-02b). Only the two values above
+ * are meaningful; any other value sends the draft-16 token (see `wt_webtransport_upgrade_token_value`). */
+void wt_http3_driver_set_upgrade_token(wt_http3_driver_t *driver, wt_webtransport_upgrade_token_t token);
 
 /* END THE SESSION'S DATA STREAMS: draft-ietf-webtrans-http3-16 section 6's reset, for every WebTransport stream
  * this driver remembers.

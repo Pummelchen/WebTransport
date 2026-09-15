@@ -1,6 +1,7 @@
 import Foundation
 import Darwin
 import Testing
+import WebTransportLoopbackTestSupport
 
 // MARK: - Help and Scenario Selection
 
@@ -30,6 +31,35 @@ func webTransportCLIProcessCoversHelpListInvalidArgumentsAndScenarioExitCodes() 
         let scenario = try WebTransportProcessSupport.run(server, ["--scenario", "demo"])
         #expect(scenario.exitCode == 0)
         #expect(scenario.stdout.contains("PASS demo"))
+    }
+}
+
+// MARK: - No Listener Without A Mode
+
+/// The no-argument invocation must not report a listener it never started.
+///
+/// `WebTransportServer` with no arguments used to build a configuration, store it in a
+/// discarded `WebTransportServer` value, print "local demo endpoint ready" and exit 0.
+/// `WebTransportServer.init` only stores the configuration; it does not bind a socket. A
+/// supervisor or health probe that keys on the exit status therefore read a dead process as a
+/// running endpoint, which is the "hardcoded success / surface wired to nothing" shape the
+/// audit brief bans on a production path (F-repo-ops-07).
+@Test
+func webTransportCLIProcessRefusesToClaimReadinessWithoutAListener() throws {
+    try WebTransportProcessSupport.withExclusiveProcessExecution {
+        guard try WebTransportProcessSupport.debugProductsAvailable() else {
+            return
+        }
+        let server = try WebTransportProcessSupport.productURL("WebTransportServer", configuration: "debug")
+
+        let result = try WebTransportProcessSupport.run(server, [])
+
+        // Nothing was started, so nothing may report success (2 is this tool's argument error).
+        #expect(result.exitCode == 2)
+        #expect(result.stdout.contains("ready") == false)
+        #expect(result.stdout.contains("listening") == false)
+        // The refusal names the argument that would start a listener.
+        #expect(result.stderr.contains("--listen"))
     }
 }
 
@@ -407,6 +437,19 @@ func webTransportCLIProcessPortBindingAndOccupiedPortHandling() throws {
 
         let badAddress = try WebTransportProcessSupport.run(server, ["--listen", "127.0.0.1"])
         #expect(badAddress.exitCode != 0)
+
+        // F-repo-ops-15: a non-positive --timeout-ms would wait forever downstream, so it is
+        // an argument error at parse time, and the space-separated and `=` forms must refuse
+        // it with the same specific message rather than accepting it or falling back to the
+        // generic "invalid payload".
+        for arguments in [
+            ["--listen", "127.0.0.1:0", "--timeout-ms", "0"],
+            ["--listen", "127.0.0.1:0", "--timeout-ms=-1"],
+        ] {
+            let rejected = try WebTransportProcessSupport.run(server, arguments)
+            #expect(rejected.exitCode != 0)
+            #expect(rejected.stderr.contains("--timeout-ms requires a positive integer in milliseconds"))
+        }
     }
 }
 
@@ -686,7 +729,7 @@ enum WebTransportProcessSupport {
         label: String = #function,
         _ body: () async throws -> T
     ) async throws -> T {
-        try await WebTransportLoopbackProcessGate.withLock(label: label, body)
+        try await WebTransportLoopbackTestLock.withLockAsync(label: label) { try await body() }
     }
 
     static func debugProductsAvailable() throws -> Bool {
@@ -938,80 +981,6 @@ enum WebTransportProcessSupport {
         try data.write(to: directory.appendingPathComponent("latest.json"))
         try result.stdout.write(to: directory.appendingPathComponent("latest.stdout"), atomically: true, encoding: .utf8)
         try result.stderr.write(to: directory.appendingPathComponent("latest.stderr"), atomically: true, encoding: .utf8)
-    }
-}
-
-private enum WebTransportLoopbackProcessGate {
-    private static let lockPath = "/tmp/webtransport-loopback-tests.dirlock"
-    private static let ownerFile = "owner.txt"
-    private static let maximumWait: TimeInterval = 180
-
-    static func withLock<T>(label: String, _ body: () throws -> T) throws -> T {
-        try acquireBlocking(label: label)
-        defer {
-            release()
-        }
-        return try body()
-    }
-
-    static func withLock<T>(label: String, _ body: () async throws -> T) async throws -> T {
-        try await acquireAsync(label: label)
-        defer {
-            release()
-        }
-        return try await body()
-    }
-
-    private static func acquireAsync(label: String) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try acquireBlocking(label: label)
-                    continuation.resume()
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
-    private static func acquireBlocking(label: String) throws {
-        let deadline = Date().addingTimeInterval(maximumWait)
-        while true {
-            // SAFETY: Swift supplies a temporary NUL-terminated representation
-            // of this immutable path for the synchronous POSIX call.
-            if unsafe Darwin.mkdir(lockPath, S_IRWXU) == 0 {
-                try writeOwner(label)
-                return
-            }
-            guard errno == EEXIST else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-            if Date() >= deadline {
-                throw ProcessTestError.timeout("loopback-lock", [readOwner()])
-            }
-            usleep(10_000)
-        }
-    }
-
-    private static func writeOwner(_ label: String) throws {
-        let owner = "\(label) pid=\(getpid())"
-        try owner.write(
-            toFile: "\(lockPath)/\(ownerFile)",
-            atomically: true,
-            encoding: .utf8
-        )
-    }
-
-    private static func readOwner() -> String {
-        (try? String(contentsOfFile: "\(lockPath)/\(ownerFile)", encoding: .utf8)) ?? "unknown owner"
-    }
-
-    private static func release() {
-        // SAFETY: Swift supplies temporary NUL-terminated representations of
-        // both immutable paths for these synchronous POSIX calls.
-        _ = unsafe Darwin.unlink("\(lockPath)/\(ownerFile)")
-        _ = unsafe Darwin.rmdir(lockPath)
     }
 }
 

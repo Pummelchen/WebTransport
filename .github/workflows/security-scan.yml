@@ -1,0 +1,102 @@
+# Repository-wide security scanning, in its own workflow so a scanner outage
+# cannot be confused with a product build failure and so it runs on every pull
+# request even when neither product's sources changed.
+#
+# Both jobs are blocking. Each tool is pinned to the version the audit ran
+# (gitleaks 8.30.1, trivy 0.74.0 -- AUDIT/findings/repo-ops.md, "Scanner runs")
+# and the downloaded archive is checked against the release's own checksum list,
+# so a moved release tag cannot silently change the scanner. A tool that cannot
+# be installed fails its job with the reason printed; nothing here passes
+# silently when a scanner is absent.
+#
+# See F-repo-ops-06 and `.gitleaks.toml` / `.trivy.yaml` for what is waived and
+# why, and SECURITY.md, "Automated Scanning", for the system-OpenSSL decision.
+
+name: Security scan
+
+"on":
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+# F-repo-ops-12: both jobs only read the repository, so the token is given
+# nothing else. This workflow was added after that finding was filed and would
+# otherwise have re-introduced the same omission.
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    name: Secret scan / full history (gitleaks)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout the full history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          # gitleaks scans commits, not the working tree, so a shallow clone
+          # would scan one commit and call the history clean.
+          fetch-depth: 0
+
+      - name: Install gitleaks 8.30.1
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          asset="gitleaks_${version}_linux_x64.tar.gz"
+          mkdir -p /tmp/gitleaks-install
+          cd /tmp/gitleaks-install
+          curl -sSL -O "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${asset}"
+          curl -sSL -o checksums.txt "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_checksums.txt"
+          grep " ${asset}\$" checksums.txt | sha256sum -c -
+          tar -xzf "${asset}"
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan every commit for credentials
+        # Exits 1 on a finding. `.gitleaks.toml` allowlists exactly the two
+        # audited false-positive classes and nothing else; --redact keeps any
+        # real secret out of the job log.
+        run: |
+          command -v gitleaks >/dev/null || {
+            echo "gitleaks is not installed; refusing to report a clean history"
+            exit 1
+          }
+          gitleaks git --no-banner --redact --config .gitleaks.toml .
+
+  dependency-scan:
+    name: Dependency and secret scan (trivy)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install trivy 0.74.0
+        run: |
+          set -euo pipefail
+          version=0.74.0
+          asset="trivy_${version}_Linux-64bit.tar.gz"
+          mkdir -p /tmp/trivy-install
+          cd /tmp/trivy-install
+          curl -sSL -O "https://github.com/aquasecurity/trivy/releases/download/v${version}/${asset}"
+          curl -sSL -o checksums.txt "https://github.com/aquasecurity/trivy/releases/download/v${version}/trivy_${version}_checksums.txt"
+          grep " ${asset}\$" checksums.txt | sha256sum -c -
+          tar -xzf "${asset}" trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
+          trivy --version
+
+      - name: Scan the tree for vulnerable dependencies and secrets
+        # `.trivy.yaml` enables `vuln` and `secret` and sets exit-code 1, so any
+        # finding fails the job. The system OpenSSL the C99 library links is not
+        # vendored and cannot be inventoried by a filesystem scan; that decision
+        # is written down in SECURITY.md, "Automated Scanning".
+        run: |
+          command -v trivy >/dev/null || {
+            echo "trivy is not installed; refusing to report a clean scan"
+            exit 1
+          }
+          trivy fs --config .trivy.yaml .

@@ -39,6 +39,11 @@ typedef struct wt_loop_config {
    * which a server has something to park, so it is what reaches that path from the tools (WT-189). */
   int early_stream;
   const char *message;
+  /* CLIENT only: which `:protocol` token the CONNECT carries, as the `wt_webtransport_upgrade_token_t` value
+   * (0 is the draft-16 default, 1 the pre-draft token) -- an int so this header does not depend on the HTTP/3
+   * headers, the same shape `trust` uses. The client cannot negotiate the token and a pre-draft peer refuses the
+   * session before any SETTINGS exchange, so the tool is told which one to send (F-02b). */
+  int upgrade_token;
   /* The server's identity, and the pin the client checks it against. Exactly one of the two is used per side. */
   const wt_tls_self_signed_t *identity;
   const uint8_t *pin; /* WT_SHA256_LEN bytes, or NULL for the loopback development bypass */

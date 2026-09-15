@@ -10,6 +10,12 @@ public enum QUICStateError: Error, Equatable, CustomStringConvertible, Sendable 
     case invalidAckFrame
     case flowControlViolation(limit: UInt64, attempted: UInt64)
     case streamStateViolation(String)
+    /// A final-size rule was broken (RFC 9000 section 4.5).
+    ///
+    /// Kept separate from ``streamStateViolation(_:)`` so the FINAL_SIZE_ERROR
+    /// versus STREAM_STATE_ERROR choice is made on the error case rather than on
+    /// the wording of a message.
+    case finalSizeViolation(String)
     case datagramTooLarge(limit: Int, attempted: Int)
     case connectionClosed
     case idleTimeout
@@ -34,6 +40,8 @@ public enum QUICStateError: Error, Equatable, CustomStringConvertible, Sendable 
             "flow control violation: attempted \(attempted), limit \(limit)"
         case .streamStateViolation(let message):
             "stream state violation: \(message)"
+        case .finalSizeViolation(let message):
+            "final size violation: \(message)"
         case .datagramTooLarge(let limit, let attempted):
             "datagram too large: attempted \(attempted), limit \(limit)"
         case .connectionClosed:
@@ -231,10 +239,10 @@ public struct QUICAckTracker: Equatable, Sendable {
     /// tracked.
     ///
     /// Something has to bound this. A connection receives packets for as long as
-    /// it lives, and retaining every number seen would grow without limit and
-    /// make `makeAckFrame` sort the entire history on each call, so the cost of
-    /// acknowledging would rise with the age of the connection rather than with
-    /// what is being acknowledged. RFC 9000 section 13.2.4 anticipates exactly
+    /// it lives, and retaining every number seen would grow without limit and make
+    /// acknowledgement generation walk the entire history on each call, so the
+    /// cost of acknowledging would rise with the age of the connection rather than
+    /// with what is being acknowledged. RFC 9000 section 13.2.4 anticipates exactly
     /// this and permits an endpoint to limit what it tracks.
     ///
     /// The window doubles as the replay boundary: a packet number below it is
@@ -251,6 +259,17 @@ public struct QUICAckTracker: Equatable, Sendable {
     /// Packet numbers below this are no longer tracked and are refused on sight.
     public private(set) var discardedBelow: UInt64
 
+    /// The tracked numbers as descending, non-overlapping, non-adjacent ranges.
+    ///
+    /// Maintained as numbers arrive so that ``makeAckFrame(nowMicros:)`` can emit
+    /// an acknowledgement without copying and sorting the whole tracked set: an
+    /// endpoint builds an ACK per ACK-eliciting packet, and ordering 16,384
+    /// numbers per call made acknowledgement cost grow with the window rather
+    /// than with what is being acknowledged. Insertion extends the nearest range
+    /// in place, which is O(1) for the in-order arrival that dominates, and only
+    /// the amortised window trim rebuilds the list.
+    private var receivedRangesDescending: [ClosedRange<UInt64>]
+
     public init(packetNumberSpace: QUICPacketNumberSpace, ackDelayExponent: UInt8 = 3) {
         self.packetNumberSpace = packetNumberSpace
         self.ackDelayExponent = ackDelayExponent
@@ -258,6 +277,7 @@ public struct QUICAckTracker: Equatable, Sendable {
         self.receivedPacketNumbers = []
         self.largestReceived = nil
         self.largestAckElicitingReceiveTimeMicros = nil
+        self.receivedRangesDescending = []
     }
 
     @discardableResult
@@ -274,16 +294,92 @@ public struct QUICAckTracker: Equatable, Sendable {
         }
 
         let inserted = receivedPacketNumbers.insert(packetNumber).inserted
-        if inserted && shouldUpdateLargestReceived(packetNumber) {
-            largestReceived = packetNumber
-            if ackEliciting {
-                largestAckElicitingReceiveTimeMicros = nowMicros
+        if inserted {
+            insertReceivedRange(packetNumber)
+            if shouldUpdateLargestReceived(packetNumber) {
+                largestReceived = packetNumber
+                if ackEliciting {
+                    largestAckElicitingReceiveTimeMicros = nowMicros
+                }
             }
         }
         if inserted {
             discardOutsideTrackingWindow()
         }
         return inserted
+    }
+
+    /// Adds one packet number to ``receivedRangesDescending``.
+    ///
+    /// The list stays sorted high to low with no two ranges adjacent, so
+    /// ``makeAckFrame(nowMicros:)`` can translate it directly into ACK ranges.
+    private mutating func insertReceivedRange(_ packetNumber: UInt64) {
+        guard !receivedRangesDescending.isEmpty else {
+            receivedRangesDescending.append(packetNumber...packetNumber)
+            return
+        }
+        // In-order arrival is the common case and costs O(1): extend the newest
+        // range, or open a new one above it.
+        if let highest = receivedRangesDescending.first, packetNumber > highest.upperBound {
+            if highest.upperBound != UInt64.max, packetNumber == highest.upperBound + 1 {
+                receivedRangesDescending[0] = highest.lowerBound...packetNumber
+            } else {
+                receivedRangesDescending.insert(packetNumber...packetNumber, at: 0)
+            }
+            return
+        }
+        if let lowest = receivedRangesDescending.last, packetNumber < lowest.lowerBound {
+            if packetNumber + 1 == lowest.lowerBound {
+                receivedRangesDescending[receivedRangesDescending.count - 1] = packetNumber...lowest.upperBound
+            } else {
+                receivedRangesDescending.append(packetNumber...packetNumber)
+            }
+            return
+        }
+
+        // A gap in the middle: find the first range whose lower bound is at or
+        // below the number. Ranges descend, so that range is the one below the
+        // insertion point and the one before it is the range above.
+        var low = 0
+        var high = receivedRangesDescending.count
+        while low < high {
+            let mid = low + (high - low) / 2
+            if receivedRangesDescending[mid].lowerBound > packetNumber {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        guard low < receivedRangesDescending.count else {
+            // The end cases above make this unreachable, but a number the set has
+            // accepted must never be dropped from the range list.
+            receivedRangesDescending.append(packetNumber...packetNumber)
+            return
+        }
+        if receivedRangesDescending[low].contains(packetNumber) {
+            return
+        }
+
+        let aboveIndex = low - 1
+        let touchesAbove =
+            low > 0 && receivedRangesDescending[aboveIndex].lowerBound > 0
+            && packetNumber == receivedRangesDescending[aboveIndex].lowerBound - 1
+        let belowUpperBound = receivedRangesDescending[low].upperBound
+        let touchesBelow = belowUpperBound != UInt64.max && packetNumber == belowUpperBound + 1
+
+        if touchesAbove && touchesBelow {
+            // The range below supplies the lower bound, the one above the upper.
+            receivedRangesDescending[aboveIndex] =
+                receivedRangesDescending[low].lowerBound...receivedRangesDescending[aboveIndex].upperBound
+            receivedRangesDescending.remove(at: low)
+        } else if touchesAbove {
+            receivedRangesDescending[aboveIndex] =
+                packetNumber...receivedRangesDescending[aboveIndex].upperBound
+        } else if touchesBelow {
+            receivedRangesDescending[low] = receivedRangesDescending[low].lowerBound...packetNumber
+        } else {
+            receivedRangesDescending.insert(packetNumber...packetNumber, at: low)
+        }
     }
 
     /// Drops packet numbers that have fallen out of the tracking window and
@@ -311,6 +407,11 @@ public struct QUICAckTracker: Equatable, Sendable {
         }
         discardedBelow = floor
         receivedPacketNumbers = receivedPacketNumbers.filter { $0 >= floor }
+        // This runs once per window's worth of packets, so rebuilding the range
+        // list by sorting here amortises to nothing per packet.
+        receivedRangesDescending = contiguousClosedRangesDescending(
+            receivedPacketNumbers.sorted(by: >)
+        )
     }
 
     private func shouldUpdateLargestReceived(_ packetNumber: UInt64) -> Bool {
@@ -325,18 +426,20 @@ public struct QUICAckTracker: Equatable, Sendable {
             return nil
         }
 
-        let ranges = contiguousRangesDescending(Array(receivedPacketNumbers).sorted(by: >))
+        // The ranges are already ordered high to low and non-adjacent, so this is
+        // a walk over the gaps rather than a copy and sort of the whole window.
+        let ranges = receivedRangesDescending
         guard let first = ranges.first else {
             return nil
         }
 
-        let firstAckRange = first.high - first.low
+        let firstAckRange = first.upperBound - first.lowerBound
         var extraRanges: [QUICAckRange] = []
-        var previousLow = first.low
+        var previousLow = first.lowerBound
         for range in ranges.dropFirst() {
-            let gap = previousLow - range.high - 2
-            extraRanges.append(QUICAckRange(gap: gap, length: range.high - range.low))
-            previousLow = range.low
+            let gap = previousLow - range.upperBound - 2
+            extraRanges.append(QUICAckRange(gap: gap, length: range.upperBound - range.lowerBound))
+            previousLow = range.lowerBound
         }
 
         let delayMicros = largestAckElicitingReceiveTimeMicros.map { nowMicros >= $0 ? nowMicros - $0 : 0 } ?? 0
@@ -443,6 +546,21 @@ public struct QUICLossRecovery: Equatable, Sendable {
     public var packetThreshold: UInt64
     public private(set) var sentPackets: [QUICPacketNumberSpace: [UInt64: QUICSentPacket]]
 
+    /// How many packet numbers the last ``processAck(_:in:)`` passed through a sort.
+    ///
+    /// A cost probe, not protocol state. The regression test in
+    /// `QUICCoreStateTests` pins the classification to one ordering of the
+    /// outstanding set, because the cost of acknowledging must not double just
+    /// because two passes need the same numbers in order.
+    private(set) var acknowledgementOrderingSteps = 0
+
+    /// How many ACK ranges the last ``processAck(_:in:)`` compared a packet against.
+    ///
+    /// The peer chooses how many ranges its ACK frame carries, so a per-packet
+    /// scan over all of them is a peer-controlled cost. The test pins the
+    /// classification to O(packets + ranges).
+    private(set) var acknowledgementRangeProbes = 0
+
     public init(packetThreshold: UInt64 = 3) {
         self.packetThreshold = packetThreshold
         self.sentPackets = [:]
@@ -456,23 +574,45 @@ public struct QUICLossRecovery: Equatable, Sendable {
         _ ackFrame: QUICFrame,
         in packetNumberSpace: QUICPacketNumberSpace
     ) throws -> QUICAckProcessingResult {
+        acknowledgementOrderingSteps = 0
+        acknowledgementRangeProbes = 0
         let acknowledgedRanges = try QUICAckTracker.acknowledgedPacketNumberRanges(from: ackFrame)
         guard !acknowledgedRanges.isEmpty else {
             throw QUICStateError.invalidAckFrame
         }
-        let largestAcknowledged = acknowledgedRanges.map(\.high).max() ?? 0
+        let largestAcknowledged = acknowledgedRanges[0].high
 
         var acknowledged: [QUICSentPacket] = []
         var lost: [QUICSentPacket] = []
         var packets = sentPackets[packetNumberSpace, default: [:]]
 
-        for packetNumber in packets.keys.sorted() where acknowledgedRanges.contains(where: { packetNumber >= $0.low && packetNumber <= $0.high }) {
+        // Both passes need the outstanding numbers in ascending order, and the old
+        // code sorted the key set once per pass. The peer's ranges are decoded high
+        // to low, so one cursor over them classifies every packet in ascending
+        // order without re-testing ranges that cannot contain it: the cursor only
+        // ever moves towards the higher ranges as the packet numbers grow.
+        let orderedPacketNumbers = packets.keys.sorted()
+        acknowledgementOrderingSteps += orderedPacketNumbers.count
+
+        var rangeCursor = acknowledgedRanges.count - 1
+        for packetNumber in orderedPacketNumbers {
+            while rangeCursor >= 0, packetNumber > acknowledgedRanges[rangeCursor].high {
+                acknowledgementRangeProbes += 1
+                rangeCursor -= 1
+            }
+            guard rangeCursor >= 0 else {
+                break
+            }
+            acknowledgementRangeProbes += 1
+            guard packetNumber >= acknowledgedRanges[rangeCursor].low else {
+                continue
+            }
             if let packet = packets.removeValue(forKey: packetNumber) {
                 acknowledged.append(packet)
             }
         }
 
-        for packetNumber in packets.keys.sorted()
+        for packetNumber in orderedPacketNumbers
         where isPacketThresholdLost(
             packetNumber: packetNumber,
             largestAcknowledged: largestAcknowledged
@@ -661,34 +801,76 @@ public struct QUICStreamState: Equatable, Sendable {
 
     @discardableResult
     public mutating func receive(_ frame: QUICFrame) throws -> Data {
-        try ensureCanReceive()
-        guard case .stream(let streamID, let offset, let fin, let data) = frame, streamID == id else {
+        switch frame {
+        case .resetStream(let streamID, _, let finalSize):
+            guard streamID == id else {
+                throw QUICStateError.streamStateViolation("expected STREAM frame for stream \(id)")
+            }
+            try receiveResetStream(finalSize: finalSize)
+            return Data()
+        case .stream(let streamID, let offset, let fin, let data):
+            guard streamID == id else {
+                throw QUICStateError.streamStateViolation("expected STREAM frame for stream \(id)")
+            }
+            let frameOffset = offset ?? 0
+            let (attempted, receiveOverflow) = frameOffset.addingReportingOverflow(UInt64(data.count))
+
+            // RFC 9000 section 4.5: both final-size rules are checked before the
+            // receive-closed gate. The FIN that records the final size closes the
+            // receive half in the same step, so a check placed after that gate can
+            // never observe a non-nil `finalReceiveSize`.
+            if let finalReceiveSize {
+                guard !receiveOverflow, attempted <= finalReceiveSize else {
+                    throw QUICStateError.finalSizeViolation("STREAM data exceeds final size")
+                }
+                if fin, attempted != finalReceiveSize {
+                    throw QUICStateError.finalSizeViolation("inconsistent final stream size")
+                }
+            }
+
+            try ensureCanReceive()
+            guard !receiveOverflow else {
+                throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: UInt64.max)
+            }
+            guard frameOffset == receiveOffset else {
+                throw QUICStateError.streamStateViolation("out-of-order STREAM data is not accepted")
+            }
+            guard attempted <= maxReceiveOffset else {
+                throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: attempted)
+            }
+
+            receiveOffset = attempted
+            if fin {
+                finalReceiveSize = attempted
+                receiveClosed = true
+            }
+            return data
+        default:
             throw QUICStateError.streamStateViolation("expected STREAM frame for stream \(id)")
         }
-        let frameOffset = offset ?? 0
-        guard frameOffset == receiveOffset else {
-            throw QUICStateError.streamStateViolation("out-of-order STREAM data is not accepted")
-        }
-        let (attempted, receiveOverflow) = frameOffset.addingReportingOverflow(UInt64(data.count))
-        guard !receiveOverflow else {
-            throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: UInt64.max)
-        }
-        guard attempted <= maxReceiveOffset else {
-            throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: attempted)
-        }
-        if let finalReceiveSize, attempted > finalReceiveSize {
-            throw QUICStateError.streamStateViolation("STREAM data exceeds final size")
-        }
+    }
 
-        receiveOffset = attempted
-        if fin {
-            if let finalReceiveSize, finalReceiveSize != attempted {
-                throw QUICStateError.streamStateViolation("inconsistent final stream size")
-            }
-            finalReceiveSize = attempted
-            receiveClosed = true
+    /// Records the Final Size carried by an inbound RESET_STREAM frame and closes
+    /// the receive half (RFC 9000 sections 4.5 and 19.4).
+    ///
+    /// A RESET_STREAM is produced by the peer's send side, so for this endpoint it
+    /// is the receive half's final size, and it is the only way that size becomes
+    /// known when the peer resets without ever sending FIN. Once recorded the size
+    /// cannot change, and it cannot be below the bytes already received.
+    private mutating func receiveResetStream(finalSize: UInt64) throws {
+        guard hasReceiveHalf else {
+            throw QUICStateError.streamStateViolation(
+                "cannot receive on locally initiated unidirectional stream")
         }
-        return data
+        guard finalSize >= receiveOffset else {
+            throw QUICStateError.finalSizeViolation(
+                "RESET_STREAM final size is below the bytes already received")
+        }
+        if let finalReceiveSize, finalReceiveSize != finalSize {
+            throw QUICStateError.finalSizeViolation("inconsistent final stream size")
+        }
+        finalReceiveSize = finalSize
+        receiveClosed = true
     }
 
     public mutating func applyMaxStreamData(_ maximum: UInt64) {
@@ -715,11 +897,32 @@ public struct QUICStreamState: Equatable, Sendable {
         return .stopSending(id: id, applicationErrorCode: applicationErrorCode)
     }
 
+    /// Whether this endpoint owns the stream's send half.
+    ///
+    /// RFC 9000 section 2.1: a bidirectional stream is owned in both
+    /// directions by both endpoints, while a unidirectional stream is owned in
+    /// its single direction by the endpoint that initiated it. Callers use this
+    /// to decide whether a send-side signal (STREAM data, RESET_STREAM) may be
+    /// produced at all, which is a different question from whether the send
+    /// side is still open.
+    public var hasSendHalf: Bool {
+        direction == .bidirectional || localRole == endpointRole(for: initiator)
+    }
+
+    /// Whether this endpoint owns the stream's receive half.
+    ///
+    /// The mirror of ``hasSendHalf``: a unidirectional stream whose peer is the
+    /// initiator can only be received from, so a receive-side signal
+    /// (STOP_SENDING) must not be produced for the other form.
+    public var hasReceiveHalf: Bool {
+        direction == .bidirectional || localRole != endpointRole(for: initiator)
+    }
+
     private func ensureCanSend() throws {
         guard !sendClosed && !resetSent else {
             throw QUICStateError.streamStateViolation("send side is closed")
         }
-        if direction == .unidirectional && localRole != endpointRole(for: initiator) {
+        guard hasSendHalf else {
             throw QUICStateError.streamStateViolation("cannot send on peer-initiated unidirectional stream")
         }
     }
@@ -728,7 +931,7 @@ public struct QUICStreamState: Equatable, Sendable {
         guard !receiveClosed && !stopSendingSent else {
             throw QUICStateError.streamStateViolation("receive side is closed")
         }
-        if direction == .unidirectional && localRole == endpointRole(for: initiator) {
+        guard hasReceiveHalf else {
             throw QUICStateError.streamStateViolation("cannot receive on locally initiated unidirectional stream")
         }
     }
@@ -900,6 +1103,12 @@ private func contiguousRangesDescending(_ numbers: [UInt64]) -> [(high: UInt64, 
     }
     ranges.append((high: high, low: low))
     return ranges
+}
+
+/// The same grouping as ``contiguousRangesDescending(_:)``, in the closed-range
+/// form ``QUICAckTracker`` maintains between trims.
+private func contiguousClosedRangesDescending(_ numbers: [UInt64]) -> [ClosedRange<UInt64>] {
+    contiguousRangesDescending(numbers).map { $0.low...$0.high }
 }
 
 private func insertClosedRange(low: UInt64, high: UInt64, into numbers: inout Set<UInt64>) {

@@ -116,6 +116,8 @@ static void test_the_driver_tables_are_bounded(void) {
     wt_http3_driver_t frames;
     wt_http3_endpoint_t frames_endpoint;
     uint8_t header[2] = {0x01U, 0x40U}; /* a DATA frame whose payload has not arrived */
+    /* The driver reads the endpoint's role, so the endpoint must exist before it is handed over. */
+    wt_http3_endpoint_init(&frames_endpoint, WT_HTTP3_ROLE_SERVER);
     wt_http3_driver_init(&frames, &frames_endpoint);
     for (index = 0U; index < (uint64_t)WT_HTTP3_DRIVER_FRAMES_MAX; index++) {
       WT_EXPECT_OK("a stream is part way through a frame",

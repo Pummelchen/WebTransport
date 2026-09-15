@@ -58,9 +58,23 @@ public enum WebTransportHTTP3Headers {
 
     public static func validateSuccessfulResponse(_ fields: [HTTPFieldLine]) throws {
         let map = try pseudoHeaderMap(fields)
-        guard let status = map[":status"], let value = Int(status), (200..<300).contains(value) else {
+        guard let status = map[":status"], let value = parseStatusCode(status), (200..<300).contains(value) else {
             throw QUICCodecError.malformed("WebTransport response requires 2xx :status")
         }
+    }
+
+    /// Parses `:status` under RFC 9110 section 15, which defines
+    /// `status-code = 3DIGIT`.
+    ///
+    /// `UInt16(_:)` also accepts a leading sign and leading zeros, so the grammar
+    /// is checked on the digits themselves before the conversion rather than
+    /// trusting the conversion's result.
+    static func parseStatusCode(_ value: String) -> UInt16? {
+        let bytes = value.utf8
+        guard bytes.count == 3, bytes.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) else {
+            return nil
+        }
+        return UInt16(value)
     }
 
     public static func connectRequestHeadersFrame(

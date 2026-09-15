@@ -1,0 +1,156 @@
+[
+  {
+    "id": "F-swift-architecture-01",
+    "severity": "S0",
+    "category": "unsafe",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 831,
+    "title": "CONNECT-stream capsule reader hides an unbounded, peer-controlled buffer: remote memory exhaustion",
+    "evidence": "receiveConnectCapsules (807-850): `var buffered = initialBytes` then `let received = try await stream.receive(atMost: 8_192); buffered.append(received.content)` (831) in a loop. popCompleteCapsule (852-877) decodes the capsule length from the peer: `let payloadLength = try QUICVarInt.decode(from: &cursor)` and rejects only `payloadLength > UInt64(Int.max)`; `guard buffer.count >= capsuleLength else { return nil }` keeps accumulating until the whole declared capsule arrives. The 1024-byte WT_CLOSE_SESSION cap is enforced only later, after buffering (WebTransportFlowControl.swift:169). Each read also re-opens QUIC flow-control credit, so a peer can stream indefinitely; the shipped default bind is non-loopback (WebTransport.swift:101 `localOnly: Bool = false`).",
+    "expected": "A declared capsule length above the largest legal CONNECT-stream capsule is rejected before any buffering, and a partial capsule that exceeds the bound resets the stream with H3_MESSAGE_ERROR.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-02",
+    "severity": "S1",
+    "category": "unsafe",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 1752,
+    "title": "waitForReady leaks its checked continuation and connection observer when the handshake times out",
+    "evidence": "waitForReady (1727-1802) parks `try await withCheckedThrowingContinuation { continuation in ... connection.onStateUpdate { _, state in handleState(state) } ... }` (1752, 1790) inside `withTimeout(1751)`. handleState (1754-1781) is the only path that resumes the inner continuation. withTimeout's expiry path (1978-1984) does `operationTask.cancel()` and resumes only its own outer continuation; `withCheckedThrowingContinuation` does not resume on cancellation, and there is no withTaskCancellationHandler. The abandoned task therefore stays suspended on an unresumed continuation, retaining the observer closure and role until the connection independently reaches .failed/.cancelled, or forever.",
+    "expected": "The inner continuation is resumed exactly once on every path including timeout/cancellation, and the state observer does not outlive the wait.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-03",
+    "severity": "S1",
+    "category": "bug",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 1804,
+    "title": "datagramsUsable returns a constant true, so the public datagramsAvailable flag and echo() report a capability that was never negotiated",
+    "evidence": "`static func datagramsUsable(_: NetworkConnection<QUIC>) -> Bool { return true }` (1804-1811) discards the connection. Its value becomes WebTransportNetworkSession.datagramsAvailable (477) and then the public WebTransportSession.datagramsAvailable (WebTransport.swift:299); WebTransportClient.echo branches on it at WebTransport.swift:403. The only test touching it asserts the constant: WebTransportPublicAPITests.swift:178-179 `#expect(session.datagramsAvailable)`.",
+    "expected": "datagramsAvailable reflects negotiated DATAGRAM support, or the public API does not present an unverified constant as a capability fact.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-04",
+    "severity": "S1",
+    "category": "logic",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 446,
+    "title": "receive(maximumBytes:) ignores its bound when the stream has a buffered initial payload",
+    "evidence": "`if let initialPayload = await state.consumeInitialPayload(), !initialPayload.isEmpty { ...; return initialPayload }` (446-453) returns before `readStream(..., maxBytes: maximumBytes)`; the accept path (627-632) stores `prefix.remainingPayload`, which can be as large as `maximumInitialBytes` (default 64 KiB, read at 609-613). `stream.receive(maximumBytes: 1)` can therefore return ~64 KiB.",
+    "expected": "A read returns at most maximumBytes and keeps the unread remainder for the next read.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-05",
+    "severity": "S1",
+    "category": "logic",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 1046,
+    "title": "The magic value 16 means 'argument not supplied', so an explicit maxConcurrentConnections: 16 is silently overridden by the admission policy",
+    "evidence": "`var admission = try admission.validated(); if maxConcurrentConnections != 16 { ... admission.maxConcurrentConnections = maxConcurrentConnections }` (1045-1053). WebTransport.swift:437-453 `listen(on:maxConcurrentConnections: Int = 16)` forwards the value unchanged, so an explicit 16 is indistinguishable from the default; with `admission: .publicFacing` (256) the listener runs at 256. The regression test covers only 1 and 0/-1 (WebTransportServerPolicyTests.swift:146-168).",
+    "expected": "An explicit limit always wins, and 'not supplied' is represented by nil rather than by a valid value.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-06",
+    "severity": "S2",
+    "category": "incomplete",
+    "file": "Swift/Sources/WebTransportHTTP3Core/WebTransportSession.swift",
+    "line": 1544,
+    "title": "WebTransport flow control, and the multi-session path it gates, are implemented in HTTP3Core but unreachable from the shipped runtime",
+    "evidence": "`webTransportFlowControlNegotiated` (1544-1549) is `http3.localSettings.webTransportFlowControlEnabled(with: remoteSettings)`; the runtime's local settings are always one of the profiles in HTTP3Settings.swift:81-107, none of which sets settingsWTInitialMaxData/Streams (HTTP3Constants.swift:101-103), so it is always false. Then WebTransportFlowControl.swift:362-363/383-384 no-op, reserveData/reserveStream (1276-1303/1247-1274) can never enqueue a blocked capsule, validateSessionAdmission (1524-1542) always rejects a second session, and popFlowControlCapsule (803) has no Sources caller outside LibrarySmokeClient/main.swift:961,974. The runtime never serialises .maxData/.maxStreams*/.dataBlocked/.streamsBlocked* (grep of Swift/Sources). The compliance matrix nevertheless marks this family .pass (WebTransportComplianceMatrix.swift:53-59).",
+    "expected": "Either the runtime negotiates flow control, grants credit, emits WT_MAX_*/blocked capsules and serves multiple sessions per connection, or the unreachable half is not presented as shipped behaviour.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-07",
+    "severity": "S2",
+    "category": "bug",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 620,
+    "title": "A stream prefix naming an unknown session is read, buffered, then dropped with unexpectedFrame and no reset",
+    "evidence": "The guard at 620-626 throws .unexpectedFrame when `prefix.sessionID.rawValue != sessionID`. For a server-role manager, an unknown session makes sessionForIngressOrPending return nil (WebTransportSession.swift:1484-1490), so acceptBidirectionalStreamWithActions buffers the stream and still returns a non-nil prefix (923-931). The bytes have already been consumed by readFirstChunk (609-613); no RESET_STREAM is sent, the error names the wrong condition, and the manager keeps the stream in bufferedStreamsByID because neither promoteBufferedStreams nor discardBufferedIngress can ever run for that session. The manager's own rejectionFrame (returned for buffered-ingress overflow) is likewise never sent by the runtime (same guard).",
+    "expected": "A stream for an unknown/foreign session is reset at the protocol level, not registered or buffered, and the error names sessionGone/h3ID.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-08",
+    "severity": "S2",
+    "category": "unsafe",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 672,
+    "title": "No per-session demultiplexing for the connection-scoped datagram channel or inbound-stream queue (latent; unreachable while one session per connection)",
+    "evidence": "receiveDatagram (657-679) pops the next datagram from the connection-wide channel (`try await datagrams.receive().content`, 668) and only afterwards checks `responseSessionID.rawValue == self.sessionID` (672), throwing .invalidPayload when it belongs to another session, which has already consumed and lost it. acceptBidirectionalStream (598-605) takes the next bidirectional stream from the shared collector regardless of session. HTTP3Core, WebTransportLibrarySmokeMatrix.runMultiSession and the compliance matrix all model several sessions per connection, so the layers disagree about the contract.",
+    "expected": "A connection-scoped receive path delivers each datagram/stream to the session named in its prefix, or the runtime states and enforces one session per connection.",
+    "confidence": "suspected"
+  },
+  {
+    "id": "F-swift-architecture-09",
+    "severity": "S2",
+    "category": "deps",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 1600,
+    "title": "The ALPN identifier h3 is duplicated across modules and the policy constant is never used by the runtime",
+    "evidence": "`QUIC(alpn: [\"h3\"]) { UDP() }` (1600) hard-codes what WebTransportSecurityPolicy.swift:2 declares as `public static let requiredHTTP3Protocol = \"h3\"`. grep of Swift/Sources finds WebTransportALPNPolicy only at its declaration and WebTransportCLIConformance.swift:719, so offer and validation can diverge with no build or test failure.",
+    "expected": "One exported constant feeds both the QUIC configuration and the validation policy.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-10",
+    "severity": "S2",
+    "category": "docs",
+    "file": "Swift/Sources/WebTransport/WebTransport.docc/WebTransport.md",
+    "line": 10,
+    "title": "DocC promises a unidirectional-stream API the shipped product lacks, and claims the protocol helpers are not public while five of them are library products",
+    "evidence": "WebTransport.md:10 says the module exposes 'bidirectional streams, unidirectional streams, datagrams'; grep -rn -i unidirectional Swift/Sources/WebTransport/ returns only that sentence, and WebTransport.swift exposes only openBidirectionalStream (314) and acceptBidirectionalStream (318) while WebTransportSessionManager already implements openUnidirectionalStream/acceptUnidirectionalStream. WebTransport.md:15-16 claims the package 'keeps deterministic protocol helpers out of the public release surface', but Package.swift:18-41 ships WebTransportQUICCore, WebTransportTLSCore, WebTransportHTTP3Core, WebTransportUDPApple and WebTransportCryptoApple as library products.",
+    "expected": "Documentation matches the shipped product surface, or the product exposes what the documentation promises.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-11",
+    "severity": "S2",
+    "category": "logic",
+    "file": "Swift/Sources/WebTransportHTTP3Core/WebTransportSession.swift",
+    "line": 705,
+    "title": "close() and drain() are not idempotent: a second call throws sessionGone",
+    "evidence": "makeCloseSessionCapsuleResult (699-721) calls `_ = try sessionForIngress(sessionID)` (705), and sessionForIngress (1470-1482) throws WebTransportDraft16Error(.sessionGone) for state .closed. The public WebTransportSession.close (WebTransport.swift:351) and drain() therefore fail when invoked twice, e.g. on an error path plus a defer, unlike WebTransportListeningServer.shutdown which is documented and tested as idempotent.",
+    "expected": "Closing or draining an already-closed session is a no-op; only genuinely wrong states throw.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-12",
+    "severity": "S3",
+    "category": "deps",
+    "file": "Package.swift",
+    "line": 66,
+    "title": "WebTransportCLIConformance declares WebTransportCryptoApple but never imports or uses it",
+    "evidence": "Package.swift:64-74 (and identically Swift/Package.swift:70-80) lists \"WebTransportCryptoApple\" in the target's dependencies. grep -rn 'CryptoApple\\|QUICInitialKeyDerivation\\|QUICPacketProtection' Swift/Sources/WebTransportCLIConformance/ returns no matches, and the file's imports (lines 1-6) are Foundation, WebTransport, WebTransportHTTP3Core, WebTransportQUICCore, WebTransportTLSCore, WebTransportUDPApple.",
+    "expected": "A target's declared dependencies equal the project modules its sources import.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-13",
+    "severity": "S3",
+    "category": "dead",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 1571,
+    "title": "Unused constants, a duplicated private helper, and a vestigial parameter",
+    "evidence": "defaultAuthority/defaultPath/defaultOrigin/defaultProtocol (1571-1574) have no reader in Swift/Sources (grep returns the definitions only; the same literals are repeated as default arguments). `renderSettings` is defined byte-identically twice, at 106-111 and 1547-1552. `makeRequestStreamPayload(streamID:requestFrame:)` (1649-1651) ignores streamID and returns `try requestFrame.encode()`.",
+    "expected": "One definition per shared literal/helper and no unused parameters.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-architecture-14",
+    "severity": "S3",
+    "category": "placeholder",
+    "file": "Swift/Sources/WebTransportHTTP3Core/WebTransportComplianceMatrix.swift",
+    "line": 2,
+    "title": "The shipped compliance matrix has a single-case PASS status, so allPass is a tautology",
+    "evidence": "`public enum WebTransportDraft16ComplianceStatus: String, Equatable, Sendable { case pass = \"PASS\" }` (1-3); all six requirement families are hard-coded `status: .pass` (25-79); `allPass` (81-83) only re-checks those literals, so the public type can never report a gap, while at least one claim (flow control) is unreachable in production (F-swift-architecture-06).",
+    "expected": "A compliance status that can express partial/not-implemented/unknown, or documentation rather than a tautological code check.",
+    "confidence": "confirmed"
+  }
+]

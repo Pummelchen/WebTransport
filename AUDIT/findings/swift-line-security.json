@@ -1,0 +1,134 @@
+[
+  {
+    "id": "F-swift-line-security-01",
+    "severity": "S1",
+    "category": "bug",
+    "file": "Swift/Sources/WebTransportHTTP3Core/WebTransportSession.swift",
+    "line": 1440,
+    "title": "Session teardown resets and stops every associated stream regardless of which half this endpoint owns",
+    "evidence": "terminateAssociatedStreams appends both streamResetFrames.append(stream.reset(...)) and streamStopSendingFrames.append(stream.stopSending(...)) for every id in streamIDsBySessionID/bufferedStreamIDsBySessionID (WebTransportSession.swift:1435-1457); the set includes peer-initiated unidirectional streams registered by acceptUnidirectionalStreamWithActions (WebTransportSession.swift:985-987) and locally initiated unidirectional streams (WebTransportSession.swift:865). QUICStreamState.reset/stopSending (QUICCoreState.swift:706-716) bypass the ensureCanSend/ensureCanReceive direction guards (QUICCoreState.swift:718-733). RFC 9000 section 19.4/19.5 require STREAM_STATE_ERROR for a RESET_STREAM on a send-only stream or a STOP_SENDING on a receive-only stream. The sibling C99 implementation guards exactly this: C99/src/http3/driver.c:917-929 defines has_send_half/has_receive_half and 979-998 gates reset/stop_sending on them. Reachable through the shipped WebTransportHTTP3Core library product; the top-level runtime discards the frames (WebTransportInteroperableNetworkRuntime.swift:763-769).",
+    "expected": "Emit RESET_STREAM only on a stream whose send half this endpoint owns and STOP_SENDING only where it owns the receive half (both halves for bidirectional streams).",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-02",
+    "severity": "S1",
+    "category": "incomplete",
+    "file": "Swift/Sources/WebTransportQUICCore/QUICPacket.swift",
+    "line": 310,
+    "title": "Short-header reserved bits are never validated, although the long-header and Retry decoders do validate them",
+    "evidence": "QUICShortHeaderPacket.decode checks only (first & 0x80) == 0 and (first & 0x40) != 0 (QUICPacket.swift:303-308) before reading the packet number; the long-header decoder rejects (first & 0x0c) != 0 (QUICPacket.swift:90-94) and Retry does the same (:214-216). grep -n \"0x18\" WebTransportQUICCore/QUICPacket.swift returns no match. RFC 9001 section 5.4 requires PROTOCOL_VIOLATION for non-zero reserved bits after header protection removal; short-header reserved bits are 0x18. C99 checks both forms: C99/src/quic/packet.c:286 (0x0c) and 404-406 (0x18), escalated in C99/src/quic/packet_io.c:218-221. Public API of the shipped WebTransportQUICCore product.",
+    "expected": "Reject a short-header packet whose reserved bits (0x18) are non-zero with QUICCodecError.malformed, matching the long-header path.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-03",
+    "severity": "S1",
+    "category": "unsafe",
+    "file": "Swift/Sources/WebTransportNetworkRuntime/WebTransportInteroperableNetworkRuntime.swift",
+    "line": 2390,
+    "title": "Per-connection inbound-stream queue has no bound and post-establishment unidirectional streams have no consumer",
+    "evidence": "InteroperableQUICStreamQueue has private var queued: [Int: [Element]] = [:] (:2330) and appends every inbound stream with queued[direction, default: []].append(stream) (:2390) with no cap and no eviction; fail(_:) only resumes waiters (:2441-2450). The only consumers are acceptBidirectionalStream (:602), the server's CONNECT stream (:1447) and readPeerControlStream during establishment (:1890). WebTransportSessionManager.acceptUnidirectionalStream (WebTransportHTTP3Core/WebTransportSession.swift:949) has no caller anywhere in WebTransportNetworkRuntime or WebTransport (grep: no matches), and the public API only exposes acceptBidirectionalStream (WebTransport/WebTransport.swift:314-320). QUIC stream limits do not bound this over time because RFC 9000 section 4.6 stops counting a stream once it is closed regardless of application reads; the exact remote growth rate depends on Network.framework stream accounting, hence suspected.",
+    "expected": "A bounded per-direction stream queue (cap plus reset/refusal of excess streams) and a consumer for peer-initiated unidirectional streams, so no accepted stream is retained for the life of the connection without bound.",
+    "confidence": "suspected"
+  },
+  {
+    "id": "F-swift-line-security-04",
+    "severity": "S2",
+    "category": "dead",
+    "file": "Swift/Sources/WebTransportQUICCore/QUICCoreState.swift",
+    "line": 679,
+    "title": "Both final-size checks in QUICStreamState.receive are unreachable, so FINAL_SIZE_ERROR is never produced by this type",
+    "evidence": "receive() calls ensureCanReceive() first (:664), which throws when receiveClosed or stopSendingSent is set (:727-734); finalReceiveSize is private(set) and assigned exactly once in the file, at :688 together with receiveClosed = true. Therefore both `if let finalReceiveSize` tests (:679, :685) always see nil. grep -n finalReceiveSize QUICCoreState.swift shows the declaration at :614, reads at :679/:685 and the single assignment at :688. TLSQUICConnectionState compensates with its own pre-check (TLSQUICConnectionState.swift:338-361), which is evidence the intended check is misplaced.",
+    "expected": "A STREAM frame whose offset+length exceeds a known final size, and a FIN whose size differs from one already recorded, are reported as final-size errors; finalReceiveSize is also recorded from RESET_STREAM (RFC 9000 sections 4.5, 19.4).",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-05",
+    "severity": "S2",
+    "category": "incomplete",
+    "file": "Swift/Sources/WebTransportHTTP3Core/QPACK.swift",
+    "line": 876,
+    "title": "HTTP field values from the peer are never validated: CR, LF and NUL are accepted, and :status accepts non-3DIGIT forms",
+    "evidence": "HTTPFieldLine.init validates only the name and stores the value verbatim (QPACK.swift:8-25); decodeStringLiteral stops at `guard let value = String(data: decodedBytes, encoding: .utf8)` (QPACK.swift:866-880), and \"\\r\\n\", \"\\u{0}\" and other C0 controls are valid UTF-8. RFC 9110 section 5.5 forbids CR/LF/NUL in field values and RFC 9114 section 4.1.2 makes such a field section malformed. Separately, WebTransportSessionHeaders.status uses UInt16(statusValue) plus a 100...599 range check (WebTransportSession.swift:1727-1735) and WebTransportHTTP3Headers.validateSuccessfulResponse uses Int(status) (WebTransportHeaders.swift:59-64); `swift -e 'print(UInt16(\"+200\") as Any, UInt16(\"0200\") as Any)'` prints Optional(200) Optional(200), so :status \"+200\"/\"0200\" is accepted although RFC 9110 section 15 defines status-code as 3DIGIT.",
+    "expected": "Reject field values containing C0 controls, DEL, CR, LF or NUL, and accept :status only as exactly three ASCII digits before converting.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-06",
+    "severity": "S2",
+    "category": "logic",
+    "file": "Swift/Sources/WebTransportCryptoApple/QUICInitialKeyDerivation.swift",
+    "line": 62,
+    "title": "CryptoApple HKDF-Expand-Label silently wraps the RFC 5869 block counter, while the TLSCore copy is guarded against it",
+    "evidence": "hkdfExpandLabel guards only outputByteCount <= UInt16.max (QUICInitialKeyDerivation.swift:61-64) and hkdfExpand increments `var counter: UInt8` with `counter &+= 1` and no block-count cap (:81-102); TLS13KeySchedule.hkdfExpandLabel has `guard outputByteCount <= 255 * sha256Length` with a comment naming the counter-wrap hazard (TLS13KeySchedule.swift:36-44). Probe of the copied function: outputByteCount = 255*32 gives blocks=255 counter wrapped to 0: false; outputByteCount = 255*32 + 32 gives blocks=256 counter wrapped to 0: true. QUICPacketProtection.deriveKeys (WebTransportCryptoApple/QUICPacketProtection.swift:19-42) is public and forwards caller byte counts here. Not peer-controlled on the shipped runtime path.",
+    "expected": "Reject outputByteCount above 255 * 32 (the SHA-256 RFC 5869 limit) instead of silently producing a non-RFC HKDF stream.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-07",
+    "severity": "S2",
+    "category": "dead",
+    "file": "Swift/Sources/WebTransportTLSCore/TLSIdentityTrust.swift",
+    "line": 138,
+    "title": "Pinned-certificate trust policy and CertificateVerify verifier are unreachable from any shipped client path",
+    "evidence": "grep -rn \"TLSPinnedCertificateTrustPolicy|TLSCertificateVerifier|evaluate(certificateChainDER\" Swift/Sources returns only the definitions (TLSIdentityTrust.swift:123/138/154, TLSCertificateVerification.swift:19) and one conformance use (WebTransportCLIConformance.swift:732-733). WebTransportQUICPeerTrustPolicy offers only .systemTrust and .localDevelopmentSelfSigned (WebTransportInteroperableNetworkRuntime.swift:48-85), so the shipped runtime delegates all validation to Network.framework and cannot pin a leaf certificate. WebTransportComplianceMatrix.swift:67-78 claims \"pinned trust\" as implemented.",
+    "expected": "Either expose pinning as a client trust-policy configuration wired into the Network.framework verify path, or state that pinning is a WebTransportTLSCore-only API and correct the compliance-matrix claim.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-08",
+    "severity": "S2",
+    "category": "perf",
+    "file": "Swift/Sources/WebTransportTLSCore/TLSHandshakeFlight.swift",
+    "line": 96,
+    "title": "CRYPTO-stream reassembly is quadratic in the buffered byte count and retains every consumed byte forever",
+    "evidence": "append() calls pendingByteCount once per frame (TLSHandshakeFlight.swift:132) and recomputePendingByteCount does two full passes over bytesByOffset (:106-116), so a peer feeding one-byte CRYPTO frames costs O(n^2) (~2x10^9 dictionary probes at the 64 KiB ceiling set at :61) before authentication; bytesByOffset is one dictionary entry per byte (:63, :147). Consumed bytes are never removed (deliberate, :66-73) and every decoded message is appended to the transcript (:218, TLS13KeySchedule.swift:141-143) with no state machine rejecting repeated handshake messages (TLSQUICConnectionState.swift:132-140), so repeated well-formed handshake messages grow both structures without bound for the connection lifetime. Reachable only through the shipped WebTransportTLSCore library product; Network.framework terminates TLS in the runtime.",
+    "expected": "Pending-byte accounting is O(1) per append (stored counter updated by append/markConsumed), and total retained CRYPTO/transcript bytes are bounded for a long-lived connection.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-09",
+    "severity": "S2",
+    "category": "unsafe",
+    "file": "Swift/Sources/WebTransportServer/main.swift",
+    "line": 52,
+    "title": "Peer-controlled echo text is printed into operator logs without escaping (log injection)",
+    "evidence": "WebTransportServer/main.swift:51-53 prints message=\"\\(result.message)\" and WebTransportClient/main.swift:34-36 prints the same shape; result.message is the peer's payload decoded as UTF-8 (WebTransportInteroperableNetworkRuntime.swift:1321-1327 from echoOneStream :1349-1358 for the server, and :365-377 for the client). A peer can embed a double quote and newlines to forge additional log lines. The redacted WebTransportLogEvent path (WebTransport/WebTransport.swift:119-147) and WebTransportErrorSurface (:167-215) exist precisely to keep peer text out of output; these two CLI printfs bypass them.",
+    "expected": "Never interpolate peer-derived text raw; print its byte count (as WebTransportLogEvent.sessionClosed(reasonByteCount:) does) or sanitize control characters first.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-10",
+    "severity": "S2",
+    "category": "bug",
+    "file": "Swift/Sources/WebTransportTestSupport/Phase11Identity.swift",
+    "line": 97,
+    "title": "parseKeyType maps the Ed25519 key type name to kSecAttrKeyTypeECSECPrimeRandom",
+    "evidence": "Phase11IdentitySupport.parseKeyType returns kSecAttrKeyTypeECSECPrimeRandom for both \"ec\"/\"p256\" and \"ed25519\" (Phase11Identity.swift:92-101). A caller selecting ed25519 therefore builds the wrong SecKey attributes (OSStatus -50 on the P-256 attempt, or a mislabelled identity if a P-256 blob is supplied) instead of being told the key type is unsupported. The target is imported by a shipped executable (LibrarySmokeServer/main.swift:4).",
+    "expected": "\"ed25519\" is either mapped to the correct Ed25519 key type or rejected with the same unsupported-key-type error as any unknown name.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-11",
+    "severity": "S3",
+    "category": "style",
+    "file": "Swift/Sources/WebTransportTLSCore/TLSQUICConnectionState.swift",
+    "line": 329,
+    "title": "Error-code selection is decided by substring-matching a human-readable message",
+    "evidence": "closeDueToStreamError switches on `case .streamStateViolation(let message) where message.contains(\"final size\")` to choose FINAL_SIZE_ERROR versus STREAM_STATE_ERROR (TLSQUICConnectionState.swift:325-335). The two cases are distinguishable only by the prose thrown at QUICCoreState.swift:680 and :686, and per F-swift-line-security-04 neither message can currently be produced. Any wording change silently reclassifies a wire-visible connection error.",
+    "expected": "A dedicated QUICStateError case (for example finalSizeViolation) matched structurally rather than by message text.",
+    "confidence": "confirmed"
+  },
+  {
+    "id": "F-swift-line-security-12",
+    "severity": "S3",
+    "category": "bug",
+    "file": "Swift/Sources/WebTransportUDPApple/QUICUDPPort.swift",
+    "line": 62,
+    "title": "setsockopt failure is ignored",
+    "evidence": "QUICUDPPort.init calls `unsafe setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))` and discards the result (QUICUDPPort.swift:59-62), while bind (:70-77), getsockname (:85-92), sendto (:115-125), poll (:149-155) and recvmsg (:184-187) all check their status and throw QUICUDPError.posix after close(fd).",
+    "expected": "Check the setsockopt status and throw QUICUDPError.posix(operation: \"setsockopt\", code: errno) after close(fd), like the neighbouring syscall wrappers.",
+    "confidence": "confirmed"
+  }
+]

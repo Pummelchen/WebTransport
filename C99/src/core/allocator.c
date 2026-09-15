@@ -74,13 +74,19 @@ void *wt_alloc(const wt_allocator_t *a, size_t size) {
 void *wt_alloc_array(const wt_allocator_t *a, size_t count, size_t elem_size,
                      wt_status_t *out_status) {
   size_t total = 0U;
+  void *block;
   wt_status_t status = wt_checked_mul_size(count, elem_size, &total);
   if (status != WT_OK) {
     if (out_status != NULL) *out_status = WT_ERR_OVERFLOW;
     return NULL;
   }
+  block = wt_alloc(a, total);
+  if (block == NULL) {
+    if (out_status != NULL) *out_status = WT_ERR_OUT_OF_MEMORY;
+    return NULL;
+  }
   if (out_status != NULL) *out_status = WT_OK;
-  return wt_alloc(a, total);
+  return block;
 }
 
 void *wt_calloc_array(const wt_allocator_t *a, size_t count, size_t elem_size,

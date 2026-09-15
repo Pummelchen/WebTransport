@@ -2,6 +2,7 @@ import Foundation
 import Darwin
 import Testing
 @testable import WebTransportNetworkRuntime
+import WebTransportLoopbackTestSupport
 import WebTransportQUICCore
 import WebTransportTLSCore
 
@@ -26,7 +27,7 @@ func networkProbeCodecRoundTripsAndRejectsMalformedPackets() throws {
 
 @Test
 func networkProbeClientServerExchangeOverUDP() async throws {
-    let (clientResult, serverResult, localPort) = try await WebTransportRuntimeLoopbackGate.withLock(label: #function) {
+    let (clientResult, serverResult, localPort) = try await WebTransportLoopbackTestLock.withLockAsync(label: #function) {
         let server = try WebTransportNetworkProbeServer(bindPort: 0)
         let task = Task.detached {
             try server.serveOne(timeoutMilliseconds: 30_000)
@@ -326,7 +327,7 @@ func quicPacketProbeRejectsWrongALPNAndTransportParameters() throws {
 
 @Test
 func quicPacketProbeClientServerExchangeOverUDP() async throws {
-    let (clientResult, serverResult, localPort) = try await WebTransportRuntimeLoopbackGate.withLock(label: #function) {
+    let (clientResult, serverResult, localPort) = try await WebTransportLoopbackTestLock.withLockAsync(label: #function) {
         let server = try WebTransportQUICPacketProbeServer(bindPort: 0)
         let task = Task.detached {
             try server.serveOne(timeoutMilliseconds: 15_000)
@@ -468,74 +469,4 @@ private func clientHelloForValidationTest(
             try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519]),
         ]
     ).handshakeMessage()
-}
-
-private enum WebTransportRuntimeLoopbackGate {
-    private static let lockPath = "/tmp/webtransport-loopback-tests.dirlock"
-    private static let ownerFile = "owner.txt"
-    private static let maximumWait: TimeInterval = 180
-
-    static func withLock<T>(label: String, _ body: () async throws -> T) async throws -> T {
-        try await acquireAsync(label: label)
-        defer {
-            release()
-        }
-        return try await body()
-    }
-
-    private static func acquireAsync(label: String) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try acquireBlocking(label: label)
-                    continuation.resume()
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
-    private static func acquireBlocking(label: String) throws {
-        let deadline = Date().addingTimeInterval(maximumWait)
-        while true {
-            // SAFETY: Swift supplies a temporary NUL-terminated representation
-            // of this immutable path for the synchronous POSIX call.
-            if unsafe Darwin.mkdir(lockPath, S_IRWXU) == 0 {
-                try writeOwner(label)
-                return
-            }
-            guard errno == EEXIST else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-            if Date() >= deadline {
-                throw NSError(
-                    domain: "WebTransportRuntimeLoopbackGate",
-                    code: Int(ETIMEDOUT),
-                    userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for loopback lock held by \(readOwner())"]
-                )
-            }
-            usleep(10_000)
-        }
-    }
-
-    private static func writeOwner(_ label: String) throws {
-        let owner = "\(label) pid=\(getpid())"
-        try owner.write(
-            toFile: "\(lockPath)/\(ownerFile)",
-            atomically: true,
-            encoding: .utf8
-        )
-    }
-
-    private static func readOwner() -> String {
-        (try? String(contentsOfFile: "\(lockPath)/\(ownerFile)", encoding: .utf8)) ?? "unknown owner"
-    }
-
-    private static func release() {
-        // SAFETY: Swift supplies temporary NUL-terminated representations of
-        // both immutable paths for these synchronous POSIX calls.
-        _ = unsafe Darwin.unlink("\(lockPath)/\(ownerFile)")
-        _ = unsafe Darwin.rmdir(lockPath)
-    }
 }

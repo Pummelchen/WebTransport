@@ -22,10 +22,12 @@ static void test_drain_and_close(void) {
   const uint8_t *reason = NULL;
   size_t reason_length = 0U;
 
-  /* A drain has no value, and its encoding is the type and a zero length. */
+  /* A drain has no value, and its encoding is the type and a zero length. The
+   * type 0x78ae needs a four-byte varint; the zero length needs one. */
   w = wt_writer_init(bytes, sizeof(bytes));
   WT_EXPECT_OK("a drain writes", wt_webtransport_drain_session_write(&w));
-  WT_EXPECT_U64("as two bytes plus the varint type", 0U, 0U);
+  WT_EXPECT_U64("as a four-byte type and a zero length", 5U,
+                (uint64_t)wt_writer_offset(&w));
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("and decodes", wt_webtransport_capsule_decode(&c, 64U, &capsule, &error));
   WT_EXPECT_U64("as a drain capsule", WT_CAPSULE_DRAIN_SESSION, capsule.type);
