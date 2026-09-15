@@ -2,8 +2,10 @@
  * section 3.1, over RFC 9220's extended CONNECT).
  *
  * A WebTransport session begins with a request that is a CONNECT carrying the
- * `:protocol` pseudo-header with the value `webtransport`. Four rules decide what a
- * decoded request is, and only the last is this layer's own:
+ * `:protocol` pseudo-header with the value `webtransport-h3` (section 3.2); the
+ * pre-draft value `webtransport`, which section 2.1.2 gives to WebTransport over
+ * HTTP/2, is also accepted, for the interoperability reason stated below. Four rules
+ * decide what a decoded request is, and only the last is this layer's own:
  *
  *   - a CONNECT without `:protocol` is an ordinary CONNECT, which is not this layer's
  *     business at all;
@@ -34,14 +36,17 @@
 extern "C" {
 #endif
 
-/* The `:protocol` value that makes a CONNECT a WebTransport request (draft-16 section 3.2). */
-#define WT_WEBTRANSPORT_PROTOCOL_TOKEN "webtransport"
+/* The `:protocol` value that makes a CONNECT a WebTransport request, and the one this endpoint SENDS.
+ * Draft-ietf-webtrans-http3-16 sections 3.2 and 9.1 name it `webtransport-h3`; the Swift reference's draft-16
+ * constants use the same string (Swift/Sources/WebTransportHTTP3Core/HTTP3Constants.swift). */
+#define WT_WEBTRANSPORT_PROTOCOL_TOKEN "webtransport-h3"
 
-/* The PRE-DRAFT token draft-16 renamed away from. This endpoint ACCEPTS it as well as the draft-16 one, and that
- * acceptance is not a courtesy: four of the five independent implementations this tree interoperates with were
- * written against the earlier drafts, and a server that refused the old token would refuse every one of them --
- * the same split the Swift reference calls its interoperable mode. SENDING the draft-16 token by default is
- * `WT-215`, which is a separate decision with its own evidence to reproduce (see the tracker). */
+/* The PRE-DRAFT token draft-16 renamed away from: `webtransport` is the WebTransport-over-HTTP/2 token of
+ * draft-16 section 2.1.2, a DIFFERENT string from the HTTP/3 token above. This server deliberately ACCEPTS it as
+ * well as the draft-16 one, and that acceptance is not a courtesy: four of the five independent implementations
+ * this tree interoperates with were written against the earlier drafts, and a server that refused the old token
+ * would refuse every one of them -- the same split the Swift reference calls its interoperable mode. Both tokens
+ * are accepted; only the draft-16 token is sent. */
 #define WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY "webtransport"
 
 /* Where a CLIENT offers its sub-protocols (draft-16 section 3.3). `wt-protocol` -- the name in protocol.h -- is

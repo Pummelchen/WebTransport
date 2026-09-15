@@ -38,7 +38,7 @@ static void test_accepted_and_not_ours(void) {
   policy.path = "/wt";
   policy.wt_enabled = 1;
 
-  make_request(&message, "CONNECT", "webtransport", "https", "localhost", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost", "/wt");
   WT_EXPECT_OK("a WebTransport CONNECT is decided",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
@@ -80,13 +80,13 @@ static void test_rejections(void) {
   /* A WebTransport request without a scheme or a path. The CONNECT exception in RFC
    * 9114 does not apply to an EXTENDED CONNECT, and a layer that inherited it would
    * accept a request it cannot route. */
-  make_request(&message, "CONNECT", "webtransport", NULL, "localhost", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, NULL, "localhost", "/wt");
   WT_EXPECT_OK("a request with no scheme is decided",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
   WT_EXPECT_U64("with 404", (uint64_t)WT_WEBTRANSPORT_REJECT_NOT_FOUND, (uint64_t)request.status);
 
-  make_request(&message, "CONNECT", "webtransport", "https", "localhost", NULL);
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost", NULL);
   WT_EXPECT_OK("and one with no path",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection as well", (int)WT_WEBTRANSPORT_REQUEST_REJECT,
@@ -94,12 +94,12 @@ static void test_rejections(void) {
 
   /* Authority and path are compared exactly: a different host is not this server's
    * session, and neither is a path that merely starts the same way. */
-  make_request(&message, "CONNECT", "webtransport", "https", "elsewhere", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "elsewhere", "/wt");
   WT_EXPECT_OK("another authority is decided",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
 
-  make_request(&message, "CONNECT", "webtransport", "https", "localhost", "/wt/deeper");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost", "/wt/deeper");
   WT_EXPECT_OK("and a longer path",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
@@ -107,7 +107,7 @@ static void test_rejections(void) {
   /* A server that never advertised WT_ENABLED refuses with 501 rather than serving a
    * session the client could not have known about. */
   policy.wt_enabled = 0;
-  make_request(&message, "CONNECT", "webtransport", "https", "localhost", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost", "/wt");
   WT_EXPECT_OK("a server that did not advertise decides",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
@@ -181,27 +181,27 @@ static void test_an_authority_may_name_the_port_it_is_talking_to(void) {
   policy.path = "/wt";
   policy.wt_enabled = 1;
 
-  make_request(&message, "CONNECT", "webtransport", "https", "localhost:54070", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost:54070", "/wt");
   WT_EXPECT_OK("a port on the authority is decided",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as an acceptance for the host the policy names", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT,
                 (int)request.outcome);
 
   /* The port is not part of the comparison, so a DIFFERENT host is still refused with one. */
-  make_request(&message, "CONNECT", "webtransport", "https", "elsewhere:54070", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "elsewhere:54070", "/wt");
   WT_EXPECT_OK("another host with a port is decided",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
 
   /* An IPv6 literal keeps its colons and drops only the port after the bracket. */
   policy.authority = "[::1]";
-  make_request(&message, "CONNECT", "webtransport", "https", "[::1]:54070", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "[::1]:54070", "/wt");
   WT_EXPECT_OK("a bracketed IPv6 literal with a port is decided",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
 
   /* And the bare literal, with no port at all, is the same host. */
-  make_request(&message, "CONNECT", "webtransport", "https", "[::1]", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "[::1]", "/wt");
   WT_EXPECT_OK("as is the same literal alone",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("which is accepted too", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
@@ -211,10 +211,59 @@ static void test_an_authority_may_name_the_port_it_is_talking_to(void) {
   memset(&policy, 0, sizeof(policy));
   policy.path = NULL;
   policy.wt_enabled = 1;
-  make_request(&message, "CONNECT", "webtransport", "https", "anything:1234", "/anything");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "anything:1234", "/anything");
   WT_EXPECT_OK("a policy with no authority and no path accepts any",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
+}
+
+/* Draft-ietf-webtrans-http3-16 sections 3.2 and 9.1 name the `:protocol` value `webtransport-h3`; the drafts
+ * before it used `webtransport`, which section 2.1.2 defines as the WebTransport-over-HTTP/2 token. They are
+ * DIFFERENT strings, and this server accepts BOTH: the draft-16 token because that is what a conforming peer
+ * sends, the pre-draft one deliberately, because four of the five interop peers send it (see the constant's
+ * comment). Two constants that were the same string could not state that: the client could not send the
+ * draft-16 token at all, no peer could be told the two apart, and the acceptance check `x || x` accepted only
+ * one value while claiming to accept two. */
+static void test_both_protocol_tokens_are_accepted_and_distinct(void) {
+  wt_http3_message_t message;
+  wt_webtransport_request_policy_t policy;
+  wt_webtransport_session_request_t request;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  /* The names are two tokens, which is what makes accepting both a decision rather than a tautology. */
+  WT_EXPECT_TRUE("the draft-16 token is not the pre-draft token",
+                 strcmp(WT_WEBTRANSPORT_PROTOCOL_TOKEN, WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY) != 0);
+  WT_EXPECT_BYTES("and the draft-16 token is the one the draft registers",
+                  (const uint8_t *)"webtransport-h3",
+                  (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN, strlen("webtransport-h3"));
+  WT_EXPECT_BYTES("while the pre-draft token is the HTTP/2 one", (const uint8_t *)"webtransport",
+                  (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY, strlen("webtransport"));
+
+  memset(&policy, 0, sizeof(policy));
+  policy.authority = "localhost";
+  policy.path = "/wt";
+  policy.wt_enabled = 1;
+
+  /* The draft-16 token is the one a conforming client sends, and it is accepted. */
+  make_request(&message, "CONNECT", "webtransport-h3", "https", "localhost", "/wt");
+  WT_EXPECT_OK("a draft-16 request is decided",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
+
+  /* The pre-draft token is accepted too, deliberately and separately. */
+  make_request(&message, "CONNECT", "webtransport", "https", "localhost", "/wt");
+  WT_EXPECT_OK("a pre-draft request is decided",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as an acceptance as well", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT,
+                (int)request.outcome);
+
+  /* A third token is somebody else's extended CONNECT. `webtransport-h2` is the near miss that matters: it is
+   * the same LENGTH as the draft-16 token, so a match that compared only a prefix or a length would accept it. */
+  make_request(&message, "CONNECT", "webtransport-h2", "https", "localhost", "/wt");
+  WT_EXPECT_OK("an unrelated protocol is decided",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as not WebTransport", (int)WT_WEBTRANSPORT_REQUEST_NOT_WEBTRANSPORT,
+                (int)request.outcome);
 }
 
 int main(void) {
@@ -222,5 +271,6 @@ int main(void) {
   test_rejections();
   test_the_settings_a_webtransport_endpoint_advertises();
   test_an_authority_may_name_the_port_it_is_talking_to();
+  test_both_protocol_tokens_are_accepted_and_distinct();
   WT_TEST_MAIN_END("wt_webtransport_session_request");
 }

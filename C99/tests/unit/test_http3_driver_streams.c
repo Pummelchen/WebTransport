@@ -149,7 +149,8 @@ static void test_the_streams_a_session_start_opens(void) {
                  wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, payload, (size_t)frame_length, NULL,
                                          0U, 0U, scratch, sizeof(scratch), &decode_error));
     WT_EXPECT_BYTES("into a CONNECT", (const uint8_t *)"CONNECT", message.method, 7U);
-    WT_EXPECT_BYTES("for the WebTransport protocol", (const uint8_t *)"webtransport", message.protocol, 12U);
+    WT_EXPECT_BYTES("for the WebTransport protocol", (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN,
+                    message.protocol, strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN));
     WT_EXPECT_BYTES("at the path asked for", (const uint8_t *)"/chat", message.path, 5U);
     WT_EXPECT_BYTES("for the authority asked for", (const uint8_t *)"example.com", message.authority, 11U);
   }
