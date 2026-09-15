@@ -130,6 +130,26 @@ static size_t prefix_needed(const uint8_t *bytes, size_t have) {
   return width;
 }
 
+/* How many bytes the WHOLE prefix of a unidirectional stream needs, given `have` bytes assembled so far. The
+ * prefix is the stream TYPE varint and -- for the draft's WebTransport type -- the SESSION ID varint that
+ * follows it (draft-16 section 4.2); the session ID is part of the prefix, not payload, so it is reassembled
+ * here exactly as the type is. The answer never exceeds 8 + 8 = 16, which is the pending table's own bound, and
+ * a value larger than `have` means more bytes are needed. */
+static size_t uni_prefix_length(const uint8_t *bytes, size_t have) {
+  size_t type_width;
+  wt_cursor_t cursor;
+  uint64_t type = 0U;
+
+  if (have == 0U) return 1U; /* wait for the type's first byte */
+  type_width = prefix_needed(bytes, have);
+  if (have < type_width) return type_width;
+  cursor = wt_cursor_init(bytes, type_width);
+  if (wt_quic_varint_decode(&cursor, &type) != WT_OK) return type_width;
+  if (type != WT_WEBTRANSPORT_STREAM_UNI) return type_width;
+  if (have == type_width) return type_width + 1U; /* wait for the session ID's first byte */
+  return type_width + prefix_needed(bytes + type_width, have - type_width);
+}
+
 wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64_t stream_id,
                                                uint64_t offset, const uint8_t *data, size_t length,
                                                wt_http3_endpoint_stream_kind_t *out_kind,
@@ -141,7 +161,7 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
   uint8_t prefix[WT_HTTP3_DRIVER_PREFIX_MAX];
   size_t have = 0U;
   size_t needed;
-  size_t take;
+  size_t take = 0U;
   wt_status_t status;
 
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
@@ -175,15 +195,28 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
     size_t i;
     for (i = 0U; i < have; i++) prefix[i] = pending->bytes[i];
   }
-  needed = prefix_needed(have > 0U ? prefix : data, have);
-  take = needed > have ? needed - have : 0U;
-  if (take > length) take = length;
-  {
-    size_t i;
-    for (i = 0U; i < take; i++) prefix[have + i] = data[i];
+
+  /* Assemble the WHOLE prefix -- the stream type and, for the draft's WebTransport type, the session ID that
+   * follows it -- before anything is classified. Classifying the type as soon as IT was complete is the defect
+   * this loop closes: a frame carrying only the type marked the stream WEBTRANSPORT in the endpoint and then
+   * returned WT_ERR_TRUNCATED, so the connection closed with INTERNAL_ERROR for a legal fragmented prefix, and
+   * the later frame that completed it saw a stored WEBTRANSPORT kind and handed the session ID's bytes to the
+   * session with no session check at all. A QUIC peer may put the type and the session ID in separate STREAM
+   * frames, so the held bytes are reassembled here and the type is decoded only when both varints are in. */
+  for (;;) {
+    needed = uni_prefix_length(prefix, have);
+    if (have >= needed) break;
+    {
+      size_t want = needed - have;
+      size_t i;
+      if (want > length - take) want = length - take;
+      for (i = 0U; i < want; i++) prefix[have + i] = data[take + i];
+      have += want;
+      take += want;
+      if (out_prefix_consumed != NULL) *out_prefix_consumed = take;
+      if (want == 0U) break;
+    }
   }
-  have += take;
-  if (out_prefix_consumed != NULL) *out_prefix_consumed = take;
 
   if (have < needed) {
     /* Still incomplete, and incomplete is not malformed on a stream: hold what there is and
@@ -204,52 +237,46 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
     return WT_OK;
   }
 
-  /* The prefix is complete. Classify it through the endpoint, which applies the rules that
-   * belong to a stream of that type -- one control stream, one of each QPACK stream, and the
-   * draft's WebTransport type claimed for the layer above. */
-  status = wt_http3_endpoint_on_uni_stream(driver->endpoint, stream_id, prefix, have, NULL,
-                                           out_kind, out_error);
+  /* The prefix is complete, so the local copy above replaces the held bytes: the table entry goes whether or
+   * not classification succeeds. */
   if (pending != NULL) forget_pending(driver, stream_id);
-  if (status != WT_OK) return status;
 
-  /* A WEBTRANSPORT stream's prefix is the TYPE and then the session ID (draft-16 section 4.2), and the type
-   * classifier above reads only the type. The session ID is part of the prefix, so the bytes the session is
-   * handed must start AFTER it -- the first version of this path passed it along as data, which arrived as one
-   * leading byte nobody could explain. It must arrive in the same frame as the type here: a session ID split
-   * across frames would need the pending table's reassembly for a varint, and the honest answer until then is
-   * WT_ERR_TRUNCATED rather than a byte of somebody's session ID in the payload. */
-  if (out_kind != NULL && *out_kind == WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT) {
-    wt_cursor_t session_cursor;
+  {
+    wt_cursor_t type_cursor = wt_cursor_init(prefix, have);
+    uint64_t type = 0U;
     uint64_t session_id = 0U;
-    size_t session_bytes;
+    int is_webtransport = 0;
 
-    if (take >= length) {
-      /* The type used the whole frame: the session ID has not arrived. */
-      return WT_ERR_TRUNCATED;
+    if (wt_quic_varint_decode(&type_cursor, &type) != WT_OK) return WT_ERR_TRUNCATED;
+    if (type == WT_WEBTRANSPORT_STREAM_UNI) {
+      size_t type_bytes = have - wt_cursor_remaining(&type_cursor);
+      wt_cursor_t session_cursor = wt_cursor_init(prefix + type_bytes, have - type_bytes);
+      if (wt_quic_varint_decode(&session_cursor, &session_id) != WT_OK) return WT_ERR_TRUNCATED;
+      /* The session the prefix names must be THIS session, and the check is here -- BEFORE the endpoint is told
+       * the stream's kind -- because classification is what makes a later frame on this stream skip the prefix
+       * entirely, and because a stream for somebody else must leave no trace in the endpoint table. Sessions on
+       * one connection are mutually hostile: the draft says a stream that names a session this endpoint does
+       * not have is H3_ID_ERROR, and a data stream is the easiest place to smuggle one. */
+      if (driver->session_id_set != 0 && session_id != driver->session_id) {
+        if (out_error != NULL) *out_error = WT_HTTP3_ID_ERROR;
+        return WT_ERR_PROTOCOL;
+      }
+      is_webtransport = 1;
     }
-    session_cursor = wt_cursor_init(data + take, length - take);
-    if (wt_quic_varint_decode(&session_cursor, &session_id) != WT_OK) return WT_ERR_TRUNCATED;
-    /* The session the prefix names must be THIS session, and the check is here because the bidirectional path
-     * has had it since it was written (`driver.c`, the `start_kind == WEBTRANSPORT` branch) while this one did
-     * not: an audit pointed a unidirectional stream at another session ID and the payload was delivered to this
-     * session anyway. Sessions on one connection are mutually hostile -- the draft says a stream that names a
-     * session this endpoint does not have is H3_ID_ERROR -- and a data stream is the easiest place to smuggle
-     * one. Checked before the stream is remembered, so a stream for somebody else leaves no trace here. */
-    if (driver->session_id_set != 0 && session_id != driver->session_id) {
-      if (out_error != NULL) *out_error = WT_HTTP3_ID_ERROR;
-      return WT_ERR_PROTOCOL;
-    }
-    session_bytes = (length - take) - wt_cursor_remaining(&session_cursor);
-    take += session_bytes;
-    /* The caller is told how much of ITS frame went to the whole prefix -- type and session ID -- because
-     * that is the number it needs to continue at the right offset. */
-    if (out_prefix_consumed != NULL) *out_prefix_consumed = take;
-    /* The stream is remembered, with the session its prefix named (WT-180). A peer's unidirectional
-     * WebTransport stream is a data stream like a bidirectional one -- section 4.6's buffering rule and
-     * section 6's reset both apply to it -- and the ID in its prefix is what a caller asks for when it needs
-     * to know whether the session is known yet. Remembering it also means the bytes that follow are routed as
-     * the session's rather than classified a second time. */
-    {
+
+    /* The prefix is settled. Classify it through the endpoint, which applies the rules that belong to a stream
+     * of that type -- one control stream, one of each QPACK stream, and the draft's WebTransport type claimed
+     * for the layer above. */
+    status = wt_http3_endpoint_on_uni_stream(driver->endpoint, stream_id, prefix, have, NULL, out_kind,
+                                             out_error);
+    if (status != WT_OK) return status;
+
+    if (is_webtransport != 0) {
+      /* The stream is remembered, with the session its prefix named (WT-180). A peer's unidirectional
+       * WebTransport stream is a data stream like a bidirectional one -- section 4.6's buffering rule and
+       * section 6's reset both apply to it -- and the ID in its prefix is what a caller asks for when it needs
+       * to know whether the session is known yet. Remembering it also means the bytes that follow are routed as
+       * the session's rather than classified a second time. */
       wt_status_t remembered = remember_data_stream(driver, stream_id, 0U, session_id, 1);
       if (remembered != WT_OK) return remembered;
     }

@@ -1067,6 +1067,129 @@ static void test_a_data_stream_knows_its_session(void) {
 
 }
 
+/* F-07: a WebTransport unidirectional prefix split between the TYPE and the SESSION ID. The session ID is part
+ * of the prefix, so a frame carrying only the type must be held and NOT classified; the frame that completes
+ * the prefix must apply the session check before the endpoint is told the kind, and hand the session only the
+ * bytes after the whole prefix. Before the fix the first frame classified the stream WEBTRANSPORT and returned
+ * WT_ERR_TRUNCATED, which the frame route turns into a connection close with INTERNAL_ERROR, and the retry then
+ * saw a stored WEBTRANSPORT kind and delivered the session ID's bytes as payload with no check at all. */
+static void test_a_webtransport_uni_prefix_split_after_the_type(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_endpoint_stream_kind_t kind = WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  const uint8_t *payload = NULL;
+  size_t payload_length = 0U;
+  size_t consumed = 0U;
+  uint8_t type[8];
+  uint8_t rest[16];
+  size_t type_length;
+  size_t rest_length;
+  uint64_t named = 0U;
+
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wt_http3_driver_set_session_id(&driver, 4U);
+
+  type_length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_UNI, type, sizeof(type));
+  rest_length = wt_quic_varint_encode(4U, rest, sizeof(rest));
+  rest[rest_length] = 0xaaU;
+  rest[rest_length + 1U] = 0xbbU;
+  rest[rest_length + 2U] = 0xccU;
+  rest_length += 3U;
+
+  /* The first frame carries the TYPE only: nothing classified, nothing delivered, one entry held. */
+  WT_EXPECT_OK("the type alone is held",
+               wt_http3_driver_on_uni_stream_data(&driver, 3U, 0U, type, type_length, &kind, &payload,
+                                                  &payload_length, &consumed, &error));
+  WT_EXPECT_INT("with nothing classified", (int)WT_HTTP3_ENDPOINT_STREAM_UNKNOWN, (int)kind);
+  WT_EXPECT_U64("no payload", 0U, (uint64_t)payload_length);
+  WT_EXPECT_U64("the type consumed", (uint64_t)type_length, (uint64_t)consumed);
+  WT_EXPECT_U64("one stream waiting", 1U, (uint64_t)wt_http3_driver_pending_count(&driver));
+  /* The endpoint must not have been told the kind, or a later frame on this stream would skip the prefix. */
+  WT_EXPECT_INT("and the stream is not marked WebTransport yet",
+                (int)WT_HTTP3_ENDPOINT_STREAM_UNKNOWN,
+                (int)wt_http3_endpoint_stream_kind(&endpoint, 3U));
+
+  /* The second frame completes the prefix (the session ID) and carries payload behind it: only the session
+   * ID's one byte comes out of this frame, and the payload starts after the whole prefix. */
+  WT_EXPECT_OK("the session ID completes the prefix",
+               wt_http3_driver_on_uni_stream_data(&driver, 3U, type_length, rest, rest_length, &kind, &payload,
+                                                  &payload_length, &consumed, &error));
+  WT_EXPECT_INT("classifying the stream", (int)WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT, (int)kind);
+  WT_EXPECT_U64("with only the session ID taken from this frame", 1U, (uint64_t)consumed);
+  WT_EXPECT_U64("leaving the rest as payload", 3U, (uint64_t)payload_length);
+  WT_EXPECT_TRUE("starting right after the session ID", payload == rest + 1U);
+  if (payload != NULL && payload_length > 0U) {
+    WT_EXPECT_U64("and the first payload byte is the payload's", 0xaaU, (uint64_t)payload[0]);
+  }
+  WT_EXPECT_U64("with nothing left waiting", 0U, (uint64_t)wt_http3_driver_pending_count(&driver));
+  WT_EXPECT_OK("and the stream is remembered for the session its prefix named",
+               wt_http3_driver_data_stream_session_id(&driver, 3U, &named));
+  WT_EXPECT_U64("which is this session", 4U, named);
+
+  /* A split prefix naming ANOTHER session: the comparison must happen before classification, so the stream
+   * leaves no trace in the endpoint and no payload reaches this session. */
+  {
+    uint8_t wrong[8];
+    size_t wrong_length = wt_quic_varint_encode(12U, wrong, sizeof(wrong));
+    wrong[wrong_length] = 0xddU;
+    wrong_length += 1U;
+
+    WT_EXPECT_OK("a wrong session's type is held too",
+                 wt_http3_driver_on_uni_stream_data(&driver, 7U, 0U, type, type_length, &kind, &payload,
+                                                    &payload_length, &consumed, &error));
+    WT_EXPECT_STATUS("a stream for another session is refused", WT_ERR_PROTOCOL,
+                     wt_http3_driver_on_uni_stream_data(&driver, 7U, type_length, wrong, wrong_length, &kind,
+                                                        &payload, &payload_length, &consumed, &error));
+    WT_EXPECT_U64("with the id error code", WT_HTTP3_ID_ERROR, (uint64_t)error);
+    WT_EXPECT_INT("and the endpoint was never told the kind",
+                  (int)WT_HTTP3_ENDPOINT_STREAM_UNKNOWN,
+                  (int)wt_http3_endpoint_stream_kind(&endpoint, 7U));
+    WT_EXPECT_U64("with nothing left waiting", 0U, (uint64_t)wt_http3_driver_pending_count(&driver));
+  }
+
+  /* And through the FRAME route, which is where the unfixed code closed the connection with INTERNAL_ERROR:
+   * the first frame is held, the second completes the prefix and hands the session exactly the payload. */
+  {
+    wt_http3_endpoint_t route_endpoint;
+    wt_http3_driver_t route_driver;
+    wt_http3_driver_sink_t sink;
+    session_log_t session;
+    wt_quic_frame_t frame;
+
+    memset(&session, 0, sizeof(session));
+    memset(&sink, 0, sizeof(sink));
+    sink.on_stream_data = record_stream_data;
+    sink.context = &session;
+    wt_http3_endpoint_init(&route_endpoint, WT_HTTP3_ROLE_SERVER);
+    wt_http3_driver_init(&route_driver, &route_endpoint);
+    wt_http3_driver_set_session_id(&route_driver, 4U);
+
+    memset(&frame, 0, sizeof(frame));
+    frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+    frame.as.stream.id = 2U; /* a peer-initiated unidirectional stream */
+    frame.as.stream.has_length = 1;
+    frame.as.stream.offset = 0U;
+    frame.as.stream.data = type;
+    frame.as.stream.length = type_length;
+    WT_EXPECT_OK("the frame route holds the type",
+                 wt_http3_driver_on_quic_frame(&route_driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink,
+                                               4096U));
+    WT_EXPECT_U64("delivering nothing", 0U, (uint64_t)session.streams);
+
+    frame.as.stream.offset = type_length;
+    frame.as.stream.data = rest;
+    frame.as.stream.length = rest_length;
+    WT_EXPECT_OK("and the session ID completes the prefix",
+                 wt_http3_driver_on_quic_frame(&route_driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink,
+                                               4096U));
+    WT_EXPECT_U64("delivering the payload once", 1U, (uint64_t)session.streams);
+    WT_EXPECT_U64("with no session-ID byte in it", 3U, (uint64_t)session.stream_bytes);
+    WT_EXPECT_U64("for the stream it arrived on", 2U, session.last_stream_id);
+  }
+}
+
 int main(void) {
   test_a_prefix_split_across_frames();
   test_a_complete_prefix_in_one_frame();
@@ -1081,5 +1204,6 @@ int main(void) {
   test_a_bidirectional_prefix_split_across_frames();
   test_the_pending_table_is_bounded();
   test_a_data_stream_knows_its_session();
+  test_a_webtransport_uni_prefix_split_after_the_type();
   WT_TEST_MAIN_END("wt_http3_driver");
 }
