@@ -186,10 +186,25 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
     const uint8_t *peer_source = NULL;
     size_t peer_source_length = 0U;
     if (wt_quic_transport_parameters_get(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID, &peer_source,
-                                         &peer_source_length) == WT_OK &&
-        peer_source != NULL && peer_source_length > 0U &&
-        peer_source_length <= (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
-      adopt_peer_connection_id(connection, peer_source, peer_source_length);
+                                         &peer_source_length) == WT_OK) {
+      /* RFC 9000 section 7.3: "Endpoints MUST validate that received transport parameters match received
+       * connection ID values", and a mismatch is a connection error of type TRANSPORT_PARAMETER_ERROR or
+       * PROTOCOL_VIOLATION. The reference value is the Source Connection ID of the Initial packets the peer
+       * sent, which the receive path recorded; the parameter is compared with it BEFORE it is adopted,
+       * because adopting it is what aims everything this endpoint sends at the ID it names. A connection that
+       * was never handed a real packet has nothing to compare -- the same rule the original_destination
+       * check below uses -- so a synthetic object or a caller that supplies parameters out of band is not
+       * made to satisfy a requirement it has no data for. */
+      if (connection->peer_source_connection_id_set != 0 &&
+          (peer_source_length != connection->peer_source_connection_id_length ||
+           (peer_source_length != 0U &&
+            memcmp(peer_source, connection->peer_source_connection_id, peer_source_length) != 0))) {
+        return WT_ERR_PROTOCOL;
+      }
+      if (peer_source != NULL && peer_source_length > 0U &&
+          peer_source_length <= (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
+        adopt_peer_connection_id(connection, peer_source, peer_source_length);
+      }
     }
   }
 
@@ -3029,6 +3044,23 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
                                         &destination_sequence)) {
         connection->packets_discarded++;
         return WT_OK;
+      }
+      /* RFC 9000 section 7.3: "Endpoints MUST validate that received transport parameters match received
+       * connection ID values", where the value for `initial_source_connection_id` is "the value that an
+       * endpoint used in the ... Source Connection ID fields of Initial packets that it sent". The parameters
+       * arrive in CRYPTO frames carried by these very packets, so the SCID is recorded from the first
+       * authenticated long-header packet addressed to this endpoint, and `set_peer_parameters` compares the
+       * parameter with it before adopting it as this connection's destination. A short header carries no
+       * SCID, and a packet for another connection proves nothing about this one, which is why this sits
+       * after the destination check. */
+      if (packet.short_header == 0 && connection->peer_source_connection_id_set == 0 &&
+          packet.source_connection_id_len <= (size_t)WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
+        if (packet.source_connection_id_len > 0U) {
+          memcpy(connection->peer_source_connection_id, packet.source_connection_id,
+                 packet.source_connection_id_len);
+        }
+        connection->peer_source_connection_id_length = packet.source_connection_id_len;
+        connection->peer_source_connection_id_set = 1;
       }
       status = process_packet(connection, space, packet.payload, packet.payload_len, &ack_eliciting,
                               now, destination_sequence);

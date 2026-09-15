@@ -586,6 +586,52 @@ static void test_handshake(wt_udp_family_t family) {
       }
       WT_EXPECT_U64("and it is not discarded", 0U, server.connection.packets_discarded);
     }
+
+    /* RFC 9000 section 7.3: the peer's initial_source_connection_id MUST match the Source Connection ID of
+     * the Initial packets it sent. The packets above were real, so the connection recorded the server's SCID;
+     * a parameter naming a DIFFERENT ID is a connection error rather than a destination this endpoint adopts,
+     * while the value the packets actually carried is still accepted (the same comparison, not a blanket
+     * refusal of the parameter). */
+    {
+      static const uint8_t k_other_source[4] = {0xdeU, 0xadU, 0xbeU, 0xefU};
+      wt_quic_transport_parameters_t params;
+      uint8_t encoded[64];
+      wt_writer_t w;
+
+      wt_quic_transport_parameters_init(&params);
+      WT_EXPECT_OK("a mismatching initial_source_connection_id builds",
+                   wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                                          k_other_source, sizeof(k_other_source)));
+      w = wt_writer_init(encoded, sizeof(encoded));
+      WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
+      WT_EXPECT_STATUS("an initial_source_connection_id that is not the packets' SCID is refused",
+                       WT_ERR_PROTOCOL,
+                       wt_quic_connection_set_peer_parameters(&client.connection, encoded,
+                                                              wt_writer_offset(&w)));
+
+      wt_quic_transport_parameters_init(&params);
+      WT_EXPECT_OK("the packets' own initial_source_connection_id builds",
+                   wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                                          k_connection_id, sizeof(k_connection_id)));
+      w = wt_writer_init(encoded, sizeof(encoded));
+      WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
+      WT_EXPECT_STATUS("and the value the packets carried is accepted", WT_OK,
+                       wt_quic_connection_set_peer_parameters(&client.connection, encoded,
+                                                              wt_writer_offset(&w)));
+
+      /* The server's half of the same rule: it recorded the client's Initial SCID, so the client's
+       * parameter must match that too. */
+      wt_quic_transport_parameters_init(&params);
+      WT_EXPECT_OK("a mismatching client initial_source_connection_id builds",
+                   wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                                          k_other_source, sizeof(k_other_source)));
+      w = wt_writer_init(encoded, sizeof(encoded));
+      WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
+      WT_EXPECT_STATUS("the server refuses a client's mismatching initial_source_connection_id",
+                       WT_ERR_PROTOCOL,
+                       wt_quic_connection_set_peer_parameters(&server.connection, encoded,
+                                                              wt_writer_offset(&w)));
+    }
   }
 
   close_endpoint(&client);

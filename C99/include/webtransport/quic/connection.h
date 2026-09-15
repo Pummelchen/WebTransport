@@ -248,6 +248,14 @@ typedef struct wt_quic_connection {
    * client has the server's own Source Connection ID and stops using this one. */
   uint8_t original_destination_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
   size_t original_destination_id_length;
+  /* The Source Connection ID of the first authenticated long-header (Initial or Handshake) packet this
+   * endpoint received from the peer. RFC 9000 section 7.3 requires the peer's `initial_source_connection_id`
+   * transport parameter to match it, so it is recorded here from the packet itself rather than taken from the
+   * parameter it is supposed to validate. `..._set` is 0 for a connection that was never handed a real packet
+   * (the synthetic objects tests and some callers build), where there is nothing to compare. */
+  uint8_t peer_source_connection_id[WT_QUIC_MAX_CONNECTION_ID_LENGTH];
+  size_t peer_source_connection_id_length;
+  int peer_source_connection_id_set;
 
   /* One key set per space and direction. A direction that has not been installed -- the Handshake
    * keys before the handshake produces them -- means a packet for that space cannot be read or sent,
