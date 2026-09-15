@@ -18,7 +18,16 @@ deterministic protocol cores (`WebTransportQUICCore`, `WebTransportTLSCore`,
 are published as library products so embedders and conformance tooling can drive
 the protocol directly. Send-only and receive-only WebTransport streams are
 implemented in the `WebTransportHTTP3Core` session manager; the `WebTransport`
-session API currently exposes bidirectional streams and datagrams.
+session API exposes bidirectional streams, datagrams, and — through
+``WebTransportSession/acceptUnidirectionalStream(maximumInitialBytes:)`` — a
+**receive-only** ``WebTransportUnidirectionalStream`` for a stream the peer
+initiated. A peer-initiated unidirectional stream is receive-only because RFC
+9000 section 2.1 gives a unidirectional stream to its initiator, so the accepted
+type deliberately has no `send`; the peer must have been granted
+`initialMaxUnidirectionalStreams`, and a stream beyond the runtime's
+per-direction inbound ceiling is refused with `WT_BUFFERED_STREAM_REJECTED`.
+Opening a locally initiated unidirectional stream is not exposed by the
+`WebTransport` session API.
 
 Client configurations can provide optimistic CONNECT capsules through
 ``WebTransportClientConfiguration/optimisticCapsules``. The runtime sends them
@@ -46,6 +55,7 @@ Established sessions expose draft-16 session-bound TLS exporter material through
 ### Streams
 
 - ``WebTransportBidirectionalStream``
+- ``WebTransportUnidirectionalStream``
 
 ### Logging and Errors
 

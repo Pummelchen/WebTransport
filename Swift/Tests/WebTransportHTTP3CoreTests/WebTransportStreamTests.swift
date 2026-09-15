@@ -304,6 +304,51 @@ func webTransportPublicStreamSignalsApplyTheHalfOwnershipRule() throws {
     }
 }
 
+/// F-swift-line-security-05b: a peer-initiated unidirectional WebTransport stream
+/// is receive-only for this endpoint, so the send-side API must refuse it rather
+/// than emit a STREAM frame the peer would reject as a STREAM_STATE_ERROR.
+///
+/// The reset/stop-signal rule above covers the two teardown signals; this covers
+/// the ordinary payload path, where a silent success would put bytes on a stream
+/// whose send half belongs to the peer.
+@Test
+func webTransportPeerInitiatedUnidirectionalStreamRefusesSendSidePayload() throws {
+    var pair = try WebTransportStreamTestSupport.makeReadyManagers()
+    let requestFrame = try pair.client.makeClientSessionRequest(
+        streamID: 0,
+        request: try WebTransportSessionRequest(
+            authority: "example.com",
+            path: "/wt",
+            availableProtocols: []
+        )
+    )
+    let decision = try pair.server.receiveClientSessionRequest(
+        streamID: 0,
+        frame: requestFrame,
+        policy: try WebTransportServerSessionPolicy()
+    )
+    _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
+
+    let session = try #require(pair.server.session(forRequestStreamID: 0))
+    let prefix = try pair.client.openUnidirectionalStream(streamID: 6, sessionID: session.id)
+    _ = try pair.server.acceptUnidirectionalStream(streamID: 6, firstBytes: prefix)
+
+    // The half-ownership model the accept path registers is receive-only.
+    #expect(pair.server.stream(for: 6)?.hasSendHalf == false)
+    #expect(pair.server.stream(for: 6)?.hasReceiveHalf == true)
+
+    #expect(
+        throws: QUICStateError.streamStateViolation(
+            "cannot send on peer-initiated unidirectional stream")
+    ) {
+        _ = try pair.server.sendStreamPayload(streamID: 6, payload: Data("nope".utf8))
+    }
+
+    // The receive half still works: the refusal is confined to the send side.
+    try pair.server.receiveStreamPayload(streamID: 6, payload: Data("ok".utf8))
+    #expect(pair.server.popStreamPayload(streamID: 6) == Data("ok".utf8))
+}
+
 @Test
 func webTransportStreamOpenRejectsUnknownSession() throws {
     var pair = try WebTransportStreamTestSupport.makeReadyManagers()

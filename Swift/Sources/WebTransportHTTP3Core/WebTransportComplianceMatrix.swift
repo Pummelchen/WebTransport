@@ -50,11 +50,12 @@ public enum WebTransportDraft16ComplianceMatrix {
             requirementFamily: "Streams and datagrams, including buffered ingress and rejection behavior",
             status: .pass,
             documentedBehavior:
-                "WebTransport stream/datagram prefixes, ownership, routing, buffering, rejection cleanup, and bounded ingress are implemented and documented.",
+                "WebTransport stream/datagram prefixes, ownership, routing, buffering, rejection cleanup, and bounded ingress are implemented and documented. The shipped runtime opens and accepts bidirectional streams and accepts a peer-initiated unidirectional stream as a receive-only stream; the runtime serves exactly one session per connection, so a unidirectional stream whose prefix names another session is refused with WT_SESSION_GONE before it is registered or buffered. Opening a locally initiated unidirectional stream is not exposed by the shipped WebTransport session API.",
             evidence: [
                 "WebTransportStreamTests",
                 "WebTransportDatagramTests",
                 "WebTransportPhase13Tests",
+                "WebTransportUnidirectionalStreamAcceptTests",
                 "WebTransportLibrarySmokeMatrix",
                 "run-third-party-interop.sh datagram exchange proof",
             ]

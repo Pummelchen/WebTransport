@@ -463,6 +463,116 @@ public final class WebTransportNetworkBidirectionalStream: @unchecked Sendable {
     }
 }
 
+/// A peer-initiated unidirectional WebTransport stream, accepted from the wire.
+///
+/// RFC 9000 section 2.1 gives a unidirectional stream to its initiator only, so a
+/// stream the peer initiated is receive-only here: this type has no send method,
+/// and the session manager refuses a send-side call on the same stream (see
+/// `WebTransportSessionManager.sendStreamPayload`). That is the difference from
+/// ``WebTransportNetworkBidirectionalStream``, which owns both halves. No abort
+/// operation is exposed either: the only signal the receive half could produce is
+/// STOP_SENDING, and Network.framework offers no per-stream STOP_SENDING.
+public final class WebTransportNetworkUnidirectionalStream: Sendable {
+    public let streamID: UInt64
+
+    private let stream: QUIC.Stream<QUICStream>
+    private let timeoutMilliseconds: Int32
+    private let state: WebTransportNetworkStreamState
+    private let manager: WebTransportNetworkSessionManagerState?
+
+    fileprivate init(
+        stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        initialPayload: Data = Data(),
+        manager: WebTransportNetworkSessionManagerState? = nil
+    ) {
+        self.streamID = stream.streamID
+        self.stream = stream
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.state = WebTransportNetworkStreamState(prefix: nil, initialPayload: initialPayload)
+        self.manager = manager
+    }
+
+    /// Reads the next bytes of the peer's stream.
+    ///
+    /// The arguments and the buffered-first-chunk behaviour mirror
+    /// ``WebTransportNetworkBidirectionalStream/receive(maximumBytes:timeoutMilliseconds:)``;
+    /// only the send half is absent.
+    public func receive(
+        maximumBytes: Int = 64 * 1024,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> Data {
+        if let initialPayload = await state.consumeInitialPayload(maximumBytes: maximumBytes) {
+            if !initialPayload.isEmpty, let manager {
+                _ = await manager.withManager { manager in
+                    manager.popStreamPayload(streamID: self.streamID)
+                }
+            }
+            return initialPayload
+        }
+        let payload = try await InteroperableQUICHelpers.readStream(
+            stream,
+            timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
+            maxBytes: maximumBytes
+        )
+        if let manager {
+            return try await manager.withManager { manager in
+                try manager.receiveAndPopStreamPayload(streamID: self.streamID, payload: payload)
+            }
+        }
+        return payload
+    }
+}
+
+/// Test-support handle for a peer-side unidirectional stream.
+///
+/// The shipped runtime accepts peer-initiated unidirectional streams
+/// (``WebTransportNetworkSession/acceptUnidirectionalStream(maximumInitialBytes:timeoutMilliseconds:)``)
+/// but does not open them, so a loopback test that needs a peer to initiate one
+/// has no producer. This retains the local QUIC stream for as long as the
+/// receiver is reading it — releasing the last handle would let the transport
+/// cancel the receive side before the bytes arrive — and writes the WebTransport
+/// unidirectional prefix once, before the first payload.
+///
+/// Internal on purpose: opening a unidirectional stream is not part of the
+/// shipped surface, and the finding this supports is about accepting one.
+final class WebTransportNetworkUnidirectionalStreamProducer: Sendable {
+    let streamID: UInt64
+
+    private let stream: QUIC.Stream<QUICStream>
+    private let timeoutMilliseconds: Int32
+    private let state: WebTransportNetworkStreamState
+
+    fileprivate init(
+        stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        prefix: Data
+    ) {
+        self.streamID = stream.streamID
+        self.stream = stream
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.state = WebTransportNetworkStreamState(prefix: prefix, initialPayload: Data())
+    }
+
+    /// Sends `data`, writing the WebTransport stream prefix first on the first
+    /// call so the peer's `acceptUnidirectionalStream` sees a prefixed stream.
+    func send(
+        _ data: Data,
+        endOfStream: Bool = false,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws {
+        var payload = Data()
+        if let prefix = await state.consumeOutboundPrefix() {
+            payload.append(prefix)
+        }
+        payload.append(data)
+        let outbound = payload
+        try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
+            try await self.stream.send(outbound, endOfStream: endOfStream)
+        }
+    }
+}
+
 // SAFETY: Endpoint/session metadata are immutable. Mutable WebTransport state is
 // isolated in `WebTransportNetworkSessionManagerState`; inbound stream queues are
 // actors; the Network.framework connection is only accessed through async APIs.
@@ -660,6 +770,151 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             initialPayload: prefix.remainingPayload,
             manager: manager
         )
+    }
+
+    /// Accepts a peer-initiated unidirectional stream and returns it receive-only.
+    ///
+    /// The runtime serves exactly one WebTransport session per connection (see
+    /// `validateSessionAdmission`), so the demultiplex is by direction plus the
+    /// session ID in the stream prefix: a unidirectional stream whose prefix names
+    /// this session is delivered here, and one whose prefix names any other
+    /// session is refused with `WT_SESSION_GONE` before the session manager can
+    /// register or buffer it. There is no multi-session routing on this
+    /// connection and none is invented.
+    ///
+    /// The returned stream has no send half: RFC 9000 section 2.1 gives a
+    /// unidirectional stream to the endpoint that initiated it, which here is the
+    /// peer. A caller that needs to send must open its own unidirectional stream.
+    ///
+    /// The peer must have been granted `initialMaxUnidirectionalStreams`: the QUIC
+    /// transport enforces that advertisement, and a stream beyond the runtime's
+    /// per-direction inbound ceiling is refused with `WT_BUFFERED_STREAM_REJECTED`
+    /// (F-swift-line-security-03).
+    public func acceptUnidirectionalStream(
+        maximumInitialBytes: Int = 64 * 1024,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> WebTransportNetworkUnidirectionalStream {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        let started = Date()
+        while true {
+            let remaining = InteroperableQUICHelpers.remainingTimeout(
+                timeoutMilliseconds: timeout,
+                started: started
+            )
+            let stream = try await inboundStreams.next(
+                direction: InteroperableQUICHelpers.unidirectionalStreamDirection,
+                timeoutMilliseconds: remaining
+            )
+            let firstChunk = try await InteroperableQUICHelpers.readFirstChunk(
+                stream,
+                timeoutMilliseconds: remaining,
+                maxBytes: maximumInitialBytes
+            )
+            // The peer's HTTP/3 control and QPACK streams share the
+            // unidirectional direction with WebTransport streams, and
+            // establishment returns as soon as it reads the control stream, so a
+            // QPACK stream that arrived behind it is still queued here. Those
+            // streams are critical and must not be closed, so they are retained
+            // and the wait for a WebTransport stream continues.
+            guard WebTransportStreamSignaling.hasStreamPrefix(firstChunk) else {
+                if await InteroperableQUICHelpers.retainPeerCriticalUnidirectionalStream(
+                    stream,
+                    firstBytes: firstChunk,
+                    in: inboundStreams
+                ) {
+                    continue
+                }
+                throw WebTransportNetworkRuntimeError.unexpectedFrame
+            }
+            if let foreignSessionID = InteroperableQUICHelpers.foreignSessionID(
+                inPrefixedStream: firstChunk,
+                expectedSessionID: sessionID,
+                form: .unidirectional
+            ) {
+                stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+                InteroperableQUICDebug.log(
+                    "refusing inbound unidirectional stream \(stream.streamID): prefix names session "
+                        + "\(foreignSessionID), this connection serves \(sessionID)"
+                )
+                throw WebTransportDraft16Error(
+                    kind: .sessionGone,
+                    message: "WebTransport inbound stream names session \(foreignSessionID), not \(sessionID)"
+                )
+            }
+            let accepted = try await manager.withManager { manager in
+                try manager.acceptUnidirectionalStreamWithActions(
+                    streamID: stream.streamID,
+                    firstBytes: firstChunk
+                )
+            }
+            guard let prefix = accepted.prefix, accepted.rejectionFrame == nil else {
+                stream.streamApplicationErrorCode =
+                    WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
+                throw WebTransportDraft16Error(
+                    kind: .bufferedStreamRejected,
+                    message: "WebTransport inbound unidirectional stream was refused by the session manager"
+                )
+            }
+            guard prefix.form == .unidirectional, prefix.sessionID.rawValue == sessionID else {
+                stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+                throw WebTransportDraft16Error(
+                    kind: .sessionGone,
+                    message: "WebTransport inbound stream names session \(prefix.sessionID.rawValue), not \(sessionID)"
+                )
+            }
+            return WebTransportNetworkUnidirectionalStream(
+                stream: stream,
+                timeoutMilliseconds: timeout,
+                initialPayload: prefix.remainingPayload,
+                manager: manager
+            )
+        }
+    }
+
+    /// Test support: opens a locally initiated unidirectional stream and returns a
+    /// handle the loopback tests can send on, so the peer has a stream to accept.
+    ///
+    /// `writingSessionID` overrides the session the stream prefix names. The
+    /// default is this connection's session; any other value writes that session's
+    /// prefix without registering the stream with this session's manager, because
+    /// the stream does not belong to the session this endpoint serves. That is the
+    /// foreign-session case ``acceptUnidirectionalStream(maximumInitialBytes:timeoutMilliseconds:)``
+    /// must refuse. It exists only for tests: the shipped surface accepts
+    /// peer-initiated unidirectional streams but does not open one, so there is no
+    /// production caller.
+    func openUnidirectionalStreamForTesting(
+        writingSessionID sessionID: UInt64? = nil,
+        firstPayload: Data = Data(),
+        endOfStream: Bool = false,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> WebTransportNetworkUnidirectionalStreamProducer {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
+            try await self.connection.openStream(directionality: .unidirectional)
+        }
+        let targetSessionID = sessionID ?? self.sessionID
+        let prefix: Data
+        if targetSessionID == self.sessionID {
+            prefix = try await manager.withManager { manager in
+                try manager.openUnidirectionalStream(
+                    streamID: stream.streamID,
+                    sessionID: WebTransportSessionID(rawValue: self.sessionID)
+                )
+            }
+        } else {
+            prefix = try WebTransportStreamSignaling.serializeUnidirectionalPrefix(
+                sessionID: targetSessionID
+            )
+        }
+        let producer = WebTransportNetworkUnidirectionalStreamProducer(
+            stream: stream,
+            timeoutMilliseconds: timeout,
+            prefix: prefix
+        )
+        if !firstPayload.isEmpty || endOfStream {
+            try await producer.send(firstPayload, endOfStream: endOfStream)
+        }
+        return producer
     }
 
     public func sendDatagram(
@@ -1920,8 +2175,8 @@ enum InteroperableQUICHelpers {
         return disposition
     }
 
-    /// The session a peer-prefixed bidirectional stream names, when that session
-    /// is not the one this connection serves.
+    /// The session a peer-prefixed stream names, when that session is not the one
+    /// this connection serves.
     ///
     /// A WebTransport stream starts with a marker and a session ID. The runtime
     /// serves exactly one session per connection, so a prefix naming any other
@@ -1930,15 +2185,20 @@ enum InteroperableQUICHelpers {
     /// prefix is available, so the stream cannot be handed back; it must be reset
     /// rather than silently dropped. A caller that sees `nil` leaves the bytes to
     /// `WebTransportSessionManager`, which owns the prefix grammar and reports the
-    /// appropriate protocol error for a missing, malformed, or non-bidirectional
-    /// prefix.
+    /// appropriate protocol error for a missing, malformed, or wrong-form prefix.
+    ///
+    /// `form` is the direction the caller accepted the stream on. A prefix whose
+    /// form does not match is a grammar error owned by the session manager, not a
+    /// foreign-session report, so it is deliberately left alone: only a
+    /// well-formed prefix of the expected form naming another session is foreign.
     static func foreignSessionID(
         inPrefixedStream firstBytes: Data,
-        expectedSessionID: UInt64
+        expectedSessionID: UInt64,
+        form: WebTransportStreamForm = .bidirectional
     ) -> UInt64? {
         guard WebTransportStreamSignaling.hasStreamPrefix(firstBytes),
             let prefix = try? WebTransportStreamSignaling.parsePrefix(firstBytes),
-            prefix.form == .bidirectional
+            prefix.form == form
         else {
             return nil
         }
@@ -2222,6 +2482,38 @@ enum InteroperableQUICHelpers {
             throw WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID: stream.streamID)
         }
         return bytes
+    }
+
+    /// Retains an HTTP/3 critical unidirectional stream the WebTransport accept
+    /// path encountered, reporting whether it did.
+    ///
+    /// The peer's control and QPACK streams share the unidirectional direction
+    /// with WebTransport streams. ``readPeerControlStream(from:role:timeoutMilliseconds:)``
+    /// returns as soon as it reads the control stream, so a QPACK stream that
+    /// arrived behind it is still queued when the application starts accepting
+    /// WebTransport streams. RFC 9114 section 6.2.1 and RFC 9204 section 4.2 make
+    /// those streams critical — they must not be closed — so the accept path
+    /// retains them and waits on. Anything else is not a stream this runtime
+    /// serves, and the caller reports it rather than handing it to the
+    /// application as if it were a WebTransport stream.
+    fileprivate static func retainPeerCriticalUnidirectionalStream(
+        _ stream: QUIC.Stream<QUICStream>,
+        firstBytes: Data,
+        in inboundStreams: InteroperableQUICInboundStreamCollector
+    ) async -> Bool {
+        guard let prefix = try? HTTP3StreamTypeParser.parsePrefix(firstBytes) else {
+            return false
+        }
+        switch prefix.type {
+        case HTTP3StreamType.control, HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
+            await inboundStreams.retainCritical(stream)
+            Task {
+                await drainPeerCriticalStream(stream)
+            }
+            return true
+        default:
+            return false
+        }
     }
 
     fileprivate static func readPeerControlStream(

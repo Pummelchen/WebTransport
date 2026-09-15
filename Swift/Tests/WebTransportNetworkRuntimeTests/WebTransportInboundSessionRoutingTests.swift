@@ -63,6 +63,36 @@ func runtimeClassifiesForeignSessionPrefixedStreamsForRefusal() throws {
             expectedSessionID: servedSessionID
         ) == nil)
 
+    // F-swift-line-security-05b: the same classification is applied on the
+    // unidirectional accept path, where a unidirectional prefix naming another
+    // session *is* foreign and must be refused before the manager registers or
+    // buffers it.
+    #expect(
+        InteroperableQUICHelpers.foreignSessionID(
+            inPrefixedStream: unidirectional,
+            expectedSessionID: servedSessionID,
+            form: .unidirectional
+        ) == 8)
+    // The prefix for the session this connection serves is not foreign in either
+    // form.
+    let matchingUnidirectional = try WebTransportStreamSignaling.serializeUnidirectionalPrefix(
+        sessionID: servedSessionID
+    )
+    #expect(
+        InteroperableQUICHelpers.foreignSessionID(
+            inPrefixedStream: matchingUnidirectional,
+            expectedSessionID: servedSessionID,
+            form: .unidirectional
+        ) == nil)
+    // A bidirectional prefix on a unidirectional accept is a grammar error, so it
+    // is still left to the manager rather than reported as a foreign session.
+    #expect(
+        InteroperableQUICHelpers.foreignSessionID(
+            inPrefixedStream: matching,
+            expectedSessionID: servedSessionID,
+            form: .unidirectional
+        ) == nil)
+
     // A truncated prefix is malformed, not foreign.
     #expect(
         InteroperableQUICHelpers.foreignSessionID(

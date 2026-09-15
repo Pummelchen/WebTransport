@@ -322,6 +322,30 @@ public final class WebTransportBidirectionalStream: @unchecked Sendable {
     }
 }
 
+/// A peer-initiated unidirectional WebTransport stream.
+///
+/// RFC 9000 section 2.1 gives a unidirectional stream to the endpoint that
+/// initiated it, so a stream the peer initiated is **receive-only** here: this
+/// type exposes ``receive(maximumBytes:)`` and deliberately has no `send`. A
+/// caller that needs to send must have the peer open the stream, or open its own.
+/// There is no abort method either: STOP_SENDING is the only signal the receive
+/// half could produce, and the runtime's transport exposes no per-stream
+/// STOP_SENDING.
+public final class WebTransportUnidirectionalStream: Sendable {
+    public let id: UInt64
+
+    private let runtime: WebTransportNetworkUnidirectionalStream
+
+    init(_ runtime: WebTransportNetworkUnidirectionalStream) {
+        self.runtime = runtime
+        self.id = runtime.streamID
+    }
+
+    public func receive(maximumBytes: Int = 64 * 1024) async throws -> Data {
+        try await runtime.receive(maximumBytes: maximumBytes)
+    }
+}
+
 /// Established WebTransport session backed by the production network runtime.
 ///
 /// SAFETY: Public state is immutable after initialization. Mutable session
@@ -361,6 +385,17 @@ public final class WebTransportSession: @unchecked Sendable {
 
     public func acceptBidirectionalStream(maximumInitialBytes: Int = 64 * 1024) async throws -> WebTransportBidirectionalStream {
         try await WebTransportBidirectionalStream(runtime.acceptBidirectionalStream(maximumInitialBytes: maximumInitialBytes))
+    }
+
+    /// Accepts a peer-initiated unidirectional stream, which is receive-only.
+    ///
+    /// The runtime serves one session per connection, so a unidirectional stream
+    /// whose prefix names another session is refused with the session-gone error
+    /// rather than registered here. The peer must have been granted
+    /// `initialMaxUnidirectionalStreams`; a stream beyond the runtime's
+    /// per-direction inbound ceiling is refused with `WT_BUFFERED_STREAM_REJECTED`.
+    public func acceptUnidirectionalStream(maximumInitialBytes: Int = 64 * 1024) async throws -> WebTransportUnidirectionalStream {
+        try await WebTransportUnidirectionalStream(runtime.acceptUnidirectionalStream(maximumInitialBytes: maximumInitialBytes))
     }
 
     public func sendDatagram(_ data: Data) async throws {
