@@ -43,6 +43,43 @@ func webTransportClientServerNetworkSessionExposesCloseLifecycle() async throws 
     }
 }
 
+/// F-swift-perf-tests-12: the loopback exchange helpers must not sleep on the
+/// success path.
+///
+/// `runLoopbackPublicAPIExchange` slept 2 s after the exchange had completed and
+/// the listener had been shut down, and
+/// `runLoopbackPublicAPISessionCloseExchange` slept 2 s on success and 2 s per
+/// failed attempt inside an eight-iteration loop. Nothing depended on the delay:
+/// the pair binds port 0 and `listener.shutdown()` returns once the listener
+/// stops accepting. The helpers record every sleep they take, and this test
+/// requires that no step of a successful exchange sleeps for a second or more.
+@Test
+func publicAPIExchangeHelpersDoNotSleepOnTheSuccessPath() async throws {
+    let exchangeLog = WebTransportPublicAPISleepLog()
+    _ = try await WebTransportProcessSupport.withExclusiveProcessExecution {
+        try await runLoopbackPublicAPIExchange(
+            protocols: ["demo.v1"],
+            message: "no-success-sleep",
+            sleepLog: exchangeLog
+        )
+    }
+    let exchangeSleeps = await exchangeLog.snapshot()
+    #expect(
+        exchangeSleeps.allSatisfy { $0 < .seconds(1) },
+        "the exchange slept \(exchangeSleeps) on its success path"
+    )
+
+    let closeLog = WebTransportPublicAPISleepLog()
+    try await WebTransportProcessSupport.withExclusiveProcessExecution {
+        try await runLoopbackPublicAPISessionCloseExchange(sleepLog: closeLog)
+    }
+    let closeSleeps = await closeLog.snapshot()
+    #expect(
+        closeSleeps.allSatisfy { $0 < .seconds(1) },
+        "the close exchange slept \(closeSleeps) on its success path"
+    )
+}
+
 @Test
 func webTransportPublicAPILogsOnlySanitizedProductionEvents() async throws {
     let clientEvents = WebTransportEventRecorder()
@@ -117,6 +154,29 @@ func webTransportLogTextEscapesPeerControlledPayload() {
     #expect(WebTransportLogText.escaped("caf\u{e9}") == "caf\u{e9}")
 }
 
+/// Records the sleeps a loopback exchange helper performs.
+///
+/// The helpers used fixed sleeps as implicit synchronisation; recording them lets
+/// a test assert the success path performs none.
+private actor WebTransportPublicAPISleepLog {
+    private var recorded: [Duration] = []
+
+    func record(_ duration: Duration) {
+        recorded.append(duration)
+    }
+
+    func snapshot() -> [Duration] {
+        recorded
+    }
+}
+
+private func recordAndSleep(_ duration: Duration, log: WebTransportPublicAPISleepLog?) async throws {
+    if let log {
+        await log.record(duration)
+    }
+    try await Task.sleep(for: duration)
+}
+
 private func makeLoopbackPublicAPIPair(
     protocols: [String],
     optimisticCapsules: [WebTransportFlowCapsule] = [],
@@ -154,7 +214,8 @@ private func runLoopbackPublicAPIExchange(
     message: String,
     optimisticCapsules: [WebTransportFlowCapsule] = [],
     clientLogger: WebTransportLogger = .disabled,
-    serverLogger: WebTransportLogger = .disabled
+    serverLogger: WebTransportLogger = .disabled,
+    sleepLog: WebTransportPublicAPISleepLog? = nil
 ) async throws -> (WebTransportConnectionResult, WebTransportConnectionResult) {
     var lastError: Error?
     for _ in 0..<5 {
@@ -171,18 +232,21 @@ private func runLoopbackPublicAPIExchange(
             async let served = listener.serveOne()
             let result = try await client.echo(to: listener.localEndpoint, message: message)
             let serverResult = try await served
+            // The exchange is complete; the pair bound port 0, so shutting the
+            // listener down is the whole teardown and nothing else needs a wait.
             listener.shutdown()
-            try await Task.sleep(for: .seconds(2))
             return (result, serverResult)
         } catch {
             lastError = error
-            try await Task.sleep(for: .milliseconds(250))
+            try await recordAndSleep(.milliseconds(250), log: sleepLog)
         }
     }
     throw lastError ?? QUICCodecError.malformed("WebTransport public API exchange failed")
 }
 
-private func runLoopbackPublicAPISessionCloseExchange() async throws {
+private func runLoopbackPublicAPISessionCloseExchange(
+    sleepLog: WebTransportPublicAPISleepLog? = nil
+) async throws {
     var lastError: Error?
     for _ in 0..<8 {
         do {
@@ -225,12 +289,14 @@ private func runLoopbackPublicAPISessionCloseExchange() async throws {
 
             try await session.drain()
             try await session.close(applicationErrorCode: 0, reason: "done")
+            // Session closed and listener shut down; nothing needs a wait here.
             listener.shutdown()
-            try await Task.sleep(for: .seconds(2))
             return
         } catch {
             lastError = error
-            try await Task.sleep(for: .seconds(2))
+            // Back off before retrying the establishment this attempt failed on,
+            // on the same 250 ms terms as the exchange helper.
+            try await recordAndSleep(.milliseconds(250), log: sleepLog)
         }
     }
     throw lastError ?? QUICCodecError.malformed("WebTransport public API session stream exchange failed")
