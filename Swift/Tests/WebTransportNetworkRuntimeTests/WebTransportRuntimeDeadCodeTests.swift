@@ -28,3 +28,36 @@ func runtimeEncodesRequestStreamPayloadWithoutAVestigialStreamID() throws {
         try InteroperableQUICHelpers.makeRequestStreamPayload(requestFrame: frame) == frame.encode(),
         "the CONNECT payload is the encoded frame")
 }
+
+/// F-swift-line-security-07: the compliance matrix listed "pinned trust" among the
+/// shipped security capabilities, but no shipped client path can pin anything.
+/// `WebTransportQUICPeerTrustPolicy` offers only `systemTrust` and
+/// `localDevelopmentSelfSigned`, `WebTransportNetworkRuntime` delegates all
+/// certificate and signature validation to Network.framework, and
+/// `TLSPinnedCertificateTrustPolicy` / `TLSCertificateVerifier` are reachable only
+/// from direct users of `WebTransportTLSCore`. The row has to record that boundary
+/// rather than claim the control is wired.
+@Test
+func webTransportDraft16PinnedTrustClaimMatchesTheShippedRuntimeBoundary() throws {
+    guard
+        let security = WebTransportDraft16ComplianceMatrix.definitionOfDone.first(where: {
+            $0.requirementFamily == "Security and identity handling without prompts"
+        })
+    else {
+        Issue.record("the security compliance item is missing")
+        return
+    }
+
+    #expect(
+        security.status.rawValue == "PARTIAL",
+        "pinned trust is not wired into the shipped runtime, so the family is not a full pass")
+    #expect(security.documentedBehavior.contains("TLSPinnedCertificateTrustPolicy"))
+    #expect(security.documentedBehavior.contains("not wired"))
+    #expect(security.documentedBehavior.contains("WebTransportNetworkRuntime"))
+
+    // The invariant behind the wording: the shipped client trust surface has no
+    // pinned policy, so nothing running through the runtime can pin a leaf.
+    #expect(throws: WebTransportNetworkRuntimeError.self) {
+        _ = try WebTransportQUICPeerTrustPolicy.parse("pinned")
+    }
+}

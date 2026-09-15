@@ -82,9 +82,9 @@ public enum WebTransportDraft16ComplianceMatrix {
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Security and identity handling without prompts",
-            status: .pass,
+            status: .partial,
             documentedBehavior:
-                "ALPN/settings/session-policy negatives, prompt-free identity inputs, pinned trust, deterministic trust failures, and the EXPORTER-WebTransport TLS binding are implemented and documented.",
+                "ALPN/settings/session-policy negatives, prompt-free identity inputs, deterministic trust failures, and the EXPORTER-WebTransport TLS binding are implemented and documented. Pinned-certificate trust (TLSPinnedCertificateTrustPolicy) and the CertificateVerify verifier (TLSCertificateVerifier) are implemented and conformance-tested in WebTransportTLSCore, but they are not wired into the shipped client path: WebTransportQUICPeerTrustPolicy offers only systemTrust and localDevelopmentSelfSigned, and WebTransportNetworkRuntime delegates certificate and signature validation to Network.framework, so the runtime cannot pin a leaf certificate. Pinning is a WebTransportTLSCore-only API for direct callers.",
             evidence: [
                 "WebTransportTLSCoreTests",
                 "WebTransportPublicAPITests",
