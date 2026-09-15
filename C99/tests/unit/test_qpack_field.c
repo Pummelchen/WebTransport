@@ -141,9 +141,38 @@ static void test_post_base_and_truncation(void) {
                    wt_qpack_field_line_decode(&c, &decoded));
 }
 
+/* A name length is a varint from the peer (up to 2^62-1) and the decoder stores it in a size_t. The narrowing
+ * must be CHECKED, not cast: on a target whose size_t is narrower than 64 bits, `(size_t)name_length` truncates,
+ * so a name the peer says is 2^32+1 bytes long becomes a one-byte name and the value that follows is read from
+ * the wrong offset -- the whole line is mis-parsed. The bytes below are written by hand (the literal-literal
+ * form's 001 pattern, then the length 2^32+1 as a QPACK prefixed integer, then a name byte and an empty value),
+ * because the encoder writes the same size_t the decoder reads and a round trip cannot see a truncation. */
+static void test_a_name_length_wider_than_size_t_is_refused(void) {
+  /* 0x27: 001 pattern, N and H clear, the 3-bit name-length prefix saturated at 7; then
+   * (2^32+1)-7 = 4294967290 in base-128 groups: 0xfa 0xff 0xff 0xff 0x0f. A one-byte name follows (0x00), and
+   * then an empty value string (0x00). */
+  static const uint8_t wire[] = {0x27U, 0xfaU, 0xffU, 0xffU, 0xffU, 0x0fU, 0x00U, 0x00U};
+  wt_cursor_t c;
+  wt_qpack_field_line_t decoded;
+
+  c = wt_cursor_init(wire, sizeof(wire));
+#if SIZE_MAX < UINT64_MAX
+  /* 32-bit: the length does not fit size_t, so the line is malformed. Before the checked narrowing this call
+   * returned WT_OK with a one-byte name (the bytes above were built to make that visible). */
+  WT_EXPECT_STATUS("a name length wider than size_t is refused", WT_ERR_PROTOCOL,
+                   wt_qpack_field_line_decode(&c, &decoded));
+#else
+  /* 64-bit: the length fits size_t but names more bytes than the cursor holds, which is a truncation and not a
+   * narrowing. This half keeps the test meaningful on a target that cannot reach the branch above. */
+  WT_EXPECT_STATUS("a name longer than the cursor is truncated", WT_ERR_TRUNCATED,
+                   wt_qpack_field_line_decode(&c, &decoded));
+#endif
+}
+
 int main(void) {
   test_static_indexed();
   test_literal_forms();
   test_post_base_and_truncation();
+  test_a_name_length_wider_than_size_t_is_refused();
   WT_TEST_MAIN_END("wt_qpack_field");
 }
