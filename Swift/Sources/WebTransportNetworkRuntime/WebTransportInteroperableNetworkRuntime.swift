@@ -804,6 +804,21 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
     }
 
+    /// The largest CONNECT-stream capsule payload permitted by
+    /// draft-ietf-webtrans-http3-16, in bytes.
+    ///
+    /// The only CONNECT-stream capsule whose payload is neither empty nor a
+    /// single QUIC varint is WT_CLOSE_SESSION: it carries a 32-bit application
+    /// error code followed by a UTF-8 message that the draft (Section 6) caps
+    /// at `wtCloseSessionMaxMessageBytes` (1024) bytes. Flow-control capsules
+    /// carry one varint and WT_DRAIN_SESSION is empty, so a conforming peer
+    /// can never declare a larger payload. The reader rejects a declared
+    /// length above this bound on the capsule header alone — before waiting
+    /// for, and therefore before buffering, the payload — so a peer cannot
+    /// pin unbounded memory by announcing a huge capsule and then stalling.
+    static let maximumConnectStreamCapsulePayloadBytes =
+        WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes + 4
+
     private static func receiveConnectCapsules(
         from stream: QUIC.Stream<QUICStream>,
         manager: WebTransportNetworkSessionManagerState,
@@ -849,7 +864,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
     }
 
-    private static func popCompleteCapsule(from buffer: inout Data) throws -> Data? {
+    /// Internal rather than private so the draft-16 capsule-size bound can be
+    /// regression-tested directly: `receiveConnectCapsules` needs a live
+    /// `Network.framework` `QUIC.Stream` that a unit test cannot fabricate.
+    static func popCompleteCapsule(from buffer: inout Data) throws -> Data? {
         guard !buffer.isEmpty else {
             return nil
         }
@@ -859,6 +877,15 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             let payloadLength = try QUICVarInt.decode(from: &cursor)
             guard payloadLength <= UInt64(Int.max) else {
                 throw QUICCodecError.valueOutOfRange("CONNECT capsule length exceeds Int.max")
+            }
+            // Reject an over-long declaration on the header alone. Waiting for
+            // the announced payload would let a peer keep this loop buffering
+            // (and re-opening flow-control credit) without bound.
+            guard payloadLength <= UInt64(Self.maximumConnectStreamCapsulePayloadBytes) else {
+                throw QUICCodecError.valueOutOfRange(
+                    "CONNECT capsule payload length \(payloadLength) exceeds the draft-16 maximum of "
+                        + "\(Self.maximumConnectStreamCapsulePayloadBytes) bytes"
+                )
             }
             let headerLength = buffer.count - cursor.remaining
             let (capsuleLength, overflow) = headerLength.addingReportingOverflow(Int(payloadLength))
