@@ -149,9 +149,63 @@ static void test_pseudo_header_values(void) {
   feed(&validation, ":path", "/wt", "and a path");
 }
 
+/* The REGULAR field's name and value grammars (headers.c). The fix that split the uppercase-only check into
+ * field_name_is_valid (a token) and field_value_is_valid (field-content) had no regression test: every refusal
+ * here used to be an uppercase name that the pre-fix code already rejected, so a name with a space or a value
+ * carrying CRLF -- the peer-reachable shapes the fix exists for -- were untested. A name that is not a token and
+ * a value that is not field-content are both RFC 9114 section 10.3 malformed messages, and the classic stake is
+ * the injection: a value this layer accepts and a later writer turns into a second field. */
+static void test_regular_field_grammar(void) {
+  wt_http3_header_validation_t validation;
+
+  /* A name that is not a token. */
+  wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+  refuse(&validation, "bad name", "1", "a name with a space is refused");
+  wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+  refuse(&validation, "bad:name", "1", "and a name with a colon");
+  wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+  refuse(&validation, "bad\tname", "1", "and a name with a tab");
+
+  /* A value that is not field-content: CR, LF and NUL are the bytes that become a second field. */
+  wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+  refuse(&validation, "x-test", "a\r\nX: y", "a value carrying a CRLF injection is refused");
+  wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+  refuse(&validation, "x-test", "a\rb", "and one carrying a bare CR");
+  wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+  refuse(&validation, "x-test", "a\nb", "and one carrying a bare LF");
+  {
+    /* A NUL cannot go through the strlen-based helper, so the bytes and their length are passed directly. */
+    static const uint8_t k_nul_value[3] = {'a', 0x00U, 'b'};
+    static const uint8_t k_name[6] = {'x', '-', 't', 'e', 's', 't'};
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+    WT_EXPECT_STATUS("a NUL in a regular field value is refused", WT_ERR_PROTOCOL,
+                     wt_http3_header_validate(&validation, k_name, sizeof(k_name), k_nul_value,
+                                              sizeof(k_nul_value), &error));
+    WT_EXPECT_U64("as a message error", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  }
+  {
+    /* A DEL (0x7f) is the other control the value grammar refuses. */
+    static const uint8_t k_del_value[3] = {'a', 0x7fU, 'b'};
+    static const uint8_t k_name[6] = {'x', '-', 't', 'e', 's', 't'};
+    wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+    wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+    WT_EXPECT_STATUS("a DEL in a value is refused", WT_ERR_PROTOCOL,
+                     wt_http3_header_validate(&validation, k_name, sizeof(k_name), k_del_value,
+                                              sizeof(k_del_value), &error));
+  }
+
+  /* And the legal shapes are still accepted: field-content allows SP and HTAB, a name may use the token's
+   * punctuation, and obs-text (above 0x7f) is legal in a value. */
+  wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+  feed(&validation, "x-test_1", "a b", "a token name and a value with a space are accepted");
+  feed(&validation, "x-note", "a\tb", "and one with a tab");
+}
+
 int main(void) {
   test_a_request();
   test_the_rules();
   test_pseudo_header_values();
+  test_regular_field_grammar();
   WT_TEST_MAIN_END("wt_http3_headers");
 }
