@@ -18,8 +18,10 @@ import WebTransportTLSCore
 // established.
 //
 // The generator is seeded and fully deterministic, so a failure reproduces
-// exactly. `WEBTRANSPORT_FUZZ_ITERATIONS` raises the per-parser budget for
-// longer local runs; CI uses the default.
+// exactly. `WEBTRANSPORT_FUZZ_ITERATIONS` raises the per-parser budget above the
+// 400-iteration default in ``fuzzIterations``: the AddressSanitizer fuzz job in
+// `.github/workflows/swift-ci.yml` sets it to 20,000, so unlike a local
+// `swift test` (which uses the default) CI runs the larger budget.
 
 /// Deterministic PRNG. Reproducibility matters more than statistical quality:
 /// a crash found in CI has to be replayable from the seed alone.
