@@ -11,7 +11,7 @@ public struct QUICUDPEndpoint: Equatable, Sendable {
     }
 }
 
-public enum QUICUDPError: Error, CustomStringConvertible, Sendable {
+public enum QUICUDPError: Error, Equatable, CustomStringConvertible, Sendable {
     case posix(operation: String, code: Int32)
     case timeout
     case invalidAddress
@@ -49,6 +49,25 @@ public final class QUICUDPPort: @unchecked Sendable {
     private let receiveLock = NSLock()
     public let localEndpoint: QUICUDPEndpoint
 
+    /// Applies one integer socket option, throwing the POSIX error when it fails.
+    ///
+    /// Internal rather than inlined so the failure branch is testable: SO_REUSEADDR
+    /// does not fail on a fresh socket, so `init` alone can never reach it. The
+    /// caller owns closing the descriptor on failure, matching the other syscall
+    /// guards in this file.
+    static func applySocketOption(
+        _ descriptor: Int32,
+        level: Int32,
+        name: Int32,
+        value: inout Int32
+    ) throws {
+        // SAFETY: The pointer references one initialized Int32 for exactly the
+        // duration and byte count passed to setsockopt.
+        guard unsafe setsockopt(descriptor, level, name, &value, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            throw QUICUDPError.posix(operation: "setsockopt", code: errno)
+        }
+    }
+
     public init(bindHost: String = "127.0.0.1", bindPort: UInt16 = 0) throws {
         let bindAddress = try Self.loopbackAddress(host: bindHost, port: bindPort)
         let fd = socket(bindAddress.family, SOCK_DGRAM, IPPROTO_UDP)
@@ -57,9 +76,14 @@ public final class QUICUDPPort: @unchecked Sendable {
         }
 
         var reuse: Int32 = 1
-        // SAFETY: The pointer references one initialized Int32 for exactly the
-        // duration and byte count passed to setsockopt.
-        unsafe setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
+        do {
+            try Self.applySocketOption(fd, level: SOL_SOCKET, name: SO_REUSEADDR, value: &reuse)
+        } catch {
+            // The descriptor is not stored yet, so this initializer owns closing it
+            // on every failure path, exactly as the bind and getsockname guards do.
+            close(fd)
+            throw error
+        }
 
         var address = bindAddress.storage
         // SAFETY: sockaddr_storage is large and aligned enough for sockaddr;

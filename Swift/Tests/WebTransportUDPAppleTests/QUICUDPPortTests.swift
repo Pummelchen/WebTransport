@@ -1,7 +1,8 @@
+import Darwin
 import Foundation
 import Testing
 import WebTransportQUICCore
-import WebTransportUDPApple
+@testable import WebTransportUDPApple
 
 @Test
 func udpPortExchangesNativeFramesOnLoopback() throws {
@@ -115,4 +116,41 @@ func udpReceiveReportsADatagramLargerThanItsBuffer() throws {
     let (bytes, _) = try server.receive(maximumBytes: 4_096, timeoutMilliseconds: 1_000)
     #expect(bytes.count == oversized.count)
     #expect(bytes == oversized)
+}
+
+/// F-swift-line-security-12: `setsockopt` used to have its result discarded, so a
+/// socket option that could not be applied surfaced later, if at all, under the
+/// wrong operation name. The guard now throws the POSIX error and `init` closes the
+/// descriptor before it propagates, like the bind and getsockname guards.
+///
+/// SO_REUSEADDR does not fail on a fresh socket, so this drives the extracted
+/// `applySocketOption` seam with an option number the kernel rejects rather than
+/// the socket path end to end.
+@Test
+func udpPortReportsAFailedSetsockoptUnderItsOwnOperation() throws {
+    let descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+    guard descriptor >= 0 else {
+        Issue.record("could not create a probe socket: \(errno)")
+        return
+    }
+    defer { close(descriptor) }
+
+    var value: Int32 = 1
+    // The option `init` applies succeeds and returns nothing.
+    try QUICUDPPort.applySocketOption(
+        descriptor,
+        level: SOL_SOCKET,
+        name: SO_REUSEADDR,
+        value: &value
+    )
+
+    // An option the kernel rejects is reported as "setsockopt", not swallowed.
+    #expect(throws: QUICUDPError.posix(operation: "setsockopt", code: ENOPROTOOPT)) {
+        try QUICUDPPort.applySocketOption(
+            descriptor,
+            level: SOL_SOCKET,
+            name: -1,
+            value: &value
+        )
+    }
 }
