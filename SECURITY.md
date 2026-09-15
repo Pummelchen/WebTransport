@@ -33,8 +33,14 @@ Every pull request and every push to `main` runs two blocking scans
   false-positive classes -- the test-only fixtures under
   `C99/tests/vectors/trust/` and one Swift enum label in a test -- are allowlisted
   by path and value in `.gitleaks.toml`; anything else fails the job.
-- **Vulnerable dependencies and secrets** in the tree with trivy
-  (`.trivy.yaml`).
+- **Vulnerable dependencies, secrets, and container/IaC configuration** in the
+  tree with trivy (`.trivy.yaml`). `vuln` and `secret` are absolute; the
+  `misconfig` findings that are accepted rather than fixed are listed, per file,
+  in `.trivyignore.yaml` -- today DS-0002 (no non-root `USER`) and DS-0026 (no
+  `HEALTHCHECK`) on the six interop TEST Dockerfiles. Those containers run only
+  on a private bridge network started and polled by
+  `scripts/run-container-interop*.sh`, are never published and never shipped, and
+  the exception is scoped by path, so a new Dockerfile is still checked.
 
 **The one dependency, system OpenSSL.** The C99 library links the platform's
 OpenSSL 3.x -- `find_package(OpenSSL 3.0 REQUIRED)`, `C99/CMakeLists.txt:38` -- and
