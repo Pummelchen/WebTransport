@@ -619,18 +619,51 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             timeoutMilliseconds: overrideTimeoutMilliseconds ?? timeoutMilliseconds,
             maxBytes: maximumInitialBytes
         )
+        // The prefix is classified before the session manager sees the bytes. A
+        // stream for another session must not be registered or buffered for a
+        // session this connection never serves: the manager's server role has to
+        // buffer a stream whose CONNECT may still be in flight, so it cannot tell
+        // that case from a foreign one, but this runtime serves exactly one
+        // session and can.
+        if let foreignSessionID = InteroperableQUICHelpers.foreignSessionID(
+            inPrefixedStream: firstChunk,
+            expectedSessionID: sessionID
+        ) {
+            stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+            InteroperableQUICDebug.log(
+                "refusing inbound stream \(stream.streamID): prefix names session \(foreignSessionID), "
+                    + "this connection serves \(sessionID)"
+            )
+            throw WebTransportDraft16Error(
+                kind: .sessionGone,
+                message: "WebTransport inbound stream names session \(foreignSessionID), not \(sessionID)"
+            )
+        }
         let accepted = try await manager.withManager { manager in
             try manager.acceptBidirectionalStreamWithActions(
                 streamID: stream.streamID,
                 firstBytes: firstChunk
             )
         }
-        guard let prefix = accepted.prefix,
-            accepted.rejectionFrame == nil,
-            prefix.form == .bidirectional,
-            prefix.sessionID.rawValue == sessionID
-        else {
-            throw WebTransportNetworkRuntimeError.unexpectedFrame
+        guard let prefix = accepted.prefix, accepted.rejectionFrame == nil else {
+            // The manager refused the stream — a buffered-ingress limit or an
+            // over-long initial payload — and returned the reset frame the peer
+            // must observe. The runtime resets through the framework's stream
+            // error code rather than by writing a frame, so name the refusal code
+            // and let go of the handle instead of dropping the stream silently.
+            stream.streamApplicationErrorCode =
+                WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
+            throw WebTransportDraft16Error(
+                kind: .bufferedStreamRejected,
+                message: "WebTransport inbound stream was refused by the session manager"
+            )
+        }
+        guard prefix.form == .bidirectional, prefix.sessionID.rawValue == sessionID else {
+            stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+            throw WebTransportDraft16Error(
+                kind: .sessionGone,
+                message: "WebTransport inbound stream names session \(prefix.sessionID.rawValue), not \(sessionID)"
+            )
         }
         return WebTransportNetworkBidirectionalStream(
             stream: stream,
@@ -1763,6 +1796,35 @@ enum InteroperableQUICHelpers {
                 WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
         }
         return disposition
+    }
+
+    /// The session a peer-prefixed bidirectional stream names, when that session
+    /// is not the one this connection serves.
+    ///
+    /// A WebTransport stream starts with a marker and a session ID. The runtime
+    /// serves exactly one session per connection, so a prefix naming any other
+    /// session is a peer error the draft requires be refused at the stream level.
+    /// The bytes have already been consumed from the transport by the time the
+    /// prefix is available, so the stream cannot be handed back; it must be reset
+    /// rather than silently dropped. A caller that sees `nil` leaves the bytes to
+    /// `WebTransportSessionManager`, which owns the prefix grammar and reports the
+    /// appropriate protocol error for a missing, malformed, or non-bidirectional
+    /// prefix.
+    static func foreignSessionID(
+        inPrefixedStream firstBytes: Data,
+        expectedSessionID: UInt64
+    ) -> UInt64? {
+        guard WebTransportStreamSignaling.hasStreamPrefix(firstBytes),
+            let prefix = try? WebTransportStreamSignaling.parsePrefix(firstBytes),
+            prefix.form == .bidirectional
+        else {
+            return nil
+        }
+        let namedSessionID = prefix.sessionID.rawValue
+        guard namedSessionID != expectedSessionID else {
+            return nil
+        }
+        return namedSessionID
     }
 
     static func makeRequestStreamPayload(streamID: UInt64, requestFrame: HTTP3Frame) throws -> Data {
