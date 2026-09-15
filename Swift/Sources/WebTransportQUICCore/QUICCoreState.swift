@@ -661,34 +661,76 @@ public struct QUICStreamState: Equatable, Sendable {
 
     @discardableResult
     public mutating func receive(_ frame: QUICFrame) throws -> Data {
-        try ensureCanReceive()
-        guard case .stream(let streamID, let offset, let fin, let data) = frame, streamID == id else {
+        switch frame {
+        case .resetStream(let streamID, _, let finalSize):
+            guard streamID == id else {
+                throw QUICStateError.streamStateViolation("expected STREAM frame for stream \(id)")
+            }
+            try receiveResetStream(finalSize: finalSize)
+            return Data()
+        case .stream(let streamID, let offset, let fin, let data):
+            guard streamID == id else {
+                throw QUICStateError.streamStateViolation("expected STREAM frame for stream \(id)")
+            }
+            let frameOffset = offset ?? 0
+            let (attempted, receiveOverflow) = frameOffset.addingReportingOverflow(UInt64(data.count))
+
+            // RFC 9000 section 4.5: both final-size rules are checked before the
+            // receive-closed gate. The FIN that records the final size closes the
+            // receive half in the same step, so a check placed after that gate can
+            // never observe a non-nil `finalReceiveSize`.
+            if let finalReceiveSize {
+                guard !receiveOverflow, attempted <= finalReceiveSize else {
+                    throw QUICStateError.streamStateViolation("STREAM data exceeds final size")
+                }
+                if fin, attempted != finalReceiveSize {
+                    throw QUICStateError.streamStateViolation("inconsistent final stream size")
+                }
+            }
+
+            try ensureCanReceive()
+            guard !receiveOverflow else {
+                throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: UInt64.max)
+            }
+            guard frameOffset == receiveOffset else {
+                throw QUICStateError.streamStateViolation("out-of-order STREAM data is not accepted")
+            }
+            guard attempted <= maxReceiveOffset else {
+                throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: attempted)
+            }
+
+            receiveOffset = attempted
+            if fin {
+                finalReceiveSize = attempted
+                receiveClosed = true
+            }
+            return data
+        default:
             throw QUICStateError.streamStateViolation("expected STREAM frame for stream \(id)")
         }
-        let frameOffset = offset ?? 0
-        guard frameOffset == receiveOffset else {
-            throw QUICStateError.streamStateViolation("out-of-order STREAM data is not accepted")
-        }
-        let (attempted, receiveOverflow) = frameOffset.addingReportingOverflow(UInt64(data.count))
-        guard !receiveOverflow else {
-            throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: UInt64.max)
-        }
-        guard attempted <= maxReceiveOffset else {
-            throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: attempted)
-        }
-        if let finalReceiveSize, attempted > finalReceiveSize {
-            throw QUICStateError.streamStateViolation("STREAM data exceeds final size")
-        }
+    }
 
-        receiveOffset = attempted
-        if fin {
-            if let finalReceiveSize, finalReceiveSize != attempted {
-                throw QUICStateError.streamStateViolation("inconsistent final stream size")
-            }
-            finalReceiveSize = attempted
-            receiveClosed = true
+    /// Records the Final Size carried by an inbound RESET_STREAM frame and closes
+    /// the receive half (RFC 9000 sections 4.5 and 19.4).
+    ///
+    /// A RESET_STREAM is produced by the peer's send side, so for this endpoint it
+    /// is the receive half's final size, and it is the only way that size becomes
+    /// known when the peer resets without ever sending FIN. Once recorded the size
+    /// cannot change, and it cannot be below the bytes already received.
+    private mutating func receiveResetStream(finalSize: UInt64) throws {
+        guard hasReceiveHalf else {
+            throw QUICStateError.streamStateViolation(
+                "cannot receive on locally initiated unidirectional stream")
         }
-        return data
+        guard finalSize >= receiveOffset else {
+            throw QUICStateError.streamStateViolation(
+                "RESET_STREAM final size is below the bytes already received")
+        }
+        if let finalReceiveSize, finalReceiveSize != finalSize {
+            throw QUICStateError.streamStateViolation("inconsistent final stream size")
+        }
+        finalReceiveSize = finalSize
+        receiveClosed = true
     }
 
     public mutating func applyMaxStreamData(_ maximum: UInt64) {

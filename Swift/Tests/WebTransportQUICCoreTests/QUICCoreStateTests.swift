@@ -479,3 +479,79 @@ func connectionIDStoreKeepsRetiredSequencesBelowTheWatermark() throws {
     )
     #expect(store.active.keys.sorted() == [10, 11])
 }
+
+/// RFC 9000 section 4.5: once a final size is known it cannot change, so a
+/// STREAM frame that would exceed it and a FIN that would redefine it are both
+/// FINAL_SIZE_ERROR. Both checks live in `QUICStreamState.receive`, and both
+/// used to sit after the receive-closed gate that the very FIN which records
+/// the final size closes, so neither branch could ever run.
+@Test
+func streamStateEnforcesARecordedFinalSize() throws {
+    var stream = QUICStreamState(
+        id: 0,
+        localRole: .client,
+        maxSendOffset: 0,
+        maxReceiveOffset: 64
+    )
+    #expect(
+        try stream.receive(.stream(id: 0, offset: 0, fin: true, data: Data("hello".utf8)))
+            == Data("hello".utf8))
+    #expect(stream.finalReceiveSize == 5)
+    #expect(stream.receiveClosed)
+
+    // A STREAM frame past the recorded final size is FINAL_SIZE_ERROR even
+    // though the receive half is already closed.
+    #expect(throws: QUICStateError.streamStateViolation("STREAM data exceeds final size")) {
+        _ = try stream.receive(.stream(id: 0, offset: 5, fin: false, data: Data("x".utf8)))
+    }
+    // A FIN whose size disagrees with the recorded final size is FINAL_SIZE_ERROR.
+    #expect(throws: QUICStateError.streamStateViolation("inconsistent final stream size")) {
+        _ = try stream.receive(.stream(id: 0, offset: 0, fin: true, data: Data("hi".utf8)))
+    }
+}
+
+/// RFC 9000 sections 4.5 and 19.4: a RESET_STREAM frame carries the sender's
+/// Final Size, which is the receive half's final size. The state machine used to
+/// ignore RESET_STREAM entirely, so a reset stream had no recorded final size
+/// and the section 4.5 checks never had a value to compare against.
+@Test
+func streamStateRecordsFinalSizeFromResetStream() throws {
+    var stream = QUICStreamState(
+        id: 0,
+        localRole: .client,
+        maxSendOffset: 0,
+        maxReceiveOffset: 64
+    )
+    _ = try stream.receive(.stream(id: 0, offset: 0, fin: false, data: Data("hello".utf8)))
+    #expect(stream.finalReceiveSize == nil)
+
+    _ = try stream.receive(.resetStream(id: 0, applicationErrorCode: 0x10, finalSize: 5))
+    #expect(stream.finalReceiveSize == 5)
+    #expect(stream.receiveClosed)
+
+    // The reset's final size now bounds later STREAM frames.
+    #expect(throws: QUICStateError.streamStateViolation("STREAM data exceeds final size")) {
+        _ = try stream.receive(.stream(id: 0, offset: 5, fin: false, data: Data("x".utf8)))
+    }
+    // A second RESET_STREAM that changes the final size is FINAL_SIZE_ERROR.
+    #expect(throws: QUICStateError.streamStateViolation("inconsistent final stream size")) {
+        _ = try stream.receive(.resetStream(id: 0, applicationErrorCode: 0x10, finalSize: 9))
+    }
+
+    // A RESET_STREAM below the bytes already received is FINAL_SIZE_ERROR.
+    var short = QUICStreamState(
+        id: 0,
+        localRole: .client,
+        maxSendOffset: 0,
+        maxReceiveOffset: 64
+    )
+    _ = try short.receive(.stream(id: 0, offset: 0, fin: false, data: Data("hello".utf8)))
+    #expect(
+        throws: QUICStateError.streamStateViolation(
+            "RESET_STREAM final size is below the bytes already received")
+    ) {
+        _ = try short.receive(.resetStream(id: 0, applicationErrorCode: 0x10, finalSize: 3))
+    }
+    // The rejected reset left no final size behind.
+    #expect(short.finalReceiveSize == nil)
+}
