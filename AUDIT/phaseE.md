@@ -23,11 +23,10 @@ The objective is not declared complete. This file records exactly what has been 
 1. **Independent host for Phase E.** The fresh-clone run above was on the machine that developed the fixes.
    `node1`, `node2` and `node4` reject our SSH key (`Permission denied (publickey,password,keyboard-interactive)`;
    `node3` is this host) and the brief (§1b) requires approval before provisioning work onto the VPS. A
-   **Debian 13 container run** of the C99 leg from the same fresh clone is in flight as the closest independent
-   *environment* available without a human decision (`/tmp/docker-c99.txt`); it is not a different host.
-2. **Coverage numbers per language** (§1 requires coverage measurement). Both runs are in flight:
-   `swift test --enable-code-coverage` + `llvm-cov report` (app+library sources, tests excluded) and a
-   `--coverage` C99 build + `gcovr --gcov-executable "xcrun llvm-cov gcov"` over `C99/src` and `C99/apps`
-   (`/tmp/coverage.txt`).
+   **Debian 13 container run** of the C99 leg is in flight from a fresh clone at `/Users/node3/Downloads/wt-phaseE-clone`
+   (the first attempt failed only because Docker Desktop does not share `/tmp`; the clone lives under `/Users` now).
+   It is an independent *environment*, not an independent host.
+2. **Coverage numbers per language** (§1 requires coverage measurement). **Swift: DONE** — 85.88% line, 95.97% function, 93.06% region over 1,409 non-test lines (`swift test --enable-code-coverage` + `xcrun llvm-cov report` over every `.xctest` binary, tests and `.build` excluded).
+   **C99: in flight** — a `--coverage` build and `gcovr` over `C99/src` and `C99/apps` are running inside the Debian 13 container (`/tmp/cov-c99-report.txt`).
 3. **`F-repo-ops-09` (S1, BLOCKED-with-owner)** — the third-party interop matrix predates the
    `webtransport-h3` token change; options (VPS run / release note / containerised peers only) are in the ledger.
