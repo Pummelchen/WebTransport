@@ -154,6 +154,62 @@ func lossRecoveryReturnsRetransmittableFrames() throws {
     #expect(recovery.sentPackets[.applicationData]?.keys.sorted() == [2])
 }
 
+/// F-swift-perf-tests-02: classifying an ACK must not sort the outstanding packet
+/// set twice nor scan every peer-supplied ACK range for every outstanding packet.
+///
+/// `processAck` built `packets.keys.sorted()` once per pass, and the first pass
+/// used `acknowledgedRanges.contains(where:)`, which re-tested every range for
+/// every packet — O(packets x ranges), with the range count bounded only by the
+/// 16,384 expanded packet numbers a peer may put in one ACK frame. The probes
+/// below are the same operations counted, so the bound is on work rather than on
+/// wall-clock time.
+@Test
+func lossRecoveryClassifiesAckRangesWithoutScanningEveryRangePerPacket() throws {
+    let packetCount = 8_193
+    let rangeCount = 1_024
+    var recovery = QUICLossRecovery(packetThreshold: 3)
+    for number in 0..<UInt64(packetCount) {
+        recovery.recordSent(
+            QUICSentPacket(
+                packetNumberSpace: .applicationData,
+                packetNumber: number,
+                sentTimeMicros: 0,
+                bytes: 1,
+                frames: [.ping]
+            ))
+    }
+
+    // Single-packet ranges two apart: the peer acknowledges every even packet in
+    // the top 2,048 numbers. Every odd packet below them must be tested against
+    // the whole range list by a per-range scan. One range comes from
+    // `firstAckRange`, the rest from the gaps.
+    let largest = UInt64(packetCount - 1)
+    let result = try recovery.processAck(
+        .ack(
+            largestAcknowledged: largest,
+            ackDelay: 0,
+            firstAckRange: 0,
+            ranges: Array(repeating: QUICAckRange(gap: 0, length: 0), count: rangeCount - 1)
+        ),
+        in: .applicationData
+    )
+
+    #expect(result.acknowledged.count == rangeCount)
+    #expect(result.acknowledged.allSatisfy { $0.packetNumber % 2 == largest % 2 })
+    #expect(recovery.sentPackets[.applicationData]?.keys.sorted() == [largest - 1])
+
+    // One ordering pass over the outstanding set, not one sort per loop.
+    #expect(
+        recovery.acknowledgementOrderingSteps <= packetCount + 1,
+        "the outstanding set was ordered \(recovery.acknowledgementOrderingSteps) times for \(packetCount) packets"
+    )
+    // One range comparison per packet at worst, plus the ranges stepped over once.
+    #expect(
+        recovery.acknowledgementRangeProbes <= 4 * (packetCount + rangeCount),
+        "classifying \(packetCount) packets against \(rangeCount) ranges took \(recovery.acknowledgementRangeProbes) range comparisons"
+    )
+}
+
 @Test
 func lossRecoveryProcessesLargeAckRangesWithoutExpandingEveryPacketNumber() throws {
     var recovery = QUICLossRecovery(packetThreshold: 3)

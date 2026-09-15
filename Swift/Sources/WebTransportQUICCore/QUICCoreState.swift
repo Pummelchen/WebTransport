@@ -451,6 +451,21 @@ public struct QUICLossRecovery: Equatable, Sendable {
     public var packetThreshold: UInt64
     public private(set) var sentPackets: [QUICPacketNumberSpace: [UInt64: QUICSentPacket]]
 
+    /// How many packet numbers the last ``processAck(_:in:)`` passed through a sort.
+    ///
+    /// A cost probe, not protocol state. The regression test in
+    /// `QUICCoreStateTests` pins the classification to one ordering of the
+    /// outstanding set, because the cost of acknowledging must not double just
+    /// because two passes need the same numbers in order.
+    private(set) var acknowledgementOrderingSteps = 0
+
+    /// How many ACK ranges the last ``processAck(_:in:)`` compared a packet against.
+    ///
+    /// The peer chooses how many ranges its ACK frame carries, so a per-packet
+    /// scan over all of them is a peer-controlled cost. The test pins the
+    /// classification to O(packets + ranges).
+    private(set) var acknowledgementRangeProbes = 0
+
     public init(packetThreshold: UInt64 = 3) {
         self.packetThreshold = packetThreshold
         self.sentPackets = [:]
@@ -464,23 +479,45 @@ public struct QUICLossRecovery: Equatable, Sendable {
         _ ackFrame: QUICFrame,
         in packetNumberSpace: QUICPacketNumberSpace
     ) throws -> QUICAckProcessingResult {
+        acknowledgementOrderingSteps = 0
+        acknowledgementRangeProbes = 0
         let acknowledgedRanges = try QUICAckTracker.acknowledgedPacketNumberRanges(from: ackFrame)
         guard !acknowledgedRanges.isEmpty else {
             throw QUICStateError.invalidAckFrame
         }
-        let largestAcknowledged = acknowledgedRanges.map(\.high).max() ?? 0
+        let largestAcknowledged = acknowledgedRanges[0].high
 
         var acknowledged: [QUICSentPacket] = []
         var lost: [QUICSentPacket] = []
         var packets = sentPackets[packetNumberSpace, default: [:]]
 
-        for packetNumber in packets.keys.sorted() where acknowledgedRanges.contains(where: { packetNumber >= $0.low && packetNumber <= $0.high }) {
+        // Both passes need the outstanding numbers in ascending order, and the old
+        // code sorted the key set once per pass. The peer's ranges are decoded high
+        // to low, so one cursor over them classifies every packet in ascending
+        // order without re-testing ranges that cannot contain it: the cursor only
+        // ever moves towards the higher ranges as the packet numbers grow.
+        let orderedPacketNumbers = packets.keys.sorted()
+        acknowledgementOrderingSteps += orderedPacketNumbers.count
+
+        var rangeCursor = acknowledgedRanges.count - 1
+        for packetNumber in orderedPacketNumbers {
+            while rangeCursor >= 0, packetNumber > acknowledgedRanges[rangeCursor].high {
+                acknowledgementRangeProbes += 1
+                rangeCursor -= 1
+            }
+            guard rangeCursor >= 0 else {
+                break
+            }
+            acknowledgementRangeProbes += 1
+            guard packetNumber >= acknowledgedRanges[rangeCursor].low else {
+                continue
+            }
             if let packet = packets.removeValue(forKey: packetNumber) {
                 acknowledged.append(packet)
             }
         }
 
-        for packetNumber in packets.keys.sorted()
+        for packetNumber in orderedPacketNumbers
         where isPacketThresholdLost(
             packetNumber: packetNumber,
             largestAcknowledged: largestAcknowledged
