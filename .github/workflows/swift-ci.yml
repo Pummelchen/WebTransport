@@ -13,9 +13,9 @@ concurrency:
 
 jobs:
   macos-swift:
-    name: macOS 26 / Swift 6.3.3+ SwiftPM
+    name: macOS 27 / Swift 6.4+ SwiftPM
 
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -84,7 +84,7 @@ jobs:
 
   fuzz-peer-input:
     name: Fuzz peer-facing parsers / ASan
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -102,7 +102,7 @@ jobs:
 
   thread-sanitizer:
     name: Thread Sanitizer / in-process tests
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@v6

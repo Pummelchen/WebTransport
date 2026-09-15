@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-minimum_swift="6.3.3"
-minimum_xcode="26.6"
+minimum_swift="6.4"
+minimum_xcode="27.0"
 
 version_at_least() {
     awk -v current="$1" -v minimum="$2" 'BEGIN {

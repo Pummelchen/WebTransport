@@ -1,4 +1,4 @@
-// swift-tools-version: 6.3
+// swift-tools-version: 6.4
 import PackageDescription
 
 let strictSwiftSettings: [SwiftSetting] = [
@@ -197,7 +197,12 @@ let package = Package(
             name: "WebTransportHTTP3CoreTests",
             dependencies: [
                 "WebTransportHTTP3Core",
-                "WebTransportQUICCore"
+                "WebTransportQUICCore",
+                // PeerInputFuzzTests calls WebTransportTLSCore's parsers directly. The dependency was
+                // implicit and resolved through eager linking before the Swift 6.4 build system, which
+                // no longer surfaces transitive symbols: the test bundle failed to link with
+                // "Undefined symbols for architecture arm64" until this became explicit.
+                "WebTransportTLSCore"
             ],
             path: "Swift/Tests/WebTransportHTTP3CoreTests",
             swiftSettings: strictSwiftSettings
