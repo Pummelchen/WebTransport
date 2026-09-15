@@ -200,6 +200,10 @@ typedef struct wt_quic_tx_frame {
 
 typedef struct wt_quic_control_frame {
   int in_use;
+  /* Set when a re-send of this retained frame could not go out. The obligation stands -- the slot is still
+   * in_use -- but no packet is in flight that a later loss could name it by, because the descriptor is freed
+   * with the failed send. `wt_quic_connection_flush` re-drives every flagged slot. */
+  int resend_pending;
   wt_quic_space_t space;
   uint8_t wire[WT_QUIC_CONTROL_WIRE_MAX];
   size_t wire_length;
@@ -336,6 +340,10 @@ typedef struct wt_quic_connection {
   /* Control frames sent WITHOUT a slot, because the table was full: a bound this endpoint enforces rather than
    * a table it grows, counted so that "the retransmission did not happen" is visible. */
   uint64_t control_frames_unretained;
+  /* Retained control frames whose re-send could not go out (congestion, a full sent list or descriptor table,
+   * the path's datagram limit, an I/O error). They are still owed and `flush` re-drives them; counted so that
+   * "the retransmission has not happened YET" is visible rather than silent. */
+  uint64_t control_frames_resend_deferred;
 
   wt_quic_frame_handler_fn handler;
   void *handler_context;

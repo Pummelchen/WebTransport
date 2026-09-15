@@ -3679,6 +3679,73 @@ static void test_an_acknowledged_control_frame_is_not_sent_again(void) {
   close_pair(&pair);
 }
 
+/* And the third half of "until acknowledged": a re-send that CANNOT go out. `send_encoded_frame` frees the
+ * descriptor when the send fails, and the descriptor is the only handle a later loss names the obligation by --
+ * so a discarded failure drops the frame for the life of the connection AND keeps its slot occupied forever.
+ * Here the path's datagram limit is too small at the instant the loss is declared (one of the ways `send_packet`
+ * fails), and the slot must stay owed so the next flush re-drives it. */
+static void test_a_failed_control_resend_is_redriven_by_flush(void) {
+  connection_pair_t pair;
+  wt_quic_frame_t ping = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
+  uint64_t now = 111500000U;
+  uint64_t packets_before;
+  unsigned i;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  arm_application(&pair, 0x90U);
+
+  WT_EXPECT_OK("a grant is in force", wt_quic_connection_set_max_data(&pair.client, 100000U));
+  WT_EXPECT_OK("a MAX_DATA frame goes out", wt_quic_connection_send_max_data(&pair.client, 200000U, now));
+  now += 1000U;
+  /* The network drops it. */
+  discard_one_datagram(&pair.server_socket);
+
+  /* Three more packets, delivered, so the dropped one is three below what gets acknowledged. */
+  for (i = 0U; i < 3U; i++) {
+    WT_EXPECT_OK("a later packet goes out",
+                 wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1,
+                                               now + i * 1000U));
+    WT_EXPECT_OK("and is flushed", wt_quic_connection_flush(&pair.client, now + i * 1000U));
+    now += 1000U;
+    receive_on(&pair.server, &pair.server_socket, now);
+  }
+
+  now += 40000U;
+  WT_EXPECT_OK("the peer's timer acknowledges", wt_quic_connection_on_timeout(&pair.server, now));
+  now += 1000U;
+
+  /* The path's limit is too small for ANY packet right now, so the re-send that the acknowledgement's loss
+   * detection triggers cannot go out. */
+  packets_before = pair.client.packets_sent;
+  pair.client.config.max_datagram_size = 8U;
+  receive_on(&pair.client, &pair.client_socket, now);
+  WT_EXPECT_TRUE("the dropped packet was declared lost",
+                 pair.client.packets_declared_lost[WT_QUIC_SPACE_APPLICATION] > 0U);
+  WT_EXPECT_U64("and the failed re-send put nothing new on the wire", packets_before,
+                pair.client.packets_sent);
+
+  /* The path recovers, and the next flush re-drives the retained obligation. */
+  pair.client.config.max_datagram_size = WT_QUIC_MAX_PACKET;
+  WT_EXPECT_OK("the next flush runs", wt_quic_connection_flush(&pair.client, now + 1000U));
+  WT_EXPECT_U64("and re-sends the retained control frame", packets_before + 1U,
+                pair.client.packets_sent);
+
+  /* The peer sees the raised limit only now, carried by the re-driven copy. */
+  WT_EXPECT_U64("which the dropped packet never delivered", 0U, pair.server.peer_limits.initial_max_data);
+  {
+    unsigned round;
+    for (round = 0U; round < 50U && pair.server.peer_limits.initial_max_data != 200000U; round++) {
+      now += 1000U;
+      if (wt_udp_wait(&pair.server_socket, 20000U) != WT_OK) continue;
+      (void)wt_quic_connection_receive(&pair.server, now);
+    }
+  }
+  WT_EXPECT_U64("but the re-driven copy does", 200000U, pair.server.peer_limits.initial_max_data);
+  WT_EXPECT_INT("with nobody closed", 0, wt_quic_connection_is_closed(&pair.client));
+
+  close_pair(&pair);
+}
+
 /* RFC 9000 section 13.3 is a list of exceptions in BOTH directions. Lost PING and PADDING frames "do not require
  * repair", an old ACK must not be resent (it would inflate the peer's RTT sample) and is replaced rather than
  * repeated, a CONNECTION_CLOSE "is not sent again when packet loss is detected", and a DATAGRAM is never
@@ -4039,6 +4106,7 @@ int main(void) {
   test_a_retransmission_descriptor_is_released_on_acknowledgement();
   test_a_lost_control_frame_is_sent_again();
   test_an_acknowledged_control_frame_is_not_sent_again();
+  test_a_failed_control_resend_is_redriven_by_flush();
   test_only_retransmittable_frames_keep_a_slot();
 
   test_open_stream();

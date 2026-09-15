@@ -399,9 +399,18 @@ static void on_lost(void *context, const wt_quic_sent_packet_t *packet) {
       size_t slot = (size_t)descriptor.offset;
       if (slot < WT_QUIC_CONTROL_FRAMES_MAX && connection->control_frames[slot].in_use) {
         wt_quic_control_frame_t *kept = &connection->control_frames[slot];
-        int sent = 0;
-        (void)send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1,
-                                 tag_for_control(connection, slot), &sent, connection->last_activity);
+        /* The re-sent packet has to be ANSWERABLE: the descriptor is what a later loss names this obligation
+         * by, and `send_encoded_frame` frees the one it was given when the send fails. A discarded failure
+         * would therefore drop the frame for the life of the connection AND leave the slot occupied forever --
+         * nothing later names it. The slot is flagged instead, and `wt_quic_connection_flush` re-drives it (the
+         * bytes are still the frame, which is why the slot is kept at all). */
+        wt_status_t resent = send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1,
+                                                tag_for_control(connection, slot), NULL,
+                                                connection->last_activity);
+        if (resent != WT_OK) {
+          kept->resend_pending = 1;
+          connection->control_frames_resend_deferred++;
+        }
       }
     } else if (connection->lost_handler != NULL) {
       connection->lost_handler(connection->lost_context, &descriptor);
@@ -716,6 +725,7 @@ static wt_status_t send_control_frame(wt_quic_connection_t *connection, wt_quic_
   }
 
   connection->control_frames[slot].in_use = 1;
+  connection->control_frames[slot].resend_pending = 0;
   connection->control_frames[slot].space = space;
   connection->control_frames[slot].wire_length = wt_writer_offset(&kept);
   memcpy(connection->control_frames[slot].wire, wire, wt_writer_offset(&kept));
@@ -936,6 +946,7 @@ static wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t 
       if (connection->frames[snapshot[i].tag].stream_id == WT_QUIC_CONTROL_STREAM_ID &&
           connection->frames[snapshot[i].tag].offset < (uint64_t)WT_QUIC_CONTROL_FRAMES_MAX) {
         connection->control_frames[connection->frames[snapshot[i].tag].offset].in_use = 0;
+        connection->control_frames[connection->frames[snapshot[i].tag].offset].resend_pending = 0;
       }
       free_frame(connection, snapshot[i].tag);
     }
@@ -2425,6 +2436,39 @@ wt_status_t wt_quic_connection_send_frame(wt_quic_connection_t *connection, wt_q
   return sent ? WT_OK : WT_ERR_STATE;
 }
 
+/* One retained control frame whose earlier re-send could not go out. The slot is still owed but no packet is in
+ * flight that a loss could name it by, so it is re-driven here. The descriptor is allocated BEFORE the bytes are
+ * sent, so a packet that does go out is answerable; a full descriptor table defers the frame to the next flush
+ * rather than putting bytes on the wire that nothing would ever retransmit. A failure leaves `resend_pending`
+ * set, so the obligation survives as many flushes as it takes. */
+static void resume_control_frame(wt_quic_connection_t *connection, size_t slot, uint64_t now) {
+  wt_quic_control_frame_t *kept = &connection->control_frames[slot];
+  uint64_t tag = tag_for_control(connection, slot);
+
+  if (tag >= (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX) {
+    connection->control_frames_resend_deferred++;
+    return;
+  }
+  if (send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1, tag, NULL, now) != WT_OK) {
+    connection->control_frames_resend_deferred++;
+    return;
+  }
+  kept->resend_pending = 0;
+}
+
+/* Every retained control frame a failed re-send left flagged. Called from `wt_quic_connection_flush`, which is the
+ * pump the caller already runs, so the obligation is retried by ordinary progress rather than by a loss event that
+ * will never come. */
+static void resume_pending_control_frames(wt_quic_connection_t *connection, uint64_t now) {
+  size_t slot;
+
+  for (slot = 0U; slot < WT_QUIC_CONTROL_FRAMES_MAX; slot++) {
+    if (connection->control_frames[slot].in_use && connection->control_frames[slot].resend_pending != 0) {
+      resume_control_frame(connection, slot, now);
+    }
+  }
+}
+
 /* An acknowledgement for a space, if one is owed. `probe` asks for an ack-eliciting PING instead,
  * which is what a probe timeout sends: something the peer must acknowledge, so that the round trip
  * estimate can recover. */
@@ -2516,6 +2560,10 @@ wt_status_t wt_quic_connection_flush(wt_quic_connection_t *connection, uint64_t 
     status = flush_space(connection, (wt_quic_space_t)i, 0, 0, now);
     if (status != WT_OK) return status;
   }
+  /* A retained control frame whose re-send failed is still owed, and no loss event names it: re-drive it before
+   * the path challenge, because it is the connection's own frame and the challenge is a question, not an
+   * obligation. */
+  resume_pending_control_frames(connection, now);
   /* And a PATH_CHALLENGE this connection owes (WT-172), after the spaces: a challenge is a probe, not a
    * handshake message, and a flush that sent it before an owed acknowledgement would delay the peer's own
    * progress to ask it a question of our own. */
