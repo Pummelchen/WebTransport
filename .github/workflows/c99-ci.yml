@@ -2,10 +2,12 @@
 # share nothing but the repository: no toolchain overlap, no dependency overlap,
 # and a failure in one should not mask the other.
 #
-# Four jobs, and the plan's Phase 12 list is what they are for. macOS 26 and Debian
-# run the tree in CI as they always have; the FreeBSD leg is still to be added; and
-# the Windows leg is here twice, because there are two different claims to make and
-# only one of them needs a Windows machine:
+# Four jobs, and the plan's Phase 12 list is what they are for. macOS 26 and Ubuntu
+# 24.04 run the tree in CI as they always have -- the Linux legs are GitHub's
+# `ubuntu-24.04` image (GCC and Clang), not a Debian container; the plan's Phase 12
+# matrix names Debian 13 for those two legs, which they do not yet run. The FreeBSD
+# leg is still to be added; and the Windows leg is here twice, because there are two
+# different claims to make and only one of them needs a Windows machine:
 #
 #   * `windows-wine` cross-builds the whole tree with mingw on Linux and RUNS every
 #     test executable under Wine. That is what found `WT-199` and `WT-200` -- a

@@ -48,7 +48,8 @@ chain is validated against the platform trust store and the name is checked rath
 84 test programs and 91,552 checks pass (plus a 200,000-input parser fuzz run and a Clang Static
 Analyzer pass over all 94 sources), and every suite runs again under AddressSanitizer and
 UndefinedBehaviorSanitizer, on macOS and Linux in CI: **97 CTest tests pass on macOS 26 and
-Debian 13**. The tree also compiles, links and **runs** on Windows (85 of 85 test executables
+Ubuntu 24.04** (the workflow's two `ubuntu-24.04` legs). The tree also compiles, links and
+**runs** on Windows (85 of 85 test executables
 under Wine, including a Windows-only test of the datagram layer) and FreeBSD 15.1 (the whole suite
 on a real kernel) -- and running the Windows branch is what found and fixed `WT-199` and `WT-200`.
 Windows is covered by two CI legs: `windows-wine` (enforced -- mingw cross-build, then every test

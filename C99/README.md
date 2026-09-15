@@ -20,7 +20,8 @@ layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1
 runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
 dynamic table, the draft-16 WebTransport session layer, and the public consumer API.
 
-**97 CTest tests pass on macOS 26 and on Debian 13**, and the tree also runs on **Windows** (85
+**97 CTest tests pass on macOS 26 and on Ubuntu 24.04** (the two `ubuntu-24.04` CI
+legs), and the tree also runs on **Windows** (85
 test executables executed under Wine, 85 passing, plus a Windows-only test of the datagram layer
 itself) and **FreeBSD 15.1** (the whole suite on a real kernel). Running the Windows branch is what
 found and fixed `WT-199` and `WT-200` — a datagram
