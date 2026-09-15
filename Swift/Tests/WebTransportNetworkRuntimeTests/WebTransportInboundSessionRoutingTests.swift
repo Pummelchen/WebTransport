@@ -70,3 +70,49 @@ func runtimeClassifiesForeignSessionPrefixedStreamsForRefusal() throws {
             expectedSessionID: servedSessionID
         ) == nil)
 }
+
+/// F-swift-architecture-08: the connection-scoped datagram channel cannot hand a
+/// datagram back once it has been read, so a datagram naming a session this
+/// connection does not serve must be classified before the session manager can
+/// retain its payload, and reported as a foreign session rather than as an
+/// invalid payload.
+@Test
+func runtimeClassifiesForeignSessionDatagramsForRefusal() throws {
+    let servedSessionID: UInt64 = 0
+
+    // A datagram for the session this connection serves is not foreign.
+    let matching = try WebTransportDatagramSignaling.serialize(
+        sessionID: servedSessionID,
+        payload: Data("served".utf8)
+    )
+    #expect(
+        try InteroperableQUICHelpers.foreignDatagramSessionID(
+            inDatagram: matching,
+            expectedSessionID: servedSessionID
+        ) == nil)
+
+    // A datagram that names another session is foreign, and the named session ID
+    // is reported so the caller can name the condition.
+    let foreign = try WebTransportDatagramSignaling.serialize(
+        sessionID: 8,
+        payload: Data("foreign".utf8)
+    )
+    #expect(
+        try InteroperableQUICHelpers.foreignDatagramSessionID(
+            inDatagram: foreign,
+            expectedSessionID: servedSessionID
+        ) == 8)
+
+    // A datagram with no decodable prefix is a WebTransport ID error, matching
+    // what the session manager reports for the same bytes — not a silent drop
+    // and not a foreign-session report.
+    do {
+        _ = try InteroperableQUICHelpers.foreignDatagramSessionID(
+            inDatagram: Data(),
+            expectedSessionID: servedSessionID
+        )
+        Issue.record("an empty datagram should be reported as a WebTransport ID error")
+    } catch let error as WebTransportDraft16Error {
+        #expect(error.kind == .h3ID)
+    }
+}

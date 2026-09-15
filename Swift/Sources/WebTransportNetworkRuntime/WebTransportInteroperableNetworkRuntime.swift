@@ -708,6 +708,25 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         let receivedDatagram = try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
             try await datagrams.receive().content
         }
+        // The datagram has already left the connection-scoped channel and cannot
+        // be put back, so the session it names is checked before the manager can
+        // retain its payload for a session this connection does not serve. The
+        // runtime serves exactly one session per connection (see
+        // `validateSessionAdmission`), so a datagram naming a different session is
+        // a peer error — not an invalid payload — and must be named as such.
+        if let foreignSessionID = try InteroperableQUICHelpers.foreignDatagramSessionID(
+            inDatagram: receivedDatagram,
+            expectedSessionID: sessionID
+        ) {
+            InteroperableQUICDebug.log(
+                "refusing inbound datagram: prefix names session \(foreignSessionID), "
+                    + "this connection serves \(sessionID)"
+            )
+            throw WebTransportDraft16Error(
+                kind: .sessionGone,
+                message: "WebTransport datagram names session \(foreignSessionID), not \(sessionID)"
+            )
+        }
         return try await manager.withManager { manager in
             let responseSessionID = try manager.receiveDatagramFrame(.datagram(receivedDatagram))
             guard responseSessionID.rawValue == self.sessionID,
@@ -1821,6 +1840,34 @@ enum InteroperableQUICHelpers {
             return nil
         }
         let namedSessionID = prefix.sessionID.rawValue
+        guard namedSessionID != expectedSessionID else {
+            return nil
+        }
+        return namedSessionID
+    }
+
+    /// The session a WebTransport datagram names, when that session is not the
+    /// one this connection serves.
+    ///
+    /// The QUIC datagram channel is connection-scoped: a datagram read from it
+    /// cannot be put back, so the session ID in its prefix has to be checked
+    /// before the session manager can retain the payload for a session this
+    /// connection never serves. The runtime serves exactly one session per
+    /// connection, so a datagram naming any other session is a peer error that
+    /// must be named rather than reported as an invalid payload and discarded.
+    /// A malformed datagram prefix throws the `.h3ID` error the session manager
+    /// reports for the same bytes, so a caller propagates it unchanged.
+    static func foreignDatagramSessionID(
+        inDatagram payload: Data,
+        expectedSessionID: UInt64
+    ) throws -> UInt64? {
+        let parsed: WebTransportDatagramPrefix
+        do {
+            parsed = try WebTransportDatagramSignaling.parse(payload)
+        } catch {
+            throw WebTransportDraft16Error(kind: .h3ID, message: "invalid WebTransport datagram session ID")
+        }
+        let namedSessionID = parsed.sessionID.rawValue
         guard namedSessionID != expectedSessionID else {
             return nil
         }
