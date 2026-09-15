@@ -21,6 +21,7 @@ Base commit: `196324e` (main). Branch: `audit/2026-09-15`.
 | A-0003 | S3 | swift | Two Swift manifests — INTENDED split, enforced by check-manifest-sync.sh | DONE (not a defect) |
 | A-0004 | S1 | swift | Baseline warning count (earlier figure withdrawn as a misread); warnings-as-errors per §1 | START |
 | A-0006 | S1 | swift | No check that target imports are covered by declared dependencies (A-0001 class) | START |
+| F-swift-architecture-01 | S0 | swift | Unbounded peer-controlled CONNECT-stream capsule buffer | AUDIT (fix 81043ae) |
 | A-0007 | S3 | swift | Manifests not swift-format clean; CI format gate excludes them | START |
 | A-0005 | S3 | swift | `swift-tools-version: 6.3` vs mandated Swift 6.4 | START |
 
