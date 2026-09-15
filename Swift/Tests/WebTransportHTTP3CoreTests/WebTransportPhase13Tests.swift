@@ -533,9 +533,8 @@ func webTransportLibrarySmokeMatrixCoversPhase13IScenarios() throws {
 }
 
 @Test
-func webTransportDraft16ComplianceDefinitionOfDoneIsExplicitAndPassing() {
+func webTransportDraft16ComplianceDefinitionOfDoneIsExplicitAndHonest() {
     let items = WebTransportDraft16ComplianceMatrix.definitionOfDone
-    #expect(WebTransportDraft16ComplianceMatrix.allPass)
     #expect(
         items.map(\.requirementFamily) == [
             "Session establishment and application protocol negotiation",
@@ -545,9 +544,41 @@ func webTransportDraft16ComplianceDefinitionOfDoneIsExplicitAndPassing() {
             "H3 control and request stream constraints",
             "Security and identity handling without prompts",
         ])
-    #expect(items.allSatisfy { $0.status == .pass })
     #expect(items.allSatisfy { !$0.documentedBehavior.isEmpty })
     #expect(items.allSatisfy { !$0.evidence.isEmpty })
+    // Every claim is either a full pass or a recorded partial gap; nothing is
+    // left not-implemented or unstated. Compared by raw value so the assertion
+    // states the contract without depending on the case set.
+    #expect(
+        items.allSatisfy {
+            $0.status.rawValue == "PASS" || $0.status.rawValue == "PARTIAL"
+        })
+}
+
+/// F-swift-architecture-14: the compliance status must be able to describe
+/// something other than a full pass, and the matrix must use that where the
+/// shipped product falls short.
+///
+/// With `pass` as the only case, `allPass` was a tautology: every row was a
+/// literal `.pass`, so the public type could never report a gap. The flow-control
+/// family is the concrete case — implemented and conformance-tested in
+/// `WebTransportHTTP3Core`, but not negotiated by the Network.framework runtime
+/// (F-swift-architecture-06) — so it is `.partial`.
+@Test
+func webTransportDraft16ComplianceMatrixCanReportAGap() {
+    let items = WebTransportDraft16ComplianceMatrix.definitionOfDone
+    #expect(!items.isEmpty)
+    #expect(
+        items.contains { $0.status.rawValue != "PASS" },
+        "every compliance family is a literal PASS, so allPass cannot detect a gap")
+    guard
+        let flowControl = items.first(where: { $0.requirementFamily == "Flow-control and error codes" })
+    else {
+        Issue.record("the flow-control compliance item is missing")
+        return
+    }
+    #expect(flowControl.status.rawValue == "PARTIAL")
+    #expect(!WebTransportDraft16ComplianceMatrix.allPass)
 }
 
 /// F-swift-architecture-06: the compliance matrix must not present flow control

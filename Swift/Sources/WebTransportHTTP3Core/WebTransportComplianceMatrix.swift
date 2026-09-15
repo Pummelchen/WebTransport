@@ -1,5 +1,21 @@
+/// How much of a requirement family the shipped product actually covers.
+///
+/// The type has to be able to describe less than a full pass, or the matrix is a
+/// tautology: with `pass` as the only case, `allPass` could never be false and
+/// nothing could record a gap. `partial` is the honest state for a family whose
+/// protocol implementation exists and is conformance-tested but is not wired
+/// into every shipped entry point (see the flow-control row).
 public enum WebTransportDraft16ComplianceStatus: String, Equatable, Sendable {
+    /// The family is implemented, conformance-tested, and reachable from the
+    /// shipped products.
     case pass = "PASS"
+    /// Implemented and tested in the protocol core, but not wired end to end in
+    /// every shipped entry point.
+    case partial = "PARTIAL"
+    /// Not implemented.
+    case notImplemented = "NOT_IMPLEMENTED"
+    /// Not yet established either way.
+    case unknown = "UNKNOWN"
 }
 
 public struct WebTransportDraft16ComplianceItem: Equatable, Sendable {
@@ -52,7 +68,7 @@ public enum WebTransportDraft16ComplianceMatrix {
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Flow-control and error codes",
-            status: .pass,
+            status: .partial,
             documentedBehavior:
                 "Both-peer flow-control negotiation, directional stream-byte accounting, missing-setting zero defaults, strictly increasing WT_MAX_* capsules, the 2^60 stream ceiling, blocked capsules, and prohibited HTTP/2 capsule handling are implemented in WebTransportHTTP3Core and exercised by the conformance suite. The shipped Network.framework runtime does not advertise SETTINGS_WT_INITIAL_MAX_* and so never negotiates WebTransport flow control; it admits one session per connection, and the multi-session path that flow control gates is reachable only through WebTransportSessionManager, not through WebTransportNetworkRuntime.",
             evidence: ["WebTransportDraft16Tests", "WebTransportFlowControlTests", "WebTransportPhase13Tests"]
@@ -78,6 +94,13 @@ public enum WebTransportDraft16ComplianceMatrix {
         ),
     ]
 
+    /// True only when every requirement family is a full pass.
+    ///
+    /// This is a real check now that the status type can express `partial`,
+    /// `notImplemented` and `unknown`: it is false as soon as any row records a
+    /// gap. It still reports what the table *declares* rather than what a test run
+    /// proved — `evidence` names the suites behind each row — so it must not be
+    /// read as a CI result.
     public static var allPass: Bool {
         definitionOfDone.allSatisfy { $0.status == .pass && !$0.evidence.isEmpty && !$0.documentedBehavior.isEmpty }
     }
