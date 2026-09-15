@@ -124,6 +124,16 @@ wt_status_t wt_http3_header_validate(wt_http3_header_validation_t *validation, c
       if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
       return WT_ERR_PROTOCOL;
     }
+    /* A pseudo-header's value is a field value: RFC 9114 section 4.3.1 defines the pseudo-header fields in
+     * terms of the field grammar, and section 10.3 makes "a character not permitted in a field value" a
+     * malformed message. This branch used to return without any grammar check, so `:path` or `:authority`
+     * could carry a CR, LF or NUL that a later writer would turn into a second field; the regular-field branch
+     * below has always checked. The NAME cannot be malformed here because only names this message type defines
+     * reach this point. */
+    if (!field_value_is_valid(value, value_length)) {
+      if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
+      return WT_ERR_PROTOCOL;
+    }
     validation->pseudo_seen |= bit;
     return WT_OK;
   }
