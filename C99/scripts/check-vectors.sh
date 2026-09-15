@@ -39,10 +39,12 @@ fi
 
 # The vectors are re-derived from the RFC text by python3 extractors, and a machine without an interpreter cannot
 # check anything: it says so with its reason rather than reporting a vector mismatch (WT-201). `pkg install
-# python3` on FreeBSD is the one command that fixes it, and a CI runner has one.
+# python3` on FreeBSD is the one command that fixes it, and a CI runner has one. The status is 77 -- CTest's
+# skip code, and a NON-PASSING status for a plain CI step -- because `exit 0` made "the check could not run"
+# indistinguishable from "the check ran and found nothing", which is the one thing a hard check must not do.
 if ! command -v python3 >/dev/null 2>&1; then
   echo "check-vectors: unsupported -- python3 is not installed, so the RFC vectors cannot be re-derived"
-  exit 0
+  exit 77
 fi
 
 python3 "$c99_root/tests/vectors/extract_rfc9001_keys.py" "$rfc" --check
