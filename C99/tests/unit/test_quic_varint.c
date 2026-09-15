@@ -190,14 +190,15 @@ int main(void) {
   }
 
   /* An unencodable value overflows the writer rather than writing a truncated
-   * one, and a NULL writer does not crash. */
+   * one, and a NULL writer is tolerated: it still reports the length the value
+   * occupies, as the header promises for a writer that cannot take the bytes. */
   {
     wt_writer_t writer = wt_writer_init(buffer, sizeof(buffer));
     (void)wt_quic_writer_varint(&writer, UINT64_C(1) << 62);
     WT_EXPECT_INT("an unencodable value overflows the writer", 0,
                   wt_writer_ok(&writer));
-    (void)wt_quic_writer_varint(NULL, 1U);
-    WT_EXPECT_INT("a NULL writer is tolerated", 1, 1);
+    WT_EXPECT_U64("a NULL writer is tolerated", 1U,
+                  (uint64_t)wt_quic_writer_varint(NULL, 1U));
   }
 
   /* NULL arguments. */

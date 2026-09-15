@@ -84,9 +84,8 @@ int main(void) {
     wt_dealloc(&def, b, 0U);
   }
 
-  /* Freeing NULL is a documented no-op. */
-  wt_dealloc(&def, NULL, 0U);
-  WT_EXPECT_TRUE("freeing NULL is harmless", 1);
+  /* Freeing NULL is a documented no-op; it is checked through the probe below,
+   * where a counting free callback can show whether it was reached at all. */
 
   /* Reallocating a NULL block allocates. */
   block = wt_realloc(&def, NULL, 0U, 8U);
@@ -138,6 +137,10 @@ int main(void) {
     WT_EXPECT_STATUS("and reports out of memory", WT_ERR_OUT_OF_MEMORY, status);
 
     probe.refuse = 0;
+
+    /* Freeing NULL is a no-op: it must not reach the allocator's callback. */
+    wt_dealloc(&a, NULL, 0U);
+    WT_EXPECT_U64("freeing NULL never reaches the allocator", 0U, probe.frees);
 
     /* Every block that is allocated here is released here. An earlier version
      * of this file allocated one inside a WT_EXPECT_TRUE and never freed it,

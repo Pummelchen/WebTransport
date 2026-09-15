@@ -244,12 +244,13 @@ static void test_initial_keys(void) {
                                                    &client));
 
   /* Clearing a key set leaves nothing behind, which is what a discarded key
-   * needs; clearing NULL is harmless. */
+   * needs; clearing NULL must leave the live set alone rather than reach it. */
+  wt_quic_packet_keys_clear(NULL);
+  WT_EXPECT_TRUE("clearing NULL leaves the live key set intact",
+                 !all_zero((const uint8_t *)&client, sizeof client));
   wt_quic_packet_keys_clear(&client);
   WT_EXPECT_TRUE("a cleared key set is all zeroes",
                  all_zero((const uint8_t *)&client, sizeof client));
-  wt_quic_packet_keys_clear(NULL);
-  WT_EXPECT_INT("clearing NULL is harmless", 1, 1);
 
   /* The key update: the next secret is the RFC's `ku`, and the keys are derived
    * from it with the same three labels. */
