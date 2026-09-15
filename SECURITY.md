@@ -7,8 +7,8 @@ Security fixes are provided for the current `main` branch and the latest tagged 
 | Version | Supported |
 | --- | --- |
 | `main` | Yes |
-| `1.1.x` | Yes |
-| Earlier releases | No |
+| `1.3.x` | Yes |
+| `1.2.x` and earlier (including `1.1.x`) | No |
 
 ## Reporting a Vulnerability
 
