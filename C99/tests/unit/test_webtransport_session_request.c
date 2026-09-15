@@ -239,6 +239,18 @@ static void test_both_protocol_tokens_are_accepted_and_distinct(void) {
   WT_EXPECT_BYTES("while the pre-draft token is the HTTP/2 one", (const uint8_t *)"webtransport",
                   (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY, strlen("webtransport"));
 
+  /* And the SELECTION maps to those two strings, with the draft-16 token as its zero so that a zeroed driver
+   * sends the current token (F-02b). Before this selection existed the client could only ever send one of them. */
+  WT_EXPECT_INT("the draft-16 selection is the default zero", 0,
+                (int)WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16);
+  WT_EXPECT_STR("and names the draft-16 token", "webtransport-h3",
+                wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16));
+  WT_EXPECT_STR("the legacy selection names the pre-draft token", "webtransport",
+                wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY));
+  WT_EXPECT_TRUE("so the two selections put different strings on the wire",
+                 strcmp(wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16),
+                        wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY)) != 0);
+
   memset(&policy, 0, sizeof(policy));
   policy.authority = "localhost";
   policy.path = "/wt";

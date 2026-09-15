@@ -742,6 +742,98 @@ static void test_a_server_marks_the_connect_stream_as_it_accepts_it(void) {
   WT_EXPECT_INT("with the peer's end of stream", 1, log.data_fin);
 }
 
+/* The `:protocol` token on the wire is this endpoint's CHOICE, not a constant (F-02b).
+ *
+ * Draft-ietf-webtrans-http3-16 section 3.2 names `webtransport-h3`, so that is what the driver must send when
+ * nothing says otherwise -- a zeroed driver, since the draft-16 selection is the enum's zero. The pre-draft
+ * `webtransport` is what a peer that predates the rename accepts, and before this selection existed the client
+ * could not put it on the wire at all. The assertion is on the DECODED request rather than on the field this code
+ * set, because the bytes a peer reads are the evidence. */
+
+/* The request is the fourth stream a session start opens -- control, encoder, decoder, request. */
+static void decode_recorded_request(const recording_t *recording, wt_http3_message_t *out) {
+  wt_cursor_t cursor = wt_cursor_init(recording->streams[3].bytes, recording->streams[3].length);
+  uint8_t scratch[256];
+  uint64_t frame_type = 0U;
+  uint64_t frame_length = 0U;
+  const uint8_t *payload = NULL;
+  size_t available = 0U;
+  wt_http3_error_t decode_error = WT_HTTP3_NO_ERROR;
+
+  memset(out, 0, sizeof(*out));
+  WT_EXPECT_OK("the request's frame header reads", wt_quic_varint_decode(&cursor, &frame_type));
+  WT_EXPECT_U64("as a HEADERS frame", 0x01U, frame_type);
+  WT_EXPECT_OK("with a length", wt_quic_varint_decode(&cursor, &frame_length));
+  payload = wt_cursor_rest(&cursor, &available);
+  WT_EXPECT_U64("that matches what follows it", (uint64_t)available, frame_length);
+  WT_EXPECT_OK("and the field section decodes",
+               wt_http3_message_decode(out, WT_HTTP3_HEADER_REQUEST, payload, (size_t)frame_length, NULL, 0U, 0U,
+                                       scratch, sizeof(scratch), &decode_error));
+}
+
+static void init_recorded_session(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint,
+                                  wt_http3_driver_transport_t *transport, recording_t *recording) {
+  memset(recording, 0, sizeof(*recording));
+  memset(transport, 0, sizeof(*transport));
+  transport->open_stream = record_open;
+  transport->send_stream = record_send;
+  transport->send_datagram = record_datagram;
+  transport->context = recording;
+
+  wt_http3_endpoint_init(endpoint, WT_HTTP3_ROLE_CLIENT);
+  wt_http3_driver_init(driver, endpoint);
+}
+
+static void start_recorded_session(wt_http3_driver_t *driver, wt_http3_driver_transport_t *transport,
+                                   recording_t *recording) {
+  wt_http3_settings_t settings;
+  uint64_t request_stream_id = 0U;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("the endpoint advertises WebTransport",
+               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_OK("a session starts",
+               wt_http3_driver_start_session(driver, transport, &settings, "example.com", "/chat", 0U, 1000U,
+                                             &request_stream_id, &error));
+  WT_EXPECT_U64("four streams are opened", 4U, (uint64_t)recording->count);
+}
+
+static void test_the_upgrade_token_the_client_sends(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_driver_transport_t transport;
+  recording_t recording;
+  wt_http3_message_t message;
+
+  /* The default, with no setter call: this is what `wt_http3_driver_init` alone leaves in place, and the assert
+   * on the field BEFORE the session starts is half the evidence -- the other half is the bytes below. */
+  init_recorded_session(&driver, &endpoint, &transport, &recording);
+  WT_EXPECT_INT("a fresh driver holds the draft-16 selection", (int)WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16,
+                (int)driver.upgrade_token);
+  start_recorded_session(&driver, &transport, &recording);
+  decode_recorded_request(&recording, &message);
+  WT_EXPECT_U64("so the CONNECT is fifteen bytes of token", 15U, (uint64_t)message.protocol_length);
+  WT_EXPECT_BYTES("which is webtransport-h3", (const uint8_t *)"webtransport-h3",
+                  message.protocol, strlen("webtransport-h3"));
+  WT_EXPECT_TRUE("with the hyphen that the pre-draft token does not have", message.protocol[12] == '-');
+
+  /* The legacy selection: the token a peer that predates the rename accepts, which before F-02b could not be
+   * sent at all. The LENGTH is asserted too, because "webtransport" is a prefix of "webtransport-h3" and a
+   * twelve-byte comparison of the draft-16 token would pass a byte check while sending the wrong token. */
+  init_recorded_session(&driver, &endpoint, &transport, &recording);
+  wt_http3_driver_set_upgrade_token(&driver, WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY);
+  WT_EXPECT_INT("the setter records the legacy selection", (int)WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY,
+                (int)driver.upgrade_token);
+  start_recorded_session(&driver, &transport, &recording);
+  decode_recorded_request(&recording, &message);
+  WT_EXPECT_U64("so the CONNECT is twelve bytes of token", 12U, (uint64_t)message.protocol_length);
+  WT_EXPECT_BYTES("which is webtransport", (const uint8_t *)"webtransport",
+                  message.protocol, strlen("webtransport"));
+  WT_EXPECT_TRUE("and the two tokens are different strings",
+                 strcmp(WT_WEBTRANSPORT_PROTOCOL_TOKEN, WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY) != 0);
+}
+
 int main(void) {
   test_the_streams_a_session_start_opens();
   test_a_data_stream_this_endpoint_opened();
@@ -750,5 +842,6 @@ int main(void) {
   test_the_connect_streams_capsules_are_not_framed();
   test_a_server_marks_the_connect_stream_as_it_accepts_it();
   test_the_session_start_can_be_split_around_a_data_stream();
+  test_the_upgrade_token_the_client_sends();
   WT_TEST_MAIN_END("wt_http3_driver_streams");
 }

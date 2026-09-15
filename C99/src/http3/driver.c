@@ -56,6 +56,11 @@ void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_
   driver->session_id_set = 1;
 }
 
+void wt_http3_driver_set_upgrade_token(wt_http3_driver_t *driver, wt_webtransport_upgrade_token_t token) {
+  if (driver == NULL) return;
+  driver->upgrade_token = token;
+}
+
 size_t wt_http3_driver_pending_count(const wt_http3_driver_t *driver) {
   if (driver == NULL) return 0U;
   return driver->pending_count;
@@ -1254,6 +1259,7 @@ wt_status_t wt_http3_driver_send_session_request(wt_http3_driver_t *driver,
                                                  const char *path, uint64_t peer_max_entries, uint64_t now,
                                                  wt_http3_error_t *out_error) {
   wt_http3_message_t request;
+  const char *token;
 
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
   if (driver == NULL || driver->endpoint == NULL || transport == NULL || authority == NULL ||
@@ -1273,8 +1279,12 @@ wt_status_t wt_http3_driver_send_session_request(wt_http3_driver_t *driver,
   request.authority_length = strlen(authority);
   request.path = (const uint8_t *)path;
   request.path_length = strlen(path);
-  request.protocol = (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN;
-  request.protocol_length = strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN);
+  /* The token is this endpoint's choice, not a constant: draft-16 section 3.2 names `webtransport-h3` and that
+   * is the default, while a peer that predates the rename needs the pre-draft `webtransport` and gets it only
+   * when the caller selected it (see `wt_http3_driver_set_upgrade_token`). */
+  token = wt_webtransport_upgrade_token_value(driver->upgrade_token);
+  request.protocol = (const uint8_t *)token;
+  request.protocol_length = strlen(token);
 
   return wt_http3_driver_send_message(driver, transport, stream_id, &request, peer_max_entries, 0, now);
 }

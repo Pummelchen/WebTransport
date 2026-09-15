@@ -10,6 +10,7 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | # | Requirement | Implementation | Evidence | Status |
 | --- | --- | --- | --- | --- |
 | 3.1 | A WebTransport session starts with an extended CONNECT carrying `:protocol = webtransport-h3` (the pre-draft `webtransport` is also accepted, for interop) | `wt_webtransport_session_request_validate`, `WT_WEBTRANSPORT_PROTOCOL_TOKEN`, `WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY` | `test_webtransport_session_request`, `wt_conformance_scenarios` | tested |
+| 3.2 | The token a client SENDS is its own choice, draft-16 by default; the pre-draft value is selectable per peer because it cannot be negotiated | `wt_webtransport_upgrade_token_t`, `wt_webtransport_upgrade_token_value`, `wt_http3_driver_set_upgrade_token` | `test_http3_driver_streams`, `test_cli_options` | tested |
 | 3.1 | A server that did not advertise WebTransport refuses the session | `wt_webtransport_request_policy_t`, `WT_HTTP3_SETTING_WT_ENABLED` | `test_webtransport_session_request` | tested |
 | 3.1 | Both roles advertise the reliable-stream-reset extension WebTransport requires, with the empty value that makes it a flag | `WT_QUIC_TP_RESET_STREAM_AT`, `wt_quic_transport_parameters_build` | `test_quic_transport_parameters`, `test_quic_peer_limits` | tested |
 | 3.1 | A path or authority the server does not serve is refused with a status | `WT_WEBTRANSPORT_REJECT_NOT_FOUND`, `wt_webtransport_session_request_validate` | `test_webtransport_session_request` | tested |

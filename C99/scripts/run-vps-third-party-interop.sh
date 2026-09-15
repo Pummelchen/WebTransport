@@ -11,6 +11,12 @@
 # address, while the name the certificate must prove comes from `--authority`. Without the split the
 # client would have to resolve the name itself, which the C99 endpoint parser does not do.
 #
+# The `:protocol` TOKEN is per peer, because it cannot be negotiated: the client sends the draft-16
+# value `webtransport-h3` (draft-ietf-webtrans-http3-16 section 3.2, and the default) and four of the
+# five peers reject exactly that value with H3_MESSAGE_ERROR before reading any SETTINGS, so they are
+# driven with `--upgrade-token legacy` (`webtransport`). The peer's own evidence is named at the
+# dispatch below. Selecting it per proof is the only thing that changes; the default stays draft-16.
+#
 # Required environment:
 #   WEBTRANSPORT_VPS_INTEROP_AUTHORITY  the name the peers' certificate carries
 #                                    (default pummelchen.91.99.176.243.nip.io)
@@ -66,10 +72,11 @@ fi
 
 mkdir -p "$out"
 
-# One proof: implementation, exchange, port, and the message whose echo is the evidence. The message
-# is NAMED rather than empty because an empty WebTransport stream carries nothing a peer can observe.
+# One proof: implementation, exchange, port, the `:protocol` token the peer needs, and the message whose echo
+# is the evidence. The message is NAMED rather than empty because an empty WebTransport stream carries nothing a
+# peer can observe.
 run_proof() {
-  key="$1" implementation="$2" exchange="$3" peer_address="$4" port="$5"
+  key="$1" implementation="$2" exchange="$3" peer_address="$4" port="$5" token="$6"
   message="$key-$exchange-vps"
   stdout_file="$out/$key-$exchange.stdout"
   json_file="$out/$key-$exchange.json"
@@ -89,7 +96,8 @@ run_proof() {
   while :; do
     set +e
     "$client" --connect "$peer_address:$port" --authority "$authority" --trust system \
-      --exchange "$exchange" --message "$message" --timeout-ms "$timeout_ms" --json \
+      --exchange "$exchange" --message "$message" --timeout-ms "$timeout_ms" \
+      --upgrade-token "$token" --json \
       >"$stdout_file" 2>&1
     status=$?
     set -e
@@ -104,13 +112,13 @@ run_proof() {
   done
 
   python3 - "$json_file" "$implementation" "$authority" "$peer_address" "$port" "$exchange" \
-    "$message" "$timeout_ms" "$status" "$attempt" "$stdout_file" <<'PY'
+    "$message" "$timeout_ms" "$status" "$attempt" "$stdout_file" "$token" <<'PY'
 import json
 import pathlib
 import sys
 
 (json_file, implementation, authority, address, port, exchange,
- message, timeout_ms, status, attempt, stdout_file) = sys.argv[1:]
+ message, timeout_ms, status, attempt, stdout_file, token) = sys.argv[1:]
 
 report = {}
 for line in pathlib.Path(stdout_file).read_text(errors="replace").splitlines():
@@ -140,6 +148,7 @@ proof = {
     "authority": authority,
     "trust": "system",
     "message": message,
+    "upgradeToken": token,
     "timeoutMilliseconds": int(timeout_ms),
     "exitCode": int(status),
     "attempts": int(attempt),
@@ -151,7 +160,7 @@ proof = {
     "receivedBytes": report.get("receivedBytes"),
 }
 pathlib.Path(json_file).write_text(json.dumps(proof, indent=2, sort_keys=True) + "\n")
-print(f"{'PASS' if passed else 'FAIL'}  {implementation:<24} {exchange:<9} "
+print(f"{'PASS' if passed else 'FAIL'}  {implementation:<24} {exchange:<9} token={token:<7} "
       f"status={report.get('status')} receivedBytes={report.get('receivedBytes')}")
 PY
 }
@@ -169,16 +178,23 @@ address_for() {
   [ -n "$override" ] && printf '%s' "$override" || printf '%s' "$address"
 }
 
+# The token each peer is driven with is the one it accepts, and the evidence for each is the line its own log or
+# source gave when the draft-16 default was run against it (F-02b):
+#   pywebtransport  accepts only b"webtransport"                    (pywebtransport/protocol/handler.py:402)
+#   quinn           fails in web-transport-proto connect.rs:162       (if protocol != Some("webtransport"))
+#   quiche          fails in the same place                           (web-transport-proto connect.rs:162)
+#   h3              H3_MESSAGE_ERROR - invalid header value ":protocol"
+#                   [119,101,98,116,114,97,110,115,112,111,114,116,45,104,51] = "webtransport-h3"
+#   erlang          accepts draft-16 in its "latest" mode (wt_ha.erl / wt_h3.erl:211), so it stays on the default
 for proof in $proofs; do
   case "$proof" in
-    pywebtransport)  run_proof pywebtransport "pywebtransport / aioquic" stream   "$(address_for PY)"     "$py_port" ;;
-    quinn)           run_proof quinn          "web-transport-quinn"     stream   "$(address_for QUINN)"  "$quinn_port" ;;
-    quinn-datagram)  run_proof quinn          "web-transport-quinn"     datagram "$(address_for QUINN)"  "$quinn_port" ;;
-    quiche)          run_proof quiche         "web-transport-quiche"    stream   "$(address_for QUICHE)" "$quiche_port" ;;
-    h3)              run_proof h3             "hyperium/h3-webtransport" datagram "$(address_for H3)"    "$h3_port" ;;
-    erlang)          run_proof erlang         "erlang-webtransport"     stream   "$(address_for ERLANG)" "$erlang_port" ;;
-    erlang-datagram) run_proof erlang         "erlang-webtransport"     datagram "$(address_for ERLANG)" "$erlang_port" ;;
-    erlang-datagram) run_proof erlang         "erlang-webtransport"     datagram "$erlang_port" ;;
+    pywebtransport)  run_proof pywebtransport "pywebtransport / aioquic" stream   "$(address_for PY)"     "$py_port"     legacy ;;
+    quinn)           run_proof quinn          "web-transport-quinn"     stream   "$(address_for QUINN)"  "$quinn_port"  legacy ;;
+    quinn-datagram)  run_proof quinn          "web-transport-quinn"     datagram "$(address_for QUINN)"  "$quinn_port"  legacy ;;
+    quiche)          run_proof quiche         "web-transport-quiche"    stream   "$(address_for QUICHE)" "$quiche_port" legacy ;;
+    h3)              run_proof h3             "hyperium/h3-webtransport" datagram "$(address_for H3)"    "$h3_port"     legacy ;;
+    erlang)          run_proof erlang         "erlang-webtransport"     stream   "$(address_for ERLANG)" "$erlang_port" draft16 ;;
+    erlang-datagram) run_proof erlang         "erlang-webtransport"     datagram "$(address_for ERLANG)" "$erlang_port" draft16 ;;
     *) echo "vps interop: unknown proof $proof"; exit 2 ;;
   esac
 done

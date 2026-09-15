@@ -49,6 +49,29 @@ extern "C" {
  * are accepted; only the draft-16 token is sent. */
 #define WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY "webtransport"
 
+/* Which of the two tokens THIS endpoint puts on its OWN CONNECT.
+ *
+ * The choice exists because the token cannot be negotiated, only sent. Draft-16 section 3.2 renamed the HTTP/3
+ * token to `webtransport-h3`, but a peer written against an earlier draft knows only `webtransport`, and it
+ * refuses the extended CONNECT with H3_MESSAGE_ERROR before it reads any SETTINGS -- so an endpoint that always
+ * sends the draft-16 value reaches no pre-draft peer at all, and one that always sends the old value claims to
+ * speak a version it does not. The default is the draft-16 token, which is what a conforming client must send
+ * (section 3.2: the `:protocol` value is `webtransport-h3`) and what the Swift reference sends even in its
+ * interoperable modes (Swift/Sources/WebTransportHTTP3Core/HTTP3Connection.swift, `upgradeToken`); the legacy
+ * value is the explicit, per-peer accommodation for the implementations that predate the rename. Zero is the
+ * draft-16 default, so a zeroed structure and `wt_http3_driver_init` both start out sending the current token. */
+typedef enum wt_webtransport_upgrade_token {
+  /* `webtransport-h3`, the DEFAULT. */
+  WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16 = 0,
+  /* `webtransport`, the pre-draft value of draft-16 section 2.1.2, for a peer that predates the rename. */
+  WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY = 1
+} wt_webtransport_upgrade_token_t;
+
+/* The string one selection puts on the wire. Never NULL: a value outside the enum is reported as the draft-16
+ * token rather than as a NULL a caller would dereference, so the only two selections above are also the only two
+ * strings this returns. */
+const char *wt_webtransport_upgrade_token_value(wt_webtransport_upgrade_token_t token);
+
 /* Where a CLIENT offers its sub-protocols (draft-16 section 3.3). `wt-protocol` -- the name in protocol.h -- is
  * the RESPONSE field that names the one the server selected (section 9.7); the pre-draft shape used `wt-protocol`
  * for both, which is why this constant exists next to the parser that only knows the value. */

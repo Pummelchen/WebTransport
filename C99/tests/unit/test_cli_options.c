@@ -53,6 +53,11 @@ static void test_the_required_flags(void) {
     WT_EXPECT_INT("a stream exchange", (int)WT_CLI_EXCHANGE_STREAM, (int)plain.exchange);
     WT_EXPECT_U64("and a five second timeout", 5000U, plain.timeout_ms);
     WT_EXPECT_INT("where the address is positional", 1, plain.address != NULL);
+    /* The default token is the draft-16 one, which is the whole point of the selection: it must not become an
+     * accidental legacy default just because zero is a convenient initialiser (F-02b). */
+    WT_EXPECT_INT("and the draft-16 upgrade token", (int)WT_CLI_UPGRADE_TOKEN_DRAFT16,
+                  (int)plain.upgrade_token);
+    WT_EXPECT_INT("which the caller did not have to ask for", 0, plain.upgrade_token_set);
   }
 }
 
@@ -267,6 +272,72 @@ static void test_the_names_and_the_json(void) {
   }
 }
 
+static void test_the_upgrade_token_flag(void) {
+  wt_cli_options_t options;
+  const char *error = NULL;
+  const char *argument = NULL;
+
+  /* Both names select, and each selects the token it names. */
+  {
+    const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--upgrade-token", "legacy"};
+    WT_EXPECT_OK("the legacy token parses", parse(argv, 5, &options, &error));
+    WT_EXPECT_INT("and is selected", (int)WT_CLI_UPGRADE_TOKEN_LEGACY, (int)options.upgrade_token);
+    WT_EXPECT_INT("with the caller's choice recorded", 1, options.upgrade_token_set);
+    WT_EXPECT_STR("under its own name", "legacy", wt_cli_upgrade_token_name(options.upgrade_token));
+  }
+  {
+    const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--upgrade-token", "draft16"};
+    WT_EXPECT_OK("the draft-16 token parses", parse(argv, 5, &options, &error));
+    WT_EXPECT_INT("and is selected", (int)WT_CLI_UPGRADE_TOKEN_DRAFT16, (int)options.upgrade_token);
+    WT_EXPECT_STR("under its own name", "draft16", wt_cli_upgrade_token_name(options.upgrade_token));
+  }
+  /* A value that is neither is refused by name, and the argument named is the value rather than the flag. */
+  {
+    const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--upgrade-token", "webtransport-h2"};
+    WT_EXPECT_STATUS("an unknown token is refused", WT_ERR_INVALID_ARGUMENT,
+                     wt_cli_options_parse(&options, 5, argv, &error, &argument));
+    WT_EXPECT_STR("with a message naming what was refused", "unsupported upgrade token", error);
+    WT_EXPECT_STR("and the value that caused it", "webtransport-h2", argument);
+  }
+  /* A listener sends no CONNECT, so asking for a token there would be stating something about a request it does
+   * not make. Refused rather than ignored -- and only when the flag was actually given, which the case below
+   * checks, because the draft-16 default must stay valid for every mode. */
+  {
+    const char *argv[] = {"wt-server-c99", "--listen", "h:1", "--upgrade-token", "legacy"};
+    WT_EXPECT_OK("a listener may parse the flag", parse(argv, 5, &options, &error));
+    WT_EXPECT_STATUS("but the token is refused for a listener", WT_ERR_INVALID_ARGUMENT,
+                     wt_cli_options_check(&options, &error));
+    WT_EXPECT_STR("with the client-only reason",
+                  "--upgrade-token is a client's option: it names the CONNECT's :protocol", error);
+  }
+  {
+    const char *argv[] = {"wt-server-c99", "--listen", "h:1"};
+    WT_EXPECT_OK("a listener without the flag parses", parse(argv, 3, &options, &error));
+    WT_EXPECT_OK("and passes the check at the draft-16 default", wt_cli_options_check(&options, &error));
+  }
+  /* And the selection is in the report a script reads, not only on the command line. */
+  {
+    FILE *stream;
+    char buffer[512];
+    size_t read_length;
+    options = wt_cli_options_default();
+    options.mode = WT_CLI_MODE_CONNECT;
+    options.address = "localhost:4433";
+    options.upgrade_token = WT_CLI_UPGRADE_TOKEN_LEGACY;
+    stream = tmpfile();
+    WT_EXPECT_TRUE("a temporary stream opens", stream != NULL);
+    if (stream != NULL) {
+      wt_cli_options_write_json(&options, stream);
+      rewind(stream);
+      read_length = fread(buffer, 1U, sizeof(buffer) - 1U, stream);
+      buffer[read_length] = '\0';
+      fclose(stream);
+      WT_EXPECT_TRUE("the report names the legacy token",
+                     strstr(buffer, "\"upgradeToken\":\"legacy\"") != NULL);
+    }
+  }
+}
+
 int main(void) {
   test_help_and_version_are_not_flags_to_refuse();
   test_the_required_flags();
@@ -275,5 +346,6 @@ int main(void) {
   test_timeouts_are_digits_only();
   test_the_check_is_one_place();
   test_the_names_and_the_json();
+  test_the_upgrade_token_flag();
   WT_TEST_MAIN_END("wt_cli_options");
 }

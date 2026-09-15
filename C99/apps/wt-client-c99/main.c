@@ -47,6 +47,12 @@ static int wt_usage(const char *program) {
   printf("certificate against the platform trust store AND the name given by\n");
   printf("--authority, while local-development skips validation and is refused for a\n");
   printf("name that is not loopback.\n");
+  printf("\n");
+  printf("--upgrade-token draft16|legacy selects the `:protocol` token of the CONNECT:\n");
+  printf("draft16 (the default) sends `webtransport-h3` per draft-ietf-webtrans-http3-16\n");
+  printf("section 3.2, while legacy sends the pre-draft `webtransport` that a peer written\n");
+  printf("against an earlier draft accepts. The token cannot be negotiated, so a pre-draft\n");
+  printf("peer needs this selected explicitly.\n");
   printf("It exits non-zero when the session does not complete.\n");
   return 3;
 }
@@ -153,6 +159,9 @@ int main(int argc, char **argv) {
     loop.timeout_ms = options.timeout_ms;
     loop.datagram = options.exchange == WT_CLI_EXCHANGE_DATAGRAM;
     loop.early_stream = options.early_stream;
+    /* Which `:protocol` token the CONNECT carries. The enum values are the same numbers the library's
+     * `wt_webtransport_upgrade_token_t` uses, so this is the selection itself rather than a translation. */
+    loop.upgrade_token = (int)options.upgrade_token;
     loop.message = options.message;
     /* `--trust` decides how the peer is validated. This tool used to accept the flag, echo it in the report, and
      * take the loopback bypass whatever it said, so a caller who asked for verification got none (WT-193). */

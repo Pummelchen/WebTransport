@@ -9,6 +9,13 @@ static int token_is(const uint8_t *bytes, size_t length, const char *text) {
   return length == text_length && memcmp(bytes, text, text_length) == 0;
 }
 
+const char *wt_webtransport_upgrade_token_value(wt_webtransport_upgrade_token_t token) {
+  /* The two selections are the only two strings, and the default is the draft-16 token: a value that is not the
+   * legacy one -- including an out-of-range int a caller cast -- sends the current token rather than a NULL. */
+  return token == WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY ? WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY
+                                                       : WT_WEBTRANSPORT_PROTOCOL_TOKEN;
+}
+
 /* Whether a request's `:authority` names the host this server serves.
  *
  * RFC 9114 section 4.3.1 makes `:authority` the authority of the target URI, and an authority carries the port
