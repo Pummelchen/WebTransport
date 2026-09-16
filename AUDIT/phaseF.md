@@ -253,6 +253,9 @@ steps (`/tmp/sub-winbuild.log`).
 - **`WT-251` is filed**, not fixed: the C99 agent's one `unfinished` item, what consumes the peer's SETTINGS
   payload in the shipped tools. It is flagged, not proven, and is now a tracker row rather than a sentence in a
   report.
-- **`WT-85`, `WT-191`, `WT-197`, `WT-221` (Swift), `WT-39`, `WT-153`, `WT-223` (C99) and `WT-196` (infra) stay
-  open and untouched.** `WT-191` and `WT-197` are **UNFIXED** — no progress was made on either this pass, and
+- **`WT-85`, `WT-221` (Swift), `WT-39`, `WT-153`, `WT-223` (C99) and `WT-196` (infra) stay open and untouched.**
+  `WT-191` and `WT-197` were closed after this record was first written, in `851a198`: the framework error now has a
+  name at both queue boundaries, and the RSA PKCS#12 fixture is a PBES2/AES-256-CBC container that OpenSSL 3 reads
+  (the row's `OSStatus -26276` does **not** reproduce on macOS 27.0, and both the fix report and the ledger say so
+  rather than claiming a reproduction). The obsolete text this replaces said
   nothing in the fix log claims otherwise.
