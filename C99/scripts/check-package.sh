@@ -112,6 +112,25 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 
+# And they must RUN from the install tree, not merely exist in it.
+#
+# "The file is there and executable" was the whole check, and it passed while every
+# installed tool was unusable: CMake removes the build-tree rpath at install time, and
+# nothing had set an install rpath, so an installed `wt-client-c99` died with
+#
+#   dyld: Library not loaded: @rpath/libwebtransport.1.dylib
+#   Reason: no LC_RPATH's found
+#
+# The library path itself was covered -- this script builds and RUNS a consumer of the
+# installed CMake package -- but nothing executed an installed tool, so a defect that
+# only an install tree shows had no check. It has one now, and it is the reason the
+# `cmake --install` above is followed by an execution: a tool that cannot load its own
+# library is not a product.
+for product in wt-client-c99 wt-server-c99 wt-conformance-c99; do
+  run "running the installed $product" "$log_dir/run-installed-$product.log" \
+    "$tools_prefix/bin/$product" --help
+done
+
 unwanted=$(find "$tools_prefix" \( -name 'test_*' -o -name '*spike*' -o -name '*sample*' \) -print)
 if [ -n "$unwanted" ]; then
   echo "webtransport-c99: the install tree carries something that is not a product:" >&2

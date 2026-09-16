@@ -107,6 +107,30 @@ if(NOT BUILD_SHARED_LIBS AND NOT WEBTRANSPORT_C99_BUILD_STATIC)
   message(FATAL_ERROR "BUILD_SHARED_LIBS and WEBTRANSPORT_C99_BUILD_STATIC are both off: nothing would be built")
 endif()
 
+# An INSTALLED executable must be able to find the INSTALLED shared library.
+#
+# The executables link the library as `@rpath/libwebtransport.<major>.dylib` (macOS)
+# or `libwebtransport.so.<version>` (ELF), and CMake's default build-tree rpath
+# points at this build directory. At `cmake --install` time CMake REMOVES that rpath
+# because it names a build path -- and nothing put an install rpath in its place, so
+# an installed `wt-client-c99` died with:
+#
+#   dyld: Library not loaded: @rpath/libwebtransport.1.dylib
+#   Reason: no LC_RPATH's found
+#
+# That is a defect in the install tree, not in the tool: the lib/ directory sits
+# beside bin/ in the layout this project installs, so the executable's own directory
+# plus ../lib is the answer, spelled `@loader_path` on macOS and `$ORIGIN` on ELF.
+#
+# Set before the applications are added (apps/CMakeLists.txt) because
+# CMAKE_INSTALL_RPATH is read when a target is created. Tests are built and run from
+# the build tree and are not installed, so this does not affect them.
+if(APPLE)
+  set(CMAKE_INSTALL_RPATH "@loader_path/../lib")
+else()
+  set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
+endif()
+
 # Every source file, one list. A library target that forgot a file would fail to
 # link, which is a build error rather than a silent gap, but the list is also
 # what the install rules and the compile checks use, so it is defined once.

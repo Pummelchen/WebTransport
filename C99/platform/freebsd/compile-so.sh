@@ -9,7 +9,12 @@ if [ ! -f "$c99_root/CMakeLists.txt" ]; then
   exit 2
 fi
 
-build_dir="$c99_root/out/freebsd/build"
+# The packaging build gets its OWN directory. `C99/scripts/build-and-test.sh`
+# configures the same platform's Debug build in `out/<platform>/build` with
+# Ninja, and these scripts use CMake's default generator (Makefiles), so sharing
+# that directory made whichever ran second fail with "Does not match the
+# generator used previously" -- a release-path failure with a confusing cause.
+build_dir="$c99_root/out/freebsd/build-install"
 install_dir="$c99_root/out/freebsd/install"
 
 cmake -S "$c99_root" -B "$build_dir" \

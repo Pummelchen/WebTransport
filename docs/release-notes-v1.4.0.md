@@ -1,11 +1,26 @@
-# WebTransport Swift 1.4.0
+# WebTransport 1.4.0
 
-The pre-production audit's fixes, and the first release whose version is
-single-sourced across both libraries.
+The pre-production audit's fixes, the first release whose version is single-sourced,
+and the first that carries **both libraries** of this repository.
 
-This release ships the **Swift** products only. The portable C99 implementation in
-`C99/` is built and tested on every push but is **not released** here; when it joins,
-it joins this tag and these notes rather than getting its own.
+This is one project's release, not one library's. The Swift package and the portable
+C99 library carry the same version (`1.4.0`), ship under one tag, and are described
+together here; the source of both is on this Release as
+**Source code (tar.gz)** / **Source code (zip)** for the tag.
+
+| Asset | What it is |
+| --- | --- |
+| `WebTransport-swift-1.4.0-macos-arm64.tar.gz` | the Swift products: `WebTransportClient`, `WebTransportServer`, `SHA256SUMS`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README-binaries.txt` |
+| `WebTransport-c99-1.4.0-macos-arm64.tar.gz` | the C99 library: `libwebtransport.1.4.0.dylib` + `libwebtransport.a`, 64 public headers, the `find_package` CMake package, the three `wt-*-c99` tools, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `README-binaries.txt` |
+| each `….tar.gz.sha256` | the digest of the archive beside it |
+
+`lipo -archs` reports exactly `arm64` for every Mach-O in both archives — the two
+Swift products, the C99 dylib, the C99 static library and the three C99 tools — and
+the release script asserts that before packaging. Neither archive is Developer ID
+signed or notarized; each `README-binaries.txt` says so and gives the quarantine
+command. The C99 dylib additionally requires the platform's **OpenSSL 3** at runtime
+(macOS ships LibreSSL, not OpenSSL 3), which its `README-binaries.txt` states with the
+path this build resolved.
 
 ## The pre-production audit landed
 
@@ -29,6 +44,32 @@ The full ledger, per-finding evidence and the Phase E state are in the repositor
 
 Check: `swift test` reports **360 tests, 0 failures**; `ctest` reports **97/97** in the
 Debug, Release and ASan+UBSan configurations.
+
+## The C99 library, now in the release
+
+The C99 tree is built and packed by `C99/platform/macos26/compile-dylib.sh` (Part 2's
+named builder for this platform) and was previously only built and tested. It is
+complete as an implementation: the QUIC wire core and crypto layer with vectors
+extracted from the RFCs, the TLS 1.3 handshake, the QUIC connection runtime, HTTP/3,
+QPACK including its dynamic table, the draft-16 WebTransport session layer and the
+public consumer API.
+
+- Its identity is observable from the artifact alone: the archive carries the
+  version-stamped `libwebtransport.1.4.0.dylib` and its symlinks, and
+  `wt_version_string()` returns `1.4.0`.
+- `WT_ABI_VERSION` and `wt_protocol_draft()` are separate axes and did not move with
+  this release.
+- The archive's `README-binaries.txt` names the OpenSSL 3 runtime dependency and the
+  path the build resolved, because the library is deliberately not bundled with it (the
+  project's documented decision is that the platform supplies it, so fixes arrive
+  through the distributor).
+
+Checks: `C99/scripts/build-and-test.sh --all` — **97/97 CTest** in Debug, Release and
+ASan+UBSan, 0 warnings; `check-vectors.sh` (RFC 8448/7748/9204/7541 vectors
+re-extracted and compared), `check-matrix.sh` (91 named symbols/tests),
+`check-portability.sh`, `check-static-analysis.sh` (94 sources, no findings),
+`check-cppcheck.sh`, `check-package.sh` (the installed package builds a consumer),
+`check-workflows.py`, and the three Windows gates (see below).
 
 ## New public API: peer-initiated unidirectional streams
 
@@ -56,8 +97,7 @@ Check: the audit added 52 tests (308 → 360); both the new API's tests and the
 - The per-connection inbound-stream queue is bounded by the advertised WebTransport
   stream limits, and a full queue is refused explicitly rather than growing without
   bound; teardown resets only the stream halves this endpoint owns.
-- CRYPTO-stream reassembly is linear and bounded (it re-summed its consumed-byte count
-  and retained every consumed byte forever); the TLS transcript is capped at 1 MiB.
+- CRYPTO-stream reassembly is linear and bounded; the TLS transcript is capped at 1 MiB.
 - `FINAL_SIZE_ERROR` is reachable: the checks ran after the gate that already returned.
 - The QUIC short-header decoder validates its reserved bits, as the long-header and
   Retry decoders did.
@@ -79,31 +119,30 @@ slowdown blows through), plus the regression test each finding carries.
   mirrored in `C99/include/webtransport/version.h` and
   `Swift/Sources/WebTransport/WebTransportVersion.swift`, with
   `Swift/check-version-sync.sh` (bump: `--write`) and the C99 CMake configure both
-  failing on a mismatch. The two libraries now carry the same number: the C99 side
-  moves from its pre-1.0 `0.1.0` identity to 1.4.0. `WT_ABI_VERSION` and the protocol
-  draft are separate axes and did not move.
+  failing on a mismatch. This is what makes "one repository, one version" true rather
+  than aspirational: the C99 side moves from its pre-1.0 `0.1.0` identity to 1.4.0.
+- C99 changes in this release include the QPACK static table, the `:protocol` token,
+  the stream-table counters, transport-parameter validation, the Windows monotonic
+  clock, capsules arriving after `WT_CLOSE_SESSION`, and the HTTP/3 field-name and
+  field-value grammar.
 - Both manifests build with warnings-as-errors and strict memory safety; the manifests
   are under the formatting gate; every workflow action is pinned to a commit SHA with
   least-privilege `permissions:`; a blocking `security-scan` workflow runs gitleaks over
   the full history and trivy over the tree.
-- 185 files of committed CMake build output left the tree, the hand-maintained
-  "Views (14d)" badge's data source is gone, and `THIRD_PARTY_NOTICES.md` carries the
-  Apache-2.0 notice for OpenSSL, the C99 build's required dependency.
+- 185 files of committed CMake build output left the tree, and
+  `THIRD_PARTY_NOTICES.md` carries the Apache-2.0 notice for OpenSSL, the C99 build's
+  required dependency.
 
 Checks: `Swift/check-toolchain.sh 6.4 27.0`, `Swift/check-manifest-sync.sh` (19 shared
-targets), `Swift/check-target-imports.sh` (42 targets / 202 imports),
-`Swift/check-api-compatibility.sh`, `swift format lint --strict`, and the C99
-`check-*.sh` family — `check-vectors.sh` (RFC 8448/7748/9204/7541 vectors re-extracted
-and compared), `check-matrix.sh` (91 named symbols/tests), `check-portability.sh`,
-`check-static-analysis.sh` (94 sources, no findings), `check-cppcheck.sh`,
-`check-package.sh`, `check-workflows.py`.
+targets), `Swift/check-version-sync.sh`, `Swift/check-target-imports.sh` (42 targets /
+202 imports), `Swift/check-api-compatibility.sh`, `swift format lint --strict`.
 
 ## What is not in this release
 
-- **The C99 library.** Built and tested (97/97, ASan+UBSan, Windows under Wine, FreeBSD
-  by hand) but not released, and its artifacts are not attached here.
 - **0-RTT and resumption** are not implemented in either library; the draft-16
   compliance matrix records that as a deliberate `--` row.
+- The C99 library's **FreeBSD and native-Windows CI legs** are not jobs yet (the code
+  on those platforms is measured by hand; see the Windows gates below).
 
 ## Checks that ran elsewhere, and what did not run
 
@@ -127,9 +166,14 @@ sentences (RELEASE.md Part 1 §1.2.7):
 ## Checksums
 
 ```
-SHA256: SHA256_PENDING
-Bytes:  ARCHIVE_BYTES_PENDING
+WebTransport-swift-1.4.0-macos-arm64.tar.gz
+  SHA256: SHA256_PENDING
+  Bytes:  ARCHIVE_BYTES_PENDING
+
+WebTransport-c99-1.4.0-macos-arm64.tar.gz
+  SHA256: C99_SHA256_PENDING
+  Bytes:  C99_ARCHIVE_BYTES_PENDING
 ```
 
-The digests are substituted at publish time from the archive that is uploaded. A dry
-run's numbers are not copied here, because publishing rebuilds.
+Both digests are substituted at publish time from the archives that are uploaded. A dry
+run's numbers are never copied here, because publishing rebuilds.

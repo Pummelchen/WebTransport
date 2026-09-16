@@ -190,11 +190,19 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 ## Prebuilt binaries
 
 The [1.4.0 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.4.0)
-ships `WebTransport-swift-1.4.0-macos-arm64.tar.gz` — `WebTransportClient`,
-`WebTransportServer`, `SHA256SUMS`, `LICENSE`, `THIRD_PARTY_NOTICES.md` and a
-`README-binaries.txt` — with the archive's SHA-256 beside it as
-`WebTransport-swift-1.4.0-macos-arm64.tar.gz.sha256`. The two binaries are thin
-arm64 Mach-O and run natively on every Apple Silicon Mac, M1 and later. They are
+carries **both libraries** of this repository, at the same version, with the source of
+both as the Release's own source archives:
+
+- `WebTransport-swift-1.4.0-macos-arm64.tar.gz` — `WebTransportClient`,
+  `WebTransportServer`, `SHA256SUMS`, `LICENSE`, `THIRD_PARTY_NOTICES.md` and a
+  `README-binaries.txt`.
+- `WebTransport-c99-1.4.0-macos-arm64.tar.gz` — `libwebtransport.1.4.0.dylib` and
+  `libwebtransport.a`, the 64 public headers, the `find_package(webtransport_c99)`
+  CMake package, the three `wt-*-c99` tools, `LICENSE`, `THIRD_PARTY_NOTICES.md` and a
+  `README-binaries.txt` that names the OpenSSL 3 runtime dependency.
+
+Each archive has its SHA-256 beside it as `<archive>.sha256`. Every Mach-O in both is
+thin arm64 and runs natively on every Apple Silicon Mac, M1 and later. They are
 ad-hoc signed rather than Developer ID signed, and are not notarized, so Gatekeeper
 quarantines them on first run; an archive unpacks with its modes, so verify the
 digest, unpack, then clear the quarantine flag:
@@ -207,9 +215,9 @@ xattr -dr com.apple.quarantine WebTransportClient WebTransportServer
 ./WebTransportServer --scenario all
 ```
 
-`Swift/release-macos-arm64.sh` builds and packs that archive and is a dry run unless
-given `--publish`; it asserts `lipo -archs` is exactly `arm64` on every shipped
-binary before it packages them.
+`./release-macos-arm64.sh` builds and packs both archives and is a dry run unless given
+`--publish` (or `--republish`, to correct a published Release in place); it asserts
+`lipo -archs` is exactly `arm64` on every Mach-O it ships before it packages them.
 
 Two of the forty conformance scenarios assert properties of the source tree -- they
 read `Package.swift` and `Swift/build-release-apple-silicon.sh` from the working
