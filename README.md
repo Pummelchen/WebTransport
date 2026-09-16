@@ -55,8 +55,9 @@ on a real kernel) -- and running the Windows branch is what found and fixed `WT-
 Windows is covered by two CI legs: `windows-wine` (enforced -- mingw cross-build, then every test
 under Wine) and `windows-native` on `windows-latest` (MSYS2 MINGW64, present but
 `continue-on-error: true` until it has been seen green). FreeBSD 15.1 has no CI leg. Of the plan's
-nine completion criteria **8 are met and 1 is partial** (the CI *job* for the FreeBSD leg and an
-enforced native Windows leg, not the code on them). All 34 of the
+nine completion criteria **8 are met and 1 is partial** (the CI *job* for the FreeBSD leg,
+`WT-223`, and an enforced native Windows leg, `WT-224`, not the code on them; the outstanding
+work is listed on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99)). All 34 of the
 draft-16 compliance-matrix rows are exercised by a test. See
 [C99/README.md](C99/README.md) and the
 [C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).

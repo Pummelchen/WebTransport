@@ -29,14 +29,15 @@ receive that reported a truncated packet as a limit error and dropped the sender
 hand-written `WSARecvMsg` prototype with one parameter too many, which a cross-compile cannot see
 because the declaration was this tree's own. Windows already has two CI legs — `windows-wine`
 (enforced) and `windows-native` on `windows-latest` (MSYS2 MINGW64, not yet enforced) — so what
-Phase 12 still lacks is a CI *job* for FreeBSD and an enforced native Windows leg; Phase 10 (the
-test port) is under way, and Phases 13 and 14 are the hardening and
-release-readiness work tracked in the
-[project tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker).
+Phase 12 still lacks is a CI *job* for FreeBSD (`WT-223`) and an enforced native Windows leg
+(`WT-224`), and the plan's Debian 13 leg runs on Ubuntu (`WT-225`). **Open work on this tree is
+listed on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99)
+and nowhere else**; the sentence above that calls Phase 10 "under way" is `WT-226` against the
+Definition-of-Done's `met`.
 
 Of the plan's nine Definition-of-Done criteria **eight are met and one is partial** — and the
-partial one is CI *job* coverage (no FreeBSD leg, and the native Windows leg not yet enforced),
-not the code on them.
+partial one is CI *job* coverage (no FreeBSD leg, `WT-223`; the native Windows leg not yet
+enforced, `WT-224`; the Debian 13 leg running on Ubuntu, `WT-225`), not the code on them.
 `scripts/score-matrix.sh` prints that state from the matrix rather than from memory.
 
 What is here:
@@ -298,8 +299,9 @@ What is here:
   a mingw toolchain and a Windows OpenSSL the whole tree **links** — 91 PE32+ executables and
   `libwebtransport.dll` — and CI does that on the legs it already has, because the MSYS2 OpenSSL
   package is a plain tarball. That link found a defect the compile could not (`-Wstringop-overflow` in
-  a Release build, which clang never reported). What remains is *running* those binaries, which needs
-  Windows or Wine, and FreeBSD.
+  a Release build, which clang never reported). It also RUNS them now — 85 of 85 test executables green
+  under Wine, 64,900 checks — so what remains is the CI *job* on a real Windows runner (`WT-224`) and on
+  FreeBSD (`WT-223`), not the running.
   `scripts/check-portability.sh` fails if the library uses a POSIX-only call the inventory does not
   name — it caught `sendto`/`recvfrom` missing on its first run — and CI runs it. FreeBSD is close to
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
