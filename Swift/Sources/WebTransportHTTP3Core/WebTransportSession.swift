@@ -833,6 +833,18 @@ public struct WebTransportSessionManager: Equatable, Sendable {
                 received.append(result)
                 terminationActions = result.terminationActions ?? terminationActions
                 remaining.removeFirst(parsed.bytesConsumed)
+            } catch let error as WebTransportDraft16Error where error.kind == .flowControl {
+                // draft-ietf-webtrans-http3-16 section 5.6.2: a flow-control
+                // capsule whose value exceeds the draft's maximum is a
+                // session-level violation, and the session must be closed with
+                // WT_FLOW_CONTROL_ERROR. The parse above runs before
+                // `receiveFlowControlCapsuleWithActions` can see the capsule, so
+                // this entry point has to route the violation to the same close
+                // path the direct one uses; otherwise the error reaches the
+                // CONNECT-stream reader, which resets the stream with
+                // H3_MESSAGE_ERROR while the session stays `accepted` locally.
+                try closeForFlowControlViolation(sessionID)
+                throw error
             } catch  where capsuleType == WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule {
                 let isAlreadyClosed: Bool
                 if case .closed = sessionsByID[sessionID]?.state {

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import WebTransportHTTP3Core
 @testable import WebTransportNetworkRuntime
 
 /// Delivery guarantees for the queue that hands inbound QUIC streams to whoever
@@ -207,6 +208,44 @@ struct WebTransportInboundStreamQueueTests {
         await #expect(throws: (any Error).self) {
             try await queue.next(direction: Self.direction, timeoutMilliseconds: 50)
         }
+    }
+
+    /// Critically-typed streams are retained under the same discipline as
+    /// ordinary inbound streams, but with a much smaller entitlement.
+    ///
+    /// RFC 9114 section 6.2.1 gives a connection exactly one HTTP/3 control
+    /// stream and RFC 9204 section 4.2 exactly one QPACK encoder and one decoder
+    /// stream, and a second of any of them is a connection error rather than
+    /// something to retain. Before the entitlement was enforced, `retainCritical`
+    /// appended with no bound: a peer that opened control-typed streams the
+    /// runtime had no consumer for made it retain each one, and the buffers
+    /// behind it, for the connection's whole life — and each retained handle
+    /// permanently consumed one unit of the peer's unidirectional-stream credit.
+    @Test
+    func criticalStreamRetentionIsBoundedToTheThreeEntitledStreams() async throws {
+        let queue = InteroperableQUICStreamQueue<Int>()
+
+        #expect(await queue.retainCritical(0, type: HTTP3StreamType.control))
+        #expect(!(await queue.retainCritical(1, type: HTTP3StreamType.control)))
+        #expect(await queue.retainCritical(2, type: HTTP3StreamType.qpackEncoder))
+        #expect(!(await queue.retainCritical(3, type: HTTP3StreamType.qpackEncoder)))
+        #expect(await queue.retainCritical(4, type: HTTP3StreamType.qpackDecoder))
+        #expect(!(await queue.retainCritical(5, type: HTTP3StreamType.qpackDecoder)))
+        #expect(await queue.retainedCriticalCount == 3)
+
+        // A peer that keeps opening control-typed streams must not be able to
+        // grow retention past the entitlement. The count is the observable the
+        // audit probe used (`retainedCount=100000` on the old code).
+        for index in 0..<1_000 {
+            #expect(!(await queue.retainCritical(index, type: HTTP3StreamType.control)))
+        }
+        #expect(await queue.retainedCriticalCount == 3)
+
+        // A type outside the entitlement is refused on sight: only the one
+        // control and two QPACK streams are ever retained, so the array cannot
+        // grow by a caller choosing some other type.
+        #expect(!(await queue.retainCritical(6, type: HTTP3StreamType.push)))
+        #expect(await queue.retainedCriticalCount == 3)
     }
 
     /// F-swift-perf-tests-04: remembering a delivery must not shift the history.

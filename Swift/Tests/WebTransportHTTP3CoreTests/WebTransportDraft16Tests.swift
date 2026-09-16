@@ -103,6 +103,36 @@ func draft16OversizedBlockedAndHTTP2OnlyCapsulesCloseTheSession() throws {
     }
 }
 
+/// draft-ietf-webtrans-http3-16 section 5.6.2: a WT_MAX_STREAMS value above the
+/// draft's 2^60 maximum is a session-level flow-control violation, and the
+/// session must be closed with WT_FLOW_CONTROL_ERROR — not merely reported to
+/// the CONNECT-stream reader.
+///
+/// The CONNECT-stream entry point used to parse the capsule a second time in
+/// `receiveConnectStreamCapsulesWithActions` and let that parse's error escape
+/// before `receiveFlowControlCapsuleWithActions` (which owns the close) ran, so
+/// the local session stayed `accepted` while the peer was told the wrong code.
+@Test
+func draft16ConnectStreamFlowControlViolationClosesTheSession() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    var pair = try Draft16TestSupport.makeReadyPair(flowControl: true)
+    let sessionID = try Draft16TestSupport.establishSession(pair: &pair)
+    let oversized = try WebTransportFlowCapsuleCodec.serialize(
+        .maxStreamsBidi(limit: constants.maximumMaxStreamsValue + 1)
+    )
+
+    #expect(throws: WebTransportDraft16Error.self) {
+        _ = try pair.server.receiveConnectStreamCapsulesWithActions(
+            streamID: sessionID.rawValue,
+            bytes: oversized
+        )
+    }
+    #expect(
+        Draft16TestSupport.isFlowControlClosed(pair.server.sessionsByID[sessionID]?.state),
+        "the CONNECT-stream path must close the session with WT_FLOW_CONTROL_ERROR"
+    )
+}
+
 @Test
 func draft16MalformedCloseMessagesResetConnectStreamWithH3MessageError() throws {
     let constants = WebTransportHTTP3DraftConstants.current

@@ -797,34 +797,45 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
         let started = Date()
         while true {
-            let remaining = InteroperableQUICHelpers.remainingTimeout(
-                timeoutMilliseconds: timeout,
-                started: started
-            )
             let stream = try await inboundStreams.next(
                 direction: InteroperableQUICHelpers.unidirectionalStreamDirection,
-                timeoutMilliseconds: remaining
+                timeoutMilliseconds: InteroperableQUICHelpers.remainingTimeout(
+                    timeoutMilliseconds: timeout,
+                    started: started
+                )
             )
+            // The budget is the caller's whole wait, so the second await in an
+            // iteration gets only what the first one left. Recomputing it here
+            // rather than reusing a value captured before `next` is what keeps
+            // one iteration — and each critical stream it retains — from
+            // spending the deadline twice.
             let firstChunk = try await InteroperableQUICHelpers.readFirstChunk(
                 stream,
-                timeoutMilliseconds: remaining,
+                timeoutMilliseconds: InteroperableQUICHelpers.remainingTimeout(
+                    timeoutMilliseconds: timeout,
+                    started: started
+                ),
                 maxBytes: maximumInitialBytes
             )
             // The peer's HTTP/3 control and QPACK streams share the
             // unidirectional direction with WebTransport streams, and
             // establishment returns as soon as it reads the control stream, so a
             // QPACK stream that arrived behind it is still queued here. Those
-            // streams are critical and must not be closed, so they are retained
-            // and the wait for a WebTransport stream continues.
+            // streams are critical and must not be closed, so they are retained;
+            // an unknown HTTP/3 stream type is discarded under RFC 9114 section
+            // 6.2. Either outcome leaves the wait for a WebTransport stream
+            // running.
             guard WebTransportStreamSignaling.hasStreamPrefix(firstChunk) else {
-                if await InteroperableQUICHelpers.retainPeerCriticalUnidirectionalStream(
+                switch try await InteroperableQUICHelpers.classifyPeerUnprefixedUnidirectionalStream(
                     stream,
                     firstBytes: firstChunk,
                     in: inboundStreams
                 ) {
+                case .retained, .ignored:
                     continue
+                case .unserved, .malformed:
+                    throw WebTransportNetworkRuntimeError.unexpectedFrame
                 }
-                throw WebTransportNetworkRuntimeError.unexpectedFrame
             }
             if let foreignSessionID = InteroperableQUICHelpers.foreignSessionID(
                 inPrefixedStream: firstChunk,
@@ -910,6 +921,35 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             stream: stream,
             timeoutMilliseconds: timeout,
             prefix: prefix
+        )
+        if !firstPayload.isEmpty || endOfStream {
+            try await producer.send(firstPayload, endOfStream: endOfStream)
+        }
+        return producer
+    }
+
+    /// Test support: opens a locally initiated unidirectional stream and writes
+    /// `firstPayload` verbatim, with no WebTransport prefix in front of it.
+    ///
+    /// HTTP/3 stream types and WebTransport streams share the unidirectional
+    /// direction (RFC 9114 section 6.2; draft-ietf-webtrans-http3-16 section 4.4),
+    /// so a peer can open a stream this runtime does not serve. The shipped
+    /// surface never produces one, which leaves a loopback test no way to make a
+    /// peer do it; this helper does, so the runtime's classification of an
+    /// unknown or critical HTTP/3 stream type can be exercised end to end.
+    func openUnframedUnidirectionalStreamForTesting(
+        firstPayload: Data,
+        endOfStream: Bool = false,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> WebTransportNetworkUnidirectionalStreamProducer {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
+            try await self.connection.openStream(directionality: .unidirectional)
+        }
+        let producer = WebTransportNetworkUnidirectionalStreamProducer(
+            stream: stream,
+            timeoutMilliseconds: timeout,
+            prefix: Data()
         )
         if !firstPayload.isEmpty || endOfStream {
             try await producer.send(firstPayload, endOfStream: endOfStream)
@@ -1172,7 +1212,21 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         } catch is CancellationError {
             return
         } catch {
-            stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+            // draft-ietf-webtrans-http3-16 section 5.6.2 names the code for a
+            // flow-control violation. The session manager has already closed the
+            // session with it by the time this catches, so the CONNECT stream is
+            // reset with the same code rather than a generic H3_MESSAGE_ERROR:
+            // otherwise the peer cannot tell a malformed capsule from an
+            // over-limit flow-control value, and the code the draft requires it
+            // close the session with never reaches it.
+            if let draft16Error = error as? WebTransportDraft16Error,
+                draft16Error.kind == .flowControl
+            {
+                stream.streamApplicationErrorCode =
+                    WebTransportHTTP3DraftConstants.current.wtFlowControlError
+            } else {
+                stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+            }
             try? await stream.send(Data(), endOfStream: true)
         }
     }
@@ -2484,8 +2538,29 @@ enum InteroperableQUICHelpers {
         return bytes
     }
 
-    /// Retains an HTTP/3 critical unidirectional stream the WebTransport accept
-    /// path encountered, reporting whether it did.
+    /// Retains an HTTP/3-critical peer unidirectional stream, or reports the
+    /// duplicate as a connection error.
+    ///
+    /// RFC 9114 section 6.2.1 makes a second HTTP/3 control stream a connection
+    /// error of type H3_STREAM_CREATION_ERROR, and RFC 9204 section 4.2 says the
+    /// same for a second QPACK encoder or decoder stream. The collector holds at
+    /// most one of each, so a refusal here is the peer having opened a stream the
+    /// protocol does not allow it to open, not a resource limit.
+    fileprivate static func retainPeerCriticalStreamOrThrow(
+        _ stream: QUIC.Stream<QUICStream>,
+        type: UInt64,
+        in inboundStreams: InteroperableQUICInboundStreamCollector
+    ) async throws {
+        guard await inboundStreams.retainCritical(stream, type: type) else {
+            throw HTTP3ConnectionError(
+                code: .streamCreationError,
+                reason: "peer opened more than one HTTP/3 stream of type \(type)"
+            )
+        }
+    }
+
+    /// Classifies a peer unidirectional stream that carries no WebTransport
+    /// prefix, retaining it when it is critical and ignoring it when it is not.
     ///
     /// The peer's control and QPACK streams share the unidirectional direction
     /// with WebTransport streams. ``readPeerControlStream(from:role:timeoutMilliseconds:)``
@@ -2493,26 +2568,42 @@ enum InteroperableQUICHelpers {
     /// arrived behind it is still queued when the application starts accepting
     /// WebTransport streams. RFC 9114 section 6.2.1 and RFC 9204 section 4.2 make
     /// those streams critical — they must not be closed — so the accept path
-    /// retains them and waits on. Anything else is not a stream this runtime
-    /// serves, and the caller reports it rather than handing it to the
-    /// application as if it were a WebTransport stream.
-    fileprivate static func retainPeerCriticalUnidirectionalStream(
+    /// retains them and waits on.
+    ///
+    /// Every other HTTP/3 stream type is one this runtime does not serve. RFC
+    /// 9114 section 6.2 requires an *unknown* one be discarded rather than
+    /// reported: a recipient of an unknown stream type "MUST NOT consider [it] to
+    /// be a connection error of any kind", and section 6.2.3 reserves the
+    /// `0x1f * N + 0x21` range precisely so peers may send such streams. A type
+    /// HTTP/3 itself defines — the push stream — is not unknown, so it is
+    /// reported instead of being mistaken for one, and bytes that do not begin
+    /// with a decodable stream type are reported because no HTTP/3 stream grammar
+    /// admits them.
+    fileprivate static func classifyPeerUnprefixedUnidirectionalStream(
         _ stream: QUIC.Stream<QUICStream>,
         firstBytes: Data,
         in inboundStreams: InteroperableQUICInboundStreamCollector
-    ) async -> Bool {
+    ) async throws -> InteroperableQUICPeerStreamClassification {
         guard let prefix = try? HTTP3StreamTypeParser.parsePrefix(firstBytes) else {
-            return false
+            return .malformed
         }
         switch prefix.type {
         case HTTP3StreamType.control, HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
-            await inboundStreams.retainCritical(stream)
+            try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
             Task {
                 await drainPeerCriticalStream(stream)
             }
-            return true
+            return .retained
+        case HTTP3StreamType.push:
+            InteroperableQUICDebug.log(
+                "reporting peer push stream \(stream.streamID): this runtime does not serve server push"
+            )
+            return .unserved
         default:
-            return false
+            InteroperableQUICDebug.log(
+                "ignoring peer unidirectional stream \(stream.streamID) of type \(prefix.type)"
+            )
+            return .ignored
         }
     }
 
@@ -2547,17 +2638,29 @@ enum InteroperableQUICHelpers {
             let prefix = try HTTP3StreamTypeParser.parsePrefix(bytes)
             switch prefix.type {
             case HTTP3StreamType.control:
-                await inboundStreams.retainCritical(stream)
+                try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
                 return bytes
             case HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
                 InteroperableQUICDebug.log("\(role) ignoring peer QPACK stream type=\(prefix.type)")
-                await inboundStreams.retainCritical(stream)
+                try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
                 Task {
                     await drainPeerCriticalStream(stream)
                 }
                 continue
-            default:
+            case HTTP3StreamType.push:
+                // HTTP/3 defines the push stream, so it is not an unknown type
+                // that RFC 9114 section 6.2 protects; this runtime never
+                // negotiates push, and a server push stream arriving before the
+                // peer's control stream is reported rather than discarded.
                 throw WebTransportNetworkRuntimeError.unexpectedFrame
+            default:
+                // RFC 9114 section 6.2: an unknown or reserved stream type is
+                // discarded rather than reported as a connection error. Only the
+                // peer's control stream ends this wait.
+                InteroperableQUICDebug.log(
+                    "\(role) ignoring peer unidirectional stream type=\(prefix.type) while waiting for control"
+                )
+                continue
             }
         }
     }
@@ -2963,6 +3066,42 @@ enum InteroperableQUICInboundStreamDisposition: Equatable, Sendable {
     case refusedInboundDeliveryFailed
 }
 
+/// What the runtime did with a peer unidirectional stream that carries no
+/// WebTransport prefix.
+///
+/// The outcomes are kept distinct because they call for different handling: a
+/// retained stream is parked and the wait continues, an ignored one is an unknown
+/// stream type discarded under RFC 9114 section 6.2, a defined-but-unserved type
+/// is reported, and malformed bytes are the one case reported for their grammar.
+enum InteroperableQUICPeerStreamClassification: Equatable, Sendable {
+    /// A control or QPACK-encoder/decoder stream, retained for the connection's
+    /// life and not delivered to the application.
+    case retained
+    /// An HTTP/3 stream type this runtime does not serve, and which RFC 9114
+    /// section 6.2 forbids reporting as a connection error.
+    case ignored
+    /// A stream type HTTP/3 itself defines — the push stream — which this runtime
+    /// has no use for and which is therefore reported rather than treated as
+    /// unknown.
+    case unserved
+    /// The leading bytes are not a decodable HTTP/3 stream type at all.
+    case malformed
+}
+
+/// The HTTP/3 stream types a connection is entitled to retain, in one place.
+///
+/// RFC 9114 section 6.2.1 allows exactly one control stream, and RFC 9204 section
+/// 4.2 exactly one QPACK encoder and one decoder stream. Spelled out as a set so
+/// the bound on retention is structural: a type outside it is refused on sight,
+/// whatever a future caller passes.
+enum InteroperableQUICCriticalStreamEntitlement {
+    static let types: Set<UInt64> = [
+        HTTP3StreamType.control,
+        HTTP3StreamType.qpackEncoder,
+        HTTP3StreamType.qpackDecoder,
+    ]
+}
+
 private typealias InteroperableQUICInboundStreamCollector = InteroperableQUICStreamQueue<QUIC.Stream<QUICStream>>
 
 /// Delivers inbound streams to whoever is waiting for one of that direction.
@@ -3034,10 +3173,49 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     /// handle after reading lets the transport cancel the receive side, which
     /// the peer sees as exactly that. This collector is owned by the session, so
     /// anything parked here lives as long as the connection does.
+    ///
+    /// Retention is bounded by the protocol entitlement rather than by a
+    /// separate ceiling: RFC 9114 section 6.2.1 allows exactly one control stream
+    /// and RFC 9204 section 4.2 exactly one QPACK encoder and one decoder stream,
+    /// so ``retainCritical(_:type:)`` refuses a second stream of a type it
+    /// already holds. A peer that opens control-typed streams this endpoint has
+    /// no consumer for therefore cannot make the runtime retain them, and each
+    /// refused stream returns its unidirectional-stream credit instead of
+    /// spending it for the connection's life.
     private var retainedCriticalStreams: [Element] = []
 
-    func retainCritical(_ stream: Element) {
+    /// The HTTP/3 stream types already represented in
+    /// ``retainedCriticalStreams``.
+    private var retainedCriticalTypes: Set<UInt64> = []
+
+    /// How many critical peer streams this collector is holding.
+    ///
+    /// Exposed for the regression test in
+    /// `WebTransportInboundStreamQueueTests`: retention used to be unbounded, so
+    /// a peer could make this grow for the connection's whole life.
+    var retainedCriticalCount: Int {
+        retainedCriticalStreams.count
+    }
+
+    /// Retains a peer HTTP/3-critical stream, reporting whether the connection
+    /// was entitled to one of that type.
+    ///
+    /// Returns `false` for any type outside
+    /// ``InteroperableQUICCriticalStreamEntitlement`` and for a second stream of
+    /// a type already retained; the caller reports the latter as
+    /// `H3_STREAM_CREATION_ERROR`. Refusing rather than appending is also what
+    /// bounds the memory this collector holds: the entitlement is one control,
+    /// one encoder and one decoder stream, so the retained array can never exceed
+    /// three entries.
+    @discardableResult
+    func retainCritical(_ stream: Element, type: UInt64) -> Bool {
+        guard InteroperableQUICCriticalStreamEntitlement.types.contains(type),
+            retainedCriticalTypes.insert(type).inserted
+        else {
+            return false
+        }
         retainedCriticalStreams.append(stream)
+        return true
     }
 
     /// Accepts an inbound stream, ignoring one that has already been delivered.
