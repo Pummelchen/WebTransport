@@ -179,8 +179,10 @@ wt_status_t wt_http3_message_encode(wt_writer_t *w, const wt_http3_message_t *me
       return WT_ERR_INVALID_ARGUMENT;
     }
     /* Written by hand rather than with a formatter: a status is three digits, and the
-     * library does not own `snprintf` on every target it builds for. */
-    if (message->status > 999U) {
+     * library does not own `snprintf` on every target it builds for. The bound is RFC 9114
+     * section 4.3.2's -- three digits, 100 to 599, exactly what `parse_status` above accepts
+     * -- so this writer cannot produce a field section its own reader refuses. */
+    if (message->status < 100U || message->status > 599U) {
       if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
       return WT_ERR_LIMIT;
     }

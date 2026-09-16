@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "webtransport/api/flow.h"
+#include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/capsule.h"
 #include "webtransport/writer.h"
 
@@ -145,13 +146,28 @@ static void test_limits_and_allowances(void) {
                 (uint64_t)wt_session_last_error(session).code);
   WT_EXPECT_U64("and the limit intact", 200U, wt_session_flow_snapshot(session).max_data);
 
-  w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a count above the draft's ceiling writes",
-               wt_webtransport_max_streams_write(&w, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE + 1U));
-  WT_EXPECT_STATUS("and is refused", WT_ERR_PROTOCOL,
-                   wt_session_on_capsule(session, bytes, wt_writer_offset(&w)));
-  WT_EXPECT_U64("as a flow-control error", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR,
-                (uint64_t)wt_session_last_error(session).code);
+  /* The draft's ceiling (sections 5.6.2 and 5.6.3) is not a limit at all: a count above 2^60 must close the
+   * session with WT_FLOW_CONTROL_ERROR. The capsule is built by hand because the writer refuses to produce one
+   * (test_webtransport_flow covers that half), and a peer can still send it. */
+  {
+    static uint8_t over_limit[16];
+    uint64_t over = WT_WEBTRANSPORT_MAX_STREAMS_VALUE + 1U;
+    size_t over_length = 0U;
+
+    over_length += wt_quic_varint_encode(WT_CAPSULE_MAX_STREAMS_BIDI, over_limit + over_length,
+                                         sizeof(over_limit) - over_length);
+    over_length += wt_quic_varint_encode((uint64_t)wt_quic_varint_size(over), over_limit + over_length,
+                                         sizeof(over_limit) - over_length);
+    over_length += wt_quic_varint_encode(over, over_limit + over_length,
+                                         sizeof(over_limit) - over_length);
+    WT_EXPECT_STATUS("a count above the draft's ceiling is refused", WT_ERR_PROTOCOL,
+                     wt_session_on_capsule(session, over_limit, over_length));
+    WT_EXPECT_U64("as a flow-control error", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR,
+                  (uint64_t)wt_session_last_error(session).code);
+    /* Section 5.6.2: the recipient MUST close the session, so the state says so afterwards -- a caller that
+     * reads only `wt_session_state` must not be left with a session that is still usable. */
+    WT_EXPECT_INT("and closes the session", (int)WT_SESSION_CLOSED, (int)wt_session_state(session));
+  }
 
   wt_session_destroy(session, NULL);
 }

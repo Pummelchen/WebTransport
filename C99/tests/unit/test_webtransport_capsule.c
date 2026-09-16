@@ -156,6 +156,20 @@ static void test_close_edges(void) {
                      wt_webtransport_close_session_parse(&drain, &code, NULL, &reason_length,
                                                          &error));
   }
+
+  /* A value the caller says is present but has no buffer: the parser is public and must refuse it before it
+   * reads, rather than doing pointer arithmetic on NULL. The sibling parsers tolerate the same shape because the
+   * cursor clamps a NULL buffer to zero bytes; this one reads `value` directly and needed a guard of its own. */
+  {
+    wt_webtransport_capsule_t null_value;
+    null_value.type = WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION;
+    null_value.value = NULL;
+    null_value.value_length = 4U;
+    null_value.bytes_consumed = 0U;
+    WT_EXPECT_STATUS("a NULL value is refused", WT_ERR_INVALID_ARGUMENT,
+                     wt_webtransport_close_session_parse(&null_value, &code, NULL, &reason_length,
+                                                         &error));
+  }
 }
 
 static void test_incomplete_unknown_and_bounds(void) {

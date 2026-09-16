@@ -16,6 +16,8 @@
 
 #include "webtransport/quic/packet.h"
 
+#include "rfc9001_retry.h"
+
 /* A listener peeks the FRONT of a datagram, so the two connection IDs must be readable from a prefix of a long
  * header -- which `wt_quic_long_header_decode` cannot do, because it also reads the Length field and hands back
  * a view of the payload. Requiring the whole packet there meant a 1200-byte Initial could not be read from a
@@ -71,6 +73,75 @@ static void test_the_connection_ids_of_a_long_header_can_be_read_from_a_prefix(v
   WT_EXPECT_STATUS("and a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_quic_long_header_connection_ids(packet, wt_writer_offset(&w), NULL, &destination_length,
                                                       &source, &source_length));
+}
+
+/* RFC 9000 section 17.2.5 puts an `Unused (4)` field where the protected packet types put the reserved bits and
+ * the packet number length, and says of it: "The value in the Unused field is set to an arbitrary value by the
+ * server; a client MUST ignore these bits." RFC 9001 appendix A.4's Retry therefore begins 0xff -- Unused =
+ * 0xf -- and it is the very packet the integrity tag is computed over, so a client that refuses it refuses the
+ * RFC's own example. Applying the protected types' reserved-bit rule (section 17.2) to a Retry was exactly
+ * that mistake, and a vector this repository already ships is the check that catches it: the RFC's bytes say
+ * what must be accepted, and a rule this code invented cannot overrule them. The other three nibbles are
+ * covered too, because the bug refused only the 0x0c half of the field. */
+static void test_a_retry_ignores_the_unused_bits(void) {
+  wt_quic_retry_packet_t decoded;
+  wt_quic_error_t error = 0U;
+  uint8_t unused_bits;
+
+  WT_EXPECT_U64("the RFC's Retry has non-zero Unused bits", 0x0fU,
+                (uint64_t)(WT_RFC9001_RETRY_PACKET[0] & 0x0fU));
+  WT_EXPECT_STATUS("and a client accepts it", WT_OK,
+                   wt_quic_retry_packet_decode(WT_RFC9001_RETRY_PACKET, WT_RFC9001_RETRY_PACKET_LEN, &decoded,
+                                               &error));
+  WT_EXPECT_U64("with the five-byte token A.4 prints", 5U, (uint64_t)decoded.token_len);
+  WT_EXPECT_BYTES("byte for byte", (const uint8_t *)"token", decoded.token, 5U);
+  WT_EXPECT_BYTES("and the tag A.4 prints", WT_RFC9001_RETRY_TAG, decoded.integrity_tag,
+                  WT_RFC9001_RETRY_TAG_LEN);
+
+  /* Every value of the field, not just the RFC's: a Retry is a whole datagram whose shape the other fields
+   * already fix, so the only thing the first byte's low nibble may do is fail this test. The packet is the
+   * RFC's own, with nothing but that nibble changed. */
+  for (unused_bits = 0U; unused_bits < 16U; unused_bits++) {
+    uint8_t varied[WT_RFC9001_RETRY_PACKET_LEN];
+    wt_quic_retry_packet_t one;
+    memcpy(varied, WT_RFC9001_RETRY_PACKET, sizeof(varied));
+    varied[0] = (uint8_t)(0xf0U | unused_bits);
+    WT_EXPECT_STATUS("a Retry whose Unused field is arbitrary parses", WT_OK,
+                     wt_quic_retry_packet_decode(varied, sizeof(varied), &one, &error));
+    WT_EXPECT_U64("with its token intact", 5U, (uint64_t)one.token_len);
+    WT_EXPECT_BYTES("and its tag last", WT_RFC9001_RETRY_TAG, one.integrity_tag,
+                    WT_RFC9001_RETRY_TAG_LEN);
+  }
+}
+
+/* A non-zero length with a NULL pointer is a caller error, and the writer would read it; the long header
+ * encoder refuses exactly these arguments (`packet.c`, `wt_quic_long_header_encode`), and a public Retry
+ * encoder that segfaults instead is a defect a caller cannot defend against (WT-239). Nothing may be written
+ * before the refusal either, or the caller is left with half a packet. */
+static void test_a_retry_encoder_refuses_missing_argument_bytes(void) {
+  static const uint8_t k_source[1] = {0x77U};
+  static const uint8_t k_token[3] = {0xA1U, 0xA2U, 0xA3U};
+  static const uint8_t k_tag[16] = {0};
+  uint8_t buffer[64];
+  wt_writer_t w = wt_writer_init(buffer, sizeof(buffer));
+
+  WT_EXPECT_STATUS("a NULL destination connection ID with a length is refused",
+                   WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_retry_packet_encode(&w, WT_QUIC_VERSION_1, NULL, 4U, k_source,
+                                               sizeof(k_source), k_token, sizeof(k_token), k_tag));
+  WT_EXPECT_STATUS("a NULL token with a length is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_quic_retry_packet_encode(&w, WT_QUIC_VERSION_1, NULL, 0U, k_source,
+                                               sizeof(k_source), NULL, 4U, k_tag));
+  WT_EXPECT_U64("and neither refusal wrote a byte", 0U, (uint64_t)wt_writer_offset(&w));
+
+  /* The zero-length forms of the same arguments are legal: a Retry may carry no destination connection ID at
+   * all, and a zero-length token is a packet the client discards rather than a caller error. */
+  WT_EXPECT_STATUS("a zero-length destination connection ID is legal", WT_OK,
+                   wt_quic_retry_packet_encode(&w, WT_QUIC_VERSION_1, NULL, 0U, k_source,
+                                               sizeof(k_source), k_token, sizeof(k_token), k_tag));
+  WT_EXPECT_U64("and it wrote the packet",
+                (uint64_t)(1U + 4U + 1U + 0U + 1U + sizeof(k_source) + sizeof(k_token) + 16U),
+                (uint64_t)wt_writer_offset(&w));
 }
 
 int main(void) {
@@ -590,5 +661,7 @@ int main(void) {
                 wt_quic_packet_type_name((wt_quic_packet_type_t)9));
 
   test_the_connection_ids_of_a_long_header_can_be_read_from_a_prefix();
+  test_a_retry_ignores_the_unused_bits();
+  test_a_retry_encoder_refuses_missing_argument_bytes();
   WT_TEST_MAIN_END("wt_quic_packet");
 }

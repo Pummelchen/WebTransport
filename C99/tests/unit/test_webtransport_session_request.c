@@ -45,6 +45,13 @@ static void test_accepted_and_not_ours(void) {
   WT_EXPECT_BYTES("carrying the authority", (const uint8_t *)"localhost", request.authority, 9U);
   WT_EXPECT_BYTES("and the path", (const uint8_t *)"/wt", request.path, 3U);
 
+  /* RFC 3986 section 3.1 makes a URI scheme case-insensitive, so the same field upper-cased is
+   * still `https` and still names a session (section 3.2 requires the https scheme). */
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "HTTPS", "localhost", "/wt");
+  WT_EXPECT_OK("an upper-cased scheme is decided",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
+
   /* An ordinary request: not ours, and not an error. */
   make_request(&message, "GET", NULL, "https", "localhost", "/wt");
   WT_EXPECT_OK("a GET is decided",
@@ -91,6 +98,15 @@ static void test_rejections(void) {
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection as well", (int)WT_WEBTRANSPORT_REQUEST_REJECT,
                 (int)request.outcome);
+
+  /* Section 3.2: "The :scheme field MUST be https." A WebTransport CONNECT over http is a refusal, not a
+   * session: the scheme is part of what identifies the target resource, so it takes the same rejection as a
+   * missing one rather than being reported as someone else's request. */
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "http", "localhost", "/wt");
+  WT_EXPECT_OK("a request over http is decided",
+               wt_webtransport_session_request_validate(&message, &policy, &request, &error));
+  WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
+  WT_EXPECT_U64("with 404", (uint64_t)WT_WEBTRANSPORT_REJECT_NOT_FOUND, (uint64_t)request.status);
 
   /* Authority and path are compared exactly: a different host is not this server's
    * session, and neither is a path that merely starts the same way. */

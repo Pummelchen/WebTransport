@@ -40,9 +40,29 @@ wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_ca
     }
     return WT_OK;
   }
-  if (capsule->type == WT_CAPSULE_MAX_STREAMS_BIDI || capsule->type == WT_CAPSULE_MAX_STREAMS_UNI) {
-    status = wt_webtransport_max_streams_parse(capsule, &maximum, out_error);
-    if (status != WT_OK) return status;
+  if (capsule->type == WT_CAPSULE_MAX_STREAMS_BIDI || capsule->type == WT_CAPSULE_MAX_STREAMS_UNI ||
+      capsule->type == WT_CAPSULE_STREAMS_BLOCKED_BIDI || capsule->type == WT_CAPSULE_STREAMS_BLOCKED_UNI) {
+    int blocked = capsule->type == WT_CAPSULE_STREAMS_BLOCKED_BIDI ||
+                  capsule->type == WT_CAPSULE_STREAMS_BLOCKED_UNI;
+
+    status = blocked ? wt_webtransport_streams_blocked_parse(capsule, &maximum, out_error)
+                     : wt_webtransport_max_streams_parse(capsule, &maximum, out_error);
+    if (status != WT_OK) {
+      /* Sections 5.6.2 and 5.6.3: the 2^60 ceiling reaches this layer from the parser as WT_FLOW_CONTROL_ERROR in
+       * the HTTP/3 slot, and it is a SESSION error -- record it where the caller states refusals from, so
+       * `wt_capsule_stream_refuse` writes the WT_CLOSE_SESSION capsule that ends the session instead of the
+       * connection. A malformed value keeps its own code and is the connection's to answer for. */
+      if (out_error != NULL && (uint64_t)*out_error == WT_WEBTRANSPORT_FLOW_CONTROL_ERROR) {
+        stream->refused_session_code = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
+        stream->refused_session_code_set = 1;
+      }
+      return status;
+    }
+    if (blocked) {
+      /* Informational only (section 5.6.3): the ceiling above is the one rule a WT_STREAMS_BLOCKED carries that
+       * this layer must act on, and it grants nothing to account for. */
+      return WT_OK;
+    }
     if (wt_webtransport_flow_on_max_streams(&stream->peer_limits,
                                             capsule->type == WT_CAPSULE_MAX_STREAMS_BIDI ? 1 : 0, maximum,
                                             &flow_error) != WT_OK) {

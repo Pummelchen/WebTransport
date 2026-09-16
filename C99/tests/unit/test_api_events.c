@@ -239,7 +239,11 @@ static void test_datagrams_and_capsules(void) {
 
   /* Clearing the callbacks stops delivery without refusing anything: an event nobody asked
    * about is accepted and discarded, because blaming the peer for our configuration would
-   * be wrong. */
+   * be wrong. A FRESH session, because the one above has been closed and section 6 makes a
+   * closed session refuse the event itself (see the termination test below). */
+  wt_session_destroy(session, NULL);
+  recorder.count = 0U;
+  session = make_session(&recorder, &callbacks);
   WT_EXPECT_OK("the callbacks are cleared", wt_session_set_callbacks(session, NULL));
   {
     size_t before = recorder.count;
@@ -249,6 +253,49 @@ static void test_datagrams_and_capsules(void) {
     WT_EXPECT_U64("with nothing reported", (uint64_t)before, (uint64_t)recorder.count);
   }
   (void)length;
+  wt_session_destroy(session, NULL);
+  g_session = NULL;
+}
+
+/* Draft-16 section 6: "Upon learning that the session has been terminated, the endpoint MUST reset the send
+ * side and abort reading on the receive side of all unidirectional and bidirectional streams associated with the
+ * session ... it MUST NOT send any new datagrams or open any new streams." The feed functions therefore refuse
+ * every event once the session is closed, and the consumer's callback does not run -- otherwise a caller sees
+ * datagrams and streams for a session that is over. */
+static void test_a_terminated_session_delivers_nothing(void) {
+  recorder_t recorder;
+  wt_session_callbacks_t callbacks;
+  wt_session_t *session;
+  uint8_t bytes[64];
+  wt_writer_t w;
+
+  memset(&recorder, 0, sizeof(recorder));
+  memset(&callbacks, 0, sizeof(callbacks));
+  session = make_session(&recorder, &callbacks);
+
+  /* A stream opened while the session is alive, so the data path has something to refuse. */
+  WT_EXPECT_OK("a stream opens", wt_session_on_stream_opened(session, 8U, 0, 4U));
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_OK("a close writes", wt_webtransport_close_session_write(&w, 0U, NULL, 0U));
+  WT_EXPECT_OK("and is applied", wt_session_on_capsule(session, bytes, wt_writer_offset(&w)));
+  WT_EXPECT_INT("closing the session", (int)WT_SESSION_CLOSED, (int)wt_session_state(session));
+
+  {
+    size_t before = recorder.count;
+
+    WT_EXPECT_STATUS("a stream open after the close is refused", WT_ERR_STATE,
+                     wt_session_on_stream_opened(session, 12U, 0, 4U));
+    WT_EXPECT_U64("with the state error recorded", (uint64_t)WT_ERR_STATE,
+                  (uint64_t)wt_session_last_error(session).status);
+    WT_EXPECT_STATUS("as is data on an open stream", WT_ERR_STATE,
+                     wt_session_on_stream_data(session, 8U, bytes, 1U, 0));
+    w = wt_writer_init(bytes, sizeof(bytes));
+    WT_EXPECT_OK("a datagram writes", wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"hi", 2U));
+    WT_EXPECT_STATUS("and is refused too", WT_ERR_STATE,
+                     wt_session_on_datagram(session, bytes, wt_writer_offset(&w)));
+    WT_EXPECT_U64("with no callback run", (uint64_t)before, (uint64_t)recorder.count);
+  }
+
   wt_session_destroy(session, NULL);
   g_session = NULL;
 }
@@ -282,6 +329,7 @@ static void test_configuration_bounds(void) {
 int main(void) {
   test_streams();
   test_datagrams_and_capsules();
+  test_a_terminated_session_delivers_nothing();
   test_configuration_bounds();
   WT_TEST_MAIN_END("wt_api_events");
 }

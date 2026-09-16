@@ -131,6 +131,11 @@ wt_status_t wt_webtransport_close_session_parse(const wt_webtransport_capsule_t 
     if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
     return WT_ERR_INVALID_ARGUMENT;
   }
+  /* The value is a view the caller owns, and a NULL one is the caller's mistake rather than a capsule to read:
+   * everything below does pointer arithmetic on it and reads it, so it is refused before any of that. The
+   * sibling parsers never see this shape because the cursor clamps a NULL buffer to zero bytes; this one reads
+   * `value` directly. */
+  if (capsule->value == NULL && capsule->value_length != 0U) return WT_ERR_INVALID_ARGUMENT;
   /* The four-byte code is mandatory, so a shorter value is a malformed capsule rather
    * than one with nothing to say. */
   if (capsule->value_length < 4U) {
@@ -244,6 +249,31 @@ static wt_status_t write_two(wt_writer_t *w, uint64_t type, uint64_t first, uint
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
 
+/* The draft's ceiling on a stream-count limit (sections 5.6.2 and 5.6.3): "This value cannot exceed 2^60, as it
+ * is not possible to encode stream IDs larger than 2^62-1." It is one rule for both capsule families and both
+ * directions -- read and write -- which is why it has one home: a peer's over-limit value ends the session with
+ * WT_FLOW_CONTROL_ERROR, and this build must not send one its own reader would refuse. */
+static int stream_count_within_ceiling(uint64_t value) {
+  return value <= WT_WEBTRANSPORT_MAX_STREAMS_VALUE;
+}
+
+/* One stream-count varint, with the ceiling applied after the value is read. The draft makes an over-limit value
+ * a SESSION error rather than a malformed capsule, so it reports the registered WT_FLOW_CONTROL_ERROR -- the
+ * caller that owns the session closes with it -- rather than H3_MESSAGE_ERROR, which names the syntax. */
+static wt_status_t parse_stream_count(const wt_webtransport_capsule_t *capsule, uint64_t *out_maximum,
+                                      wt_http3_error_t *out_error) {
+  wt_status_t status;
+
+  if (capsule == NULL) return WT_ERR_INVALID_ARGUMENT;
+  status = parse_one(capsule, capsule->type, out_maximum, out_error);
+  if (status != WT_OK) return status;
+  if (!stream_count_within_ceiling(*out_maximum)) {
+    if (out_error != NULL) *out_error = (wt_http3_error_t)WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
+  return WT_OK;
+}
+
 wt_status_t wt_webtransport_max_data_write(wt_writer_t *w, uint64_t maximum) {
   return write_one(w, WT_CAPSULE_MAX_DATA, maximum);
 }
@@ -254,6 +284,10 @@ wt_status_t wt_webtransport_max_stream_data_write(wt_writer_t *w, uint64_t strea
 }
 
 wt_status_t wt_webtransport_max_streams_write(wt_writer_t *w, int bidirectional, uint64_t maximum) {
+  /* Sections 5.6.2 and 5.6.3: a Maximum Streams value cannot exceed 2^60. Refused for the reason the close
+   * reason's length is: this build must not put a capsule on the wire that its own reader -- or any conforming
+   * peer, which would end the session with WT_FLOW_CONTROL_ERROR -- refuses. */
+  if (!stream_count_within_ceiling(maximum)) return WT_ERR_LIMIT;
   return write_one(w, bidirectional ? WT_CAPSULE_MAX_STREAMS_BIDI : WT_CAPSULE_MAX_STREAMS_UNI,
                    maximum);
 }
@@ -269,6 +303,9 @@ wt_status_t wt_webtransport_stream_data_blocked_write(wt_writer_t *w, uint64_t s
 
 wt_status_t wt_webtransport_streams_blocked_write(wt_writer_t *w, int bidirectional,
                                                  uint64_t maximum) {
+  /* Section 5.6.3 states the same ceiling for WT_STREAMS_BLOCKED as section 5.6.2 does for WT_MAX_STREAMS, and
+   * the same reason applies: a peer's over-limit value is a flow-control error, so this writer refuses it. */
+  if (!stream_count_within_ceiling(maximum)) return WT_ERR_LIMIT;
   return write_one(w, bidirectional ? WT_CAPSULE_STREAMS_BLOCKED_BIDI : WT_CAPSULE_STREAMS_BLOCKED_UNI,
                    maximum);
 }
@@ -287,7 +324,7 @@ wt_status_t wt_webtransport_max_streams_parse(const wt_webtransport_capsule_t *c
                                               uint64_t *out_maximum, wt_http3_error_t *out_error) {
   if (capsule == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (capsule->type == WT_CAPSULE_MAX_STREAMS_BIDI || capsule->type == WT_CAPSULE_MAX_STREAMS_UNI) {
-    return parse_one(capsule, capsule->type, out_maximum, out_error);
+    return parse_stream_count(capsule, out_maximum, out_error);
   }
   if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
   return WT_ERR_INVALID_ARGUMENT;
@@ -312,7 +349,7 @@ wt_status_t wt_webtransport_streams_blocked_parse(const wt_webtransport_capsule_
   if (capsule == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (capsule->type == WT_CAPSULE_STREAMS_BLOCKED_BIDI ||
       capsule->type == WT_CAPSULE_STREAMS_BLOCKED_UNI) {
-    return parse_one(capsule, capsule->type, out_maximum, out_error);
+    return parse_stream_count(capsule, out_maximum, out_error);
   }
   if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
   return WT_ERR_INVALID_ARGUMENT;

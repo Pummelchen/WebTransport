@@ -52,6 +52,13 @@ wt_status_t wt_session_on_stream_opened(wt_session_t *session, uint64_t stream_i
 
   if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (stream_id == 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (session->machine.state == WT_WEBTRANSPORT_SESSION_CLOSED) {
+    /* Section 6: after termination the endpoint "MUST NOT send any new datagrams or open any new streams", so a
+     * stream that opens afterwards is an event this session has no state for. Refused before the callback, with
+     * the same state error the lifecycle machine uses for a transition on a closed session. */
+    wt_session_set_error(session, WT_ERR_STATE, 0U);
+    return WT_ERR_STATE;
+  }
 
   /* A stream whose prefix named a different session is not ours to deliver, and the code
    * is HTTP/3's identifier error: the peer named an ID that cannot be for this session. */
@@ -93,6 +100,13 @@ wt_status_t wt_session_on_stream_data(wt_session_t *session, uint64_t stream_id,
                                       const uint8_t *data, size_t length, int end_stream) {
   if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (session->machine.state == WT_WEBTRANSPORT_SESSION_CLOSED) {
+    /* Section 6: a terminated session carries no more stream data, and the endpoint aborts reading the receive
+     * side of every stream it owns. The stream table may still hold the stream -- the consumer decides when it
+     * forgets -- so the state is checked before the lookup rather than after it. */
+    wt_session_set_error(session, WT_ERR_STATE, 0U);
+    return WT_ERR_STATE;
+  }
   if (wt_session_find_stream(session, stream_id) == NULL) {
     wt_session_set_error(session, WT_ERR_STATE, 0U);
     return WT_ERR_STATE;
@@ -139,6 +153,12 @@ wt_status_t wt_session_on_datagram(wt_session_t *session, const uint8_t *data, s
 
   if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (session->machine.state == WT_WEBTRANSPORT_SESSION_CLOSED) {
+    /* Section 6: "it MUST NOT send any new datagrams", so a datagram that arrives after the close is refused
+     * rather than parsed and delivered -- the consumer must not learn about traffic for a session that is over. */
+    wt_session_set_error(session, WT_ERR_STATE, 0U);
+    return WT_ERR_STATE;
+  }
 
   status = wt_webtransport_datagram_parse(data, length, &quarter, &payload, &payload_length,
                                           &h3_error);

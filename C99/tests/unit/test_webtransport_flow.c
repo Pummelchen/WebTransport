@@ -9,6 +9,7 @@
 
 #include "wt_test.h"
 
+#include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/capsule.h"
 
 static wt_webtransport_capsule_t decode(uint8_t *bytes, size_t length) {
@@ -167,9 +168,89 @@ static void test_limits_only_grow(void) {
                    wt_webtransport_flow_on_max_streams(&limits, 1, 7U, &error));
 }
 
+/* Sections 5.6.2 and 5.6.3: "This value cannot exceed 2^60, as it is not possible to encode stream IDs larger
+ * than 2^62-1. Recipients of a capsule with a Maximum Streams value larger than this limit MUST close the
+ * WebTransport session with a WT_FLOW_CONTROL_ERROR error code." The ceiling therefore belongs on BOTH sides of
+ * the codec: a writer must not produce a capsule its own reader refuses, and a reader must refuse the value with
+ * the draft's session code rather than the message error a malformed varint gets. */
+static wt_webtransport_capsule_t hand_made_stream_count(uint64_t type, uint64_t value) {
+  /* Static: the returned capsule's value is a view into these bytes, which therefore have to outlive it. */
+  static uint8_t bytes[32];
+  wt_webtransport_capsule_t capsule;
+  wt_cursor_t c;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  size_t length = 0U;
+
+  length += wt_quic_varint_encode(type, bytes + length, sizeof(bytes) - length);
+  length += wt_quic_varint_encode((uint64_t)wt_quic_varint_size(value), bytes + length,
+                                  sizeof(bytes) - length);
+  length += wt_quic_varint_encode(value, bytes + length, sizeof(bytes) - length);
+  c = wt_cursor_init(bytes, length);
+  WT_EXPECT_OK("a hand-made stream-count capsule decodes",
+               wt_webtransport_capsule_decode(&c, sizeof(bytes), &capsule, &error));
+  return capsule;
+}
+
+static void test_the_stream_count_ceiling(void) {
+  uint8_t bytes[32];
+  wt_writer_t w;
+  uint64_t value = 0U;
+  uint64_t over = WT_WEBTRANSPORT_MAX_STREAMS_VALUE + 1U;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  wt_webtransport_capsule_t capsule;
+  static const uint64_t types[] = {WT_CAPSULE_MAX_STREAMS_BIDI, WT_CAPSULE_MAX_STREAMS_UNI,
+                                   WT_CAPSULE_STREAMS_BLOCKED_BIDI, WT_CAPSULE_STREAMS_BLOCKED_UNI};
+  size_t i;
+
+  /* The writers refuse it, for both capsule types, while the ceiling itself is a legal value. */
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_STATUS("MAX_STREAMS above the ceiling is refused", WT_ERR_LIMIT,
+                   wt_webtransport_max_streams_write(&w, 1, over));
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_STATUS("STREAMS_BLOCKED above it too", WT_ERR_LIMIT,
+                   wt_webtransport_streams_blocked_write(&w, 0, over));
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_OK("while the ceiling itself writes",
+               wt_webtransport_max_streams_write(&w, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE));
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_OK("for the blocked capsule too",
+               wt_webtransport_streams_blocked_write(&w, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE));
+
+  /* The readers refuse a peer's over-limit capsule. It is built by hand because the writers above no longer
+   * produce one, and the value is the varint a peer would send. */
+  for (i = 0U; i < sizeof(types) / sizeof(types[0]); i++) {
+    capsule = hand_made_stream_count(types[i], over);
+    value = 0U;
+    error = WT_HTTP3_NO_ERROR;
+    if (types[i] == WT_CAPSULE_MAX_STREAMS_BIDI || types[i] == WT_CAPSULE_MAX_STREAMS_UNI) {
+      WT_EXPECT_STATUS("an over-limit MAX_STREAMS is refused", WT_ERR_PROTOCOL,
+                       wt_webtransport_max_streams_parse(&capsule, &value, &error));
+    } else {
+      WT_EXPECT_STATUS("an over-limit STREAMS_BLOCKED is refused", WT_ERR_PROTOCOL,
+                       wt_webtransport_streams_blocked_parse(&capsule, &value, &error));
+    }
+    WT_EXPECT_U64("with the draft's flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR,
+                  (uint64_t)error);
+  }
+
+  /* A NULL value with a non-zero length is a caller error the sibling capsule parsers survive: the cursor
+   * clamps a NULL buffer to zero bytes rather than reading it, and this assertion keeps it that way (the close
+   * parser needed an explicit guard; these did not). */
+  capsule.type = WT_CAPSULE_MAX_STREAMS_BIDI;
+  capsule.value = NULL;
+  capsule.value_length = 4U;
+  capsule.bytes_consumed = 0U;
+  value = 0U;
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a NULL value is refused, not read", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_streams_parse(&capsule, &value, &error));
+  WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+}
+
 int main(void) {
   test_round_trips();
   test_malformed_values();
   test_limits_only_grow();
+  test_the_stream_count_ceiling();
   WT_TEST_MAIN_END("wt_webtransport_flow");
 }

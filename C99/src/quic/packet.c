@@ -463,10 +463,14 @@ wt_status_t wt_quic_retry_packet_decode(const uint8_t *data, size_t length,
     return wt_quic_packet_fail(out_error, WT_QUIC_PROTOCOL_VIOLATION,
                                WT_ERR_PROTOCOL);
   }
-  if ((first & 0x0cU) != 0U) {
-    return wt_quic_packet_fail(out_error, WT_QUIC_PROTOCOL_VIOLATION,
-                               WT_ERR_PROTOCOL);
-  }
+  /* RFC 9000 section 17.2.5 gives a Retry an `Unused (4)` field in place of the protected packet types'
+   * reserved bits and packet number length, and says of it: "The value in the Unused field is set to an
+   * arbitrary value by the server; a client MUST ignore these bits." Section 17.2's non-zero-reserved-bits
+   * rule is scoped to packets that were header-protected ("after removing both packet and header
+   * protection"), and a Retry is not protected, so there is deliberately no test on the low nibble here.
+   * Demanding zero refused RFC 9001 appendix A.4's own Retry, which begins 0xff, and with it every Retry a
+   * conformant server wrote with those bits set (WT-227). The integrity tag covers the field, so a corrupted
+   * or forged value still fails wt_quic_retry_integrity_verify. */
   if ((wt_quic_packet_type_t)((first >> 4) & 0x03U) != WT_QUIC_PACKET_RETRY) {
     return wt_quic_packet_fail(out_error, WT_QUIC_PROTOCOL_VIOLATION,
                                WT_ERR_PROTOCOL);
@@ -492,10 +496,13 @@ wt_status_t wt_quic_retry_packet_decode(const uint8_t *data, size_t length,
    * memory-safety defect an audit found here, and the guard is one comparison: the header and the tag have to
    * fit before anything may be called a token (`WT-203`). */
   if (length < header_len + WT_QUIC_RETRY_INTEGRITY_TAG_LEN) return WT_ERR_TRUNCATED;
-  /* The token is what is left once the tag is reserved, and the tag is the last
-   * sixteen bytes. A Retry with no token is malformed: RFC 9000 section 17.2.5
-   * allows a zero-length token but then the packet is only a header and a tag,
-   * which no retry would be. */
+  /* The token is what is left once the tag is reserved, and the tag is the last sixteen bytes. A zero-length
+   * token is grammatically a Retry -- the field is `Retry Token (..)` -- so this parser reports it rather than
+   * inventing a rule of its own: RFC 9000 section 17.2.5.2 puts the requirement on the client ("A client MUST
+   * discard a Retry packet with a zero-length Retry Token field"), and the connection's Retry handler enforces
+   * it before the token is used (`on_retry_packet`, src/quic/connection.c). The distinction matters here: a
+   * truncated buffer is not a packet at all, while a zero-length token is a packet the client must throw
+   * away. */
   out->token = data + header_len;
   out->token_len = length - header_len - WT_QUIC_RETRY_INTEGRITY_TAG_LEN;
   out->integrity_tag = data + length - WT_QUIC_RETRY_INTEGRITY_TAG_LEN;
@@ -674,13 +681,20 @@ wt_status_t wt_quic_retry_packet_encode(
       source_connection_id_len > WT_QUIC_MAX_CID_LEN) {
     return WT_ERR_INVALID_ARGUMENT;
   }
+  /* The same argument guards as the long header encoder: a non-zero length with a NULL pointer is a caller
+   * error, and `wt_writer_bytes` would dereference it (WT-239). A zero-length field ignores its pointer. */
+  if (destination_connection_id_len != 0U && destination_connection_id == NULL) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
+  if (token_len != 0U && token == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (source_connection_id_len == 0U || source_connection_id == NULL) {
     /* RFC 9000 section 17.2.5: the Source Connection ID in a Retry is the one the
      * server chose, and a server that has not chosen one cannot retry. */
     return WT_ERR_INVALID_ARGUMENT;
   }
-  /* A Retry has no packet number, so the low two bits of the first byte are
-   * reserved and zero; and it always uses the long header's Retry type. */
+  /* RFC 9000 section 17.2.5 gives a Retry an `Unused (4)` field where the protected types put their reserved
+   * bits and packet number length. Its value is arbitrary, so this encoder writes zero -- the same choice the
+   * RFC's own A.4 example does not make (it writes 0xf), which is why the decoder must ignore the field. */
   wt_writer_u8(w, (uint8_t)(WT_QUIC_LONG_HEADER_BIT | WT_QUIC_FIXED_BIT |
                             ((uint8_t)WT_QUIC_PACKET_RETRY << 4)));
   wt_writer_u32(w, version);

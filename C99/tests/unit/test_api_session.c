@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "webtransport/api/flow.h"
 #include "webtransport/api/session.h"
 #include "webtransport/webtransport/capsule.h"
 #include "webtransport/writer.h"
@@ -160,6 +161,55 @@ static void test_capsules_and_the_sanitized_error(void) {
   wt_session_destroy(session, NULL);
 }
 
+/* Sections 4.7 and 6: this entry point must apply the same two rules the machine walker applies to the same
+ * bytes. Section 4.7 Figure 5 fixes a WT_DRAIN_SESSION's Length at 0, so a value is a capsule this layer cannot
+ * read rather than one it may ignore; and section 6 ends the session at the close, so "if any additional stream
+ * data is received on the CONNECT stream after receiving a WT_CLOSE_SESSION capsule, the stream MUST be reset
+ * with code H3_MESSAGE_ERROR". The two entry points disagreeing was how a peer could raise its own data limit
+ * after the session had ended. */
+static void test_the_entry_point_refuses_what_the_walker_refuses(void) {
+  wt_session_config_t config;
+  wt_session_t *session = NULL;
+  uint8_t bytes[64];
+  wt_writer_t w;
+  wt_session_error_t error;
+
+  config = wt_session_config_default();
+  config.authority = "localhost";
+  config.path = "/wt";
+  config.max_capsule_bytes = 128U;
+
+  WT_EXPECT_OK("a session is created", wt_session_create(&config, NULL, &session));
+  WT_EXPECT_OK("and established", wt_session_established(session));
+  WT_EXPECT_OK("with a data limit", wt_session_flow_configure(session, 1, 100U, 0U, 0U));
+
+  /* The drain's encoding is the type 0x78ae and a one-byte length 1 followed by a value. */
+  {
+    static const uint8_t k_drain_with_a_value[] = {0x80U, 0x00U, 0x78U, 0xaeU, 0x01U, 0x2aU};
+    WT_EXPECT_STATUS("a drain carrying a value is refused", WT_ERR_PROTOCOL,
+                     wt_session_on_capsule(session, k_drain_with_a_value, sizeof(k_drain_with_a_value)));
+    error = wt_session_last_error(session);
+    WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, error.code);
+    WT_EXPECT_INT("leaving the session where it was", (int)WT_SESSION_ESTABLISHED,
+                  (int)wt_session_state(session));
+  }
+
+  /* Close it, then grant more data: a capsule after the close is a message the peer has no state for. */
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_OK("a close writes", wt_webtransport_close_session_write(&w, 0U, NULL, 0U));
+  WT_EXPECT_OK("and is applied", wt_session_on_capsule(session, bytes, wt_writer_offset(&w)));
+  w = wt_writer_init(bytes, sizeof(bytes));
+  WT_EXPECT_OK("a bigger grant writes", wt_webtransport_max_data_write(&w, 200U));
+  WT_EXPECT_STATUS("a capsule after the close is refused", WT_ERR_PROTOCOL,
+                   wt_session_on_capsule(session, bytes, wt_writer_offset(&w)));
+  error = wt_session_last_error(session);
+  WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, error.code);
+  WT_EXPECT_U64("and the peer's data limit is unchanged", 100U,
+                wt_session_flow_data_allowance(session));
+
+  wt_session_destroy(session, NULL);
+}
+
 static void test_the_capsule_bound(void) {
   wt_session_config_t config;
   wt_session_t *session = NULL;
@@ -209,6 +259,7 @@ static void test_the_capsule_bound(void) {
 int main(void) {
   test_create_and_destroy();
   test_capsules_and_the_sanitized_error();
+  test_the_entry_point_refuses_what_the_walker_refuses();
   test_the_capsule_bound();
   WT_TEST_MAIN_END("wt_api_session");
 }

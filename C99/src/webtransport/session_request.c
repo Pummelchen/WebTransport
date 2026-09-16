@@ -9,6 +9,21 @@ static int token_is(const uint8_t *bytes, size_t length, const char *text) {
   return length == text_length && memcmp(bytes, text, text_length) == 0;
 }
 
+/* Whether `bytes` is `https`, compared the way a URI scheme is: RFC 3986 section 3.1 makes schemes
+ * case-insensitive, so `HTTPS`, `Https` and `https` are the same scheme and the same target resource. */
+static int scheme_is_https(const uint8_t *bytes, size_t length) {
+  static const char k_https[] = "https";
+  size_t i;
+
+  if (length != 5U) return 0;
+  for (i = 0U; i < length; i++) {
+    uint8_t lower = bytes[i];
+    if (lower >= (uint8_t)'A' && lower <= (uint8_t)'Z') lower = (uint8_t)(lower + 32U);
+    if (lower != (uint8_t)k_https[i]) return 0;
+  }
+  return 1;
+}
+
 const char *wt_webtransport_upgrade_token_value(wt_webtransport_upgrade_token_t token) {
   /* The two selections are the only two strings, and the default is the draft-16 token: a value that is not the
    * legacy one -- including an out-of-range int a caller cast -- sends the current token rather than a NULL. */
@@ -123,6 +138,16 @@ wt_status_t wt_webtransport_session_request_validate(
    * authority, because that is all a plain CONNECT requires. */
   if (message->scheme_length == 0U || message->authority_length == 0U ||
       message->path_length == 0U) {
+    out->outcome = WT_WEBTRANSPORT_REQUEST_REJECT;
+    out->status = WT_WEBTRANSPORT_REJECT_NOT_FOUND;
+    return WT_OK;
+  }
+
+  /* Section 3.2: "The :scheme field MUST be https." A WebTransport session is identified by the https URI
+   * scheme, so a request carrying any other scheme names something this endpoint does not serve -- the same
+   * rejection a missing scheme gets, not a request that belongs to another protocol. The comparison is
+   * case-insensitive because RFC 3986 section 3.1 makes schemes so. */
+  if (!scheme_is_https(message->scheme, message->scheme_length)) {
     out->outcome = WT_WEBTRANSPORT_REQUEST_REJECT;
     out->status = WT_WEBTRANSPORT_REJECT_NOT_FOUND;
     return WT_OK;

@@ -157,9 +157,54 @@ static void test_empty_values_and_blocked(void) {
   WT_EXPECT_U64("with no error to send the peer", (uint64_t)WT_HTTP3_NO_ERROR, (uint64_t)error);
 }
 
+/* RFC 9114 section 4.3.2: a :status is exactly three digits in the range 100..599, which is what this file's
+ * own reader enforces (`parse_status`). The encoder guarded only "> 999", so a status of 5 went on the wire as
+ * ":status: 005" and 600/999 were written as themselves -- field sections its own reader refuses. A writer must
+ * not be able to produce a message the reader rejects. */
+static void test_the_encoder_bounds_the_status(void) {
+  wt_http3_message_t message;
+  uint8_t section[64];
+  uint8_t scratch[64];
+  size_t length = 0U;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  static const uint64_t refused[] = {5U, 99U, 600U, 999U};
+  static const uint64_t accepted[] = {100U, 200U, 599U};
+  size_t i;
+
+  for (i = 0U; i < sizeof(refused) / sizeof(refused[0]); i++) {
+    wt_writer_t w = wt_writer_init(section, sizeof(section));
+    memset(&message, 0, sizeof(message));
+    message.type = WT_HTTP3_HEADER_RESPONSE;
+    message.has_status = 1;
+    message.status = refused[i];
+    error = WT_HTTP3_NO_ERROR;
+    WT_EXPECT_STATUS("a status outside 100..599 is refused", WT_ERR_LIMIT,
+                     wt_http3_message_encode(&w, &message, 0U, &error));
+    WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  }
+
+  for (i = 0U; i < sizeof(accepted) / sizeof(accepted[0]); i++) {
+    wt_writer_t w = wt_writer_init(section, sizeof(section));
+    memset(&message, 0, sizeof(message));
+    message.type = WT_HTTP3_HEADER_RESPONSE;
+    message.has_status = 1;
+    message.status = accepted[i];
+    error = WT_HTTP3_NO_ERROR;
+    WT_EXPECT_OK("a status inside the range writes",
+                 wt_http3_message_encode(&w, &message, 0U, &error));
+    length = wt_writer_offset(&w);
+    error = WT_HTTP3_NO_ERROR;
+    WT_EXPECT_OK("and this library's own reader accepts it",
+                 wt_http3_message_decode(&message, WT_HTTP3_HEADER_RESPONSE, section, length, NULL, 0U,
+                                         0U, scratch, sizeof(scratch), &error));
+    WT_EXPECT_U64("with the status that was written", accepted[i], message.status);
+  }
+}
+
 int main(void) {
   test_a_request();
   test_a_response_and_its_status();
   test_empty_values_and_blocked();
+  test_the_encoder_bounds_the_status();
   WT_TEST_MAIN_END("wt_http3_message");
 }

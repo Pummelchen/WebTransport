@@ -114,6 +114,16 @@ wt_status_t wt_session_established(wt_session_t *session) {
   return status;
 }
 
+/* Section 6's terminal state, applied where a flow-control violation is found. Sections 5.6.2 and 5.6.3 say the
+ * recipient of an over-limit Maximum Streams "MUST close the WebTransport session with a WT_FLOW_CONTROL_ERROR
+ * error code"; this API owns no writer of its own, so it makes the transition a close capsule would make and
+ * leaves the code where `wt_session_last_error` reports it. `sent` is recorded -- the endpoint that found the
+ * violation is the one ending the session, and the peer's capsule is not a close. */
+static void wt_session_close_for_flow_error(wt_session_t *session) {
+  (void)wt_webtransport_session_on_close(&session->machine, 1,
+                                         (uint32_t)WT_WEBTRANSPORT_FLOW_CONTROL_ERROR);
+}
+
 wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, size_t length) {
   wt_cursor_t c;
   wt_webtransport_capsule_t capsule;
@@ -123,6 +133,17 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
 
   if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (bytes == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+
+  if (session->machine.state == WT_WEBTRANSPORT_SESSION_CLOSED && length != 0U) {
+    /* Section 6: "If any additional stream data is received on the CONNECT stream after receiving a
+     * WT_CLOSE_SESSION capsule, the stream MUST be reset with code H3_MESSAGE_ERROR." This is the same gate
+     * `wt_webtransport_session_on_capsule_bytes` applies on entry, repeated here because this entry point
+     * decodes without that walker; the two must agree about identical bytes, and without the gate a peer could
+     * close the session and then send a grant this endpoint would honour. An EMPTY delivery is the ordinary FIN
+     * after the close, not a capsule, and is left to the decoder below. */
+    wt_session_set_error(session, WT_ERR_PROTOCOL, (uint64_t)WT_HTTP3_MESSAGE_ERROR);
+    return WT_ERR_PROTOCOL;
+  }
 
   c = wt_cursor_init(bytes, length);
   status = wt_webtransport_capsule_decode(&c, session->max_capsule_bytes, &capsule, &h3_error);
@@ -142,6 +163,12 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
     return WT_ERR_PROTOCOL;
   }
   if (capsule.type == WT_CAPSULE_DRAIN_SESSION) {
+    /* Section 4.7 Figure 5 fixes the capsule at "Length (i) = 0", so a value is a capsule this layer cannot read
+     * rather than one it may ignore -- exactly the rule the walker's drain branch applies. */
+    if (capsule.value_length != 0U) {
+      wt_session_set_error(session, WT_ERR_PROTOCOL, (uint64_t)WT_HTTP3_MESSAGE_ERROR);
+      return WT_ERR_PROTOCOL;
+    }
     status = wt_webtransport_session_on_drain(&session->machine, 0);
     /* The error surface is recorded BEFORE the callback, and the callback is the LAST thing this function does
      * to the session. Both halves matter: the first means the consumer that reads `wt_session_last_error` from
@@ -203,6 +230,11 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
     status = wt_webtransport_max_streams_parse(&capsule, &maximum, &h3_error);
     if (status != WT_OK) {
       wt_session_set_error(session, status, (uint64_t)h3_error);
+      /* Sections 5.6.2 and 5.6.3: an over-limit Maximum Streams is a SESSION error, not a syntax error, and
+       * the recipient MUST close the session with it. */
+      if ((uint64_t)h3_error == WT_WEBTRANSPORT_FLOW_CONTROL_ERROR) {
+        wt_session_close_for_flow_error(session);
+      }
       return status;
     }
     if (session->flow_enabled == 0) {
@@ -216,6 +248,22 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
       wt_session_set_error(session, status, flow_error);
       return status;
     }
+  }
+  if (capsule.type == WT_CAPSULE_STREAMS_BLOCKED_BIDI || capsule.type == WT_CAPSULE_STREAMS_BLOCKED_UNI) {
+    uint64_t maximum = 0U;
+    status = wt_webtransport_streams_blocked_parse(&capsule, &maximum, &h3_error);
+    if (status != WT_OK) {
+      wt_session_set_error(session, status, (uint64_t)h3_error);
+      if ((uint64_t)h3_error == WT_WEBTRANSPORT_FLOW_CONTROL_ERROR) {
+        wt_session_close_for_flow_error(session);
+      }
+      return status;
+    }
+    /* A well-formed WT_STREAMS_BLOCKED is informational (section 5.6.3): it says the peer is blocked on a limit
+     * this endpoint granted, and the only rule it carries that this layer must act on is the ceiling above. It is
+     * accepted and dropped, like any other capsule this API does not apply. */
+    wt_session_set_error(session, WT_OK, 0U);
+    return WT_OK;
   }
 
   /* Any other capsule is accepted and left alone: RFC 9297 has a receiver ignore what it
