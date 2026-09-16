@@ -105,7 +105,6 @@ static int load_fixtures(fixtures_t *fixtures) {
 
 static wt_status_t side_on_frame_payload(void *context_side, uint64_t stream_id, uint64_t type,
                                         const uint8_t *payload, size_t length, int last);
-wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);
 static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
                                        size_t length, int fin);
 static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t length);
