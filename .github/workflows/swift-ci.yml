@@ -43,6 +43,16 @@ jobs:
       - name: Verify package manifests agree on shared targets
         run: ./Swift/check-manifest-sync.sh
 
+      # Blocking. The Swift library and the C99 one ship together and must carry
+      # the same version, so a caller pairing them knows the pair is compatible.
+      # The value is single-sourced from VERSION and mirrored in the C99 header
+      # and in WebTransportVersion.swift; this fails if any of the three drifts.
+      # The C99 build's own configure fails on the same mismatch, so a C99-only
+      # build cannot produce a library whose filename and answer disagree.
+      # Bump with: ./Swift/check-version-sync.sh --write
+      - name: Verify the two libraries report the same version
+        run: ./Swift/check-version-sync.sh
+
       # Blocking. Each target's `import` statements must be covered by its own
       # declared dependencies; the manifests can agree with each other and still
       # both omit a module a target imports (A-0001/A-0006).
