@@ -74,6 +74,12 @@ public struct QUICLongHeaderPacket: Equatable, Sendable {
         return output
     }
 
+    /// Decodes a long header that has **already had header protection removed**. RFC 9001 section 5.4 protects
+    /// the low four bits of the first byte — the reserved bits and the packet number length this parser reads —
+    /// so on wire bytes those bits are a mask rather than a value, and a caller that has not unmasked them must
+    /// not use this parser to judge a packet. (The C99 library reports a set reserved bit to the authenticating
+    /// caller instead of refusing at this layer, for the reason recorded as `WT-167`; the refusal below is only
+    /// sound because of the precondition stated here — `WT-228`.)
     public static func decode(_ data: Data, largestAcknowledged: UInt64? = nil) throws -> QUICLongHeaderPacket {
         var cursor = QUICByteCursor(data)
         let first = try cursor.readUInt8()
@@ -159,19 +165,27 @@ public struct QUICRetryPacket: Equatable, Sendable {
     public var sourceConnectionID: Data
     public var retryToken: Data
     public var retryIntegrityTag: Data
+    /// RFC 9000 section 17.2.5's `Unused (4)` field: the low four bits of the first byte, whose value "is set
+    /// to an arbitrary value by the server" and which a client must ignore. It is kept rather than dropped for
+    /// one reason: the Retry Integrity Tag of RFC 9001 section 5.8 is computed over the packet *as received*,
+    /// so re-encoding has to reproduce these bits or the pseudo-packet a verifier builds is not the one the
+    /// server tagged — RFC 9001 appendix A.4's own Retry carries `0xf` here (`WT-227`).
+    public var unusedBits: UInt8
 
     public init(
         version: UInt32,
         destinationConnectionID: Data,
         sourceConnectionID: Data,
         retryToken: Data,
-        retryIntegrityTag: Data
+        retryIntegrityTag: Data,
+        unusedBits: UInt8 = 0
     ) {
         self.version = version
         self.destinationConnectionID = destinationConnectionID
         self.sourceConnectionID = sourceConnectionID
         self.retryToken = retryToken
         self.retryIntegrityTag = retryIntegrityTag
+        self.unusedBits = unusedBits & 0x0f
     }
 
     public func encode() throws -> Data {
@@ -186,7 +200,7 @@ public struct QUICRetryPacket: Equatable, Sendable {
         }
 
         var output = Data()
-        output.append(0xf0)
+        output.append(0xf0 | (unusedBits & 0x0f))
         var buffer = QUICByteBuffer()
         buffer.appendUInt32(version)
         output.append(buffer.data)
@@ -199,21 +213,54 @@ public struct QUICRetryPacket: Equatable, Sendable {
         return output
     }
 
+    /// The packet as it goes on the wire, without the trailing 16-byte Retry Integrity Tag — the bytes RFC 9001
+    /// section 5.8's pseudo-packet is built from. `encode()` is the inverse of `decode(_:)` for a Retry, so
+    /// re-encoding drops exactly the tag that was parsed; it also fails on a tag that is not 16 bytes.
+    public func encodedWithoutIntegrityTag() throws -> Data {
+        Data(try encode().dropLast(retryIntegrityTag.count))
+    }
+
+    /// RFC 9001 section 5.8's Retry Pseudo-Packet: the Original Destination Connection ID Length as one byte,
+    /// that connection ID, then the Retry packet without its integrity tag. The tag is computed over exactly
+    /// these bytes with an empty associated data value, which is why a verifier needs the connection ID the
+    /// client put in its Initial — it is authenticated by the tag but deliberately absent from the wire packet.
+    public static func integrityPseudoPacket(
+        originalDestinationConnectionID: Data,
+        retryPacketWithoutIntegrityTag: Data
+    ) throws -> Data {
+        guard originalDestinationConnectionID.count <= 20 else {
+            throw QUICCodecError.valueOutOfRange("original destination connection ID exceeds 20 bytes")
+        }
+        var pseudoPacket = Data([UInt8(originalDestinationConnectionID.count)])
+        pseudoPacket.append(originalDestinationConnectionID)
+        pseudoPacket.append(retryPacketWithoutIntegrityTag)
+        return pseudoPacket
+    }
+
+    /// Parses a Retry packet's structure. **This does not validate the Retry Integrity Tag.** RFC 9000
+    /// section 17.2.5.2 requires a client to discard a Retry whose tag cannot be validated, and the tag covers
+    /// the original Destination Connection ID, which is not on the wire — so a packet that came from a peer must
+    /// go through `decode(_:originalDestinationConnectionID:integrityTagVerifier:)`, and this entry point is for
+    /// bytes whose authenticity is already established (a self-test, or a re-parse of a verified packet).
     public static func decode(_ data: Data) throws -> QUICRetryPacket {
         var cursor = QUICByteCursor(data)
         let first = try cursor.readUInt8()
         guard (first & 0x80) != 0 else {
             throw QUICCodecError.malformed("not a long header packet")
         }
-        // A Retry packet is a long header packet, so it carries the same Fixed Bit and
-        // reserved-bit requirements as any other: RFC 9000 section 17.2 for the Fixed
-        // Bit, RFC 9001 section 5.4 for the reserved bits.
+        // A Retry packet is a long header packet, so RFC 9000 section 17.2's Fixed Bit rule
+        // applies to it like any other.
         guard (first & 0x40) != 0 else {
             throw QUICCodecError.malformed("Retry packet fixed bit is not set")
         }
-        guard (first & 0x0c) == 0 else {
-            throw QUICCodecError.malformed("Retry packet reserved bits are not zero")
-        }
+        // RFC 9000 section 17.2.5 gives a Retry an `Unused (4)` field where the protected packet types put the
+        // reserved bits and the packet number length: "The value in the Unused field is set to an arbitrary
+        // value by the server; a client MUST ignore these bits." Section 17.2's non-zero-reserved-bits rule is
+        // scoped to packets that were header-protected ("after removing both packet and header protection"),
+        // and a Retry has no header protection, so there is deliberately no test on that nibble here. Demanding
+        // zero refused RFC 9001 appendix A.4's own Retry, which begins 0xff, and every Retry a conformant
+        // server writes with those bits set; the integrity tag covers the field, so a forged value is caught by
+        // the verifying decode below instead (`WT-227`).
         guard ((first >> 4) & 0x03) == QUICPacketType.retry.rawValue else {
             throw QUICCodecError.malformed("not a Retry packet")
         }
@@ -243,8 +290,30 @@ public struct QUICRetryPacket: Equatable, Sendable {
             destinationConnectionID: destinationConnectionID,
             sourceConnectionID: sourceConnectionID,
             retryToken: token,
-            retryIntegrityTag: tag
+            retryIntegrityTag: tag,
+            unusedBits: first & 0x0f
         )
+    }
+
+    /// Decodes a Retry packet and validates its integrity tag in one step — the only form a client may act on:
+    /// RFC 9000 section 17.2.5.2, "Clients MUST discard Retry packets that have a Retry Integrity Tag that
+    /// cannot be validated". The AEAD lives outside this module, so the caller supplies the verifier
+    /// (`WebTransportCryptoApple.QUICRetryIntegrityTag.verify`); it receives the pseudo-packet and the tag, and
+    /// a `false` result — or a thrown error — fails the decode rather than returning an unauthenticated packet.
+    public static func decode(
+        _ data: Data,
+        originalDestinationConnectionID: Data,
+        integrityTagVerifier: (Data, Data) throws -> Bool
+    ) throws -> QUICRetryPacket {
+        let packet = try decode(data)
+        let pseudoPacket = try integrityPseudoPacket(
+            originalDestinationConnectionID: originalDestinationConnectionID,
+            retryPacketWithoutIntegrityTag: packet.encodedWithoutIntegrityTag()
+        )
+        guard try integrityTagVerifier(pseudoPacket, packet.retryIntegrityTag) else {
+            throw QUICCodecError.malformed("Retry integrity tag does not validate (RFC 9001 section 5.8)")
+        }
+        return packet
     }
 }
 

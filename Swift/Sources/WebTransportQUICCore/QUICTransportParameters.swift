@@ -44,6 +44,19 @@ public struct QUICTransportParameters: Equatable, Sendable {
         if let value = try integer(for: QUICTransportParameterID.activeConnectionIDLimit), value < 2 {
             throw QUICCodecError.malformed("active_connection_id_limit must be at least 2, got \(value)")
         }
+        // RFC 9000 section 4.6: a max_streams transport parameter above 2^60 "would allow a maximum stream ID
+        // that cannot be expressed as a variable-length integer", and a receiver of one "MUST be closed
+        // immediately with a connection error of type TRANSPORT_PARAMETER_ERROR". Both stream-limit parameters
+        // carry the rule, and the C99 twin of this check is the ledger's F-05 — the Swift validator claimed to
+        // enforce section 18.2 while letting these through (`WT-250`).
+        for (id, name) in [
+            (QUICTransportParameterID.initialMaxStreamsBidi, "initial_max_streams_bidi"),
+            (QUICTransportParameterID.initialMaxStreamsUni, "initial_max_streams_uni"),
+        ] {
+            if let value = try integer(for: id), value > 1 << 60 {
+                throw QUICCodecError.malformed("\(name) must not exceed 2^60, got \(value)")
+            }
+        }
         // A stateless_reset_token is exactly 16 bytes.
         if let token = values[QUICTransportParameterID.statelessResetToken], token.count != 16 {
             throw QUICCodecError.malformed("stateless_reset_token must be 16 bytes, got \(token.count)")

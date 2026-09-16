@@ -189,6 +189,21 @@ func transportParameterValidationEnforcesRFC9000Section18Point2() throws {
                 $0[QUICTransportParameterID.retrySourceConnectionID] = Data(repeating: 0x01, count: 21)
             }
         ),
+        // RFC 9000 section 4.6: a max_streams value above 2^60 allows a stream ID that cannot be expressed as
+        // a variable-length integer, and receiving one is a TRANSPORT_PARAMETER_ERROR. The validator enforced
+        // every other section 18.2 rule and missed both of these (`WT-250`).
+        (
+            "initial_max_streams_bidi above 2^60",
+            try parameters {
+                try $0.setInteger((1 << 60) + 1, for: QUICTransportParameterID.initialMaxStreamsBidi)
+            }
+        ),
+        (
+            "initial_max_streams_uni above 2^60",
+            try parameters {
+                try $0.setInteger((1 << 60) + 1, for: QUICTransportParameterID.initialMaxStreamsUni)
+            }
+        ),
     ]
     for (name, value) in cases {
         #expect(throws: (any Error).self, "expected \(name) to be rejected") {
@@ -205,6 +220,9 @@ func transportParameterValidationEnforcesRFC9000Section18Point2() throws {
         $0[QUICTransportParameterID.initialSourceConnectionID] = Data()
         $0[QUICTransportParameterID.retrySourceConnectionID] = Data()
         try $0.setInteger(0, for: QUICTransportParameterID.maxDatagramFrameSize)
+        // Exactly 2^60 is the limit, not a violation: section 4.6 refuses values *greater* than it.
+        try $0.setInteger(1 << 60, for: QUICTransportParameterID.initialMaxStreamsBidi)
+        try $0.setInteger(1 << 60, for: QUICTransportParameterID.initialMaxStreamsUni)
     }
     try conforming.validated()
 }
@@ -253,9 +271,10 @@ func longHeaderRejectsClearedFixedBitAndReservedBits() throws {
 
 // MARK: - Retry packet validity
 
-/// RFC 9000 section 17.2.5: "A client MUST discard a Retry packet with a zero-length
-/// Retry Token field." A Retry packet is also a long header packet, so it carries the
-/// same Fixed Bit and reserved-bit requirements.
+/// RFC 9000 section 17.2.5: "A client MUST discard a Retry packet with a zero-length Retry Token
+/// field." A Retry is also a long header packet, so RFC 9000 section 17.2's Fixed Bit rule applies
+/// to it. Its low four bits are different, though: they are the `Unused (4)` field, and the RFC
+/// says "a client MUST ignore these bits", so they are deliberately not a refusal here (`WT-227`).
 private func retryPacket(
     tokenByteCount: Int,
     fixedBit: Bool = true,
@@ -287,7 +306,64 @@ func retryPacketRejectsZeroLengthTokenAndInvalidHeaderBits() throws {
     #expect(throws: (any Error).self, "a cleared Fixed Bit must be rejected") {
         _ = try QUICRetryPacket.decode(retryPacket(tokenByteCount: 4, fixedBit: false))
     }
-    #expect(throws: (any Error).self, "non-zero reserved bits must be rejected") {
-        _ = try QUICRetryPacket.decode(retryPacket(tokenByteCount: 4, reservedBits: 0b11))
+    // The Unused field is arbitrary on the wire, so every value of it parses (`WT-227`). The check is
+    // the RFC's own packet below, which begins 0xff; this loop covers the rest of the nibble.
+    for unused: UInt8 in [0b00, 0b01, 0b10, 0b11] {
+        let packet = try QUICRetryPacket.decode(retryPacket(tokenByteCount: 4, reservedBits: unused))
+        #expect(packet.retryToken.count == 4, "Unused field \(unused) must not change the parse")
+    }
+}
+
+/// The packet RFC 9001 appendix A.4 prints, and the Original Destination Connection ID of its A.2 client
+/// Initial. The first byte is `0xff`, so all four Unused bits are set — the case the decoder used to refuse,
+/// which was the RFC's own example (`WT-227`). The pseudo-packet layout is pinned here too, because the tag
+/// computation is only correct if the bytes it authenticates are these: the connection ID's length, the
+/// connection ID, then the packet without its tag.
+@Test
+func retryPacketAcceptsTheRFCsOwnPacketAndBuildsItsPseudoPacket() throws {
+    let rfcPacket = Data([
+        0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a,
+        0x42, 0x62, 0xb5, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x04, 0xa2, 0x65, 0xba,
+        0x2e, 0xff, 0x4d, 0x82, 0x90, 0x58, 0xfb, 0x3f, 0x0f, 0x24, 0x96, 0xba,
+    ])
+    let originalDestinationConnectionID = Data([0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08])
+    let packet = try QUICRetryPacket.decode(rfcPacket)
+
+    #expect(packet.version == 1)
+    #expect(packet.destinationConnectionID.isEmpty)
+    #expect(packet.sourceConnectionID == Data([0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5]))
+    #expect(packet.retryToken == Data("token".utf8))
+    #expect(
+        packet.retryIntegrityTag
+            == Data([
+                0x04, 0xa2, 0x65, 0xba, 0x2e, 0xff, 0x4d, 0x82,
+                0x90, 0x58, 0xfb, 0x3f, 0x0f, 0x24, 0x96, 0xba,
+            ])
+    )
+    #expect(try packet.encodedWithoutIntegrityTag() == rfcPacket.dropLast(16))
+    // The Unused bits survive a parse, so re-encoding is byte-for-byte the packet that arrived. Without that
+    // the pseudo-packet would carry 0xf0 where the server sent 0xff and the RFC's own tag would not verify.
+    #expect(packet.unusedBits == 0x0f)
+    #expect(try packet.encode() == rfcPacket)
+
+    let pseudoPacket = try QUICRetryPacket.integrityPseudoPacket(
+        originalDestinationConnectionID: originalDestinationConnectionID,
+        retryPacketWithoutIntegrityTag: try packet.encodedWithoutIntegrityTag()
+    )
+    #expect(
+        pseudoPacket
+            == Data([
+                0x08, 0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08,
+                0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a,
+                0x42, 0x62, 0xb5, 0x74, 0x6f, 0x6b, 0x65, 0x6e,
+            ])
+    )
+
+    // A connection ID cannot exceed twenty bytes, so neither can the pseudo-packet's length byte.
+    #expect(throws: (any Error).self, "an over-long connection ID must be refused") {
+        _ = try QUICRetryPacket.integrityPseudoPacket(
+            originalDestinationConnectionID: Data(repeating: 0, count: 21),
+            retryPacketWithoutIntegrityTag: Data()
+        )
     }
 }
