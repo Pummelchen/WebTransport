@@ -196,3 +196,36 @@ both fixed and re-measured** rather than waived:
 Neither is a product defect — the checks failed loudly, and the second one's product evidence (85 of 85 executables
 passing) was never in doubt — but both are the check-integrity class this audit was about, found by the CI gates
 the audit added. Ledger: **108 entries — 99 AUDIT (fixed + verified), 9 DONE, 0 open, 0 blocked.**
+
+## Round 15 — the 1.4.0 release round, and the three defects in its own machinery
+
+The release was cut, corrected at the owner's direction (the release is the project's, not one
+library's: it is titled **WebTransport 1.4.0** and carries **both** libraries, one artifact each under
+one tag), and every step of the correction found something the existing gates did not:
+
+- **`F-repo-ops-23` (S2) — every installed C99 tool was unusable.** `cmake --install` removes the
+  build-tree rpath and nothing set an install rpath, so `install/bin/wt-client-c99` died with
+  `dyld: Library not loaded: @rpath/libwebtransport.1.dylib ... no LC_RPATH's found`. The library's
+  *consumption* path was covered — `check-package.sh` builds and runs a consumer of the installed CMake
+  package — but for the tools that gate only asserted the file existed and was executable. Fixed with
+  `CMAKE_INSTALL_RPATH` (`@loader_path/../lib`, `$ORIGIN/../lib` on ELF), and `check-package.sh` now
+  **runs** all three installed tools; proven live by emptying the rpath line and watching it exit 1.
+- **`F-repo-ops-24` (S3) — the packaging scripts and the dev loop shared a build directory.** Different
+  generators, so whichever ran second failed with a message naming neither script. The packaging builds
+  moved to `out/<platform>/build-install`.
+- **`F-repo-ops-25` (S2) — the release notes quoted the wrong digest on the C99 lines.** `SHA256_PENDING`
+  is a substring of `C99_SHA256_PENDING`, so substituting the short token first rewrote the C99 line into
+  `C99_<swift digest>` and left the C99 substitution with nothing to match. The published body said
+  `SHA256: C99_29c1ef9b...`; that is the exact outcome §1.8 exists to prevent, and the guard in place only
+  asked whether the notes carried the placeholders, never whether the result was right. Fixed by ordering
+  the substitutions longest-first and checking the result (no surviving placeholder; each digest exactly
+  once), demonstrated failing on the old order and passing on the new.
+
+Two of the three were found by **running the artifact** rather than reading the script, and the third by
+comparing the published body with the `.sha256` files — which is the argument for the "verify it yourself"
+step being a separate step. Final state, verified after publishing: `WebTransport 1.4.0`, tag moved to
+`d0bd273`, four assets (both archives and a `.sha256` beside each), each body line equal to the digest in
+its own `.sha256`, both archives re-downloaded and re-checked, every Mach-O `arm64`, both Swift binaries
+running, and all three C99 tools running **from the unpacked archive** and reporting `1.4.0`.
+
+Ledger: **111 entries — 102 AUDIT (fixed + verified), 9 DONE, 0 open, 0 blocked.**

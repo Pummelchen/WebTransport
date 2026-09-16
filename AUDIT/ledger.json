@@ -6,7 +6,7 @@
     "protocol": "pre-production audit (Phases A-E, \u00a70-\u00a712)",
     "note": "The standing project instruction said to commit to main; this audit's protocol forbids it and takes precedence FOR THE DURATION OF THE AUDIT. All audit work stayed on audit/2026-09-15 and Phase E was complete before any of it reached main.",
     "landed_on_main": "6607d71 (+ edfc57a integrating main's Swift 6.4 toolchain baseline)",
-    "landed": "Owner-directed merge into main at 6607d71 after Phase E passed ('push all to git so the code is in sync'). One conflict, resolved deliberately: .github/traffic.json was deleted by F-repo-ops-14 and hand-refreshed on main by b526c9e, which is the hand-maintenance that finding describes, so the deletion stands. The merged tree is identical to the audited branch tree and was re-verified on main before the push: Swift 360 tests / 0 failures / 0 warnings, C99 97/97 CTest, 0 warnings. audit/2026-09-15 and main are kept identical. Second merge: main moved while the audit was landing -- node4 pushed 15d37bf, 21e7bce and 0255595, which independently fixed the same 6.4 test-bundle link failure (A-0001) and the same 12 redundant unsafe effect markers (A-0004), and raised the toolchain baseline itself (swift-tools-version 6.4 in both manifests, check-toolchain.sh at 6.4/27, the macOS jobs on xcode-27). That supersedes A-0005's written justification for staying at 6.3, so the merge at edfc57a takes 6.4 and 1f7ee98 restores the two trailing commas the conflict resolution dropped (the audit's own format gate caught them). Re-verified on the integrated tree: Swift 360 tests / 0 failures / 0 warnings, C99 97/97, format and manifest gates clean. Two defects were then found by the first real CI run on main and by running the step CI never reached, both in the audit's own CI additions and both fixed and re-measured: F-repo-ops-21 (the Windows cross-compile sweep's hand-named private include list) and F-repo-ops-22 (the Wine runner's check-total parse, which reported 0 checks and left a wrong number in four documents)."
+    "landed": "Owner-directed merge into main at 6607d71 after Phase E passed ('push all to git so the code is in sync'). One conflict, resolved deliberately: .github/traffic.json was deleted by F-repo-ops-14 and hand-refreshed on main by b526c9e, which is the hand-maintenance that finding describes, so the deletion stands. The merged tree is identical to the audited branch tree and was re-verified on main before the push: Swift 360 tests / 0 failures / 0 warnings, C99 97/97 CTest, 0 warnings. audit/2026-09-15 and main are kept identical. Second merge: main moved while the audit was landing -- node4 pushed 15d37bf, 21e7bce and 0255595, which independently fixed the same 6.4 test-bundle link failure (A-0001) and the same 12 redundant unsafe effect markers (A-0004), and raised the toolchain baseline itself (swift-tools-version 6.4 in both manifests, check-toolchain.sh at 6.4/27, the macOS jobs on xcode-27). That supersedes A-0005's written justification for staying at 6.3, so the merge at edfc57a takes 6.4 and 1f7ee98 restores the two trailing commas the conflict resolution dropped (the audit's own format gate caught them). Re-verified on the integrated tree: Swift 360 tests / 0 failures / 0 warnings, C99 97/97, format and manifest gates clean. Two defects were then found by the first real CI run on main and by running the step CI never reached, both in the audit's own CI additions and both fixed and re-measured: F-repo-ops-21 (the Windows cross-compile sweep's hand-named private include list) and F-repo-ops-22 (the Wine runner's check-total parse, which reported 0 checks and left a wrong number in four documents). The 1.4.0 release round then found and fixed three more, all in this repository's own release machinery: F-repo-ops-23 (every installed C99 tool was unusable -- no install rpath, and no gate ran one), F-repo-ops-24 (the C99 packaging scripts shared the dev loop's build directory with a different generator) and F-repo-ops-25 (the notes substituted the shorter placeholder first, so the published body quoted the Swift digest on the C99 lines). The release was corrected in place: it is titled WebTransport 1.4.0 and carries both libraries."
   },
   "tasks": [
     {
@@ -1951,6 +1951,60 @@
       "evidence-after": "VPS, Debian 13, wine64, mingw cross-build of main: `windows wine: ran 85 test executable(s) -- 85 passed, 0 failed, 0 hung, 64900 checks`, exit 0, and no 'printed no check total' line (so all 85 print a total and the new fatal branch is not tripped). Cross-checked two ways: an independent `tr -d '\\r'`-based sum over the same output files gives 64,900, and exactly one matching line exists per binary. Native Debian 13 build of the same tree: 84 programs, 64,778 checks, consistent with the audit's own macOS figure of 64,731 over 84 programs. The corrected documents name the host each number came from.",
       "commit": "",
       "notes": "The audit's F-21 filed 'a number no script measures is a number that drifts' and then produced exactly that: the script it changed measured nothing and the drifted number stayed in three documents. Recorded as its own finding so the correction is legible; F-21's notes point here.",
+      "blocked-reason": ""
+    },
+    {
+      "id": "F-repo-ops-23",
+      "severity": "S2",
+      "project": "repo-ops",
+      "file": "C99/CMakeLists.txt (install rpath), C99/scripts/check-package.sh",
+      "title": "Every installed C99 tool was unusable: cmake --install removes the build-tree rpath and nothing set an install rpath",
+      "category": "bug",
+      "status": "AUDIT",
+      "host-used": "local",
+      "discovered-by": "Cutting the 1.4.0 release: packing the C99 tools and running one from the install tree",
+      "evidence-before": "`C99/out/macos26/install/bin/wt-client-c99 --help` -> `dyld: Library not loaded: @rpath/libwebtransport.1.dylib ... Reason: no LC_RPATH's found`. The tools link `@rpath/libwebtransport.1.dylib`, CMake removes the build-tree rpath at `cmake --install` time, and no `CMAKE_INSTALL_RPATH` was ever set, so an installed tool had no rpath at all. Nothing caught it: `check-package.sh` built and RAN a consumer of the installed CMake package (that path works) but only asserted that the installed tools EXIST and are executable, so 'the file is there' was the whole check for them.",
+      "expected": "An installed tool runs from the install tree it was installed into, and a gate executes one rather than checking for its file.",
+      "fix-summary": "`C99/CMakeLists.txt` sets `CMAKE_INSTALL_RPATH` before the applications are added: `@loader_path/../lib` on macOS, `$ORIGIN/../lib` on ELF -- the install layout puts lib/ beside bin/, so that is the answer on every platform, and the Debian and FreeBSD packaging builds inherit it. `check-package.sh` now RUNS all three installed tools.",
+      "evidence-after": "With the fix: `cmake --install` reports no `install_name_tool` error, the installed tool carries `LC_RPATH @loader_path/../lib`, all three installed tools exit 0 on `--help`, and the same three run from the UNPACKED release archive. The new check is live: with the rpath line temporarily emptied, `check-package.sh` exits 1 printing the dyld error above and naming the tool.",
+      "commit": "a9aba33",
+      "notes": "Found by the release step, not by the suite: the library's own consumption path was covered, the tools' was not. Same class as F-17/F-18/F-20 (a check that does not exercise what it claims).",
+      "blocked-reason": ""
+    },
+    {
+      "id": "F-repo-ops-24",
+      "severity": "S3",
+      "project": "repo-ops",
+      "file": "C99/platform/{macos26/compile-dylib,debian/compile-so,freebsd/compile-so}.sh",
+      "title": "The C99 packaging scripts and the dev loop shared a build directory with different generators",
+      "category": "bug",
+      "status": "AUDIT",
+      "host-used": "local",
+      "discovered-by": "Running C99/scripts/build-and-test.sh --all after the packaging build, while cutting the release",
+      "evidence-before": "`build-and-test.sh` configures `out/<platform>/build` with `-G Ninja`; all three `platform/*/compile-*.sh` used the same directory with CMake's default generator. Whichever ran second died with `CMake Error: Error: generator : Ninja / Does not match the generator used previously: Unix Makefiles`, which names neither script and reads like a broken checkout rather than a collision.",
+      "expected": "A developer can build and test, then build the packaging artifact (or the reverse), without deleting a directory.",
+      "fix-summary": "The packaging builds moved to `out/<platform>/build-install`, beside their `out/<platform>/install`; the dev loop keeps `build`, `build-release` and `build-sanitize`. RELEASE.md Part 2 and AGENTS.md now name the split so the next person does not rediscover it.",
+      "evidence-after": "`build-and-test.sh --all` exit 0 (97/97 in Debug, Release and ASan+UBSan, 0 warnings) immediately followed by `compile-dylib.sh` exit 0 on the same machine, with `out/macos26/{build,build-install,build-release,build-sanitize,install}` coexisting.",
+      "commit": "a9aba33",
+      "notes": "Pre-existing; only reachable by running the documented dev loop and the packaging entry point on one machine.",
+      "blocked-reason": ""
+    },
+    {
+      "id": "F-repo-ops-25",
+      "severity": "S2",
+      "project": "repo-ops",
+      "file": "release-macos-arm64.sh (notes substitution)",
+      "title": "The release notes substituted the shorter placeholder first, so the published 1.4.0 body quoted the Swift digest on the C99 lines",
+      "category": "bug",
+      "status": "AUDIT",
+      "host-used": "local",
+      "discovered-by": "Verifying the published Release's body against the .sha256 assets",
+      "evidence-before": "The published body read `WebTransport-c99-...tar.gz / SHA256: C99_29c1ef9b... / Bytes: C99_1651341` -- the SWIFT archive's digest and byte count with a `C99_` prefix. `SHA256_PENDING` is a substring of `C99_SHA256_PENDING`, so the sed that ran first rewrote the C99 line and left the C99 substitution with nothing to match. The guard in place only asked whether the notes carried the placeholders, never whether the result was right, so it passed. Part 1 \u00a71.8 names this exact outcome ('a release quoting the wrong digest is worse than one that quotes none').",
+      "expected": "Each archive's line quotes that archive's digest, and the release body agrees with the `.sha256` beside the asset.",
+      "fix-summary": "The C99 tokens are substituted first, so the longer token is consumed before the shorter one can match inside it; and the substituted notes are then CHECKED: no `PENDING` may survive and each real digest must appear exactly once.",
+      "evidence-after": "Demonstrated against the real notes and digests: with the old order the C99 digest appears 0 times and the new guard fails; with the new order swift=1, c99=1, pending=0. After republishing, the body's Swift line quotes `e76758f5...` and its C99 line `18f749fd...`, each equal to the digest in that asset's `.sha256` file, and both downloaded archives verify.",
+      "commit": "d0bd273",
+      "notes": "The third defect this release round found in its own tooling. Two of the three were found by running the artifact, not by reading the script -- which is the argument for the 'verify it yourself' step.",
       "blocked-reason": ""
     }
   ],
