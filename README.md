@@ -23,7 +23,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.3.8](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.8) |
+| Latest release | [1.4.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.4.0) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 27 or later, Swift 6.4 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -128,7 +128,7 @@ before adopting this in production.
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.3.8"
+    exact: "1.4.0"
 )
 ```
 
@@ -189,20 +189,27 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 
 ## Prebuilt binaries
 
-The [1.3.8 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.3.8)
-ships `WebTransportClient` and `WebTransportServer` as Apple Silicon Mach-O
-binaries. They are thin arm64 and run natively on every Apple Silicon Mac, M1 and
-later. They are ad-hoc signed rather than Developer ID signed, and are not
-notarized, so Gatekeeper quarantines them on first run; a release upload does not
-carry a file's mode, so make them executable, then clear the quarantine flag after
-verifying the checksums:
+The [1.4.0 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.4.0)
+ships `WebTransport-swift-1.4.0-macos-arm64.tar.gz` — `WebTransportClient`,
+`WebTransportServer`, `SHA256SUMS`, `LICENSE`, `THIRD_PARTY_NOTICES.md` and a
+`README-binaries.txt` — with the archive's SHA-256 beside it as
+`WebTransport-swift-1.4.0-macos-arm64.tar.gz.sha256`. The two binaries are thin
+arm64 Mach-O and run natively on every Apple Silicon Mac, M1 and later. They are
+ad-hoc signed rather than Developer ID signed, and are not notarized, so Gatekeeper
+quarantines them on first run; an archive unpacks with its modes, so verify the
+digest, unpack, then clear the quarantine flag:
 
 ```sh
+shasum -a 256 -c WebTransport-swift-1.4.0-macos-arm64.tar.gz.sha256
+tar -xzf WebTransport-swift-1.4.0-macos-arm64.tar.gz
 shasum -a 256 -c SHA256SUMS
-chmod +x WebTransportClient WebTransportServer
-xattr -d com.apple.quarantine WebTransportClient WebTransportServer
+xattr -dr com.apple.quarantine WebTransportClient WebTransportServer
 ./WebTransportServer --scenario all
 ```
+
+`Swift/release-macos-arm64.sh` builds and packs that archive and is a dry run unless
+given `--publish`; it asserts `lipo -archs` is exactly `arm64` on every shipped
+binary before it packages them.
 
 Two of the forty conformance scenarios assert properties of the source tree -- they
 read `Package.swift` and `Swift/build-release-apple-silicon.sh` from the working
