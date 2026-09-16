@@ -192,8 +192,8 @@ rule exists for.
 - **Identity** semantic version. **The two libraries must always carry the same
   number** — if only one changed, recompile the other at the new number rather than
   leaving it behind.
-- **The lockstep is landed and enforced** (it was introduced by
-  `release/single-version-source` and landed for the 1.4.0 release): a root `VERSION`
+- **The lockstep is landed and enforced** (it landed for the 1.4.0 release, in the
+  commit that single-sourced the version, `f9a530b`): a root `VERSION`
   file is the single source, `WT_VERSION_*` in
   `C99/include/webtransport/version.h` and `library` in
   `Swift/Sources/WebTransport/WebTransportVersion.swift` are its mirrors, and
@@ -229,17 +229,24 @@ rule exists for.
   - output lands in `.build/release-artifacts/` with a `SHA256SUMS`.
 - **Gates** `Swift/check-toolchain.sh 6.4 27.0`, `Swift/check-manifest-sync.sh`
   (19 shared targets must agree across the two manifests), `Swift/check-version-sync.sh`,
-  `check-api-compatibility.sh`, the C99 `C99/scripts/check-*.sh` family, and the
-  full suite under ASan and TSan.
+  `Swift/check-target-imports.sh`, `check-api-compatibility.sh`, the C99
+  `C99/scripts/check-*.sh` family, the Swift suite under ASan and TSan, and the C99
+  suite under ASan+UBSan. The C99 CI also runs a `linux-debian13` job and two
+  enforced Windows jobs (`windows-wine` under Wine, `windows-native` on
+  `windows-latest`), and the CMake configure fails on a version-mirror mismatch.
+  The `check-cli-*.sh` scripts run through CTest, not as workflow steps.
 - **Two manifests** — the root `Package.swift` and `Swift/Package.swift` —
   intentionally expose different product sets; shared targets must not diverge.
 - **Publishing ships both libraries**, one artifact per library, under one tag and
-  these notes — never a release named for or carrying only one of them. Today that is
+  these notes — never a release named for or carrying only one of them. (1.4.0 is the
+  first release that carries both; the 1.0–1.3 releases were Swift-only.) Today that is
   `./release-macos-arm64.sh`, which builds both, asserts `arm64` on every Mach-O it
   ships, packs `WebTransport-swift-<version>-macos-arm64.tar.gz` and
   `WebTransport-c99-<version>-macos-arm64.tar.gz` with a `.sha256` beside each, and
   is a dry run unless given `--publish` (or `--republish`, to correct a published
   Release in place, which also moves the tag when the correction changed the source).
+  A release is the macOS arm64 pair: the `C99/platform/{debian,freebsd,windows11}`
+  scripts build and check other platforms and are not release artifacts.
   The source of both libraries reaches users through the Release's own source
   archives for the tag. Each archive carries a `README-binaries.txt`; the C99 one
   names the OpenSSL 3 runtime dependency of the dylib, because that library is

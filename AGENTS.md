@@ -22,20 +22,28 @@ so a caller pairing them knows the pair is compatible. Both are released togethe
 exercised — 97 CTest tests, ASan/UBSan, Windows-under-Wine, FreeBSD by hand. The
 audience is protocol implementers reading a
 reference implementation, so exact wire behaviour matters more than convenience.
+Open work is tracked on the repository's wiki — [Project Tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker)
+and the C99 tree's [Project Tracker C99](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99) —
+not as TODO markers in the tree.
 
 ## Layout
 
 - `Package.swift` — repo root; the supported SwiftPM entry point for applications.
 - `Swift/Package.swift` — nested manifest adding smoke executables and test
   support over the same sources. Both manifests compile `Swift/Sources/`.
-- `Swift/Sources/` — `WebTransport` (public API), `WebTransportNetworkRuntime`,
-  `WebTransportHTTP3Core`, `WebTransportQUICCore`, `WebTransportTLSCore`,
-  `WebTransportCryptoApple`, `WebTransportUDPApple`, `WebTransportClient` /
-  `WebTransportServer`, `WebTransportCLIConformance`.
-- `C99/` — a self-contained CMake project: `include/webtransport/`,
-  `src/{core,crypto,quic,tls,http3,runtime,webtransport}`,
-  `apps/{wt-client-c99,wt-server-c99,wt-conformance-c99}`, `tests/`, `scripts/`,
-  `platform/`.
+- `Swift/Sources/` — every SwiftPM target's sources live here: `WebTransport`
+  (public API), `WebTransportNetworkRuntime`, `WebTransportHTTP3Core`,
+  `WebTransportQUICCore`, `WebTransportTLSCore`, `WebTransportCryptoApple`,
+  `WebTransportUDPApple`, `WebTransportSecurityShim`, `WebTransportCLIConformance`,
+  `WebTransportClient` / `WebTransportServer`, and — declared by the nested
+  manifest only — `WebTransportTestSupport`, `LibrarySmokeClient` /
+  `LibrarySmokeServer`.
+- `C99/` — a self-contained CMake project: `cmake/`, `docs/`,
+  `include/webtransport/`, `platform/`, `scripts/`,
+  `src/{api,cli,core,crypto,http3,quic,runtime,tls,webtransport}`,
+  `apps/{wt-client-c99,wt-server-c99,wt-conformance-c99,wt-api-sample,support}`,
+  `tests/`, `third_party/`. `out/` is generated build output (only its
+  `.gitignore` and `README.md` are tracked).
 
 ## Build, test, run
 
@@ -56,6 +64,9 @@ ctest --test-dir C99/out/ci/build --output-on-failure
 The C99 build produces `wt-client-c99`, `wt-server-c99` and `wt-conformance-c99`.
 Note the two writing to different places: the script uses
 `C99/out/<platform>/<config>`, the CI invocation `C99/out/ci/build`.
+`--scenario all` is the conformance suite the two Swift CLIs share (40 scenarios,
+one catalog for the client and the server); the two Release scenarios need the
+repository as the working directory (see Traps).
 
 ## Identity
 
@@ -81,18 +92,28 @@ they do not follow the library version and must not be bumped with it.
 
 ## Gates
 
-- Swift (`.github/workflows/swift-ci.yml`): `./Swift/check-toolchain.sh 6.4 27.0`,
+- Swift (`.github/workflows/swift-ci.yml`, image `xcode-27`): `./Swift/check-toolchain.sh 6.4 27.0`,
   `./Swift/check-manifest-sync.sh`, `./Swift/check-version-sync.sh`,
   `./Swift/check-target-imports.sh`,
-  `swift format lint --strict --recursive --parallel …`, `./check-api-compatibility.sh`,
-  `./build-release-apple-silicon.sh`, tests under
+  `swift format lint --strict --recursive --parallel Swift/Sources Swift/Tests Package.swift Swift/Package.swift`,
+  both manifests built under
   `-warnings-as-errors -strict-concurrency=complete -require-explicit-sendable`,
-  a 20000-iteration ASan fuzz run, and a thread-sanitizer job that skips
-  `CLIProcess` / `ReleaseArtifacts`.
-- C99 (`.github/workflows/c99-ci.yml`): `check-vectors.sh`, `check-package.sh`,
-  `check-matrix.sh`, `check-portability.sh`, `check-static-analysis.sh` (Clang
-  Static Analyzer), `check-cppcheck.sh`, `check-workflows.py`, plus Windows
-  cross-build/Wine legs.
+  the DocC catalog validated, `./check-api-compatibility.sh`,
+  `./build-release-apple-silicon.sh`, the package tests, the nested manifest's own
+  test target (`swift test --package-path Swift --filter WebTransportTestSupportTests`),
+  the library smoke pair (`Swift/run-library-smoke.sh`), the client and server CLI
+  conformance suites (`--scenario all`), a 20000-iteration ASan fuzz run, and a
+  thread-sanitizer job that skips `CLIProcess` / `ReleaseArtifacts`.
+- C99 (`.github/workflows/c99-ci.yml`): a macOS and `ubuntu-24.04` matrix (gcc and
+  clang) building Debug and Release and running the suite under ASan+UBSan, plus a
+  `linux-debian13` job in a `debian:trixie` container; `check-vectors.sh`,
+  `check-package.sh` (builds a consumer of the installed package and *runs* all
+  three installed tools), `check-matrix.sh`, `check-portability.sh`,
+  `check-static-analysis.sh` (Clang Static Analyzer), `check-cppcheck.sh`,
+  `check-workflows.py`, and a CLI smoke step. A CMake configure fails when the
+  version mirrors disagree. Three Windows checks: `check-windows-platform.sh`,
+  `check-windows-build.sh` and `check-windows-wine.sh` on the Ubuntu leg, plus the
+  **enforced** `windows-native` job on `windows-latest` (MSYS2 MINGW64).
 - `security-scan.yml`: gitleaks 8.30.1 over full history, trivy 0.74.0.
 
 ## Traps
@@ -110,6 +131,10 @@ they do not follow the library version and must not be bumped with it.
 - **`check-manifest-sync.sh` is not a version gate.** It diffs shared SwiftPM
   targets (path/type/dependencies) between the two manifests via
   `swift package dump-package`, and exits 1 if `jq` is not on `PATH`.
+- **The formatting gate covers both manifests.** CI runs `swift format lint` over
+  `Swift/Sources Swift/Tests Package.swift Swift/Package.swift`, so a tree formatted
+  over the sources alone still fails it. The in-place command is
+  `swift format --in-place --recursive Swift/Sources Swift/Tests Package.swift Swift/Package.swift`.
 - Swift requires macOS 26+, Xcode 27 and Swift 6.4 (`swift-tools-version: 6.4`,
   `.macOS(.v26)`).
 - `Swift/build-release-apple-silicon.sh` builds `--arch arm64` and **fails unless
@@ -137,6 +162,8 @@ they do not follow the library version and must not be bumped with it.
 **Read [`RELEASE.md`](RELEASE.md) before cutting a release.** It is this repository's
 own release standard — edited here, not deployed from anywhere — and it carries both
 the general rules and this repository's own section. Do not improvise a release.
+The cut itself is `./release-macos-arm64.sh` — a dry run unless given `--publish`
+(or `--republish`) — and it packs both libraries under one tag.
 
 The non-negotiables:
 
