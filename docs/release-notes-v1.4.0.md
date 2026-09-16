@@ -39,8 +39,10 @@ a regression test:
 - the draft-16 `:protocol` token was defined as the HTTP/2 capsule token, so
   `webtransport-h3` was neither sent nor accepted.
 
-The full ledger, per-finding evidence and the Phase E state are in the repository:
-`AUDIT/ledger.md`, `AUDIT/environment.md`, `AUDIT/phaseE.md`.
+The audit that produced this release kept a ledger, per-finding evidence and environment notes in the
+tree; that working material has since been removed so a later audit does not read a finished pass as a
+live one. It remains in the repository's history at this release's own commit (`509fa91`) and the audit's
+merge commit `6607d71`.
 
 Check: `swift test` reports **360 tests, 0 failures**; `ctest` reports **97/97** in the
 Debug, Release and ASan+UBSan configurations.

@@ -2,8 +2,8 @@
 # cannot be confused with a product build failure and so it runs on every pull
 # request even when neither product's sources changed.
 #
-# Both jobs are blocking. Each tool is pinned to the version the audit ran
-# (gitleaks 8.30.1, trivy 0.74.0 -- AUDIT/findings/repo-ops.md, "Scanner runs")
+# Both jobs are blocking. Each tool is pinned to the version the 2026-09-15 audit ran
+# (gitleaks 8.30.1, trivy 0.74.0)
 # and the downloaded archive is checked against the release's own checksum list,
 # so a moved release tag cannot silently change the scanner. A tool that cannot
 # be installed fails its job with the reason printed; nothing here passes

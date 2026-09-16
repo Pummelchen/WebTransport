@@ -8,9 +8,10 @@ The project uses semantic versioning.
 
 The 2026-09-15 pre-production audit of both implementations landed here: 106 findings triaged,
 97 fixed and verified, the rest recorded with their reasons and evidence. The items a caller or an
-operator can observe are below; the complete ledger, the environment it was verified in and the
-Phase E state are in [`AUDIT/ledger.md`](AUDIT/ledger.md), [`AUDIT/environment.md`](AUDIT/environment.md)
-and [`AUDIT/phaseE.md`](AUDIT/phaseE.md), and the per-area reports are under `AUDIT/findings/`.
+operator can observe are below. The audit's ledger, its per-area findings and its environment notes were
+committed with the audit and have since been removed from the tree so a later audit starts from the code
+rather than from a previous pass's working state; they remain in the repository's history, reachable from
+the commits named in this file and in the release notes (`git log --all --diff-filter=D -- AUDIT`).
 
 Fixed:
 

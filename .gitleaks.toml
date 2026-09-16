@@ -6,9 +6,9 @@
 # allowlists the audit's full-history run needed; a finding that is not one of
 # these two audited false-positive classes still fails the job.
 #
-# Audit evidence: AUDIT/findings/repo-ops.md, "Scanner runs" -- gitleaks 8.30.1
-# over the full history (588 commits at the time of this change) reported nine
-# findings, all of them accounted for below.
+# This configuration comes from the 2026-09-15 audit: gitleaks 8.30.1 over the
+# full history (588 commits at the time of that change) reported nine findings,
+# all of them accounted for below.
 
 [extend]
 useDefault = true
@@ -26,7 +26,7 @@ paths = ['''^C99/tests/vectors/trust/''']
 #    `keyKind:` label. Path AND secret must both match, so no other file and no
 #    other value is waived.
 [[allowlists]]
-description = "generic-api-key false positive on the Swift enum label `.ellipticCurveP256` in the server-identity tests (AUDIT/findings/repo-ops.md, Scanner runs)."
+description = "generic-api-key false positive on the Swift enum label `.ellipticCurveP256` in the server-identity tests."
 condition = "AND"
 paths = ['''^Swift/Tests/WebTransportNetworkRuntimeTests/WebTransportServerIdentityTests\.swift$''']
 regexes = ['''^\.ellipticCurveP256$''']

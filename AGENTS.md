@@ -36,7 +36,6 @@ reference implementation, so exact wire behaviour matters more than convenience.
   `src/{core,crypto,quic,tls,http3,runtime,webtransport}`,
   `apps/{wt-client-c99,wt-server-c99,wt-conformance-c99}`, `tests/`, `scripts/`,
   `platform/`.
-- `AUDIT/` — the repository's own audit ledger and findings.
 
 ## Build, test, run
 
