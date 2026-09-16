@@ -150,6 +150,41 @@ static void test_parse_errors(void) {
   WT_EXPECT_STATUS("a non-boolean connect protocol value is refused", WT_ERR_PROTOCOL,
                    wt_http3_settings_parse(payload, wt_writer_offset(&w), &parsed, &error));
   WT_EXPECT_U64("as a settings error", WT_HTTP3_SETTINGS_ERROR, (uint64_t)error);
+
+  /* SETTINGS_H3_DATAGRAM is a boolean too, and RFC 9297 section 2.1.1 is explicit about both halves: "The value
+   * of the SETTINGS_H3_DATAGRAM setting MUST be either 0 or 1" and "If the SETTINGS_H3_DATAGRAM setting is
+   * received with a value that is neither 0 nor 1, the receiver MUST terminate the connection with error
+   * H3_SETTINGS_ERROR." Only ENABLE_CONNECT_PROTOCOL was range-checked, so 2 was stored and read back as
+   * "datagrams enabled" -- a peer that sent a value the RFC forbids got a session instead of a close. Every
+   * value other than 0 and 1 is covered, including the two that are one bit away from a legal one (2, 3) and a
+   * large value that also exercises the varint form. */
+  {
+    static const uint64_t bad[] = {2U, 3U, 0x40U, 0x3fffU, WT_QUIC_VARINT_MAX};
+    size_t i;
+    for (i = 0U; i < sizeof(bad) / sizeof(bad[0]); i++) {
+      w = wt_writer_init(payload, sizeof(payload));
+      write_setting(&w, WT_HTTP3_SETTING_H3_DATAGRAM, bad[i]);
+      WT_EXPECT_STATUS("a non-boolean H3_DATAGRAM value is refused", WT_ERR_PROTOCOL,
+                       wt_http3_settings_parse(payload, wt_writer_offset(&w), &parsed, &error));
+      WT_EXPECT_U64("as a settings error", WT_HTTP3_SETTINGS_ERROR, (uint64_t)error);
+    }
+  }
+
+  /* And the two legal values still parse and are stored as themselves. */
+  {
+    static const uint64_t good[] = {0U, 1U};
+    size_t i;
+    for (i = 0U; i < sizeof(good) / sizeof(good[0]); i++) {
+      int present = 0;
+      w = wt_writer_init(payload, sizeof(payload));
+      write_setting(&w, WT_HTTP3_SETTING_H3_DATAGRAM, good[i]);
+      WT_EXPECT_OK("a boolean H3_DATAGRAM value parses",
+                   wt_http3_settings_parse(payload, wt_writer_offset(&w), &parsed, &error));
+      WT_EXPECT_U64("with its value", good[i],
+                    wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_H3_DATAGRAM, &present));
+      WT_EXPECT_INT("and is present", 1, present);
+    }
+  }
 }
 
 static void test_too_many_settings(void) {
@@ -185,7 +220,15 @@ static void test_set_refusals(void) {
                                          WT_QUIC_VARINT_MAX + 1U));
   WT_EXPECT_STATUS("a connect protocol value above one cannot be", WT_ERR_INVALID_ARGUMENT,
                    wt_http3_settings_set(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 2U));
-  WT_EXPECT_OK("a valid one can",
+  /* RFC 9297 section 2.1.1's rule for the datagram setting, at the SETTER as well: the encoder must not be able
+   * to write a value its own parser refuses, which is what the setter's other range checks are for. */
+  WT_EXPECT_STATUS("a datagram value above one cannot be either", WT_ERR_INVALID_ARGUMENT,
+                   wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 2U));
+  WT_EXPECT_OK("a datagram value of zero can", wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 0U));
+  WT_EXPECT_STATUS("and the same identifier twice is still refused", WT_ERR_STATE,
+                   wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("and a datagram value of one can",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
   WT_EXPECT_STATUS("and the same identifier twice is refused", WT_ERR_STATE,
                    wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));

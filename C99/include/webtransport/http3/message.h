@@ -64,6 +64,39 @@ wt_status_t wt_http3_message_decode(wt_http3_message_t *message, wt_http3_header
                                     uint64_t known_insert_count, uint8_t *scratch,
                                     size_t scratch_capacity, wt_http3_error_t *out_error);
 
+/* Read ONE named regular field out of a field section this library has already decoded.
+ *
+ * The message above carries the pseudo-headers and the status, because those are what identifies a message; this
+ * is for the regular fields a layer ABOVE HTTP/3 defines a rule for, and it exists because one such layer has
+ * one and could not reach it otherwise. Draft-ietf-webtrans-http3-16 section 3.2: "When the request contains the
+ * Origin header, the WebTransport server MUST verify the Origin header ... If the verification fails ... SHOULD
+ * reply with status code 403." An Origin is a regular field, so `wt_http3_message_decode` validated it and then
+ * dropped it, and a consumer of the public API had no way to apply the draft's rule at all. The alternative was
+ * to add a field to `wt_http3_message_t`, which is an ABI break for every consumer and would still only cover
+ * the one field this draft happens to name; this covers any regular field and changes no structure.
+ *
+ * `payload`/`length`/`table`/`max_entries`/`known_insert_count`/`scratch`/`scratch_capacity` are the SAME
+ * arguments the section was decoded with, because the field has to be resolved again: the values the decoder
+ * produced are views into `scratch` (and into the dynamic table), and the message does not keep the section's
+ * iteration state. `scratch` is thus overwritten, so any view the decode left in `message` or that the caller
+ * kept from it is invalid afterwards -- read the pseudo-headers first, or read them again from the message,
+ * which holds no scratch views.
+ *
+ * `name` is a field name as RFC 9110 section 5.6.2 defines one (lowercase, a token), compared exactly and
+ * case-sensitively because HTTP/3 section 4.2 requires lowercase names on the wire.
+ *
+ * WT_OK means the field was found and `*out_value`/`*out_length` are its value, a view into `scratch` or the
+ * dynamic table. WT_ERR_STATE means the section is well formed and simply does not carry the field: absent and
+ * empty are different answers -- an `origin: ` present with an empty value is WT_OK with a length of zero -- and
+ * a caller deciding an application rule has to be able to tell them apart. Any other failure is the same failure
+ * `wt_http3_message_decode` would report for the same section, and `*out_error` carries it. */
+wt_status_t wt_http3_message_field(const uint8_t *name, size_t name_length, const uint8_t *payload,
+                                   size_t length, const wt_qpack_dynamic_table_t *table,
+                                   uint64_t max_entries, uint64_t known_insert_count,
+                                   uint8_t *scratch, size_t scratch_capacity,
+                                   const uint8_t **out_value, size_t *out_length,
+                                   wt_http3_error_t *out_error);
+
 /* Encode one field section: the prefix, then one literal line per field this message
  * carries, for a caller that is building a request or a response rather than reading one.
  *

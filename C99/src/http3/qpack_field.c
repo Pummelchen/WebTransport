@@ -6,11 +6,29 @@
 
 /* The first byte's pattern decides which representation follows: the section's
  * figures are a small prefix code, and reading it in that order is what keeps a
- * decoder from having to try each form in turn. */
+ * decoder from having to try each form in turn.
+ *
+ * MALFORMED VERSUS TRUNCATED. Every index and every string length in the forms below
+ * is a prefixed integer, and RFC 9204 section 4.1.1 bounds one at 62 bits: "the value
+ * is limited to 62 bits". A representation that breaks that rule is a DECODING error
+ * -- section 6, QPACK_DECOMPRESSION_FAILED, which `wt_qpack_field_section.c` raises
+ * for WT_ERR_PROTOCOL -- while bytes that merely have not arrived yet are a short
+ * read, WT_ERR_TRUNCATED, which a caller answers by waiting. The two must not be
+ * confused: a length of 2^62 or more is not a length any section can contain, so a
+ * caller told to "wait" for its bytes waits forever, and the peer is never told the
+ * code the RFC gives it. This function therefore PROPAGATES the status the integer
+ * and string decoders return -- `wt_qpack_integer_decode` answers WT_ERR_PROTOCOL for
+ * an over-62-bit integer and WT_ERR_TRUNCATED when the bytes run out, and
+ * `wt_qpack_string_decode` passes that answer through -- instead of collapsing every
+ * failure into one of the two. WT-242: the string-length sites used to return
+ * WT_ERR_TRUNCATED for an over-62-bit length, and the integer sites used to return
+ * WT_ERR_PROTOCOL for a genuine truncation, which is the same inversion with the
+ * opposite sign. */
 
 wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *out) {
   uint8_t first;
   size_t before;
+  wt_status_t status;
 
   if (c == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
   before = wt_cursor_remaining(c);
@@ -37,22 +55,26 @@ wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *ou
 
   if ((first & 0x80U) != 0U) {
     /* 1 T index(6+): indexed field line, static when T is set. */
-    if (wt_qpack_integer_decode(c, 6U, &out->index) != WT_OK) return WT_ERR_PROTOCOL;
+    status = wt_qpack_integer_decode(c, 6U, &out->index);
+    if (status != WT_OK) return status;
     out->kind = (first & 0x40U) != 0U ? WT_QPACK_FIELD_INDEXED_STATIC
                                       : WT_QPACK_FIELD_INDEXED_DYNAMIC;
   } else if ((first & 0x40U) != 0U) {
     /* 01 N T index(4+) then a value string. */
-    if (wt_qpack_integer_decode(c, 4U, &out->index) != WT_OK) return WT_ERR_PROTOCOL;
+    status = wt_qpack_integer_decode(c, 4U, &out->index);
+    if (status != WT_OK) return status;
     out->never_indexed = (first & 0x20U) != 0U;
     out->kind = (first & 0x10U) != 0U ? WT_QPACK_FIELD_LITERAL_NAME_REF_STATIC
                                       : WT_QPACK_FIELD_LITERAL_NAME_REF_DYNAMIC;
-    if (wt_qpack_string_decode(c, &out->value, &out->value_length, &out->value_huffman) != WT_OK) {
-      return WT_ERR_TRUNCATED;
-    }
+    /* The string decoder's OWN answer is propagated, because it is the one that can tell the two failures
+     * apart: see the note on MALFORMED VERSUS TRUNCATED at the top of this file. */
+    status = wt_qpack_string_decode(c, &out->value, &out->value_length, &out->value_huffman);
+    if (status != WT_OK) return status;
   } else if ((first & 0x20U) != 0U) {
     /* 001 N H name-length(3+) then the name and the value. */
     uint64_t name_length;
-    if (wt_qpack_integer_decode(c, 3U, &name_length) != WT_OK) return WT_ERR_PROTOCOL;
+    status = wt_qpack_integer_decode(c, 3U, &name_length);
+    if (status != WT_OK) return status;
     out->never_indexed = (first & 0x10U) != 0U;
     out->name_huffman = (first & 0x08U) != 0U;
     /* The name length is a peer's varint (up to 2^62-1) and `name_length` here is a size_t, so the narrowing is
@@ -67,21 +89,21 @@ wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *ou
     out->name = wt_cursor_bytes(c, out->name_length);
     if (out->name == NULL && out->name_length != 0U) return WT_ERR_TRUNCATED;
     out->kind = WT_QPACK_FIELD_LITERAL_LITERAL_NAME;
-    if (wt_qpack_string_decode(c, &out->value, &out->value_length, &out->value_huffman) != WT_OK) {
-      return WT_ERR_TRUNCATED;
-    }
+    status = wt_qpack_string_decode(c, &out->value, &out->value_length, &out->value_huffman);
+    if (status != WT_OK) return status;
   } else if ((first & 0x10U) != 0U) {
     /* 0001 index(4+): a dynamic entry counted from the base. */
-    if (wt_qpack_integer_decode(c, 4U, &out->index) != WT_OK) return WT_ERR_PROTOCOL;
+    status = wt_qpack_integer_decode(c, 4U, &out->index);
+    if (status != WT_OK) return status;
     out->kind = WT_QPACK_FIELD_POST_BASE_INDEX;
   } else {
     /* 0000 N index(3+) then a value string. */
-    if (wt_qpack_integer_decode(c, 3U, &out->index) != WT_OK) return WT_ERR_PROTOCOL;
+    status = wt_qpack_integer_decode(c, 3U, &out->index);
+    if (status != WT_OK) return status;
     out->never_indexed = (first & 0x08U) != 0U;
     out->kind = WT_QPACK_FIELD_POST_BASE_NAME_REF;
-    if (wt_qpack_string_decode(c, &out->value, &out->value_length, &out->value_huffman) != WT_OK) {
-      return WT_ERR_TRUNCATED;
-    }
+    status = wt_qpack_string_decode(c, &out->value, &out->value_length, &out->value_huffman);
+    if (status != WT_OK) return status;
   }
   out->bytes_consumed = before - wt_cursor_remaining(c);
   return WT_OK;

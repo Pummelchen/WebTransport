@@ -175,7 +175,11 @@ wt_status_t wt_sha256_update(wt_sha256_ctx_t *ctx, const void *data,
 wt_status_t wt_sha256_final(wt_sha256_ctx_t *ctx, uint8_t out[WT_SHA256_LEN]) {
   wt_openssl_sha256_ctx_t *impl;
   unsigned int written = 0U;
-  if (ctx == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* Both caller pointers are checked BEFORE the context is read, which is what every other entry point in this
+   * file does: `out` used to go straight into EVP_DigestFinal_ex, so `wt_sha256_final(ctx, NULL)` dereferenced
+   * NULL inside libcrypto and the process died. A public function that documents a status return owes the caller
+   * a status, and WT_ERR_INVALID_ARGUMENT is the one this backend's siblings return for the same argument. */
+  if (ctx == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
   impl = (wt_openssl_sha256_ctx_t *)(void *)ctx->storage;
   if (impl->live != WT_OPENSSL_SHA256_LIVE || impl->ctx == NULL) {
     return WT_ERR_STATE;

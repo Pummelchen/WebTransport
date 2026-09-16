@@ -54,6 +54,13 @@ wt_status_t wt_http3_settings_set(wt_http3_settings_t *settings, uint64_t identi
   if (identifier == WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL && value > 1U) {
     return WT_ERR_INVALID_ARGUMENT;
   }
+  /* RFC 9297 section 2.1.1: "The value of the SETTINGS_H3_DATAGRAM setting MUST be either 0 or 1", and a
+   * receiver of anything else "MUST terminate the connection with error H3_SETTINGS_ERROR". The same rule as
+   * the connect-protocol boolean above, and for the same reason: the setter is what keeps the encoder from
+   * writing a frame its own parser refuses. */
+  if (identifier == WT_HTTP3_SETTING_H3_DATAGRAM && value > 1U) {
+    return WT_ERR_INVALID_ARGUMENT;
+  }
   for (i = 0U; i < settings->count; i++) {
     /* Already present. Refused rather than overwritten: the encoder must not be
      * able to produce a frame with a duplicate identifier, which is what this
@@ -120,6 +127,12 @@ wt_status_t wt_http3_settings_parse(const uint8_t *payload, size_t length,
       continue;
     }
     if (identifier == WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL && value > 1U) {
+      if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
+      return WT_ERR_PROTOCOL;
+    }
+    /* RFC 9297 section 2.1.1's other boolean: a value that is neither 0 nor 1 is H3_SETTINGS_ERROR, not a
+     * setting to store and later read back as "datagrams enabled". */
+    if (identifier == WT_HTTP3_SETTING_H3_DATAGRAM && value > 1U) {
       if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
       return WT_ERR_PROTOCOL;
     }

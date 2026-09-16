@@ -41,6 +41,12 @@ static int name_is(const wt_qpack_resolved_field_t *field, const char *text) {
   return field->name_length == text_length && memcmp(field->name, text, text_length) == 0;
 }
 
+/* Whether a resolved field's name is a caller-supplied field name. Separate from `name_is` because that one
+ * takes a NUL-terminated literal and a field name from a peer is a length-delimited byte string. */
+static int field_name_is(const wt_qpack_resolved_field_t *field, const uint8_t *name, size_t name_length) {
+  return field->name_length == name_length && memcmp(field->name, name, name_length) == 0;
+}
+
 wt_status_t wt_http3_message_decode(wt_http3_message_t *message, wt_http3_header_message_t type,
                                     const uint8_t *payload, size_t length,
                                     const wt_qpack_dynamic_table_t *table, uint64_t max_entries,
@@ -107,18 +113,86 @@ wt_status_t wt_http3_message_decode(wt_http3_message_t *message, wt_http3_header
    * validator checked presence; this checks the content, which is what a caller would
    * otherwise have to remember to do. */
   if (type == WT_HTTP3_HEADER_REQUEST) {
-    if (message->method_length == 0U || message->scheme_length == 0U) {
+    const int is_connect =
+        message->method_length == 7U && memcmp(message->method, "CONNECT", 7U) == 0;
+    /* RFC 9114 section 4.4 exempts CONNECT from :scheme and :path -- it requires :authority instead, which
+     * `wt_http3_header_finish` has already checked -- but RFC 8441 section 4 takes the exemption back the
+     * moment the request carries a :protocol: "On requests that contain the :protocol pseudo-header field, the
+     * :scheme and :path pseudo-header fields of the target URI MUST also be included." So :scheme and :path are
+     * required of every request except a PLAIN CONNECT. The rule here used to demand :scheme of everything and
+     * :path of nothing but a non-CONNECT, which refused a legal plain CONNECT and accepted an extended CONNECT
+     * with no path at all (CAUD-10). */
+    if (message->method_length == 0U) {
       if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
       return WT_ERR_PROTOCOL;
     }
-    /* CONNECT carries no :path; every other method must have a non-empty one. */
-    if (!(message->method_length == 7U && memcmp(message->method, "CONNECT", 7U) == 0) &&
-        message->path_length == 0U) {
+    if ((!is_connect || message->protocol_length != 0U) &&
+        (message->scheme_length == 0U || message->path_length == 0U)) {
       if (out_error != NULL) *out_error = WT_HTTP3_MESSAGE_ERROR;
       return WT_ERR_PROTOCOL;
     }
   }
   return WT_OK;
+}
+
+wt_status_t wt_http3_message_field(const uint8_t *name, size_t name_length, const uint8_t *payload,
+                                   size_t length, const wt_qpack_dynamic_table_t *table,
+                                   uint64_t max_entries, uint64_t known_insert_count,
+                                   uint8_t *scratch, size_t scratch_capacity,
+                                   const uint8_t **out_value, size_t *out_length,
+                                   wt_http3_error_t *out_error) {
+  wt_qpack_field_section_decoder_t decoder;
+  wt_qpack_resolved_field_t field;
+  wt_http3_header_validation_t validation;
+  wt_qpack_error_t qpack_error = WT_QPACK_ERROR_NONE;
+  wt_status_t status;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (out_value == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* Cleared before the first failure path: a caller that reads them after a refusal must not read an
+   * uninitialised stack value, and the "not found" answer is NULL with length zero. */
+  *out_value = NULL;
+  *out_length = 0U;
+  if (name == NULL && name_length != 0U) return WT_ERR_INVALID_ARGUMENT;
+
+  /* The same validator the decoder uses, so a field this function walks past is held to the same rules: an
+   * `origin` carrying a CR is the malformed message the decoder would have refused, not something this
+   * narrower entry point lets through by looking at one field and skipping the checks between. `is_connect`
+   * and the finish check are not applied -- this reads a section, it does not decide what message it is. */
+  wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
+
+  status = wt_qpack_field_section_begin(&decoder, table, max_entries, payload, length,
+                                        known_insert_count, &qpack_error);
+  if (status != WT_OK) {
+    map_qpack_error(qpack_error, out_error);
+    return status;
+  }
+
+  for (;;) {
+    status = wt_qpack_field_section_decoder_next(&decoder, scratch, scratch_capacity, &field,
+                                                 &qpack_error);
+    if (status == WT_ERR_CLOSED) break;
+    if (status == WT_ERR_TRUNCATED) return status;
+    if (status != WT_OK) {
+      map_qpack_error(qpack_error, out_error);
+      return status;
+    }
+
+    status = wt_http3_header_validate(&validation, field.name, field.name_length, field.value,
+                                      field.value_length, out_error);
+    if (status != WT_OK) return status;
+
+    if (field_name_is(&field, name, name_length)) {
+      /* A view into `scratch` or the dynamic table, exactly as the decode path leaves its pseudo-headers, and
+       * valid until this buffer or that table is next used -- which the header states. */
+      *out_value = field.value;
+      *out_length = field.value_length;
+      return WT_OK;
+    }
+  }
+
+  /* Well formed, decoded to its end, and the field is not there. */
+  return WT_ERR_STATE;
 }
 
 /* ---------------------------------------------- encoding a field section */

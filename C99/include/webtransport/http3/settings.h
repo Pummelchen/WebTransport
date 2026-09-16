@@ -53,14 +53,18 @@ extern "C" {
 /* The first identifier of the reserved exercise range, `0x1f * N + 0x21` with
  * N = 0. A sender SHOULD include one so that its peer's "ignore what you do not
  * know" rule is exercised at least once per connection. */
-/* The RESERVED identifier from the arithmetic above: a peer must never send it, and a receiver that gets one
- * MUST treat it as H3_SETTINGS_ERROR (section 7.2.4.1). It exists in this header so that rule can be TESTED
- * rather than described. */
+/* `0x1f * N + 0x21` is the EXERCISE range, and RFC 9114 section 7.2.4.1's rule for it is the opposite of the
+ * one for the HTTP/2-derived identifiers above: these "are reserved to exercise the requirement that unknown
+ * identifiers be ignored", an endpoint "MUST NOT consider such settings to have any meaning upon receipt", and
+ * a sender SHOULD include one. A receiver therefore IGNORES it; it is not H3_SETTINGS_ERROR, which is the rule
+ * for the 0x02..0x05 family and what this comment used to say. The predicate that holds the correct rule is
+ * `wt_http3_setting_is_exerciser` in settings.c and the test is `test_exercisers_are_ignored` in
+ * tests/unit/test_http3_settings.c; the constant exists in this header so both can name it. */
 #define WT_HTTP3_SETTING_EXERCISER ((uint64_t)0x21)
 
 /* An identifier this version does not know and that is NOT reserved -- the shape a future setting has, and the
- * one a round trip must use. The difference between this and the reserved value above is the whole of section
- * 7.2.4.1, and a fixture that used the reserved one as its example of a legal unknown setting hid a bug. */
+ * one a round trip must use. The difference between this and the exercise value above is the whole of section
+ * 7.2.4.1, and a fixture that used the exercise one as its example of a legal unknown setting hid a bug. */
 #define WT_HTTP3_SETTING_UNKNOWN ((uint64_t)0x22)
 
 /* How many settings this endpoint will hold. Real peers send a handful; a peer

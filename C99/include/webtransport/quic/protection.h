@@ -99,7 +99,12 @@ wt_status_t wt_quic_packet_keys_from_secret(
  * a fresh derivation. This comment used to say all three were derived from the new secret, which is what the
  * implementation did and what a caller following it would have got wrong: every protected header after an update
  * would be one the peer cannot unmask. The AEAD does not change across an update either, which is why this takes
- * the current keys rather than a suite. */
+ * the current keys rather than a suite.
+ *
+ * ALIASING IS SUPPORTED: `out` may be the same object as `current`, which is how a caller updates a set in
+ * place. The header protection key and its length are read from `current` before the derived set overwrites
+ * `out`, so the aliased call returns the same set the two-object call does. (It did not: the copy read back the
+ * fresh hp from the object it had just written, which is the one field section 6.1 forbids changing.) */
 wt_status_t wt_quic_packet_keys_update(const wt_quic_packet_keys_t *current,
                                        wt_quic_packet_keys_t *out);
 

@@ -109,8 +109,22 @@ wt_status_t wt_quic_initial_packet_keys(const uint8_t initial_secret[WT_SHA256_L
 wt_status_t wt_quic_packet_keys_update(const wt_quic_packet_keys_t *current,
                                        wt_quic_packet_keys_t *out) {
   uint8_t next_secret[WT_QUIC_SECRET_LEN];
+  uint8_t current_hp[WT_AEAD_MAX_KEY_LEN];
+  size_t current_hp_len;
   wt_status_t status;
   if (current == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* ALIASING IS SUPPORTED, so the two things this function still needs from `current` after the derivation
+   * overwrites `out` are copied out FIRST. `wt_quic_derive_packet_keys` memsets and rewrites its output, so with
+   * `out == current` -- a caller updating a key set in place, which is the natural way to do it -- the hp and its
+   * length were read back from the object the derivation had just filled, and the copy below put the NEW header
+   * protection key on the set. That is the one value RFC 9001 section 6.1 says must not change ("The header
+   * protection key is not updated"), so the caller could no longer unmask a single packet from its peer.
+   *
+   * `current_hp` is a fixed array rather than a pointer into `current`, because a pointer is exactly what is
+   * invalidated by the aliased call; its length matches the largest AEAD key this library carries. */
+  if (current->hp_len > sizeof(current_hp)) return WT_ERR_INVALID_ARGUMENT;
+  memcpy(current_hp, current->hp, current->hp_len);
+  current_hp_len = current->hp_len;
   /* RFC 9001 section 6: the AEAD does not change across a key update, so the
    * suite comes from the current keys rather than from the caller -- a caller
    * that passed a different one would have a connection whose two directions use
@@ -121,16 +135,21 @@ wt_status_t wt_quic_packet_keys_update(const wt_quic_packet_keys_t *current,
   if (status != WT_OK) return status;
   status = wt_quic_derive_packet_keys(next_secret, current->aead, out);
   wt_secure_zero(next_secret, sizeof(next_secret));
-  if (status != WT_OK) return status;
+  if (status != WT_OK) {
+    wt_secure_zero(current_hp, sizeof(current_hp));
+    return status;
+  }
   /* RFC 9001 section 6.1: "The header protection key is not updated." The new set's AEAD key and IV come from the
    * next secret and its header protection key comes from the CURRENT one, so a packet this endpoint protects
    * after an update uses a key its peer already has -- which is the whole point of the update being cheap.
    *
    * The function used to return a freshly derived hp, and its only in-tree caller copied the old one back over it
    * (`derive_next_keys` in connection.c), so the tree worked while the PUBLIC function was wrong and its header
-   * documented the wrong behaviour. An audit found it by calling the function directly. */
-  memcpy(out->hp, current->hp, sizeof(out->hp));
-  out->hp_len = current->hp_len;
+   * documented the wrong behaviour. An audit found it by calling the function directly. The copy now comes from
+   * the snapshot above, which is what makes the aliased call correct as well. */
+  memcpy(out->hp, current_hp, current_hp_len);
+  out->hp_len = current_hp_len;
+  wt_secure_zero(current_hp, sizeof(current_hp));
   return WT_OK;
 }
 

@@ -138,6 +138,23 @@ static void test_sha256(void) {
                    wt_sha256("abc", 3U, NULL));
   WT_EXPECT_STATUS("NULL data with a length is refused",
                    WT_ERR_INVALID_ARGUMENT, wt_sha256(NULL, 3U, out));
+  /* A NULL output on the STREAMING path is the same refusal the one-shot `wt_sha256` above applies and the ten
+   * other entry points in the backend apply. It used to be missing, and the pointer went straight into
+   * EVP_DigestFinal_ex: the process died inside libcrypto rather than returning a status, which a caller can
+   * only read as "the library crashed on a NULL I was told was refused everywhere else". The context is a live
+   * one here, so the check that fires is the argument check and not the state check. */
+  {
+    wt_sha256_ctx_t live;
+    WT_EXPECT_OK("a context for the NULL-output case", wt_sha256_init(&live));
+    WT_EXPECT_OK("which has absorbed something", wt_sha256_update(&live, "abc", 3U));
+    WT_EXPECT_STATUS("finalising into NULL is refused", WT_ERR_INVALID_ARGUMENT,
+                     wt_sha256_final(&live, NULL));
+    /* And the refusal left the context usable, which is the other half of telling a caller its argument was
+     * wrong rather than that its data was lost. */
+    WT_EXPECT_OK("the one-shot hash of the same bytes", wt_sha256("abc", 3U, want));
+    WT_EXPECT_OK("and the context still finalises", wt_sha256_final(&live, out));
+    WT_EXPECT_BYTES("to the hash of what it absorbed", want, out, WT_SHA256_LEN);
+  }
   {
     /* A context the library has never touched. Both cases are written out rather
      * than left to the stack: the guarantee being checked is that a context which

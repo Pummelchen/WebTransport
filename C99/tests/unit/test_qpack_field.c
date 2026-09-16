@@ -169,10 +169,78 @@ static void test_a_name_length_wider_than_size_t_is_refused(void) {
 #endif
 }
 
+/* Malformed and truncated are two answers, and the field-line decoder used to give the same one for both.
+ *
+ * RFC 9204 section 4.1.1 bounds a prefixed integer at 62 bits, and section 6 makes a representation that breaks
+ * section 4.1.1 a decoding error -- QPACK_DECOMPRESSION_FAILED -- not a short read. A length of 2^62 or more can
+ * never be a legal length, so every byte the caller waits for from here on is a byte that cannot arrive: a
+ * decoder that reports WT_ERR_TRUNCATED for it tells the caller to WAIT, and it hangs rather than closing the
+ * connection with the code the RFC names. The integer sites already reported WT_ERR_PROTOCOL for the
+ * over-62-bit case; the three string-length sites collapsed every failure of `wt_qpack_integer_decode`,
+ * including its WT_ERR_PROTOCOL, into WT_ERR_TRUNCATED. Each string site now propagates the integer decoder's
+ * own answer, so a genuine short read stays WT_ERR_TRUNCATED and an impossible length is WT_ERR_PROTOCOL.
+ *
+ * Every byte sequence is written by hand: an encoder cannot produce an over-62-bit length, which is exactly why
+ * the parser's refusal is the only gate. `wt_qpack_field_section.c` then maps WT_ERR_PROTOCOL to
+ * QPACK_DECOMPRESSION_FAILED and passes WT_ERR_TRUNCATED through, so these two statuses are the wire-visible
+ * choice between "wait" and "decompression failed". */
+static void test_malformed_and_truncated_are_distinct(void) {
+  wt_cursor_t c;
+  wt_qpack_field_line_t decoded;
+
+  /* Literal-literal (001), a saturated 3-bit name-length prefix, then ten base-128 groups whose continuation
+   * bit is SET and which therefore keep going: the integer would need bit 70, past section 4.1.1's 62-bit bound,
+   * and the decoder refuses it on the shift instead of waiting for a terminating byte. The byte that continues a
+   * varint is 0x80-and-up; 0x7f clears the continuation bit and ends it, which is why these are 0x80 and not
+   * 0x7f -- a vector built from 0x7f encodes the legal value 190 and cannot test this rule at all. */
+  {
+    static const uint8_t over_62_bit_name_length[] = {0x3fU, 0x80U, 0x80U, 0x80U, 0x80U, 0x80U,
+                                                      0x80U, 0x80U, 0x80U, 0x80U, 0x80U, 0x80U};
+    c = wt_cursor_init(over_62_bit_name_length, sizeof(over_62_bit_name_length));
+    WT_EXPECT_STATUS("a >62-bit name length is malformed, not truncated", WT_ERR_PROTOCOL,
+                     wt_qpack_field_line_decode(&c, &decoded));
+  }
+
+  /* A decoded length and then fewer string bytes than it names: the length itself is fine, so this is the
+   * truncation the fix must not swallow. */
+  {
+    static const uint8_t name_longer_than_the_cursor[] = {0x24U, 0x00U, 0x00U, 0x00U};
+    c = wt_cursor_init(name_longer_than_the_cursor, sizeof(name_longer_than_the_cursor));
+    WT_EXPECT_STATUS("a name longer than its bytes is still truncated", WT_ERR_TRUNCATED,
+                     wt_qpack_field_line_decode(&c, &decoded));
+  }
+
+  /* Literal-name-ref (01), a saturated 4-bit index, then an unterminated value length: the same over-62-bit
+   * failure one field over, so the fix cannot be right in one string site and wrong in the next. */
+  {
+    static const uint8_t over_62_bit_value_length[] = {0x7fU, 0x80U, 0x80U, 0x80U, 0x80U, 0x80U,
+                                                       0x80U, 0x80U, 0x80U, 0x80U, 0x80U, 0x80U};
+    c = wt_cursor_init(over_62_bit_value_length, sizeof(over_62_bit_value_length));
+    WT_EXPECT_STATUS("a >62-bit value length is malformed too", WT_ERR_PROTOCOL,
+                     wt_qpack_field_line_decode(&c, &decoded));
+  }
+
+  /* And the integer index sites keep the distinction as well: an over-62-bit index is malformed, a value whose
+   * bytes ran out is a truncation. A section that reported the first as a truncation would hang on it just the
+   * same way. */
+  {
+    static const uint8_t over_62_bit_index[] = {0xffU, 0x80U, 0x80U, 0x80U, 0x80U, 0x80U,
+                                                0x80U, 0x80U, 0x80U, 0x80U, 0x80U, 0x80U};
+    static const uint8_t truncated_index[] = {0xffU, 0x80U, 0x80U, 0x80U};
+    c = wt_cursor_init(over_62_bit_index, sizeof(over_62_bit_index));
+    WT_EXPECT_STATUS("a >62-bit index is malformed", WT_ERR_PROTOCOL,
+                     wt_qpack_field_line_decode(&c, &decoded));
+    c = wt_cursor_init(truncated_index, sizeof(truncated_index));
+    WT_EXPECT_STATUS("a truncated index is still truncated", WT_ERR_TRUNCATED,
+                     wt_qpack_field_line_decode(&c, &decoded));
+  }
+}
+
 int main(void) {
   test_static_indexed();
   test_literal_forms();
   test_post_base_and_truncation();
   test_a_name_length_wider_than_size_t_is_refused();
+  test_malformed_and_truncated_are_distinct();
   WT_TEST_MAIN_END("wt_qpack_field");
 }

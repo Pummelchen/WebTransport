@@ -932,6 +932,52 @@ static void test_retry_integrity_vector(void) {
                                                   WT_RFC9001_RETRY_PACKET_LEN));
 }
 
+/* The key update with the SAME object as input and output.
+ *
+ * `wt_quic_packet_keys_update` copies the current header protection key onto the derived set, because RFC 9001
+ * section 6.1 says "The header protection key is not updated". That copy is enough when the two arguments are
+ * distinct, which is what the test above uses and what the only in-tree caller does — but the PUBLIC function
+ * also has to answer the aliased call, and it did not: `wt_quic_derive_packet_keys` memsets and overwrites its
+ * output, so with `out == current` the copy at the end of the update read the freshly derived key from the same
+ * object it was writing to. A caller that updated in place silently got the new hp — the exact key a peer does
+ * not have after an update — and could not unmask a single packet.
+ *
+ * The probe that found it: update(&k, &out).hp = 40 b8 d4 dc versus update(&k, &k).hp = 25 e8 a7 4b. */
+static void test_a_key_update_in_place_is_the_same_set(void) {
+  wt_quic_packet_keys_t aliased;
+  wt_quic_packet_keys_t separate;
+  wt_quic_packet_keys_t expected;
+
+  WT_EXPECT_OK("the aliased keys", chacha_keys(&aliased));
+  WT_EXPECT_OK("the separate keys", chacha_keys(&separate));
+  WT_EXPECT_OK("the reference keys", chacha_keys(&expected));
+
+  WT_EXPECT_OK("updating in place", wt_quic_packet_keys_update(&aliased, &aliased));
+  WT_EXPECT_OK("updating into a distinct object",
+               wt_quic_packet_keys_update(&separate, &expected));
+
+  /* The whole set has to match, not just the hp: an in-place update that got the hp right by copying it after
+   * the derivation is a different bug from one that read its own output for the secret. */
+  WT_EXPECT_BYTES("the in-place secret is the same", expected.secret, aliased.secret, WT_SHA256_LEN);
+  WT_EXPECT_BYTES("the in-place key is the same", expected.key, aliased.key, sizeof(expected.key));
+  WT_EXPECT_BYTES("the in-place IV is the same", expected.iv, aliased.iv, sizeof(expected.iv));
+  WT_EXPECT_BYTES("and the in-place header protection key is NOT updated", separate.hp, aliased.hp,
+                  sizeof(aliased.hp));
+  WT_EXPECT_INT("with the current hp length", (long)separate.hp_len, (long)aliased.hp_len);
+
+  /* And it really is the CURRENT hp, not the derived one: the derivation of `quic hp` from the new secret is a
+   * different value, so an implementation that skipped the copy would fail this. */
+  {
+    uint8_t derived[sizeof(aliased.hp)];
+    memset(derived, 0, sizeof(derived));
+    WT_EXPECT_OK("the hp the update must NOT use",
+                 wt_hkdf_expand_label_sha256(expected.secret, WT_SHA256_LEN, "quic hp", NULL, 0U,
+                                             derived, sizeof(derived)));
+    WT_EXPECT_TRUE("the in-place hp is not the freshly derived one",
+                   memcmp(aliased.hp, derived, sizeof(derived)) != 0);
+  }
+}
+
 int main(void) {
   WT_EXPECT_OK("the crypto backend initialises", wt_crypto_init());
 
@@ -941,6 +987,8 @@ int main(void) {
   test_server_initial_packet();
   test_chacha_short_header();
   test_header_protection_mask_width();
+
+  test_a_key_update_in_place_is_the_same_set();
 
   test_retry_integrity_tag();
   test_retry_integrity_vector();
