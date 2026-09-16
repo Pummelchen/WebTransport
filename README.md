@@ -30,8 +30,8 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
 The Swift conformance matrix passes in full. The C99 implementation is **Phases 0
-to 9 complete and Phase 11 (the interop matrix) complete, with Phase 10's test port and Phase 12's CI
-legs under way**: it builds with CMake as a static and shared
+to 11 complete — including Phase 10's test port, which is the 97 CTest tests below
+— with Phase 12's cross-platform CI partly in place**: it builds with CMake as a static and shared
 library with three CLI tools and carries the whole stack -- the core utilities, a QUIC wire core and
 crypto layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake
 that runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
@@ -52,11 +52,11 @@ Ubuntu 24.04** (the workflow's two `ubuntu-24.04` legs). The tree also compiles,
 **runs** on Windows (85 of 85 test executables
 under Wine, including a Windows-only test of the datagram layer) and FreeBSD 15.1 (the whole suite
 on a real kernel) -- and running the Windows branch is what found and fixed `WT-199` and `WT-200`.
-Windows is covered by two CI legs: `windows-wine` (enforced -- mingw cross-build, then every test
-under Wine) and `windows-native` on `windows-latest` (MSYS2 MINGW64, present but
-`continue-on-error: true` until it has been seen green). FreeBSD 15.1 has no CI leg. Of the plan's
+Windows is covered by two enforced CI legs: `windows-wine` (mingw cross-build, then every test
+under Wine) and `windows-native` on `windows-latest` (MSYS2 MINGW64), and a `linux-debian13` leg runs
+the suite in a `debian:trixie` container. FreeBSD 15.1 has no CI leg. Of the plan's
 nine completion criteria **8 are met and 1 is partial** (the CI *job* for the FreeBSD leg,
-`WT-223`, and an enforced native Windows leg, `WT-224`, not the code on them; the outstanding
+`WT-223`, and the plan's MSVC and Clang-CL Windows variants, not the code on them; the outstanding
 work is listed on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99)). All 34 of the
 draft-16 compliance-matrix rows are exercised by a test. See
 [C99/README.md](C99/README.md) and the

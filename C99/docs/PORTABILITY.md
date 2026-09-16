@@ -175,8 +175,8 @@ fallback itself is covered by the new `tests/windows/test_windows_udp.c`, which 
 against a real pair of loopback sockets and asserts the shared contract on each: a datagram that exactly fills
 the buffer is not called truncated, an oversized one is, the sender is named on both paths, and a peek leaves
 the datagram in the queue. It is registered only where `WIN32` is true, so the POSIX suite's list is unchanged.
-`WT-199` and `WT-200` are closed in the [[Project Tracker|Project-Tracker]]; what remains open is the Windows
-RUNNER (`WT-224`, an enforced native Windows CI leg), because Wine is a faithful Win32 implementation and not Windows: everything here is **under Wine** until
+`WT-199` and `WT-200` are closed in the [[Project Tracker|Project-Tracker]]; and the Windows
+RUNNER is now a job: `windows-native` is enforced (`WT-224`). Wine is still a faithful Win32 implementation and not Windows: everything here is **under Wine** until
 a Windows machine says otherwise, and the WSARecvMsg path in particular is one Wine happens to answer correctly.
 
 **The measurements themselves are in the tree**, because the code's comments quote them.
@@ -213,8 +213,8 @@ means "this host has no python3" is the shape of failure this document exists to
 What remains is a **runner this project does not control**. The tree compiles for Windows (76 + 108 sources,
 warnings-as-errors), links for Windows (91 PE32+ executables and a shared library, enforced in CI), and now
 executes for Windows: **85 of 85 test executables green under Wine**. It builds and passes its whole suite on
-FreeBSD. What is missing is a CI *job* for each (`WT-223` FreeBSD, `WT-224` Windows), because GitHub provides no FreeBSD runner and the Windows leg
-can only compile, link and (via Wine) run on a Linux runner. A job that cannot pass is worse than an absent one,
+FreeBSD. What is missing is a CI *job* for FreeBSD (`WT-223`), because GitHub provides no FreeBSD runner; the native Windows leg is
+enforced (`WT-224`), and the plan's MSVC and Clang-CL variants are the remaining Windows gap. A job that cannot pass is worse than an absent one,
 because it teaches people to ignore CI — so the gap is named rather than guessed at, and the evidence that a
 Windows or FreeBSD runner would have something green to run is now in this document rather than in an inventory.
 

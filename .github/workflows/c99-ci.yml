@@ -3,11 +3,12 @@
 # and a failure in one should not mask the other.
 #
 # Four jobs, and the plan's Phase 12 list is what they are for. macOS 26 and Ubuntu
-# 24.04 run the tree in CI as they always have -- the Linux legs are GitHub's
-# `ubuntu-24.04` image (GCC and Clang), not a Debian container; the plan's Phase 12
-# matrix names Debian 13 for those two legs, which they do not yet run. The FreeBSD
-# leg is still to be added; and the Windows leg is here twice, because there are two
-# different claims to make and only one of them needs a Windows machine:
+# 24.04 run the tree in CI as they always have -- the two matrix Linux legs are
+# GitHub's `ubuntu-24.04` image (GCC and Clang) -- and `linux-debian13` runs the same
+# suite in a `debian:trixie` container, so the plan's Debian 13 platform is a real
+# second distribution rather than a renamed Ubuntu job. The FreeBSD leg is still to be
+# added; and the Windows leg is here twice, because there are two different claims to
+# make and only one of them needs a Windows machine:
 #
 #   * `windows-wine` cross-builds the whole tree with mingw on Linux and RUNS every
 #     test executable under Wine. That is what found `WT-199` and `WT-200` -- a
@@ -19,8 +20,11 @@
 #     MINGW64 toolchain. Wine is a faithful Win32 implementation, not Windows, so
 #     this is the job that settles what Wine cannot: the extension function Wine
 #     happens to answer correctly, the platform trust store, and the loader's own
-#     DLL search. It starts NOT enforced, because it had never been run when it was
-#     written -- the same rule `check-windows-build.sh` was held to.
+#     DLL search. It is ENFORCED as of `F-repo-ops-26`: the job was advisory only
+#     because the build staged the shared DLL from 90 executables at once and the
+#     loser of that Ninja race failed with `Permission denied`, which is not a
+#     Windows defect. With one sequential staging edge there is no such reason left
+#     (WT-224).
 #
 # See C99/docs/PORTABILITY.md for what each of those does and does not prove.
 
@@ -201,7 +205,7 @@ jobs:
         # installation, no Windows runner, and the compiler that checks it is the same one the compile step uses.
         #
         # ENFORCED, and Linux-only. It was `continue-on-error` while nobody had seen it finish; it has now been
-        # run to completion -- 89 PE32+ executables and a shared library -- so a failure here is a real one.
+        # run to completion -- 91 PE32+ executables and a shared library -- so a failure here is a real one.
         if: runner.os == 'Linux'
         run: WT_WINDOWS_OPENSSL=/tmp/windows-openssl/mingw64 C99/scripts/check-windows-build.sh
 
@@ -215,6 +219,45 @@ jobs:
             echo "wt-client-c99 exited 0 with no protocol implemented" >&2
             exit 1
           fi
+
+  # A second Linux DISTRIBUTION, not a renamed Ubuntu job (WT-225). The plan's Phase 12 matrix names Debian 13
+  # and every other Linux leg runs GitHub's `ubuntu-24.04` image, so nothing here would notice what Debian
+  # ships: a different GCC, a different OpenSSL 3 minor, or a libc that changes what the portability inventory
+  # has to cover. The container is the `trixie` (Debian 13) tag -- a container image is not a `uses:` action, so
+  # there is no SHA to pin, and the toolchain comes from the distribution's own archive rather than from a
+  # setup action, which is the point of running the leg at all.
+  linux-debian13:
+    name: C99 / Debian 13 (trixie, gcc)
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:trixie
+    steps:
+      # `actions/checkout` runs INSIDE the container, so the container's own `git` is what clones: the Debian
+      # base image ships none, and the runner's bundled Node does not stand in for it.
+      - name: Install git for the checkout
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install cmake, Ninja, GCC and OpenSSL 3
+        # The same four tools the Ubuntu legs have, taken from Debian's archive so the versions are Debian's.
+        # `libssl-dev` is OpenSSL 3 on trixie, which is what `find_package(OpenSSL 3.0 REQUIRED)` needs.
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake ninja-build gcc libssl-dev
+
+      - name: Configure and build
+        run: |
+          cmake -S C99 -B C99/out/ci/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DWEBTRANSPORT_C99_BUILD_APPS=ON
+          cmake --build C99/out/ci/build
+
+      - name: Unit tests
+        run: ctest --test-dir C99/out/ci/build --output-on-failure
 
   # The Windows leg, RUN rather than linked: the cross-build above says the tree compiles and links for Windows,
   # and this says it EXECUTES there. It runs the binaries through Wine on Linux, which is as far as a hosted
@@ -270,10 +313,10 @@ jobs:
   windows-native:
     name: C99 / Windows (native, MSYS2 MINGW64)
     runs-on: windows-latest
-    # NOT enforced yet. It had never been run when it was written, and a CI job that cannot pass teaches people
-    # to ignore CI -- the rule `check-windows-build.sh` was held to before it was seen to finish. It becomes
-    # enforced the moment it has been seen green, and the commit that flips it says so.
-    continue-on-error: true
+    # ENFORCED (WT-224). It was advisory because the build raced 90 POST_BUILD copies of `libwebtransport.dll`
+    # into two output directories, so it could fail with `Permission denied` for reasons that had nothing to do
+    # with Windows; F-repo-ops-26 replaced those with one sequential staging edge on the shared library. A
+    # Windows-only regression can now fail the pull request, which is what this leg is for.
     defaults:
       run:
         shell: msys2 {0}

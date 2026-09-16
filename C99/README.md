@@ -27,17 +27,17 @@ itself) and **FreeBSD 15.1** (the whole suite on a real kernel). Running the Win
 found and fixed `WT-199` and `WT-200` — a datagram
 receive that reported a truncated packet as a limit error and dropped the sender, and a
 hand-written `WSARecvMsg` prototype with one parameter too many, which a cross-compile cannot see
-because the declaration was this tree's own. Windows already has two CI legs — `windows-wine`
-(enforced) and `windows-native` on `windows-latest` (MSYS2 MINGW64, not yet enforced) — so what
-Phase 12 still lacks is a CI *job* for FreeBSD (`WT-223`) and an enforced native Windows leg
-(`WT-224`), and the plan's Debian 13 leg runs on Ubuntu (`WT-225`). **Open work on this tree is
-listed on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99)
-and nowhere else**; the sentence above that calls Phase 10 "under way" is `WT-226` against the
-Definition-of-Done's `met`.
+because the declaration was this tree's own. Windows already has two CI legs — `windows-wine` and `windows-native` on
+`windows-latest` (MSYS2 MINGW64), both **enforced** — and a `linux-debian13` leg runs the suite in a
+`debian:trixie` container, so what the plan's Phase 12 matrix still lacks is a CI *job* for FreeBSD
+(`WT-223`) and the MSVC and Clang-CL Windows variants. **Open work on this tree is listed on the
+[C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99) and nowhere
+else**; the status sentences here and in the repository's root README are kept in step with each
+other.
 
 Of the plan's nine Definition-of-Done criteria **eight are met and one is partial** — and the
-partial one is CI *job* coverage (no FreeBSD leg, `WT-223`; the native Windows leg not yet
-enforced, `WT-224`; the Debian 13 leg running on Ubuntu, `WT-225`), not the code on them.
+partial one is CI *job* coverage (no FreeBSD leg, `WT-223`; and the plan's MSVC and Clang-CL Windows
+variants are not jobs), not the code on them.
 `scripts/score-matrix.sh` prints that state from the matrix rather than from memory.
 
 What is here:
@@ -300,8 +300,8 @@ What is here:
   `libwebtransport.dll` — and CI does that on the legs it already has, because the MSYS2 OpenSSL
   package is a plain tarball. That link found a defect the compile could not (`-Wstringop-overflow` in
   a Release build, which clang never reported). It also RUNS them now — 85 of 85 test executables green
-  under Wine, 64,900 checks — so what remains is the CI *job* on a real Windows runner (`WT-224`) and on
-  FreeBSD (`WT-223`), not the running.
+  under Wine, 64,900 checks — and the native Windows leg is enforced, so what remains is the CI *job*
+  on FreeBSD (`WT-223`), not the running.
   `scripts/check-portability.sh` fails if the library uses a POSIX-only call the inventory does not
   name — it caught `sendto`/`recvfrom` missing on its first run — and CI runs it. FreeBSD is close to
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.

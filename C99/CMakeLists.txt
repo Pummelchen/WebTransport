@@ -425,9 +425,18 @@ endif()
 # reads that subdirectory -- not merely by the end of this file.
 function(wt_stage_windows_runtime target)
   if(WIN32 AND BUILD_SHARED_LIBS)
-    add_custom_command(TARGET ${target} POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-              $<TARGET_FILE:webtransport_shared> $<TARGET_FILE_DIR:${target}>)
+    # ONE copy per output directory, attached to the shared library -- NOT one POST_BUILD copy per
+    # target. With no RUNTIME_OUTPUT_DIRECTORY set, every app lands in <build>/apps and every test in
+    # <build>/tests, so the per-target form put 90 copies of the same DLL into two directories, all
+    # scheduled in parallel by Ninja. The loser of that race failed the build:
+    #
+    #   Error copying file (if different) from ".../libwebtransport.dll" to ".../apps": Permission denied
+    #
+    # which is why the native Windows CI leg could not be enforced (WT-224). A target's POST_BUILD
+    # commands run inside that target's own build edge, so attaching them to the one shared library
+    # makes every dependent executable wait for the copy and removes the race by construction.
+    add_dependencies(${target} webtransport_shared)
+    set_property(GLOBAL APPEND PROPERTY WT_WINDOWS_RUNTIME_STAGE_DIRS "${CMAKE_CURRENT_BINARY_DIR}")
   endif()
 endfunction()
 
@@ -437,6 +446,18 @@ endif()
 
 if(WEBTRANSPORT_C99_BUILD_TESTS)
   add_subdirectory(tests)
+endif()
+
+# The other half of wt_stage_windows_runtime: one copy per directory that holds an executable, added
+# after the directories have declared their targets. `copy_if_different` keeps a rebuild a no-op.
+get_property(WT_WINDOWS_RUNTIME_STAGE_DIRS GLOBAL PROPERTY WT_WINDOWS_RUNTIME_STAGE_DIRS)
+if(WT_WINDOWS_RUNTIME_STAGE_DIRS)
+  list(REMOVE_DUPLICATES WT_WINDOWS_RUNTIME_STAGE_DIRS)
+  foreach(wt_stage_dir IN LISTS WT_WINDOWS_RUNTIME_STAGE_DIRS)
+    add_custom_command(TARGET webtransport_shared POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_FILE:webtransport_shared> "${wt_stage_dir}")
+  endforeach()
 endif()
 
 include(GNUInstallDirs)
