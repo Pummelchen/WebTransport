@@ -4,7 +4,7 @@ All notable changes to this project will be documented here.
 
 The project uses semantic versioning.
 
-## [1.4.0] - 2026-09-16
+## [1.4.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.4.0) - 2026-09-16
 
 The 2026-09-15 pre-production audit of both implementations landed here: 106 findings triaged,
 97 fixed and verified, the rest recorded with their reasons and evidence. The items a caller or an

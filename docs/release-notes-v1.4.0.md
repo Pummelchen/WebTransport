@@ -105,16 +105,24 @@ and compared), `check-matrix.sh` (91 named symbols/tests), `check-portability.sh
 - **0-RTT and resumption** are not implemented in either library; the draft-16
   compliance matrix records that as a deliberate `--` row.
 
-## Checks that did not run for this release
+## Checks that ran elsewhere, and what did not run
 
 Named here because "not checked, no input" and "checked and identical" are different
 sentences (RELEASE.md Part 1 §1.2.7):
 
-- The Windows cross-compile, cross-link and Wine suites are **not checked on the release
-  host**, which has no mingw or Wine toolchain. They run in CI on Linux legs
-  (`windows-wine` enforced, `windows-native` on `windows-latest` not yet enforced) and
-  are re-run during this release from the hosts that do have them; the results are
-  recorded in the release evidence rather than implied by a green build here.
+- **The three Windows C99 gates ran in full, but not all of them on the release host.**
+  That host has no Wine and cannot get one: every Homebrew Wine cask is disabled
+  ("does not pass the macOS Gatekeeper check", disabled 2026-09-01), and no unsigned
+  Wine build was improvised for a release. So:
+  - `check-windows-platform.sh` and `check-windows-build.sh` ran **on the release host**
+    (macOS, mingw-w64 14.0.0 / GCC 16.2.0): the `_WIN32` branch, all 76 library sources
+    and all 108 test and app sources compile with the warning subset as errors, and the
+    tree links into 91 PE32+ executables and one shared library.
+  - `check-windows-wine.sh` ran on the **Linux host the enforced CI leg uses**, against
+    this exact commit: **85 test executables, 85 passed, 0 failed, 0 hung, 64,900
+    checks.** The release host's copy of that gate reports `unsupported -- no Wine on
+    this machine` and is not counted as a pass.
+- Nothing else was waived, skipped or left unchecked for this release.
 
 ## Checksums
 
