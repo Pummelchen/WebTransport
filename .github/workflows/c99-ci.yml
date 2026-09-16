@@ -243,11 +243,18 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Install cmake, Ninja, GCC and OpenSSL 3
-        # The same four tools the Ubuntu legs have, taken from Debian's archive so the versions are Debian's.
+        # The Ubuntu legs inherit a toolchain from their runner image; this one starts from the bare Debian
+        # image, so it has to name every part of the toolchain it uses.
+        #
+        # `libc6-dev` is named explicitly because on Debian `gcc` only RECOMMENDS it: with
+        # `--no-install-recommends` the C runtime's startup objects are missing, and the failure is CMake's
+        # compiler check rather than anything in this tree --
+        # `/usr/bin/ld: cannot find Scrt1.o` / `crti.o`, "Check for working C compiler: /usr/bin/cc - broken".
+        # That is exactly how the first run of this leg failed, which is why the package is here now.
         # `libssl-dev` is OpenSSL 3 on trixie, which is what `find_package(OpenSSL 3.0 REQUIRED)` needs.
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends cmake ninja-build gcc libssl-dev
+          apt-get install -y --no-install-recommends cmake ninja-build gcc libc6-dev libssl-dev
 
       - name: Configure and build
         run: |
