@@ -184,7 +184,7 @@ Leave previous releases' notes and performance tables alone.
 
 # Part 2 — This repository
 
-## WebTransport — Swift **and** C99, semantic version, 11 releases
+## WebTransport — Swift **and** C99, semantic version, 12 releases
 
 **One repository, two libraries, one version.** This is the project the lockstep
 rule exists for.
@@ -192,20 +192,31 @@ rule exists for.
 - **Identity** semantic version. **The two libraries must always carry the same
   number** — if only one changed, recompile the other at the new number rather than
   leaving it behind.
-- **The lockstep mechanism is not landed yet.** It is being introduced by the open
-  pull request `release/single-version-source`: a root `VERSION` file as the single
-  source, `WT_VERSION_*` in `C99/include/webtransport/version.h` and `library` in
-  `Swift/Sources/WebTransport/WebTransportVersion.swift` as its mirrors, and
-  `Swift/check-version-sync.sh` as the gate (bump with `--write`). **Until that PR
-  merges, `main` has no in-repo version at all**: the Swift side's identity is the
-  git tag and the README install pin (`1.3.8`), while the C99 side declares `0.1.0`
-  in `C99/include/webtransport/version.h` and repeats it in `C99/CMakeLists.txt`.
-  Do not describe the lockstep as landed until it is.
+- **The lockstep is landed and enforced** (it was introduced by
+  `release/single-version-source` and landed for the 1.4.0 release): a root `VERSION`
+  file is the single source, `WT_VERSION_*` in
+  `C99/include/webtransport/version.h` and `library` in
+  `Swift/Sources/WebTransport/WebTransportVersion.swift` are its mirrors, and
+  `Swift/check-version-sync.sh` is the gate. A bump is one edit plus one command:
+  write `VERSION`, then run `./Swift/check-version-sync.sh --write`. The C99 CMake
+  configure fails on a mismatch as well, so a C99-only build cannot produce a
+  library whose filename and whose `wt_version_string()` disagree.
+- **A second declaration of the version in a test is a defect.** The C99 tests derive
+  the expected string from the header's macros (`WT_TEST_VERSION_STRING`); a literal
+  there would make every bump fail a test that is not about the version.
 - **`WT_ABI_VERSION` is not part of the lockstep.** It moves only for a breaking
   layout or signature change; a bug-fix release moves the version and not the ABI.
   `wt_protocol_draft()` is a third, separate axis.
-- **C99 artifacts** built by `C99/platform/macos26/compile-dylib.sh` (CMake,
-  Ninja); `C99/platform/{debian,freebsd}/compile-so.sh` for the other platforms.
+- **C99 artifacts** built by `C99/platform/macos26/compile-dylib.sh`;
+  `C99/platform/{debian,freebsd}/compile-so.sh` for the other platforms. Each writes
+  its own build directory (`out/<platform>/build-install`) and its own install tree
+  (`out/<platform>/install`), deliberately NOT the `out/<platform>/build` that
+  `C99/scripts/build-and-test.sh` configures with Ninja — the two use different
+  generators and sharing a directory made whichever ran second fail.
+  The install tree must be *usable*, not merely present: `check-package.sh` runs all
+  three installed tools, because an installed tool that cannot find the installed
+  library is not a product (the executables need the install rpath, which
+  `C99/CMakeLists.txt` sets to `@loader_path/../lib`, `$ORIGIN/../lib` on ELF).
 - **Swift artifacts** built by `Swift/build-release-apple-silicon.sh`, which is
   the most rigorous build in the organisation and the model for the rest:
   - `swift package describe --type json` is checked for experiment/spike targets
@@ -217,12 +228,19 @@ rule exists for.
   - `lipo -archs` must report exactly `arm64`;
   - output lands in `.build/release-artifacts/` with a `SHA256SUMS`.
 - **Gates** `Swift/check-toolchain.sh 6.4 27.0`, `Swift/check-manifest-sync.sh`
-  (19 shared targets must agree across the two manifests),
+  (19 shared targets must agree across the two manifests), `Swift/check-version-sync.sh`,
   `check-api-compatibility.sh`, the C99 `C99/scripts/check-*.sh` family, and the
-  full suite under ASan and TSan — plus `Swift/check-version-sync.sh` once the pull
-  request above lands.
+  full suite under ASan and TSan.
 - **Two manifests** — the root `Package.swift` and `Swift/Package.swift` —
   intentionally expose different product sets; shared targets must not diverge.
-- **Publishing** currently ships only the Swift products. The C99 library is built
-  and tested but not released; when it joins, it joins **this** tag and these notes
-  rather than getting its own, and the notes must say which library is not yet built.
+- **Publishing ships both libraries**, one artifact per library, under one tag and
+  these notes — never a release named for or carrying only one of them. Today that is
+  `./release-macos-arm64.sh`, which builds both, asserts `arm64` on every Mach-O it
+  ships, packs `WebTransport-swift-<version>-macos-arm64.tar.gz` and
+  `WebTransport-c99-<version>-macos-arm64.tar.gz` with a `.sha256` beside each, and
+  is a dry run unless given `--publish` (or `--republish`, to correct a published
+  Release in place, which also moves the tag when the correction changed the source).
+  The source of both libraries reaches users through the Release's own source
+  archives for the tag. Each archive carries a `README-binaries.txt`; the C99 one
+  names the OpenSSL 3 runtime dependency of the dylib, because that library is
+  deliberately not bundled with it.

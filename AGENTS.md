@@ -16,10 +16,11 @@ A reference implementation of WebTransport over HTTP/3, shipped as **two
 independent libraries in one repository**: a Swift package (async client/server API
 plus layered QUIC/TLS/HTTP-3 modules and two CLI peers) and, under `C99/`, a
 separate CMake C99 library with its own CLI tools and test suite. The two are
-built, tested and versioned separately, and nothing in the build ties one's version
-to the other's. The Swift side is released (`1.3.8`); the C99 side is built and
-exercised — 97 CTest tests, ASan/UBSan, Windows-under-Wine, FreeBSD by hand — but
-still declares a pre-1.0 identity. The audience is protocol implementers reading a
+built and tested separately and versioned in lockstep from a single `VERSION` file,
+so a caller pairing them knows the pair is compatible. Both are released together
+(`1.4.0`, one artifact per library under one tag); the C99 side is built and
+exercised — 97 CTest tests, ASan/UBSan, Windows-under-Wine, FreeBSD by hand. The
+audience is protocol implementers reading a
 reference implementation, so exact wire behaviour matters more than convenience.
 
 ## Layout
@@ -59,25 +60,31 @@ Note the two writing to different places: the script uses
 
 ## Identity
 
-**The two libraries must always carry the same version number**, even when only one
-of them changed — at that point a simple re-compile is enough to keep them
-compatible. That lockstep is being introduced by the open pull request
-`release/single-version-source`: a root `VERSION` file as the single source, CMake
-reading it and failing on a malformed value or a `version.h` that disagrees, and
-`Swift/check-version-sync.sh` as the gate.
+**The two libraries always carry the same version number**, even when only one of
+them changed — a caller pairing them has no other way to know the pair is
+compatible, so the unchanged one is recompiled at the new number rather than left
+behind.
 
-**Until that merges, `main` has no in-repo version at all.** The Swift side's
-identity is the git tag and the README install pin (`1.3.8`); the C99 side declares
-`0.1.0` in `C99/include/webtransport/version.h` (`WT_VERSION_MAJOR/MINOR/PATCH`) and
-repeats it as `project(... VERSION 0.1.0)` in `C99/CMakeLists.txt` and as literals
-in `C99/tests/unit/test_version.c` and `test_public_api.c`. The **ABI version**
-(`WT_ABI_VERSION`) and the **protocol draft** are separate axes: they do not follow
-the library version and must not be bumped with it.
+**The lockstep is landed and enforced.** `VERSION` at the repository root (currently
+`1.4.0`) is the single source; it is mirrored in
+`C99/include/webtransport/version.h` (`WT_VERSION_MAJOR/MINOR/PATCH`) and in
+`Swift/Sources/WebTransport/WebTransportVersion.swift` (`WebTransportVersion.library`).
+A bump is one edit plus one command: write `VERSION`, then run
+`./Swift/check-version-sync.sh --write`. `Swift/check-version-sync.sh` fails when the
+three disagree, and the C99 CMake configure fails on the same mismatch, so a
+C99-only build cannot produce a library whose filename and whose
+`wt_version_string()` disagree. The C99 tests derive the expected string from the
+header (`WT_TEST_VERSION_STRING`) instead of repeating a literal, because a literal
+is a second place to bump.
+
+The **ABI version** (`WT_ABI_VERSION`) and the **protocol draft** are separate axes:
+they do not follow the library version and must not be bumped with it.
 
 ## Gates
 
 - Swift (`.github/workflows/swift-ci.yml`): `./Swift/check-toolchain.sh 6.4 27.0`,
-  `./Swift/check-manifest-sync.sh`, `./Swift/check-target-imports.sh`,
+  `./Swift/check-manifest-sync.sh`, `./Swift/check-version-sync.sh`,
+  `./Swift/check-target-imports.sh`,
   `swift format lint --strict --recursive --parallel …`, `./check-api-compatibility.sh`,
   `./build-release-apple-silicon.sh`, tests under
   `-warnings-as-errors -strict-concurrency=complete -require-explicit-sendable`,
@@ -92,9 +99,15 @@ the library version and must not be bumped with it.
 ## Traps
 
 - **Two libraries that share a repository and nothing else.** Editing `C99/` does
-  not affect `Package.swift`, and no gate currently requires the two versions to
-  match — so a version bump must be applied to both by hand until the lockstep gate
-  lands.
+  not affect `Package.swift`. Their versions ARE tied by the lockstep gate, so bump
+  `VERSION` and run `./Swift/check-version-sync.sh --write` rather than editing the
+  mirrors by hand.
+- **The C99 packaging scripts use different build directories from the dev loop.**
+  `C99/platform/*/compile-*.sh` write `out/<platform>/build-install` and install to
+  `out/<platform>/install`; `C99/scripts/build-and-test.sh` configures
+  `out/<platform>/build{,-release,-sanitize}` with Ninja. The two use different
+  generators, so pointing them at one directory fails with "Does not match the
+  generator used previously".
 - **`check-manifest-sync.sh` is not a version gate.** It diffs shared SwiftPM
   targets (path/type/dependencies) between the two manifests via
   `swift package dump-package`, and exits 1 if `jq` is not on `PATH`.
