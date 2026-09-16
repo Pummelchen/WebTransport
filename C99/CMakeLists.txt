@@ -174,6 +174,12 @@ set(WT_QUIC_RUNTIME_SOURCES
   src/quic/close.c
   src/quic/packet_io.c
   src/quic/connection.c
+  src/quic/connection_send.c
+  src/quic/connection_receive.c
+  src/quic/connection_loss.c
+  src/quic/connection_stream.c
+  src/quic/connection_retry.c
+  src/quic/connection_handshake.c
   src/quic/crypto_stream.c
   src/quic/handshake.c
 )

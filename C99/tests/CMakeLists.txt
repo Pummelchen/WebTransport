@@ -94,7 +94,25 @@ set(WT_UNIT_TESTS
 )
 
 foreach(test IN LISTS WT_UNIT_TESTS)
-  add_executable(${test} unit/${test}.c)
+  # test_quic_connection was one 4154-line file; it is now a topic file per seam. The topics
+  # are separate SOURCES of the same executable, not separate tests, so the CTest name and
+  # the suite's 97 tests do not change. wt_test.c defines the harness counters wt_test.h
+  # declares, which every test links (see the note there).
+  if(test STREQUAL "test_quic_connection")
+    set(_wt_test_sources
+      unit/test_quic_connection.c
+      unit/test_quic_connection_support.c
+      unit/test_quic_connection_basics.c
+      unit/test_quic_connection_streams.c
+      unit/test_quic_connection_ids.c
+      unit/test_quic_connection_retry.c
+      unit/test_quic_connection_keys.c
+      unit/test_quic_connection_loss.c
+      unit/test_quic_connection_path.c)
+  else()
+    set(_wt_test_sources unit/${test}.c)
+  endif()
+  add_executable(${test} ${_wt_test_sources} wt_test.c)
   wt_set_c99(${test})
   wt_apply_warnings(${test})
   # `vectors` holds the generated RFC vectors, which tests include by plain name
@@ -186,7 +204,7 @@ endif()
 # without a Windows target does not see it. `scripts/check-windows-wine.sh` runs it under Wine, and a Windows
 # runner runs it natively.
 if(WIN32)
-  add_executable(test_windows_udp windows/test_windows_udp.c)
+  add_executable(test_windows_udp windows/test_windows_udp.c wt_test.c)
   wt_set_c99(test_windows_udp)
   wt_apply_warnings(test_windows_udp)
   target_include_directories(test_windows_udp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} unit

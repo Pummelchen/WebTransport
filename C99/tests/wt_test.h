@@ -44,8 +44,12 @@
   WT_TEST_STRINGIFY(WT_VERSION_MINOR) "."         \
   WT_TEST_STRINGIFY(WT_VERSION_PATCH)
 
-static int wt_test_checks = 0;
-static int wt_test_failures = 0;
+/* Shared rather than file-local so a test may be built from more than one translation
+ * unit: a `static` tally would leave each file counting into its own copy, and
+ * WT_TEST_MAIN_END would report the checks of whichever file holds `main` alone.
+ * tests/wt_test.c defines them and every test executable links it. */
+extern int wt_test_checks;
+extern int wt_test_failures;
 
 /* Sized integers, printed in decimal. A defined static function rather than a
  * macro so that the arguments are evaluated once. */
