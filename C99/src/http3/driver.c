@@ -163,7 +163,12 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
                                                size_t *out_prefix_consumed,
                                                wt_http3_error_t *out_error) {
   wt_http3_driver_pending_t *pending;
-  uint8_t prefix[WT_HTTP3_DRIVER_PREFIX_MAX];
+  /* `have` is the contract: only the first `have` bytes are ever read, and `uni_prefix_length`
+   * returns before touching a byte when `have == 0`, so the copy below can be skipped. That is
+   * true of the code but was not provable to cppcheck, which reported `uninitvar` at the
+   * `uni_prefix_length(prefix, have)` call and failed the gate (`--error-exitcode=1`). Sixteen
+   * bytes of zeroing make it provable, and the check still fails on a real uninitialised read. */
+  uint8_t prefix[WT_HTTP3_DRIVER_PREFIX_MAX] = {0};
   size_t have = 0U;
   size_t needed;
   size_t take = 0U;

@@ -24,6 +24,25 @@
 #include <string.h>
 
 #include "webtransport/status.h"
+#include "webtransport/version.h"
+
+/* The version the library is expected to report, derived from the header's
+ * macros rather than written out here.
+ *
+ * A literal in a test is a second place to bump, so a version change would fail
+ * a test that is not about the version -- and the tempting fix is to edit the
+ * test, which is how a wrong version ships. Derived, the assertion becomes
+ * "wt_version_string() agrees with the header this test was compiled against",
+ * which is the property the test is actually for. The header itself is held
+ * equal to the repository-root VERSION by Swift/check-version-sync.sh.
+ *
+ * A preprocessor concatenation, so it is usable as a WT_EXPECT_STR `want`. */
+#define WT_TEST_STRINGIFY_INNER(x) #x
+#define WT_TEST_STRINGIFY(x) WT_TEST_STRINGIFY_INNER(x)
+#define WT_TEST_VERSION_STRING                    \
+  WT_TEST_STRINGIFY(WT_VERSION_MAJOR) "."         \
+  WT_TEST_STRINGIFY(WT_VERSION_MINOR) "."         \
+  WT_TEST_STRINGIFY(WT_VERSION_PATCH)
 
 static int wt_test_checks = 0;
 static int wt_test_failures = 0;

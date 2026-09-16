@@ -11,8 +11,63 @@
 
 cmake_minimum_required(VERSION 3.28)
 
+# The version is single-sourced from the repository-root VERSION file.
+#
+# This library and the Swift one ship together and MUST carry the same number:
+# a caller pairing a Swift client with a C99 server has no other way to know the
+# pair is compatible. A library with no code change is recompiled and republished
+# at the new number rather than left behind on the old one, so the two never skew.
+#
+# The same value is declared in exactly two other places -- the WT_VERSION_*
+# macros in include/webtransport/version.h and the Swift constant in
+# Swift/Sources/WebTransport/WebTransportVersion.swift -- and
+# Swift/check-version-sync.sh fails if any of the three disagrees. Configure
+# fails rather than defaulting, so a missing or malformed file can never produce
+# a library whose version nobody can name.
+set(WT_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+if(NOT EXISTS "${WT_VERSION_FILE}")
+  message(FATAL_ERROR "VERSION file not found at ${WT_VERSION_FILE}")
+endif()
+file(STRINGS "${WT_VERSION_FILE}" WT_VERSION LIMIT_COUNT 1)
+string(STRIP "${WT_VERSION}" WT_VERSION)
+if(NOT WT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+  message(FATAL_ERROR
+    "VERSION must be MAJOR.MINOR.PATCH (got '${WT_VERSION}' in ${WT_VERSION_FILE})")
+endif()
+
+# The header is a MIRROR of that value, so verify it agrees here as well.
+#
+# Without this check a C99-only build -- which is what the C99 CI does -- would
+# happily produce libwebtransport.1.4.0.dylib from a bumped VERSION while
+# wt_version_string() still reported the old number, because the macros in the
+# header are what the string is built from. The library's filename and its own
+# answer to "what version am I" would disagree, and only the Swift job's
+# check-version-sync.sh would notice. Failing at configure makes the C99 build
+# self-consistent on its own.
+set(WT_VERSION_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/include/webtransport/version.h")
+if(NOT EXISTS "${WT_VERSION_HEADER}")
+  message(FATAL_ERROR "version header not found at ${WT_VERSION_HEADER}")
+endif()
+file(READ "${WT_VERSION_HEADER}" WT_VERSION_HEADER_TEXT)
+foreach(WT_PART MAJOR MINOR PATCH)
+  if(NOT WT_VERSION_HEADER_TEXT MATCHES
+     "#define[ \t]+WT_VERSION_${WT_PART}[ \t]+([0-9]+)")
+    message(FATAL_ERROR
+      "${WT_VERSION_HEADER} declares no WT_VERSION_${WT_PART}")
+  endif()
+  set(WT_HEADER_${WT_PART} "${CMAKE_MATCH_1}")
+endforeach()
+set(WT_HEADER_VERSION
+  "${WT_HEADER_MAJOR}.${WT_HEADER_MINOR}.${WT_HEADER_PATCH}")
+if(NOT WT_HEADER_VERSION STREQUAL WT_VERSION)
+  message(FATAL_ERROR
+    "version mismatch: ${WT_VERSION_FILE} says ${WT_VERSION} but "
+    "${WT_VERSION_HEADER} declares ${WT_HEADER_VERSION}. The macros mirror "
+    "VERSION; run Swift/check-version-sync.sh --write to propagate it.")
+endif()
+
 project(webtransport_c99
-  VERSION 0.1.0
+  VERSION ${WT_VERSION}
   DESCRIPTION "WebTransport over HTTP/3 in portable C99"
   LANGUAGES C
 )
