@@ -4,7 +4,9 @@
 
 #include <string.h>
 
+#include "webtransport/api/flow.h"
 #include "webtransport/cursor.h"
+#include "webtransport/http3/settings.h"
 #include "webtransport/writer.h"
 
 void wt_capsule_stream_init(wt_capsule_stream_t *stream) {
@@ -19,6 +21,45 @@ void wt_capsule_stream_established(wt_capsule_stream_t *stream) {
   (void)wt_webtransport_session_established(&stream->session);
 }
 
+void wt_capsule_stream_set_flow_advertised(wt_capsule_stream_t *stream,
+                                           const wt_http3_settings_t *local_settings) {
+  if (stream == NULL) return;
+  /* One predicate, so "advertised" means the same thing here as in the public session API. */
+  stream->flow_advertised_local = wt_session_flow_advertised(local_settings);
+}
+
+wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, const uint8_t *payload,
+                                               size_t length, int last, wt_http3_error_t *out_error) {
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (stream == NULL) return WT_OK; /* no account kept: the capsule is dropped, which section 2 allows */
+  if (payload == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (length > sizeof(stream->peer_settings) - stream->peer_settings_length) {
+    /* The control machine's own bound, so a validated payload cannot reach it; a caller that delivered more
+     * than the machine would have is refused rather than silently truncated. */
+    return WT_ERR_LIMIT;
+  }
+  if (length > 0U) memcpy(stream->peer_settings + stream->peer_settings_length, payload, length);
+  stream->peer_settings_length += length;
+  if (last == 0) return WT_OK;
+
+  {
+    wt_http3_settings_t parsed;
+    wt_status_t status;
+
+    wt_http3_settings_init(&parsed);
+    status = wt_http3_settings_parse(stream->peer_settings, stream->peer_settings_length, &parsed, out_error);
+    stream->peer_settings_length = 0U;
+    if (status != WT_OK) {
+      /* The control machine already validated this payload, so this is unreachable; answering 0 rather than a
+       * second refusal keeps a sink from closing a connection the machine has accepted. */
+      stream->flow_advertised_peer = 0;
+      return WT_OK;
+    }
+    stream->flow_advertised_peer = wt_session_flow_advertised(&parsed);
+  }
+  return WT_OK;
+}
+
 wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_capsule_t *capsule,
                                          wt_http3_error_t *out_error) {
   wt_capsule_stream_t *stream = context;
@@ -28,6 +69,10 @@ wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_ca
 
   if (capsule == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (stream == NULL) return WT_OK; /* no account kept: the capsule is dropped, which section 2 allows */
+  /* Section 5.1: the session's flow control applies only when BOTH endpoints advertised one of the three
+   * initial limits, and an endpoint that did not negotiate it MUST IGNORE -- not refuse -- a flow-control
+   * capsule. This is the same rule `src/api/session.c` applies to its `flow_enabled` flag. */
+  if (stream->flow_advertised_local == 0 || stream->flow_advertised_peer == 0) return WT_OK;
   if (capsule->type == WT_CAPSULE_MAX_DATA) {
     status = wt_webtransport_max_data_parse(capsule, &maximum, out_error);
     if (status != WT_OK) return status;

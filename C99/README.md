@@ -163,6 +163,10 @@ What is here:
   frame as `FLOW_CONTROL_ERROR`, which presents as a peer that says nothing. It is deliberately a
   separate call rather than four more parameters on a call that already takes seven: a caller's
   arguments cannot drift out of order, and a caller that advertises nothing simply does not call it.
+  Since WT-252 the same three numbers (`100000`, `8`, `8`; the `4096` is the per-stream transport
+  parameter with no section 5.1 setting) are also advertised as the draft's INITIAL flow-control SETTINGS
+  by `wt_webtransport_settings_apply`, so the session's own flow control is genuinely negotiated: the
+  CLI and conformance tools ignore a flow-control capsule unless both ends advertised it.
 - **A packet session driver** (Phase 9): `runtime/session.h` is the only place where the
   socket, the QUIC connection and the TLS handshake meet — the connection needs somewhere to
   send, the handshake needs a connection with Initial keys, and the socket needs a caller to
@@ -341,7 +345,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-four scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-five scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -352,10 +356,12 @@ What is here:
   rather than short), **two refusals over a real connection** (a frame cut off by the end of its stream
   closes the connection as an *application* close with `H3_FRAME_ERROR`, asserted on the end that refused
   **and** on the end that is told -- a decision is a different claim from what a peer receives, and both
-  halves are read rather than inferred), **two capsule scenarios** (a `MAX_DATA` capsule the client sends on
-  the CONNECT stream moving the limit the server enforces, and a drain plus a close ending the session with
+  halves are read rather than inferred), **three capsule scenarios** (a `MAX_DATA` capsule the client sends on
+  the CONNECT stream moving the limit the server enforces, a drain plus a close ending the session with
   the peer's application code while the connection stays up -- before WT-164 the first was silently skipped
-  as an unknown HTTP/3 frame and the other two were parsed as frames and refused), **two capsule refusals**
+  as an unknown HTTP/3 frame and the other two were parsed as frames and refused -- and a `MAX_DATA` capsule
+  the client sends without having advertised a flow-control setting being IGNORED rather than applied, which
+  is section 5.1's MUST for a setting that was not negotiated), **two capsule refusals**
   (a capsule declaring more than the receiver will buffer closing the *connection* with `H3_EXCESSIVE_LOAD` and
   the peer reading that code, and a repeated grant closing the *session* with the draft's own
   `WT_WEBTRANSPORT_FLOW_CONTROL_ERROR` while both connections stay up -- the second is the case where returning

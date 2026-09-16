@@ -27,6 +27,11 @@ static const uint8_t k_server_connection_id[8] = {0x12U, 0x34U, 0x56U, 0x78U,
 static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint64_t type,
                                          const uint8_t *payload, size_t length, int last) {
   scenario_side_t *side = context;
+  if (type == WT_HTTP3_FRAME_SETTINGS) {
+    /* The peer's SETTINGS is the PEER half of section 5.1's flow-control negotiation, and the HTTP/3 control
+     * machine has already validated this payload before the sink was handed it (WT-252). */
+    return wt_capsule_stream_on_peer_settings(&side->capsules, payload, length, last, NULL);
+  }
   if (type == WT_HTTP3_FRAME_HEADERS && stream_id == side->request_stream_id) {
     if (side->section_length + length <= sizeof(side->section)) {
       if (length > 0U) memcpy(side->section + side->section_length, payload, length);
@@ -161,6 +166,7 @@ wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail
   wt_tls_client_config_t client_tls;
   wt_tls_server_config_t server_tls;
   wt_tls_server_identity_t identity;
+  wt_http3_settings_t settings;
   static const char *const alpn_h3[] = {"h3"};
   wt_udp_address_t local;
   unsigned round;
@@ -310,5 +316,20 @@ wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail
   pair->server_side.transport = &pair->server_transport;
   pair->server_side.connection = &pair->server.connection;
   pair->server_side.now = pair->now;
+
+  /* The SERVER's SETTINGS, sent before any scenario opens its session: section 3.1 makes the settings the thing
+   * a client waits for, and section 5.1's three initial flow-control limits are part of them so that both ends
+   * of every scenario have genuinely negotiated the session's own flow control (WT-252). The client's settings
+   * are sent by whichever scenario starts the session, and a scenario that wants the UNNEGOTIATED path simply
+   * leaves them out. */
+  wt_http3_settings_init(&settings);
+  if (wt_webtransport_settings_apply(&settings, 1) != WT_OK ||
+      wt_http3_driver_start_own_streams(&pair->server_side.driver, &pair->server_transport, &settings,
+                                        pair->now) != WT_OK) {
+    scenario_detail_set(detail, detail_size, "the server's own streams could not be started");
+    scenario_pair_close(pair);
+    return WT_CLI_RESULT_FAILED;
+  }
+  wt_capsule_stream_set_flow_advertised(&pair->server_side.capsules, &settings);
   return WT_CLI_RESULT_PASSED;
 }

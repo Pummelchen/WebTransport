@@ -161,6 +161,14 @@ static void test_the_settings_a_webtransport_endpoint_advertises(void) {
                 has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, 1U));
   WT_EXPECT_INT("but not ENABLE_CONNECT_PROTOCOL, which a server sends", 0,
                 has_setting(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U));
+  /* And section 5.1's three initial flow-control limits, which are what opens the session's own flow control:
+   * they must be the values the runtime enforces, `wt_runtime_session_advertise(100000, 4096, 8, 8)` (WT-252). */
+  WT_EXPECT_INT("with the initial data limit", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, 100000U));
+  WT_EXPECT_INT("with the bidirectional stream limit", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_BIDI, 8U));
+  WT_EXPECT_INT("and with the unidirectional stream limit", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI, 8U));
 
   /* A server: everything the client sends, plus the extended-CONNECT advertisement and the limit half of the
    * older pair. */
@@ -175,6 +183,13 @@ static void test_the_settings_a_webtransport_endpoint_advertises(void) {
                 has_setting(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS, 1U));
   WT_EXPECT_INT("and with its limit", 1,
                 has_setting(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS_DEPRECATED, 1U));
+  /* The same section 5.1 limits, because flow control is a property of the connection rather than of a role. */
+  WT_EXPECT_INT("with the initial data limit", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, 100000U));
+  WT_EXPECT_INT("with the bidirectional stream limit", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_BIDI, 8U));
+  WT_EXPECT_INT("and with the unidirectional stream limit", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI, 8U));
 
   WT_EXPECT_STATUS("a NULL settings is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_webtransport_settings_apply(NULL, 0));

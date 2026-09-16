@@ -316,6 +316,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
       wt_udp_close(&loop.socket);
       return status;
     }
+    /* Section 5.1's LOCAL half: the set above advertises flow control, and the capsule gate keeps that fact
+     * so each grant is decided against both ends (WT-252). */
+    wt_capsule_stream_set_flow_advertised(&loop.side.capsules, &settings);
     status = wt_http3_driver_start_own_streams(&loop.side.driver, &loop.transport, &settings, loop.now);
     if (status != WT_OK) {
       record_oracle(&loop, out);

@@ -171,6 +171,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
       wt_udp_close(&loop.socket);
       return status;
     }
+    /* Section 5.1's LOCAL half: the set just assembled advertises flow control, and the capsule gate keeps
+     * that fact so each grant is decided against both ends (WT-252). */
+    wt_capsule_stream_set_flow_advertised(&loop.side.capsules, &settings);
   }
   /* Which `:protocol` token the CONNECT below carries. The caller's configuration says so because the token
    * cannot be negotiated: a peer written against a pre-rename draft knows only `webtransport` and refuses the

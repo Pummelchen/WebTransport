@@ -83,6 +83,25 @@ wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is
   status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
   if (status != WT_OK) return status;
 
+  /* Section 5.1's three INITIAL flow-control limits, advertised here because this function is where a
+   * WebTransport endpoint's SETTINGS are assembled and because an endpoint that wants the session's own flow
+   * control has to open the negotiation before a peer may send a grant: an endpoint that omits all three is
+   * not doing flow control, and a receiver that did not negotiate it MUST ignore the flow-control capsules
+   * (WT-252). The numbers are the limits the tools put in force with
+   * `wt_runtime_session_advertise(&session, 100000, 4096, 8, 8)`, and they must stay equal to it:
+   * INITIAL_MAX_DATA is the connection-level DATA limit (100000), INITIAL_MAX_STREAMS_BIDI is the number of
+   * bidirectional streams (8) and INITIAL_MAX_STREAMS_UNI the number of unidirectional ones (8). The middle
+   * value of that runtime call, 4096, is the PER-STREAM data limit: section 5.1 carries no setting for it (it
+   * is a QUIC transport parameter, and section 5.4 prohibits the per-stream capsules), so no third number
+   * belongs here. A caller that uses this function thereby claims flow control and must put those limits in
+   * force with `wt_runtime_session_advertise`. */
+  status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, 100000U);
+  if (status != WT_OK) return status;
+  status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_BIDI, 8U);
+  if (status != WT_OK) return status;
+  status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI, 8U);
+  if (status != WT_OK) return status;
+
   /* The same negotiation for a peer that predates the rename: one codepoint per version, which is what section
    * 7.1 asks of an endpoint that supports several. The value is the number of sessions this endpoint will
    * accept on the connection, and one is what this tree's tools serve. */

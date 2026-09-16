@@ -39,6 +39,7 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | 5.1 | A stream count above the draft's 2^60 ceiling is a flow-control error | `WT_WEBTRANSPORT_MAX_STREAMS_VALUE` | `test_webtransport_flow` | tested |
 | 5.1 | Flow control is enabled by SETTINGS and applies to what this endpoint sends | `wt_session_flow_advertised`, `wt_session_flow_configure` | `test_api_flow` | tested |
 | 5.1 | The limits an endpoint advertises are the ones it enforces | `wt_runtime_session_advertise` | `test_runtime_session_pair` | tested |
+| 5.1 | A flow-control capsule is IGNORED, not refused, when the corresponding setting was not negotiated by both endpoints -- including the CLI and conformance tools' own capsule walk | `wt_webtransport_settings_apply`, `wt_session_flow_advertised` | `wt_conformance_scenarios` | tested |
 | 5.2 | WT_DRAIN_SESSION stops new streams and lets existing ones finish | `wt_webtransport_session_on_drain`, `wt_webtransport_drain_session_write` | `test_webtransport_session`, `test_api_session` | tested |
 | 5.4 | WT_CLOSE_WEBTRANSPORT_SESSION carries the first close's code | `wt_webtransport_session_on_close`, `wt_webtransport_close_session_parse` | `test_webtransport_session` | tested |
 | 5.4 | A close reason above the draft's ceiling is refused | `WT_CAPSULE_CLOSE_MAX_REASON` | `test_webtransport_capsule` | tested |

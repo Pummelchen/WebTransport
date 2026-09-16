@@ -89,6 +89,12 @@ static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint
       }
     }
   }
+  if (type == WT_HTTP3_FRAME_SETTINGS) {
+    /* The peer's SETTINGS is the PEER half of section 5.1's flow-control negotiation, and the HTTP/3 control
+     * machine has already validated this payload before the sink was handed it (WT-252). Nothing else about a
+     * peer's settings is this tool's to read, so the reassembled set is reduced to that one answer. */
+    return wt_capsule_stream_on_peer_settings(&side->capsules, payload, length, last, NULL);
+  }
   if (type == WT_HTTP3_FRAME_HEADERS && stream_id == side->request_stream_id) {
     if (length > sizeof(side->section) - side->section_length) {
       /* The section is larger than this tool's scratch, and the first version dropped it in silence -- no copy, no

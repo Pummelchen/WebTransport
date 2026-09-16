@@ -33,6 +33,18 @@ typedef struct wt_capsule_stream {
   wt_webtransport_session_t session;
   /* The limits the peer granted, which is what the caller enforces against. */
   wt_webtransport_flow_limits_t peer_limits;
+  /* Section 5.1's negotiation state for the session's own flow control: whether THIS endpoint's SETTINGS
+   * advertised one of the three initial limits, and whether the peer's validated SETTINGS did. A grant is
+   * applied only when BOTH are set -- an endpoint MUST ignore a flow-control capsule when the setting was not
+   * negotiated, which is the rule `src/api/session.c` applies to `flow_enabled` and the one the tools need
+   * here because they walk capsules without the public session API (WT-252). */
+  int flow_advertised_local;
+  int flow_advertised_peer;
+  /* The peer's SETTINGS payload while the frame sink is handed its pieces. The HTTP/3 control machine
+   * validates the completed frame before the sink sees it, and this keeps the validated bytes so the one
+   * settings parser can answer the PEER half of the negotiation above without a second copy of it. */
+  uint8_t peer_settings[WT_HTTP3_CONTROL_SETTINGS_MAX];
+  size_t peer_settings_length;
   uint8_t bytes[WT_CAPSULE_STREAM_MAX];
   size_t length;
   /* How many capsules were walked and how many were refused. Counted rather than inferred, because "the peer sent
@@ -57,6 +69,20 @@ void wt_capsule_stream_init(wt_capsule_stream_t *stream);
 /* The session is established: the response has arrived (a client) or gone out (a server). */
 void wt_capsule_stream_established(wt_capsule_stream_t *stream);
 
+/* Record this endpoint's SETTINGS as the LOCAL half of section 5.1's flow-control negotiation. Pass the same
+ * set that was sent, before or when it goes out: the library's own predicate (`wt_session_flow_advertised`)
+ * reads it, so the caller does not re-decide what "advertised" means. A stream that never hears this keeps
+ * flow control off, and a flow-control capsule is then ignored. */
+void wt_capsule_stream_set_flow_advertised(wt_capsule_stream_t *stream,
+                                           const wt_http3_settings_t *local_settings);
+
+/* One piece of the PEER's SETTINGS frame, exactly as the frame sink is handed it. The payload has already been
+ * validated by the HTTP/3 control machine -- a duplicate or reserved identifier never reaches a sink -- and this
+ * reassembles it and records whether it advertised a section 5.1 flow-control setting, which is the PEER half
+ * above. `last` completes the frame; pieces before it are kept. */
+wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, const uint8_t *payload,
+                                               size_t length, int last, wt_http3_error_t *out_error);
+
 /* One delivery of bytes the driver routed off the CONNECT stream, with the stream's end on the last one.
  *
  * `observe` is called for every capsule the session does not own, and the context is the caller's -- pass
@@ -74,11 +100,18 @@ wt_status_t wt_capsule_stream_on_bytes(wt_capsule_stream_t *stream, const uint8_
 /* Apply the connection-level grants: MAX_DATA and both MAX_STREAMS. The context is the `wt_capsule_stream_t`, so
  * the usual call is `(wt_capsule_stream_apply_flow, stream)`.
  *
- * MAX_STREAM_DATA and the blocked signals are accepted and dropped: the first names a stream only the QUIC layer
- * holds, and the rest are requests rather than grants. RFC 9297 section 2 makes ignoring a capsule a receiver does
- * not understand correct, and a caller with no per-stream account has nothing to apply them to. A limit that does
- * not strictly increase is section 5.1's flow-control error, which this reports as WT_ERR_PROTOCOL and records as
- * a SESSION code in the stream. */
+ * Section 5.1 makes the session's flow control conditional on SETTINGS: it applies only when BOTH endpoints
+ * advertised one of the three initial limits, and an endpoint that did not negotiate it MUST IGNORE a
+ * flow-control capsule rather than refuse it -- a peer that sends one anyway has broken no rule this endpoint
+ * relies on. So every flow-control capsule, and the blocked signals, is dropped while
+ * `flow_advertised_local` or `flow_advertised_peer` is clear, which is the state before the SETTINGS exchange
+ * and the state a peer that advertises nothing leaves behind (WT-252).
+ *
+ * MAX_STREAM_DATA and the blocked signals are accepted and dropped once flow control IS negotiated: the first
+ * names a stream only the QUIC layer holds, and the rest are requests rather than grants. RFC 9297 section 2
+ * makes ignoring a capsule a receiver does not understand correct, and a caller with no per-stream account has
+ * nothing to apply them to. A limit that does not strictly increase is section 5.1's flow-control error, which
+ * this reports as WT_ERR_PROTOCOL and records as a SESSION code in the stream. */
 wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_capsule_t *capsule,
                                          wt_http3_error_t *out_error);
 

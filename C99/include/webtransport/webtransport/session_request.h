@@ -175,7 +175,13 @@ wt_status_t wt_webtransport_session_request_validate(
  * mandatory transport parameters follow in `wt_quic_transport_parameters_build`, and for the same reason: a
  * caller that had to remember each one eventually forgets one, and this call forgot
  * `SETTINGS_H3_DATAGRAM` (WT-145). A server sends `SETTINGS_ENABLE_CONNECT_PROTOCOL` too, because an extended
- * CONNECT is only legal once the peer has advertised RFC 9220 (section 3.1's list for servers). */
+ * CONNECT is only legal once the peer has advertised RFC 9220 (section 3.1's list for servers).
+ *
+ * It also advertises section 5.1's three INITIAL flow-control limits (data, bidirectional streams,
+ * unidirectional streams), which is what opens the session's own flow control: a caller that uses this call
+ * claims flow control and must put those exact limits in force with `wt_runtime_session_advertise` (the tools
+ * pass `100000, 4096, 8, 8`). An endpoint that wants no flow control must not use this call, and a peer that
+ * did not negotiate it ignores the flow-control capsules (WT-252). */
 wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is_server);
 
 #ifdef __cplusplus
