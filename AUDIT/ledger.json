@@ -2006,6 +2006,24 @@
       "commit": "d0bd273",
       "notes": "The third defect this release round found in its own tooling. Two of the three were found by running the artifact, not by reading the script -- which is the argument for the 'verify it yourself' step.",
       "blocked-reason": ""
+    },
+    {
+      "id": "F-repo-ops-26",
+      "severity": "S2",
+      "project": "repo-ops",
+      "file": "C99/CMakeLists.txt:426 (wt_stage_windows_runtime), .github/workflows/c99-ci.yml:276",
+      "title": "The Windows runtime staging rule copies the shared library once per target into one directory: a race that fails the native Windows build, which is why that CI leg is advisory",
+      "category": "bug",
+      "status": "AUDIT",
+      "host-used": "local",
+      "discovered-by": "Round 2 of the second audit pass: an audit of the CI/release machinery, checking why the native Windows leg is continue-on-error (WT-224)",
+      "evidence-before": "`wt_stage_windows_runtime(target)` attaches a POST_BUILD `cmake -E copy_if_different $<TARGET_FILE:webtransport_shared> $<TARGET_FILE_DIR:${target}>` to EVERY test and app target. With no RUNTIME_OUTPUT_DIRECTORY set, all apps land in `<build>/apps` and all tests in `<build>/tests`, so dozens of targets copy the SAME file into the SAME directory concurrently. Ninja schedules them in parallel and the loser fails: C99 CI run 35040723145 (sha 76221ac), job 'C99 / Windows (native, MSYS2 MINGW64)', step 'Configure and build' -> `Error copying file (if different) from \"D:/a/WebTransport/WebTransport/C99/out/windows-native/libwebtransport.dll\" to \"D:/a/WebTransport/WebTransport/C99/out/windows-native/apps\": Permission denied`, `ninja: build stopped: subcommand failed`. Same C99 sources PASSED the same job on c38ce58 (job conclusion success), so it is a race, not a code defect on that commit. That flake is the reason the leg carries `continue-on-error: true` (WT-224) and therefore cannot fail a pull request.",
+      "expected": "A Windows build stages the shared library exactly once per output directory, deterministically, so the same tree cannot fail a build for a reason that depends on scheduling.",
+      "fix-summary": "",
+      "evidence-after": "",
+      "commit": "",
+      "notes": "Found by auditing the CI/release machinery, which neither audit agent was given. CI otherwise came out clean in this pass: every action is pinned to a commit SHA, all three workflows declare least-privilege `permissions: contents: read` and a `concurrency` group with `cancel-in-progress`, the only two `continue-on-error` uses are this job and the optional mingw install (documented, falls through to the script's own `unsupported`), and the C99 job runs the full check family plus sanitizers, the package consumer and the Windows compile/link. Fixing this is the prerequisite for enforcing WT-224; WT-225 (no Debian 13 leg) is a separate, additive change.",
+      "blocked-reason": ""
     }
   ],
   "baseline": {

@@ -229,3 +229,33 @@ its own `.sha256`, both archives re-downloaded and re-checked, every Mach-O `arm
 running, and all three C99 tools running **from the unpacked archive** and reporting `1.4.0`.
 
 Ledger: **111 entries — 102 AUDIT (fixed + verified), 9 DONE, 0 open, 0 blocked.**
+
+## Round 2 — the second audit pass opens: baseline, two agents, and the CI machinery
+
+The objective for this pass is a full re-audit of both trees at 1.4.0, with issues fixed as they are found. State
+established before any finding was claimed:
+
+| | |
+| --- | --- |
+| Tree | `main` = `audit/2026-09-15` = `6be4315`, clean; Swift 6.4 / Xcode 27.0; `check-toolchain.sh 6.4 27.0` passes; the version lockstep agrees at 1.4.0 |
+| Swift baseline | `swift test` **360 tests, 0 failures, 0 warnings** |
+| C99 baseline | `build-and-test.sh --all` **97/97 in Debug, Release and ASan+UBSan**, 0 warnings |
+
+Two agents were given the two trees separately, each with a self-contained adversarial brief: audit against
+`draft-ietf-webtrans-http3-16` and the RFCs, verify every claim with a reproduction *it ran*, report at most 12
+findings by severity with file:line, spec basis, before-evidence and a suggested fix, mark unverified suspicions
+as SUSPECTED, do not re-report this ledger's fixed findings, and do not touch the tree (probes under `/tmp`,
+`git status` empty at the end). The source is frozen while they read it; fixes start when their reports land.
+
+Independently, the machinery neither agent was given was audited here — the CI workflows and the release path —
+and **`F-repo-ops-26`** came out of it: the Windows staging rule copies the shared library once per target into a
+shared directory, so the native Windows build fails on a race (`Permission denied` copying
+`libwebtransport.dll` into `apps/`), which is why that leg is `continue-on-error` and cannot fail a PR. Fixing
+that is the prerequisite for enforcing `WT-224`; `WT-225` (the plan's Debian 13 leg running on Ubuntu) is a
+separate additive change. Everything else in the CI audit came out clean (actions pinned to SHAs,
+least-privilege `permissions`, concurrency groups, the full check family, and the two `continue-on-error` uses
+both accounted for).
+
+Also closed in the tracker this round: **`WT-201`**, whose guard fix had already landed in `73daab4` and whose
+row still read `open` — verified by reading every interpreter guard and running one with an interpreter-free
+`PATH`, then removed from the C99 table and recorded in its history (wiki `5f22441`).
