@@ -1,0 +1,499 @@
+import Foundation
+import WebTransport
+import WebTransportHTTP3Core
+import WebTransportQUICCore
+import WebTransportTLSCore
+import WebTransportUDPApple
+
+// internal because the scenario catalogue and the runner that consults it are in
+// separate files
+internal func scenarioCatalog() -> [CLIConformanceScenario] {
+    [
+        scenario("Smoke", "demo", "async client/server API connect, datagram, and close") {
+            try await runClientServerAPIDemo()
+        },
+        scenario("Smoke", "library-smoke-matrix", "library smoke matrix passes close, rejection, backpressure, ordering, and multi-session") {
+            let results = WebTransportLibrarySmokeMatrix.runAll()
+            let failures = results.filter { !$0.passed }
+            try require(failures.isEmpty, "library smoke failures: \(failures)")
+        },
+        scenario("Session Establishment", "session-accept", "extended CONNECT accepts and selects a protocol") {
+            var pair = try makeReadyPair()
+            let request = try WebTransportSessionRequest(
+                authority: "example.com",
+                path: "/wt",
+                origin: "https://example.com",
+                availableProtocols: ["chat.v1", "chat.v2"]
+            )
+            let policy = try WebTransportServerSessionPolicy(
+                allowedAuthorities: ["example.com"],
+                allowedPaths: ["/wt"],
+                allowedOrigins: ["https://example.com"],
+                supportedProtocols: ["chat.v2"],
+                requireProtocolSelection: true
+            )
+            let sessionID = try establishSession(pair: &pair, streamID: 0, request: request, policy: policy)
+            try require(sessionID.rawValue == 0, "session ID derived from request stream ID")
+            try require(pair.client.session(forRequestStreamID: 0)?.selectedProtocol == "chat.v2", "client selected protocol")
+            try require(pair.server.session(forRequestStreamID: 0)?.selectedProtocol == "chat.v2", "server selected protocol")
+        },
+        scenario("Session Establishment", "session-reject-policy", "path, origin, and protocol policy rejections are deterministic") {
+            var pair = try makeReadyPair()
+            let pathDecision = try rejectSession(
+                pair: &pair,
+                streamID: 0,
+                request: try WebTransportSessionRequest(authority: "example.com", path: "/blocked"),
+                policy: try WebTransportServerSessionPolicy(allowedPaths: ["/wt"])
+            )
+            try require(pathDecision.session.state == .rejected(status: 405), "unsupported target rejected with 405")
+
+            pair = try makeReadyPair()
+            let originDecision = try rejectSession(
+                pair: &pair,
+                streamID: 0,
+                request: try WebTransportSessionRequest(authority: "example.com", path: "/wt", origin: "https://bad.example"),
+                policy: try WebTransportServerSessionPolicy(allowedOrigins: ["https://example.com"])
+            )
+            try require(originDecision.session.state == .rejected(status: 403), "bad origin rejected with 403")
+
+            pair = try makeReadyPair()
+            let protocolDecision = try rejectSession(
+                pair: &pair,
+                streamID: 0,
+                request: try WebTransportSessionRequest(authority: "example.com", path: "/wt", availableProtocols: ["chat.v1"]),
+                policy: try WebTransportServerSessionPolicy(supportedProtocols: ["chat.v2"], requireProtocolSelection: true)
+            )
+            try require(protocolDecision.session.state == .rejected(status: 400), "protocol mismatch rejected with 400")
+        },
+        scenario("Session Establishment", "session-invalid-id", "invalid WebTransport session IDs map to H3_ID_ERROR paths") {
+            try expectThrows { _ = try WebTransportSessionID.fromRequestStreamID(1) }
+            try expectThrows { _ = try WebTransportSessionID.fromRequestStreamID(2) }
+            let prefix = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 2)
+            try expectThrows {
+                _ = try WebTransportStreamSignaling.parsePrefix(prefix)
+            }
+        },
+        scenario("HTTP/3 Control", "settings-required", "HTTP/3 WebTransport settings requirements are enforced") {
+            let constants = WebTransportHTTP3DraftConstants.current
+            try HTTP3Settings.webTransportDraft16Defaults.validateWebTransportDraft16Requirements(peerRole: .server)
+            var missingDatagram = HTTP3Settings.webTransportDraft16Defaults
+            try missingDatagram.set(0, for: constants.settingsH3Datagram)
+            try expectThrows {
+                try missingDatagram.validateWebTransportDraft16Requirements(peerRole: .server)
+            }
+            var serverPeerSettings = HTTP3Settings.webTransportDraft16Defaults
+            try serverPeerSettings.set(0, for: constants.settingsEnableConnectProtocol)
+            try serverPeerSettings.validateWebTransportDraft16Requirements(peerRole: .client)
+        },
+        scenario("HTTP/3 Control", "settings-control-stream-errors", "control stream duplicate and request-frame errors are rejected") {
+            let connection = HTTP3ConnectionState(role: .client)
+            let control = try connection.localControlStreamBytes()
+            var peer = HTTP3ConnectionState(role: .server)
+            _ = try peer.receivePeerControlStream(control)
+            try expectThrows { _ = try peer.receivePeerControlStream(control) }
+            try expectThrows {
+                try peer.receiveControlFrame(try QPACK.headersFrame(fields: [HTTPFieldLine(name: ":status", value: "200")]))
+            }
+        },
+        scenario("HTTP/3 Control", "zero-rtt-settings", "remembered 0-RTT settings reject reduced WebTransport capacity") {
+            let constants = WebTransportHTTP3DraftConstants.current
+            var remembered = HTTP3Settings.webTransportDraft16Defaults
+            var current = HTTP3Settings.webTransportDraft16Defaults
+            try remembered.set(8, for: constants.settingsWTInitialMaxStreamsBidi)
+            try current.set(4, for: constants.settingsWTInitialMaxStreamsBidi)
+            try expectThrows {
+                try current.validateWebTransportZeroRTTCompatibility(remembered: remembered)
+            }
+        },
+        scenario("Headers and QPACK", "protocol-structured-fields", "WT protocol negotiation uses Structured Fields strings and lists") {
+            let encoded = try WebTransportProtocolNegotiation.encodeList(["chat.v1", "demo-v2"])
+            try require(try WebTransportProtocolNegotiation.decodeList(encoded) == ["chat.v1", "demo-v2"], "structured list round trip")
+            let item = WebTransportProtocolNegotiation.encodeItem("chat.v2")
+            try require(try WebTransportProtocolNegotiation.decodeItem(item + "; q=1") == "chat.v2", "structured item parameter ignored")
+            try expectThrows {
+                _ = try WebTransportProtocolNegotiation.decodeList("\"bad\\n\"")
+            }
+        },
+        scenario("Headers and QPACK", "headers-connect-round-trip", "CONNECT request and response HEADERS round-trip through QPACK") {
+            let request = try WebTransportSessionRequest(
+                authority: "example.com",
+                path: "/wt",
+                origin: "https://example.com",
+                availableProtocols: ["chat.v1"]
+            )
+            let frame = try QPACK.headersFrame(fields: request.headers())
+            let fields = try QPACK.decodeHeadersFrame(frame)
+            try WebTransportHTTP3Headers.validateConnectRequest(fields)
+            let response = try QPACK.headersFrame(fields: [
+                HTTPFieldLine(name: ":status", value: "200"),
+                HTTPFieldLine(name: WebTransportHeaderName.selectedProtocol, value: WebTransportProtocolNegotiation.encodeItem("chat.v1")),
+            ])
+            try WebTransportHTTP3Headers.validateSuccessfulResponse(try QPACK.decodeHeadersFrame(response))
+        },
+        scenario("Headers and QPACK", "qpack-static-literal-huffman", "QPACK static, literal, and Huffman field sections round-trip") {
+            let fields = try [
+                HTTPFieldLine(name: ":status", value: "200"),
+                HTTPFieldLine(name: "x-webtransport", value: "demo"),
+            ]
+            let plain = try QPACK.decodeFieldSection(QPACK.encodeFieldSection(fields))
+            try require(plain == fields, "plain QPACK round trip")
+            let huffman = try QPACK.decodeFieldSection(QPACK.encodeFieldSection(fields, huffman: true))
+            try require(huffman == fields, "Huffman QPACK round trip")
+        },
+        scenario("Headers and QPACK", "qpack-dynamic-base-postbase", "QPACK dynamic Base and post-Base references decode correctly") {
+            var table = try QPACKDynamicTable(capacity: 256)
+            let first = try HTTPFieldLine(name: "origin", value: "https://one.example")
+            let second = try HTTPFieldLine(name: "x-demo", value: "two")
+            let third = try HTTPFieldLine(name: "x-demo", value: "three")
+            try table.insert(first)
+            try table.insert(second)
+            try table.insert(third)
+            // Wrapped Required Insert Count per RFC 9204 section 4.5.1.1: a 256
+            // byte capacity holds eight entries, so three inserts encode as 4.
+            var fieldSection = Data([0x04, 0x81, 0x11, 0x00, 0x08])
+            fieldSection.append(Data("override".utf8))
+            let decoded = try QPACK.decodeFieldSection(fieldSection, dynamicTable: table)
+            try require(decoded == [third, HTTPFieldLine(name: "x-demo", value: "override")], "post-Base fields decoded")
+            try expectThrows {
+                _ = try QPACK.decodeFieldSection(Data([0x01, 0x81]), dynamicTable: table)
+            }
+        },
+        scenario("Headers and QPACK", "qpack-limits", "QPACK malformed input and decoder limits fail") {
+            try expectThrows { _ = try QPACK.decodeFieldSection(Data([0x01, 0x00])) }
+            let field = try HTTPFieldLine(name: "x-too-large", value: String(repeating: "x", count: 16))
+            let data = try QPACK.encodeFieldSection([field])
+            try expectThrows {
+                _ = try QPACK.decodeFieldSection(data, limits: QPACKDecoderLimits(maxFieldSectionBytes: 512, maxFieldLineBytes: 4, maxFieldLineCount: 4))
+            }
+        },
+        scenario("Datagrams", "datagram-round-trip", "session datagrams route by quarter stream ID and preserve payload") {
+            var pair = try makeReadyPair()
+            let sessionID = try establishDefaultSession(pair: &pair)
+            let frame = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("hello".utf8))
+            let received = try pair.server.receiveDatagramFrame(frame)
+            try require(received == sessionID, "datagram session routed")
+            try require(pair.server.popDatagramPayload(sessionID: sessionID) == Data("hello".utf8), "datagram payload preserved")
+            let parsed = try WebTransportDatagramSignaling.parse(
+                try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8)))
+            try require(parsed.quarterStreamID == 0, "quarter stream ID encoded")
+        },
+        scenario("Datagrams", "datagram-unknown-session", "unknown datagram session ID is rejected") {
+            var pair = try makeReadyPair()
+            try expectThrows {
+                _ = try pair.client.receiveDatagramFrame(
+                    .datagram(
+                        try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("orphan".utf8))
+                    ))
+            }
+        },
+        scenario("Datagrams", "datagram-buffering", "early datagrams buffer before accept and excess early datagrams drop") {
+            var pair = try makeReadyPair(maxBufferedDatagramsPerSession: 1)
+            _ = try pair.server.receiveDatagramFrame(
+                .datagram(
+                    try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("one".utf8))
+                ))
+            _ = try pair.server.receiveDatagramFrame(
+                .datagram(
+                    try WebTransportDatagramSignaling.serialize(sessionID: 0, payload: Data("two".utf8))
+                ))
+            let sessionID = try establishDefaultSession(pair: &pair)
+            try require(pair.server.popDatagramPayload(sessionID: sessionID) == Data("one".utf8), "first early datagram promoted")
+            try require(pair.server.popDatagramPayload(sessionID: sessionID) == nil, "excess early datagram dropped")
+        },
+        scenario("Datagrams", "datagram-after-close", "datagram send after close fails with session gone") {
+            var pair = try makeReadyPair()
+            let sessionID = try establishDefaultSession(pair: &pair)
+            _ = try pair.client.makeCloseSessionCapsule(sessionID: sessionID, applicationErrorCode: 0, message: "")
+            try expectThrows {
+                _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("late".utf8))
+            }
+        },
+        scenario("Streams", "stream-bidi-uni-round-trip", "bidirectional and unidirectional stream prefixes register by session") {
+            var pair = try makeReadyPair()
+            let sessionID = try establishDefaultSession(pair: &pair)
+            let bidiPrefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+            _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: bidiPrefix + Data("bidi".utf8))
+            try require(pair.server.popStreamPayload(streamID: 4) == Data("bidi".utf8), "bidi payload preserved")
+            let uniPrefix = try pair.client.openUnidirectionalStream(streamID: 2, sessionID: sessionID)
+            _ = try pair.server.acceptUnidirectionalStream(streamID: 2, firstBytes: uniPrefix + Data("uni".utf8))
+            try require(pair.server.popStreamPayload(streamID: 2) == Data("uni".utf8), "uni payload preserved")
+        },
+        scenario("Streams", "stream-buffering", "early streams buffer before accept and promote in order") {
+            var pair = try makeReadyPair()
+            let early = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0) + Data("early".utf8)
+            _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: early)
+            try require(pair.server.stream(for: 4) == nil, "early stream not registered before accept")
+            let sessionID = try establishDefaultSession(pair: &pair)
+            try require(pair.server.stream(for: 4) != nil, "early stream promoted")
+            try require(pair.server.popStreamPayload(streamID: 4) == Data("early".utf8), "early payload promoted")
+            try require(sessionID.rawValue == 0, "session ID expected")
+        },
+        scenario("Streams", "stream-buffer-overflow-reset", "excess buffered stream emits WT_BUFFERED_STREAM_REJECTED reset action") {
+            var pair = try makeReadyPair(maxBufferedStreamsPerSession: 0)
+            let early = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
+            let result = try pair.server.acceptBidirectionalStreamWithActions(streamID: 4, firstBytes: early)
+            try require(result.prefix == nil, "overflow stream rejected")
+            try require(
+                result.rejectionFrame
+                    == .resetStreamAt(
+                        id: 4,
+                        applicationErrorCode: WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError,
+                        finalSize: 0,
+                        reliableSize: 0
+                    ), "overflow stream reset action")
+        },
+        scenario("Streams", "stream-reset-stop-sending", "stream reset and stop-sending use mapped WebTransport app errors") {
+            var pair = try makeReadyPair()
+            let sessionID = try establishDefaultSession(pair: &pair)
+            let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+            _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
+            try require(
+                try pair.server.resetStream(streamID: 4, applicationErrorCode: 0x10)
+                    == .resetStreamAt(
+                        id: 4,
+                        applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x10),
+                        finalSize: 0,
+                        reliableSize: 0
+                    ), "RESET_STREAM_AT mapped")
+            try require(
+                try pair.server.stopSendingStream(streamID: 4, applicationErrorCode: 0x11)
+                    == .stopSending(
+                        id: 4,
+                        applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
+                    ), "STOP_SENDING mapped")
+        },
+        scenario("Close and Drain", "close-drain", "WT_DRAIN_SESSION and WT_CLOSE_SESSION drive state and cleanup") {
+            var pair = try makeReadyPair()
+            let sessionID = try establishDefaultSession(pair: &pair)
+            let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+            _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
+            let drain = try pair.client.makeDrainSessionCapsule(sessionID: sessionID)
+            try require(try pair.server.receiveFlowControlCapsule(sessionID: sessionID, bytes: drain) == .drainSession, "drain capsule received")
+            try require(pair.server.sessionsByID[sessionID]?.state == .draining, "server marked draining")
+            let close = try pair.client.makeCloseSessionCapsule(sessionID: sessionID, applicationErrorCode: 7, message: "done")
+            let received = try pair.server.receiveFlowControlCapsuleWithActions(sessionID: sessionID, bytes: close)
+            try require(received.capsule == .closeSession(applicationErrorCode: 7, message: "done"), "close capsule received")
+            try require(received.terminationActions?.streamResetFrames.count == 1, "close reset stream")
+            try require(pair.server.stream(for: 4) == nil, "close cleaned stream")
+        },
+        scenario("Close and Drain", "close-message-bounds", "WT_CLOSE_SESSION accepts 8192-byte UTF-8 and rejects larger messages") {
+            let max = WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes
+            _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: String(repeating: "x", count: max)))
+            try expectThrows {
+                _ = try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: String(repeating: "x", count: max + 1)))
+            }
+        },
+        scenario("Close and Drain", "connect-finish-close", "CONNECT stream FIN closes the session and gates follow-on work") {
+            var pair = try makeReadyPair()
+            let sessionID = try establishDefaultSession(pair: &pair)
+            _ = try pair.client.finishConnectStream(streamID: sessionID.rawValue)
+            try require(pair.client.sessionsByID[sessionID]?.state == .closed(applicationErrorCode: 0, message: ""), "FIN closed session")
+            try expectThrows { _ = try pair.client.openUnidirectionalStream(streamID: 2, sessionID: sessionID) }
+        },
+        scenario("Close and Drain", "connect-data-after-close", "CONNECT data after received close resets with H3_MESSAGE_ERROR") {
+            var pair = try makeReadyPair()
+            let sessionID = try establishDefaultSession(pair: &pair)
+            _ = try pair.server.receiveFlowControlCapsuleWithActions(
+                sessionID: sessionID,
+                bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: "closed"))
+            )
+            try require(
+                try pair.server.receiveConnectStreamData(streamID: sessionID.rawValue, data: Data("late".utf8))
+                    == .resetStream(
+                        id: sessionID.rawValue,
+                        applicationErrorCode: HTTP3ApplicationErrorCode.messageError.rawValue,
+                        finalSize: 0
+                    ), "late CONNECT data reset")
+        },
+        scenario("Flow Control", "flow-disabled-multi-session", "disabled WebTransport flow control rejects simultaneous sessions") {
+            var pair = try makeReadyPair()
+            _ = try establishDefaultSession(pair: &pair, streamID: 0)
+            try expectThrows {
+                _ = try pair.client.makeClientSessionRequest(
+                    streamID: 4,
+                    request: WebTransportSessionRequest(authority: "example.com", path: "/two")
+                )
+            }
+        },
+        scenario("Flow Control", "flow-explicit-zero", "explicit zero stream limit is enforced distinctly from disabled flow control") {
+            let constants = WebTransportHTTP3DraftConstants.current
+            var clientSettings = HTTP3Settings.webTransportDraft16Defaults
+            var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+            try clientSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
+            try serverSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
+            try clientSettings.set(1, for: constants.settingsWTInitialMaxData)
+            try serverSettings.set(1, for: constants.settingsWTInitialMaxData)
+            var pair = try makeReadyPair(clientSettings: clientSettings, serverSettings: serverSettings)
+            let sessionID = try establishDefaultSession(pair: &pair)
+            try require(pair.client.flowState(for: sessionID)?.isEnabled == true, "flow control enabled")
+            try require(pair.client.flowState(for: sessionID)?.maxStreamsBidi == 0, "explicit zero preserved")
+            try expectThrows { _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID) }
+        },
+        scenario("Flow Control", "flow-monotonic", "WT_MAX_DATA and WT_MAX_STREAMS updates are monotonic") {
+            var state = WebTransportFlowControlState(maxData: 4, maxStreamsBidi: 1, maxStreamsUni: 1)
+            try state.apply(.maxData(limit: 8))
+            try state.apply(.maxStreamsBidi(limit: 2))
+            try state.apply(.maxStreamsUni(limit: 2))
+            try expectThrows { try state.apply(.maxData(limit: 7)) }
+            try expectThrows { try state.apply(.maxStreamsBidi(limit: 1)) }
+            try expectThrows { try state.apply(.maxStreamsUni(limit: 1)) }
+            try expectThrows { try state.apply(.maxStreamsBidi(limit: WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue + 1)) }
+        },
+        scenario("Flow Control", "flow-receive-violation-close", "receive-side advertised-limit violation closes with WT_FLOW_CONTROL_ERROR") {
+            let constants = WebTransportHTTP3DraftConstants.current
+            var clientSettings = HTTP3Settings.webTransportDraft16Defaults
+            var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+            try clientSettings.set(4, for: constants.settingsWTInitialMaxData)
+            try serverSettings.set(4, for: constants.settingsWTInitialMaxData)
+            try clientSettings.set(1, for: constants.settingsWTInitialMaxStreamsBidi)
+            try serverSettings.set(1, for: constants.settingsWTInitialMaxStreamsBidi)
+            var pair = try makeReadyPair(clientSettings: clientSettings, serverSettings: serverSettings)
+            let sessionID = try establishDefaultSession(pair: &pair)
+            let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID)
+            _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
+            try expectThrows { try pair.server.receiveStreamPayload(streamID: 4, payload: Data(repeating: 1, count: 5)) }
+            try require(
+                pair.server.sessionsByID[sessionID]?.state
+                    == .closed(
+                        applicationErrorCode: UInt32(constants.wtFlowControlError),
+                        message: "WebTransport flow-control violation"
+                    ), "receive-side violation closed session")
+        },
+        scenario("Errors and Shutdown", "error-mapping", "WebTransport app error mapping is reversible and rejects reserved/out-of-range codes") {
+            let code = WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x1234)
+            try require(try WebTransportDraft16ErrorMapper.applicationErrorCode(forHTTPErrorCode: code) == 0x1234, "app error mapping reversible")
+            try expectThrows {
+                _ = try WebTransportDraft16ErrorMapper.applicationErrorCode(forHTTPErrorCode: 0x21)
+            }
+            try expectThrows {
+                _ = try WebTransportDraft16ErrorMapper.applicationErrorCode(
+                    forHTTPErrorCode: WebTransportHTTP3DraftConstants.current.wtApplicationErrorRange.upperBound + 1)
+            }
+        },
+        scenario("Errors and Shutdown", "goaway", "GOAWAY drains existing sessions and blocks late sessions") {
+            var pair = try makeReadyPair()
+            let sessionID = try establishDefaultSession(pair: &pair)
+            try pair.client.receiveControlFrame(try HTTP3Frame(type: HTTP3FrameType.goaway, varIntValue: 0))
+            try require(pair.client.sessionsByID[sessionID]?.state == .draining, "GOAWAY drains session")
+            try expectThrows {
+                _ = try pair.client.makeClientSessionRequest(
+                    streamID: 4,
+                    request: WebTransportSessionRequest(authority: "example.com", path: "/late")
+                )
+            }
+        },
+        scenario("Errors and Shutdown", "multi-session-isolation", "flow-control-enabled sessions isolate streams, datagrams, and close") {
+            var pair = try WebTransportLibrarySmokePair.connectedWithFlowControl()
+            let first = try pair.establishSession(streamID: 0, request: WebTransportSessionRequest(authority: "example.com", path: "/one"))
+            let second = try pair.establishSession(streamID: 4, request: WebTransportSessionRequest(authority: "example.com", path: "/two"))
+            _ = try pair.server.manager.receiveDatagramFrame(try pair.client.manager.makeDatagramFrame(sessionID: first, payload: Data("one".utf8)))
+            _ = try pair.server.manager.receiveDatagramFrame(try pair.client.manager.makeDatagramFrame(sessionID: second, payload: Data("two".utf8)))
+            try require(pair.server.manager.popDatagramPayload(sessionID: first) == Data("one".utf8), "first datagram isolated")
+            try require(pair.server.manager.popDatagramPayload(sessionID: second) == Data("two".utf8), "second datagram isolated")
+            let close = try pair.client.manager.makeCloseSessionCapsule(sessionID: first, applicationErrorCode: 1, message: "done")
+            _ = try pair.server.manager.receiveFlowControlCapsuleWithActions(sessionID: first, bytes: close)
+            try require(pair.server.manager.sessionsByID[first]?.state == .closed(applicationErrorCode: 1, message: "done"), "first closed")
+            try require(pair.server.manager.sessionsByID[second]?.state == .accepted, "second remains accepted")
+        },
+        scenario("Interop Matrices", "interop-connect-matrix", "CONNECT interop accepts valid peers and rejects malformed or policy-invalid peers") {
+            try runConnectInteropMatrix()
+        },
+        scenario("Interop Matrices", "interop-stream-matrix", "stream interop covers bidirectional/unidirectional success and invalid stream inputs") {
+            try runStreamInteropMatrix()
+        },
+        scenario("Interop Matrices", "interop-datagram-matrix", "datagram interop covers routed payloads and invalid session, size, and prefix errors") {
+            try runDatagramInteropMatrix()
+        },
+        scenario("Interop Matrices", "interop-goaway-close-drain-matrix", "GOAWAY, drain, and close interop gates late peer activity") {
+            try runGoawayCloseDrainInteropMatrix()
+        },
+        scenario("Interop Matrices", "interop-malformed-flow-matrix", "malformed input and flow-control interop close or reject with deterministic errors") {
+            try runMalformedFlowInteropMatrix()
+        },
+        scenario("Security", "security-prompt-free-negatives", "wrong ALPN, bad origin, bad settings, and trust failure are deterministic") {
+            try expectThrows { try WebTransportALPNPolicy.validateNegotiatedProtocol("h2") }
+            var pair = try makeReadyPair()
+            let decision = try rejectSession(
+                pair: &pair,
+                streamID: 0,
+                request: WebTransportSessionRequest(authority: "example.com", path: "/wt", origin: "https://bad.example"),
+                policy: WebTransportServerSessionPolicy(allowedOrigins: ["https://example.com"])
+            )
+            try require(decision.rejectionError?.kind == .requirementsNotMet, "bad origin maps to requirements not met")
+            var badSettings = HTTP3Settings.webTransportDraft16Defaults
+            try badSettings.set(0, for: WebTransportHTTP3DraftConstants.current.settingsWTEnabled)
+            try expectThrows { try badSettings.validateWebTransportDraft16Requirements(peerRole: .server) }
+            let wrongPin = Data(repeating: 0xaa, count: TLS13KeySchedule.sha256Length)
+            let policy = try TLSPinnedCertificateTrustPolicy(allowedLeafCertificateSHA256Fingerprints: [wrongPin])
+            try expectThrows { try policy.evaluate(certificateChainDER: [Data("not a certificate".utf8)]) }
+        },
+        scenario(
+            "Release",
+            "release-products",
+            "Package.swift exposes production CLI products and not spike products",
+            repositoryFiles: ["Swift/Package.swift", "Package.swift"],
+            // A `Package.swift` is not by itself evidence of *this* repository. The marker
+            // is a target only this package declares, and deliberately not one of the
+            // product names below, so requiring it cannot make the assertions vacuous.
+            repositoryMarker: "name: \"WebTransportNetworkRuntime\""
+        ) {
+            let packageURL = URL(fileURLWithPath: "Swift/Package.swift")
+            let fallbackURL = URL(fileURLWithPath: "Package.swift")
+            let url = FileManager.default.fileExists(atPath: packageURL.path) ? packageURL : fallbackURL
+            let text = try String(contentsOf: url, encoding: .utf8)
+            try require(text.contains("name: \"WebTransportClient\""), "client product present")
+            try require(text.contains("name: \"WebTransportServer\""), "server product present")
+            try require(!text.contains(".executable(\n            name: \"AppleQUICSpike\""), "AppleQUICSpike not a product")
+            try require(!text.contains(".executable(\n            name: \"NativeQUICCoreSpike\""), "NativeQUICCoreSpike not a product")
+        },
+        scenario(
+            "Release",
+            "release-script-stale-spikes",
+            "release script rejects stale spike binaries",
+            repositoryFiles: [
+                "Swift/build-release-apple-silicon.sh", "build-release-apple-silicon.sh",
+            ]
+        ) {
+            let scriptURL = URL(fileURLWithPath: "Swift/build-release-apple-silicon.sh")
+            let fallbackURL = URL(fileURLWithPath: "build-release-apple-silicon.sh")
+            let url = FileManager.default.fileExists(atPath: scriptURL.path) ? scriptURL : fallbackURL
+            let text = try String(contentsOf: url, encoding: .utf8)
+            try require(text.contains("rm -rf .build/arm64-apple-macosx/release .build/release"), "release output cleaned")
+            // The rejection has to be able to fire, so the scenario requires the resolved-plan
+            // query that makes it observable, not just a message string (F-repo-ops-17).
+            try require(
+                text.contains("swift package describe --type json")
+                    && text.contains("Unexpected spike target in the package build plan"),
+                "stale spike rejection present"
+            )
+            try require(text.contains("Release artifact is not reproducible"), "reproducibility failure path present")
+            try require(text.contains("SHA256SUMS"), "checksum manifest is emitted")
+        },
+    ]
+}
+
+// internal because the scenario catalogue and the runner that consults it are in
+// separate files
+internal func scenario(
+    _ group: String,
+    _ name: String,
+    _ description: String,
+    repositoryFiles: [String] = [],
+    repositoryMarker: String? = nil,
+    _ run: @escaping @Sendable () async throws -> Void
+) -> CLIConformanceScenario {
+    CLIConformanceScenario(
+        group: group,
+        name: name,
+        description: description,
+        repositoryFiles: repositoryFiles,
+        repositoryMarker: repositoryMarker,
+        run: run
+    )
+}
+
+/// Why a scenario cannot be attempted in this working directory, or nil when it can.
+///
+/// The reason is data rather than a thrown error: a scenario that needs the repository and
+/// has none is skipped, not failed, and the reason is what the report carries so a reader
+/// knows the run was incomplete rather than broken (WT-186).
