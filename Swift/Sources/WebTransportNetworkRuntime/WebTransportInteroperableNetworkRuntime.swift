@@ -158,7 +158,7 @@ public struct WebTransportQUICClient: Sendable {
                 }
             } catch {
                 await inboundRegistration.markEntered()
-                await inboundStreams.fail(error)
+                await inboundStreams.fail(error, role: "client")
             }
         }
         await inboundRegistration.waitUntilEntered()
@@ -1483,7 +1483,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
     public let usesDevelopmentCertificate: Bool
 
     private let listener: NetworkListener<QUIC>
-    private let acceptedConnections: InteroperableQUICConnectionQueue
+    private let acceptedConnections: InteroperableQUICConnectionQueue<InteroperableQUICAcceptedConnection>
     private let listenerTask: Task<Void, Never>
     private let authority: String
     private let path: String
@@ -1598,7 +1598,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         // whole life rather than its concurrency; `admitConnection()` applies the
         // policy's ceiling instead.
         listener = try NetworkListener<QUIC>(using: parameters)
-        acceptedConnections = InteroperableQUICConnectionQueue()
+        acceptedConnections = InteroperableQUICConnectionQueue(release: { $0.inboundTask.cancel() })
         localEndpointStorage = Mutex(endpoint)
         self.authority = authority
         self.path = path
@@ -1663,7 +1663,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                             }
                         } catch {
                             await inboundRegistration.markEntered()
-                            await inboundStreams.fail(error)
+                            await inboundStreams.fail(error, role: "server")
                         }
                     }
                     await inboundRegistration.waitUntilEntered()
@@ -1678,7 +1678,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
                     )
                 }
             } catch {
-                await acceptedConnections.fail(error)
+                await acceptedConnections.fail(error, role: "server")
             }
         }
     }
@@ -2345,28 +2345,82 @@ enum InteroperableQUICHelpers {
     /// the caller gets a case it can recognise and act on, and the framework's error is
     /// kept for diagnosis.
     ///
-    /// It does not make raw framework errors unreachable everywhere — an inbound stream
-    /// or a queued connection that fails still surfaces the framework's error through
-    /// `InteroperableQUICInboundStreamCollector.next` and
-    /// `InteroperableQUICConnectionQueue.dequeue`. Establishment is the one path on which
-    /// the condition is recognisable enough to be worth naming.
-    ///
-    /// **A POSIX condition is recognised from the error itself, not from its `NSError`
-    /// domain.** Measured rather than assumed: `NWError.posix(.ENETDOWN)` bridges to
-    /// `NSError` under the domain `"Network.NWError"` — *not* `NSPOSIXErrorDomain` — so a
-    /// predicate reading the bridged domain would never match a real failure. That is the
-    /// trap `isTransientNotConnected` below fell into, and it is why this unwraps the
-    /// `NWError` case and reports the condition under the POSIX domain it actually is.
+    /// The queues that serve an accepted connection name their failures the same way, but
+    /// as ``connectionTransportFailed(role:domain:code:)``: they are also used after
+    /// establishment, so calling theirs an establishment failure would be false. See
+    /// ``connectionQueueFailure(role:error:)``.
     static func establishmentFailure(role: String, error: Error) -> WebTransportNetworkRuntimeError {
-        if let networkError = error as? NWError, case .posix(let posixCode) = networkError {
-            return .connectionEstablishmentFailed(
-                role: role,
-                domain: NSPOSIXErrorDomain,
-                code: Int(posixCode.rawValue)
-            )
+        let components =
+            frameworkFailureComponents(error)
+            ?? {
+                let nsError = error as NSError
+                return (domain: nsError.domain, code: nsError.code)
+            }()
+        return .connectionEstablishmentFailed(
+            role: role,
+            domain: components.domain,
+            code: components.code
+        )
+    }
+
+    /// The framework's own domain and code for `error`, or `nil` when the error is not a
+    /// framework transport error.
+    ///
+    /// **A POSIX condition is recognised from the error itself, not from its bridged
+    /// `NSError` domain.** Measured rather than assumed: `NWError.posix(.ENETDOWN)`
+    /// bridges under `"Network.NWError"` — *not* `NSPOSIXErrorDomain` — so a predicate that
+    /// read the bridged domain would never match a real failure. The `NWError` case is
+    /// unwrapped and reported under the POSIX domain the condition actually is; an
+    /// `NWError` of any other kind keeps the framework's domain and code.
+    ///
+    /// A framework error can also arrive already flattened into `NSError`, because the
+    /// runtime does not control which layer hands it on, so the two framework domains are
+    /// recognised by name as well as by type. Everything else — the runtime's own named
+    /// errors, `CancellationError`, a caller's error — returns `nil`, which is what keeps
+    /// the translation below from rewrapping a cause the caller can already act on.
+    static func frameworkFailureComponents(_ error: Error) -> (domain: String, code: Int)? {
+        if let networkError = error as? NWError {
+            if case .posix(let posixCode) = networkError {
+                return (NSPOSIXErrorDomain, Int(posixCode.rawValue))
+            }
+            let nsError = networkError as NSError
+            return (nsError.domain, nsError.code)
+        }
+        if let posix = error as? POSIXError {
+            return (NSPOSIXErrorDomain, Int(posix.code.rawValue))
         }
         let nsError = error as NSError
-        return .connectionEstablishmentFailed(role: role, domain: nsError.domain, code: nsError.code)
+        guard nsError.domain == NSPOSIXErrorDomain || nsError.domain == "Network.NWError" else {
+            return nil
+        }
+        return (nsError.domain, nsError.code)
+    }
+
+    /// Names a failure a connection queue is about to deliver (WT-197).
+    ///
+    /// `InteroperableQUICConnectionQueue.dequeue` and
+    /// `InteroperableQUICInboundStreamCollector.next` are used after establishment as well
+    /// as during it: the connection queue serves every session a listener accepts, and the
+    /// inbound-stream collector only fails once the connection is carrying streams. Naming
+    /// their failures ``connectionEstablishmentFailed(role:domain:code:)`` would be false,
+    /// and it would make ``WebTransportNetworkRuntimeError/isTransientEstablishmentFailure``
+    /// retry a session that may already have carried data. They are named
+    /// ``connectionTransportFailed(role:domain:code:)`` instead — "the transport failed
+    /// while the runtime was using the connection" is true of both sites.
+    ///
+    /// The translation runs where the queue records the failure, not only where it is
+    /// thrown. `fail` resumes parked waiters directly as well as storing the error for
+    /// later `dequeue`/`next` calls, so translating in one place there is what keeps a
+    /// parked waiter and a later caller from seeing two different errors.
+    static func connectionQueueFailure(role: String, error: Error) -> Error {
+        guard let components = frameworkFailureComponents(error) else {
+            return error
+        }
+        return WebTransportNetworkRuntimeError.connectionTransportFailed(
+            role: role,
+            domain: components.domain,
+            code: components.code
+        )
     }
 
     static func waitForReady(
@@ -2877,7 +2931,15 @@ private struct InteroperableQUICAcceptedConnection: Sendable {
     let lease: InteroperableQUICConnectionLease
 }
 
-private actor InteroperableQUICConnectionQueue {
+/// Queues accepted connections for whoever accepts them.
+///
+/// Generic over the element purely so the delivery and failure semantics can be tested
+/// without a live QUIC connection, mirroring ``InteroperableQUICStreamQueue``; the runtime
+/// only ever uses the `InteroperableQUICAcceptedConnection` specialization. `release` is
+/// the element's teardown, because the runtime's element carries an inbound-stream handler
+/// task that is parked and holds the connection alive, so dropping the reference alone
+/// would not end it.
+actor InteroperableQUICConnectionQueue<Element: Sendable> {
     /// A parked accept, tagged so its own caller can take it back out.
     ///
     /// `acceptSession` bounds the wait with a timeout, and a continuation that is only
@@ -2886,53 +2948,60 @@ private actor InteroperableQUICConnectionQueue {
     /// accept behind it never sees a connection.
     private struct Waiter {
         let id: UInt64
-        let continuation: CheckedContinuation<InteroperableQUICAcceptedConnection, Error>
+        let continuation: CheckedContinuation<Element, Error>
     }
 
-    private var queue: [InteroperableQUICAcceptedConnection] = []
+    private var queue: [Element] = []
     private var waiters: [Waiter] = []
     private var nextWaiterID: UInt64 = 0
     private var failure: Error?
+
+    /// Releases an element this queue will never deliver.
+    private let release: @Sendable (Element) -> Void
+
+    init(release: @escaping @Sendable (Element) -> Void = { _ in }) {
+        self.release = release
+    }
 
     /// Delivered to parked accepts when the listener stops accepting.
     static var listenerStopped: WebTransportNetworkRuntimeError {
         .invalidTransport("listener is shutting down")
     }
 
-    func enqueue(_ accepted: InteroperableQUICAcceptedConnection) {
+    func enqueue(_ element: Element) {
         guard failure == nil else {
             // The listener has already failed, so nothing will ever serve this
             // connection. Its handler task would otherwise run for the lifetime
             // of the process.
-            accepted.inboundTask.cancel()
+            release(element)
             return
         }
         if let waiter = waiters.first {
             waiters.removeFirst()
-            waiter.continuation.resume(returning: accepted)
+            waiter.continuation.resume(returning: element)
         } else {
-            queue.append(accepted)
+            queue.append(element)
         }
     }
 
-    func dequeue() async throws -> InteroperableQUICAcceptedConnection {
+    func dequeue() async throws -> Element {
         if let failure {
             throw failure
         }
-        if let accepted = queue.first {
+        if let element = queue.first {
             queue.removeFirst()
-            return try releaseIfAbandoned(accepted)
+            return try releaseIfAbandoned(element)
         }
         let id = nextWaiterID
         nextWaiterID += 1
-        let accepted = try await withTaskCancellationHandler {
+        let element = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 waiters.append(Waiter(id: id, continuation: continuation))
             }
         } onCancel: {
             Task { await self.removeWaiter(id) }
         }
-        return try releaseIfAbandoned(accepted)
+        return try releaseIfAbandoned(element)
     }
 
     /// Hands a connection back if the task waiting for it has already been abandoned.
@@ -2944,14 +3013,12 @@ private actor InteroperableQUICConnectionQueue {
     /// connection's handler task would keep the connection and its socket alive with
     /// nothing left to serve them. The check has to happen here, in the task that
     /// observes the cancellation — the caller's task is never cancelled.
-    private func releaseIfAbandoned(
-        _ accepted: InteroperableQUICAcceptedConnection
-    ) throws -> InteroperableQUICAcceptedConnection {
+    private func releaseIfAbandoned(_ element: Element) throws -> Element {
         if Task.isCancelled {
-            accepted.inboundTask.cancel()
+            release(element)
             throw CancellationError()
         }
-        return accepted
+        return element
     }
 
     /// Detaches a waiter whose caller has stopped waiting, and lets it unwind.
@@ -2976,12 +3043,18 @@ private actor InteroperableQUICConnectionQueue {
         }
     }
 
-    func fail(_ error: Error) {
-        failure = error
+    /// Fails every waiter and every later `dequeue` with the same error.
+    ///
+    /// The error is translated here, once, so a parked waiter resumed directly and a
+    /// caller that reaches `dequeue` later both see the named error rather than a bare
+    /// framework one (WT-197); see ``InteroperableQUICHelpers/connectionQueueFailure(role:error:)``.
+    func fail(_ error: Error, role: String) {
+        let translated = InteroperableQUICHelpers.connectionQueueFailure(role: role, error: error)
+        failure = translated
         let waiters = self.waiters
         self.waiters.removeAll()
         for waiter in waiters {
-            waiter.continuation.resume(throwing: error)
+            waiter.continuation.resume(throwing: translated)
         }
         cancelQueued()
     }
@@ -2993,8 +3066,8 @@ private actor InteroperableQUICConnectionQueue {
     func cancelQueued() {
         let abandoned = queue
         queue.removeAll()
-        for accepted in abandoned {
-            accepted.inboundTask.cancel()
+        for element in abandoned {
+            release(element)
         }
         // Parked accepts have to be woken as well. Shutdown previously left them
         // blocking for their whole timeout, and each one that then expired became
@@ -3357,8 +3430,15 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         return try await waitFor(direction: direction, id: id)
     }
 
-    func fail(_ error: Error) {
-        failure = error
+    /// Fails every waiter and every later `next` with the same error.
+    ///
+    /// The error is translated here, once, so a parked waiter resumed directly and a
+    /// caller that reaches `next` (or `waitFor`'s own failure re-check) later both see the
+    /// named error rather than a bare framework one (WT-197); see
+    /// ``InteroperableQUICHelpers/connectionQueueFailure(role:error:)``.
+    func fail(_ error: Error, role: String) {
+        let translated = InteroperableQUICHelpers.connectionQueueFailure(role: role, error: error)
+        failure = translated
         let waitingByDirection = waiting
         waiting.removeAll()
         // A failed collector can never deliver what it still holds: every later
@@ -3368,7 +3448,7 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         queued.removeAll()
         for (_, waiters) in waitingByDirection {
             for waiter in waiters {
-                waiter.continuation.resume(throwing: error)
+                waiter.continuation.resume(throwing: translated)
             }
         }
     }

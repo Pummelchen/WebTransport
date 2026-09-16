@@ -199,6 +199,8 @@ public enum WebTransportErrorSurface {
             switch runtimeError {
             case .connectionEstablishmentFailed(let role, _, _):
                 return "WebTransport \(role) connection could not be established"
+            case .connectionTransportFailed(let role, _, _):
+                return "WebTransport \(role) connection failed after it was taken on"
             case .peerControlStreamNotDelivered(let role, _):
                 return "WebTransport \(role) did not receive the peer's HTTP/3 control stream"
             case .peerClosedStreamWithoutData:

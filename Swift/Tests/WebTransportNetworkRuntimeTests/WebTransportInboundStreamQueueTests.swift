@@ -96,6 +96,12 @@ struct WebTransportInboundStreamQueueTests {
         #expect(try await queue.next(direction: 0, timeoutMilliseconds: 5_000) == 1)
     }
 
+    /// A failure the runtime did not receive from the framework passes through untouched.
+    ///
+    /// WT-197 translates a framework error at the delivery boundary into a named runtime
+    /// error. That translation must not be a blanket rewrap: a caller's own error still
+    /// has to arrive as itself, so this pins the pass-through that the translation's
+    /// `guard` implements.
     @Test
     func failureIsReportedToWaitersAndToLaterCallers() async throws {
         struct QueueFailure: Error {}
@@ -105,7 +111,7 @@ struct WebTransportInboundStreamQueueTests {
             try await queue.next(direction: Self.direction, timeoutMilliseconds: 5_000)
         }
         try await Task.sleep(for: .milliseconds(50))
-        await queue.fail(QueueFailure())
+        await queue.fail(QueueFailure(), role: "client")
 
         let waitingResult = await waiting.result
         #expect(throws: QueueFailure.self) {

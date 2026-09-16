@@ -47,6 +47,22 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
     /// `"Network.NWError"`, so a predicate reading the bridged domain would never match a
     /// real failure.
     case connectionEstablishmentFailed(role: String, domain: String, code: Int)
+    /// The transport failed on a connection the runtime had already taken on.
+    ///
+    /// Distinct from ``connectionEstablishmentFailed(role:domain:code:)`` because the two
+    /// queues that raise it are used after establishment as well as during it:
+    /// `InteroperableQUICConnectionQueue` serves every session a listener accepts, and
+    /// `InteroperableQUICInboundStreamCollector` only fails once the connection is carrying
+    /// streams. Calling a failure at either point an *establishment* failure would be false,
+    /// and it would make ``isTransientEstablishmentFailure`` retry a session that may
+    /// already have exchanged data. This case claims only what is true of both sites — the
+    /// transport failed while the runtime was using the connection — and keeps the
+    /// framework's domain and code for diagnosis.
+    ///
+    /// It is deliberately outside ``isTransientEstablishmentFailure``: a caller retries
+    /// that class of condition by opening a fresh connection, and a session that has
+    /// already carried data is not one to silently re-drive.
+    case connectionTransportFailed(role: String, domain: String, code: Int)
 
     /// The transport conditions that mean the local stack could not carry a connection
     /// at that instant, as opposed to the peer refusing or resetting one.
@@ -114,6 +130,9 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
             return "the transport failed to establish the \(role) connection "
                 + "(\(domain) \(code)); the connection was never established, so opening "
                 + "a new one is the remedy"
+        case .connectionTransportFailed(let role, let domain, let code):
+            return "the transport failed on the \(role) connection after the runtime had "
+                + "taken it on (\(domain) \(code)); the connection is no longer usable"
         }
     }
 }
