@@ -259,6 +259,28 @@ static size_t read_varint(const uint8_t *bytes, size_t length, uint64_t *out) {
   return length - wt_cursor_remaining(&c);
 }
 
+/* Deliver one piece of a frame's payload. The peer's control stream is the library's to validate
+ * before the application sees anything -- RFC 9114 sections 6.2.1 and 7.2.4 make a first frame
+ * that is not SETTINGS and a second SETTINGS connection errors, and a SETTINGS payload the
+ * SETTINGS parser refuses is H3_SETTINGS_ERROR -- so the control machine runs first and a frame
+ * it refuses is never reported to the sink. Every other stream's frames go straight to the sink,
+ * whose bound is the caller's policy. */
+static wt_status_t deliver_frame_payload(wt_http3_driver_t *driver, uint64_t stream_id,
+                                         int is_control, uint64_t type, const uint8_t *payload,
+                                         size_t length, int last,
+                                         const wt_http3_driver_sink_t *sink,
+                                         wt_http3_error_t *out_error) {
+  if (is_control) {
+    wt_status_t status = wt_http3_endpoint_on_control_payload(driver->endpoint, type, payload,
+                                                              length, last, out_error);
+    if (status != WT_OK) return status;
+  }
+  if (sink != NULL && sink->on_frame_payload != NULL) {
+    return sink->on_frame_payload(sink->context, stream_id, type, payload, length, last);
+  }
+  return WT_OK;
+}
+
 wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t stream_id,
                                             const uint8_t *data, size_t length, int fin,
                                             uint64_t max_frame_bytes,
@@ -266,6 +288,7 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
                                             wt_http3_error_t *out_error) {
   wt_http3_driver_frame_state_t *state;
   size_t position = 0U;
+  int is_control;
 
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
   if (driver == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -295,6 +318,14 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
     state->in_frame = 0;
     driver->frame_count++;
   }
+
+  /* Whether this stream is the peer's control stream. The endpoint records the kind when the
+   * 0x00 type prefix is classified, and the library -- not the caller's sink -- owns the rules
+   * that go with it (RFC 9114 section 6.2.1), including the SETTINGS payload RFC 9114 section
+   * 7.2.4 says a receiver may refuse. A stream that was never classified is a caller's scratch
+   * stream: the framing is still done, and nothing is validated on its behalf. */
+  is_control = wt_http3_endpoint_stream_kind(driver->endpoint, stream_id) ==
+               WT_HTTP3_ENDPOINT_STREAM_CONTROL;
 
   while (position < length) {
     if (wt_http3_driver_is_capsule_stream(driver, stream_id)) {
@@ -335,6 +366,18 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
            * a non-zero header_length as "payload bytes arrived with the header". A copy loop
            * sized by the (always zero) remainder was here and is gone. */
           state->header_length = 0U;
+          if (is_control) {
+            /* RFC 9114 section 6.2.1's frame rules (SETTINGS first and only once, no DATA or
+             * HEADERS there) run once per frame, here, before any payload is delivered: a frame
+             * the control machine refuses must not reach the sink, and accepting this one is
+             * also what arms the SETTINGS reassembly its payload will be fed to. */
+            wt_status_t control_status =
+                wt_http3_endpoint_on_control_frame(driver->endpoint, type, out_error);
+            if (control_status != WT_OK) {
+              state->in_frame = 0;
+              return control_status;
+            }
+          }
           break;
         }
       }
@@ -352,13 +395,12 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
         /* Bytes that arrived with the header are the payload's start. */
         size_t from_header = state->header_length;
         if ((uint64_t)from_header >= remaining) from_header = (size_t)remaining;
-        if (sink != NULL && sink->on_frame_payload != NULL) {
-          last = ((uint64_t)from_header == remaining) ? 1 : 0;
-          {
-            wt_status_t status = sink->on_frame_payload(sink->context, stream_id, state->type,
-                                                       state->header, from_header, last);
-            if (status != WT_OK) return status;
-          }
+        last = ((uint64_t)from_header == remaining) ? 1 : 0;
+        {
+          wt_status_t status = deliver_frame_payload(driver, stream_id, is_control, state->type,
+                                                     state->header, from_header, last, sink,
+                                                     out_error);
+          if (status != WT_OK) return status;
         }
         state->payload_received += (uint64_t)from_header;
         state->header_length = 0U;
@@ -375,22 +417,21 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
 
       if ((uint64_t)take > remaining) take = (size_t)remaining;
       if (take > 0U) {
-        if (sink != NULL && sink->on_frame_payload != NULL) {
-          last = ((uint64_t)take == remaining) ? 1 : 0;
-          {
-            wt_status_t status = sink->on_frame_payload(sink->context, stream_id, state->type,
-                                                       data + position, take, last);
-            if (status != WT_OK) return status;
-          }
+        last = ((uint64_t)take == remaining) ? 1 : 0;
+        {
+          wt_status_t status = deliver_frame_payload(driver, stream_id, is_control, state->type,
+                                                     data + position, take, last, sink, out_error);
+          if (status != WT_OK) return status;
         }
         state->payload_received += (uint64_t)take;
         position += take;
       }
       if (state->payload_received == state->payload_length) {
-        if (state->payload_length == 0U && sink != NULL && sink->on_frame_payload != NULL) {
-          /* An empty frame is still a frame: report it once, with nothing in it. */
-          wt_status_t status = sink->on_frame_payload(sink->context, stream_id, state->type, NULL,
-                                                      0U, 1);
+        if (state->payload_length == 0U) {
+          /* An empty frame is still a frame: report it once, with nothing in it -- and an empty
+           * SETTINGS is a legal SETTINGS with no parameters, so the control machine sees it too. */
+          wt_status_t status = deliver_frame_payload(driver, stream_id, is_control, state->type,
+                                                     NULL, 0U, 1, sink, out_error);
           if (status != WT_OK) return status;
         }
         /* Cleared BEFORE the settle, for the reason given at the other completion point above: the settle

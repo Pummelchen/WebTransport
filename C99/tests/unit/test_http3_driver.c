@@ -26,6 +26,7 @@ int main(void) {
   test_frame_boundaries_on_a_stream();
   test_settling_a_capsule_stream_leaves_the_other_streams_framing();
   test_a_connection_frame_is_routed();
+  test_a_duplicate_settings_identifier_is_refused();
   test_the_outbound_half_sends_what_it_should();
   test_the_quic_transport_forwards();
   test_the_bidi_classifier();

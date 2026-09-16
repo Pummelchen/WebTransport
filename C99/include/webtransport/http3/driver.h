@@ -318,6 +318,13 @@ typedef struct wt_http3_driver_sink {
 /* Bytes arriving on a stream that carries HTTP/3 frames (the control stream, the QPACK
  * streams, a request stream). `fin` says the peer ended the stream here.
  *
+ * On the PEER'S CONTROL STREAM the library validates as well as delivers: the frame's type goes
+ * through the control machine when its header completes, and a SETTINGS payload is reassembled
+ * there and handed to the SETTINGS parser, so a payload the parser refuses -- a duplicate
+ * identifier (RFC 9114 section 7.2.4), a reserved identifier, a malformed parameter -- is a
+ * refusal and never reaches the sink. That is the one stream whose frames are not the caller's
+ * to judge; the sink's `on_frame_payload` still sees them, after the library has accepted them.
+ *
  * WT_ERR_TRUNCATED means the stream ended in the middle of a frame: an incomplete frame on a
  * stream is not malformed until there is nothing more coming, which is what `fin` decides. */
 wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t stream_id,

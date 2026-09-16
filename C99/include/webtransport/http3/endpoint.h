@@ -153,6 +153,15 @@ wt_status_t wt_http3_endpoint_write_headers(wt_http3_endpoint_t *endpoint,
 wt_status_t wt_http3_endpoint_on_control_frame(wt_http3_endpoint_t *endpoint, uint64_t type,
                                                wt_http3_error_t *out_error);
 
+/* One piece of a frame's payload on the peer's control stream: the endpoint forwards it to the
+ * control machine, which reassembles a SETTINGS payload and validates the completed frame with
+ * the SETTINGS parser (RFC 9114 section 7.2.4). A duplicate identifier, a reserved identifier,
+ * an out-of-range boolean or a truncated parameter is H3_SETTINGS_ERROR; a payload past the
+ * machine's bound is H3_EXCESSIVE_LOAD. */
+wt_status_t wt_http3_endpoint_on_control_payload(wt_http3_endpoint_t *endpoint, uint64_t type,
+                                                 const uint8_t *payload, size_t length, int last,
+                                                 wt_http3_error_t *out_error);
+
 /* A peer unidirectional stream ended. The peer's control stream ending is
  * H3_CLOSED_CRITICAL_STREAM whether or not SETTINGS had arrived; any other stream is
  * simply forgotten. */

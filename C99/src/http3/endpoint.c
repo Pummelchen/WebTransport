@@ -512,6 +512,15 @@ wt_status_t wt_http3_endpoint_on_control_frame(wt_http3_endpoint_t *endpoint, ui
   return wt_http3_control_on_frame(&endpoint->peer_control, type, out_error);
 }
 
+wt_status_t wt_http3_endpoint_on_control_payload(wt_http3_endpoint_t *endpoint, uint64_t type,
+                                                 const uint8_t *payload, size_t length, int last,
+                                                 wt_http3_error_t *out_error) {
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  return wt_http3_control_on_frame_payload(&endpoint->peer_control, type, payload, length, last,
+                                           out_error);
+}
+
 wt_status_t wt_http3_endpoint_on_uni_stream_end(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
                                                 wt_http3_error_t *out_error) {
   wt_http3_endpoint_stream_kind_t kind;

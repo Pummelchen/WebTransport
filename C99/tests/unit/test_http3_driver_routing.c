@@ -341,3 +341,135 @@ void test_a_bidirectional_prefix_split_across_frames(void) {
   }
 }
 
+/* --------------------------------------------------------------- WT-251: a received SETTINGS payload */
+
+/* One STREAM frame, shaped the way a QUIC connection reports it. */
+static wt_status_t route_stream_frame(wt_http3_driver_t *driver, const wt_http3_driver_sink_t *sink,
+                                      uint64_t stream_id, uint64_t offset, const uint8_t *bytes,
+                                      size_t length, int fin) {
+  wt_quic_frame_t frame;
+
+  memset(&frame, 0, sizeof(frame));
+  frame.kind = WT_QUIC_FRAME_KIND_STREAM;
+  frame.as.stream.id = stream_id;
+  frame.as.stream.offset = offset;
+  frame.as.stream.has_offset = offset != 0U ? 1 : 0;
+  frame.as.stream.fin = fin;
+  frame.as.stream.has_length = 1;
+  frame.as.stream.data = bytes;
+  frame.as.stream.length = length;
+  return wt_http3_driver_on_quic_frame(driver, WT_QUIC_SPACE_APPLICATION, &frame, sink, 4096U);
+}
+
+/* A SETTINGS frame's type, length and payload, in `out`. Returns its length. */
+static size_t encode_settings_frame(uint8_t *out, size_t capacity, const uint8_t *payload,
+                                    size_t payload_length) {
+  wt_writer_t w = wt_writer_init(out, capacity);
+  wt_http3_frame_t settings = wt_http3_frame_make(WT_HTTP3_FRAME_SETTINGS);
+
+  settings.payload = payload;
+  settings.length = payload_length;
+  if (wt_http3_frame_encode(&w, &settings) != WT_OK) return 0U;
+  return wt_writer_offset(&w);
+}
+
+/* WT-251. RFC 9114 section 7.2.4: "The same setting identifier MUST NOT occur more than once in
+ * the SETTINGS frame. A receiver MAY treat the presence of duplicate setting identifiers as a
+ * connection error of type H3_SETTINGS_ERROR." This build takes that option in
+ * `wt_http3_settings_parse`, but until now nothing fed a RECEIVED payload to it: the control
+ * machine tracked only a `settings_received` boolean and the payload went straight to the sink
+ * unread, so `04 04 08 01 08 01` (SETTINGS, identifier 8 twice) came back WT_OK with
+ * H3_NO_ERROR and the sink was handed the frame.
+ *
+ * The control machine now reassembles the peer's SETTINGS payload across the pieces the
+ * connection delivers it in and validates the completed frame with the existing parser, so the
+ * duplicate closes the connection with H3_SETTINGS_ERROR. The duplicate is SPLIT across two
+ * STREAM frames below, because that is what makes reassembly -- rather than per-piece reading --
+ * the property being tested.
+ *
+ * A second SETTINGS FRAME is a different rule and stays where it was: section 7.2.4 says a
+ * second SETTINGS frame on the control stream is H3_FRAME_UNEXPECTED (section 6.2.1 says nothing
+ * about a second SETTINGS), and the control machine already returned that. */
+void test_a_duplicate_settings_identifier_is_refused(void) {
+  wt_http3_endpoint_t endpoint;
+  wt_http3_driver_t driver;
+  wt_http3_driver_sink_t sink;
+  frame_log_t frames;
+  uint8_t frame_bytes[16];
+  uint8_t wire[32];
+  size_t frame_length;
+  /* Identifier 8 (ENABLE_CONNECT_PROTOCOL) twice, both boolean-legal, so the duplicate is the
+   * only rule the payload breaks. */
+  static const uint8_t duplicate_payload[] = {0x08U, 0x01U, 0x08U, 0x01U};
+  static const uint8_t ok_payload[] = {0x08U, 0x01U};
+
+  memset(&frames, 0, sizeof(frames));
+  memset(&sink, 0, sizeof(sink));
+  sink.on_frame_payload = record_frame;
+  sink.context = &frames;
+
+  /* A valid payload is accepted and still reaches the sink: the new validation must not refuse
+   * what the parser has always accepted. */
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wire[0] = (uint8_t)WT_HTTP3_STREAM_CONTROL;
+  frame_length = encode_settings_frame(frame_bytes, sizeof(frame_bytes), ok_payload,
+                                       sizeof(ok_payload));
+  WT_EXPECT_TRUE("the valid SETTINGS frame encodes", frame_length > 0U);
+  memcpy(wire + 1U, frame_bytes, frame_length);
+  WT_EXPECT_OK("a valid SETTINGS payload is accepted",
+               route_stream_frame(&driver, &sink, 2U, 0U, wire, 1U + frame_length, 0));
+  WT_EXPECT_U64("and reaches the sink", 1U, (uint64_t)frames.frames);
+  WT_EXPECT_U64("as SETTINGS", WT_HTTP3_FRAME_SETTINGS, frames.last_type);
+
+  /* The duplicate in one piece: the case the investigation found returning WT_OK. */
+  memset(&frames, 0, sizeof(frames));
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wire[0] = (uint8_t)WT_HTTP3_STREAM_CONTROL;
+  frame_length = encode_settings_frame(frame_bytes, sizeof(frame_bytes), duplicate_payload,
+                                       sizeof(duplicate_payload));
+  memcpy(wire + 1U, frame_bytes, frame_length);
+  WT_EXPECT_STATUS("a duplicate identifier is refused", WT_ERR_PROTOCOL,
+                   route_stream_frame(&driver, &sink, 2U, 0U, wire, 1U + frame_length, 0));
+  WT_EXPECT_U64("with H3_SETTINGS_ERROR", WT_HTTP3_SETTINGS_ERROR,
+                (uint64_t)wt_http3_driver_last_error(&driver));
+  WT_EXPECT_U64("and the refused frame never reaches the sink", 0U, (uint64_t)frames.frames);
+
+  /* The same duplicate SPLIT: the prefix, the frame header and the first parameter in one STREAM
+   * frame, the repeated parameter in the next. A receiver that read each piece on its own would
+   * see two legal settings and no duplicate, which is the defect reassembly closes. The frame's
+   * first piece is delivered to the sink before the second completes the frame; the refusal
+   * follows. */
+  memset(&frames, 0, sizeof(frames));
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wire[0] = (uint8_t)WT_HTTP3_STREAM_CONTROL;
+  frame_length = encode_settings_frame(frame_bytes, sizeof(frame_bytes), duplicate_payload,
+                                       sizeof(duplicate_payload));
+  memcpy(wire + 1U, frame_bytes, frame_length);
+  WT_EXPECT_OK("the first half is accepted",
+               route_stream_frame(&driver, &sink, 2U, 0U, wire, 1U + 2U + 2U, 0));
+  WT_EXPECT_STATUS("the duplicate in the second half is refused", WT_ERR_PROTOCOL,
+                   route_stream_frame(&driver, &sink, 2U, 1U + 2U + 2U, wire + 1U + 2U + 2U, 2U, 0));
+  WT_EXPECT_U64("with H3_SETTINGS_ERROR", WT_HTTP3_SETTINGS_ERROR,
+                (uint64_t)wt_http3_driver_last_error(&driver));
+
+  /* A second SETTINGS FRAME is H3_FRAME_UNEXPECTED (RFC 9114 section 7.2.4), which the control
+   * machine already enforced; this pins that the duplicate-payload rule did not replace it. */
+  memset(&frames, 0, sizeof(frames));
+  wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
+  wt_http3_driver_init(&driver, &endpoint);
+  wire[0] = (uint8_t)WT_HTTP3_STREAM_CONTROL;
+  frame_length = encode_settings_frame(frame_bytes, sizeof(frame_bytes), ok_payload,
+                                       sizeof(ok_payload));
+  memcpy(wire + 1U, frame_bytes, frame_length);
+  WT_EXPECT_OK("the first SETTINGS is accepted",
+               route_stream_frame(&driver, &sink, 2U, 0U, wire, 1U + frame_length, 0));
+  WT_EXPECT_STATUS("a second SETTINGS frame is refused", WT_ERR_PROTOCOL,
+                   route_stream_frame(&driver, &sink, 2U, 1U + frame_length, wire + 1U,
+                                      frame_length, 0));
+  WT_EXPECT_U64("as a frame unexpected", WT_HTTP3_FRAME_UNEXPECTED,
+                (uint64_t)wt_http3_driver_last_error(&driver));
+}
+

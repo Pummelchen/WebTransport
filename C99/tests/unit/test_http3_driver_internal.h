@@ -68,5 +68,7 @@ void test_a_connection_frame_is_routed(void);
 void test_the_bidi_classifier(void);
 void test_a_bidi_stream_is_routed_by_its_prefix(void);
 void test_a_bidirectional_prefix_split_across_frames(void);
+/* WT-251: the control stream's SETTINGS payload is validated, not merely delivered. */
+void test_a_duplicate_settings_identifier_is_refused(void);
 
 #endif /* WT_TEST_HTTP3_DRIVER_INTERNAL_H */
