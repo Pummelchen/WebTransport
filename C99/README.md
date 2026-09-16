@@ -320,7 +320,7 @@ What is here:
   proofs pass against five independent implementations on a routable host with `--trust system`,
   reproduced by two independent full runs. The conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
-  fifty-three C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
+  fifty-four C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
   product list is the three tools and nothing that tests them), and every remaining entry mapped to
   the unit suite that covers it. The walk found one real gap, `protocol-structured-fields`, which is
@@ -341,7 +341,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-three scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-four scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
