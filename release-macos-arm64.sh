@@ -299,19 +299,44 @@ fi
 
 # The notes must carry the placeholders or the real digests (Part 1 §1.8): a
 # release that quotes the wrong digest is worse than one that quotes none.
+#
+# ORDER MATTERS, and the first version of this got it wrong: `SHA256_PENDING` is a
+# SUBSTRING of `C99_SHA256_PENDING`, so substituting the short token first rewrote
+# the C99 line into `C99_<swift digest>` and left the C99 substitution with nothing
+# to match. The published 1.4.0 body said exactly that, which is the failure this
+# rule exists to prevent. The C99 tokens are substituted FIRST, and the result is
+# then checked rather than trusted: no placeholder may survive, and each real digest
+# must appear exactly once.
 published_notes=$(mktemp "${TMPDIR:-/tmp}/webtransport-notes.XXXXXX")
 trap 'rm -rf "$swift_stage" "$c99_stage" "$published_notes"' EXIT
 if grep -q 'SHA256_PENDING' "$notes" || grep -q 'C99_SHA256_PENDING' "$notes"; then
-  sed -e "s/SHA256_PENDING/$swift_digest/" \
-      -e "s/ARCHIVE_BYTES_PENDING/$swift_bytes/" \
-      -e "s/C99_SHA256_PENDING/$c99_digest/" \
-      -e "s/C99_ARCHIVE_BYTES_PENDING/$c99_bytes/" "$notes" > "$published_notes"
+  sed -e "s/C99_SHA256_PENDING/$c99_digest/" \
+      -e "s/C99_ARCHIVE_BYTES_PENDING/$c99_bytes/" \
+      -e "s/SHA256_PENDING/$swift_digest/" \
+      -e "s/ARCHIVE_BYTES_PENDING/$swift_bytes/" "$notes" > "$published_notes"
 elif grep -q "$swift_digest" "$notes" && grep -q "$c99_digest" "$notes"; then
   cp "$notes" "$published_notes"
 else
   echo "$notes carries neither the placeholders nor both real digests; refusing to publish" >&2
   exit 1
 fi
+
+if grep -q 'PENDING' "$published_notes"; then
+  echo "a placeholder survived substitution in the published notes; refusing to publish" >&2
+  grep -n 'PENDING' "$published_notes" >&2
+  exit 1
+fi
+for pair in "$swift_digest swift" "$c99_digest c99"; do
+  digest=${pair%% *}
+  which=${pair##* }
+  count=$(grep -c "$digest" "$published_notes" || true)
+  if [ "$count" -ne 1 ]; then
+    echo "the $which digest appears $count time(s) in the published notes, expected exactly 1" >&2
+    echo "  digest: $digest" >&2
+    grep -n 'SHA256:' "$published_notes" >&2
+    exit 1
+  fi
+done
 
 if [ "$mode" = publish ]; then
   git tag -a "$tag" -m "WebTransport $version"
