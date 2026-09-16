@@ -9,7 +9,10 @@ foreach(app wt-client-c99 wt-server-c99 wt-conformance-c99)
   set(WT_APP_NEEDS_SUPPORT FALSE)
   if(app STREQUAL "wt-client-c99" OR app STREQUAL "wt-server-c99")
     # The one-sided loops both tools use: one side of a real socket pair, where the conformance tool drives both.
-    set(WT_APP_EXTRA_SOURCES ${app}/../support/session_loop.c ${app}/../support/capsule_stream.c)
+    # The support is three translation units -- the shared machinery, the client loop and the server loop --
+    # sharing apps/support/session_loop_internal.h, which is not installed.
+    set(WT_APP_EXTRA_SOURCES ${app}/../support/session_loop.c ${app}/../support/session_loop_client.c
+                              ${app}/../support/session_loop_server.c ${app}/../support/capsule_stream.c)
     set(WT_APP_NEEDS_SUPPORT TRUE)
   endif()
   if(app STREQUAL "wt-conformance-c99")

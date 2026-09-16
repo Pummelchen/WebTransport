@@ -197,7 +197,10 @@ set(WT_TLS_SOURCES
   src/tls/keyshare.c
   src/tls/self_signed.c
   src/tls/trust.c
-  src/tls/session.c
+  # The handshake's two halves: the client and the server. They share
+  # src/tls/tls_session_internal.h (the one ciphersuite both offer), which is not installed.
+  src/tls/session_client.c
+  src/tls/session_server.c
 )
 list(APPEND WT_CORE_SOURCES ${WT_CRYPTO_SOURCES})
 list(APPEND WT_CORE_SOURCES ${WT_QUIC_SOURCES})
@@ -245,7 +248,13 @@ set(WT_HTTP3_SOURCES
   src/http3/frame.c
   src/http3/settings.c
   src/http3/control.c
+  # The driver is four translation units: its tables and accessors, the prefix and frame
+  # reassembly, the connection-frame routing, and the outbound half. They share
+  # src/http3/driver_internal.h, which is not installed.
   src/http3/driver.c
+  src/http3/driver_stream.c
+  src/http3/driver_route.c
+  src/http3/driver_send.c
   src/http3/endpoint.c
   src/http3/quic_transport.c
   src/http3/goaway.c
