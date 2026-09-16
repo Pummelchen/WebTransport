@@ -16,6 +16,7 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | 3.1 | A path or authority the server does not serve is refused with a status | `WT_WEBTRANSPORT_REJECT_NOT_FOUND`, `wt_webtransport_session_request_validate` | `test_webtransport_session_request` | tested |
 | 3.2 | A successful session is answered with a 2xx response on the same stream | `wt_http3_driver_send_response`, `wt_http3_endpoint_on_response_headers` | `test_runtime_session_pair`, `wt_conformance_scenarios` | tested |
 | 3.2 | A refusal is answered with a non-2xx status and no session exists | `wt_http3_message_encode` (response form) | `test_http3_endpoint`, `test_webtransport_session_request` | tested |
+| 3.2 | When the request carries an Origin header, the WebTransport server MUST verify it and SHOULD reply 403 when verification fails; the library exposes the field through `wt_http3_message_field` and leaves the origin policy to the application | `wt_http3_message_field` | `test_http3_message`, whose case test_a_regular_field_can_be_read_back (in `C99/tests/unit/test_http3_message.c`) reads the value back | partial |
 | 4.1 | A session IS a request stream, and its state machine follows the request rules | `wt_http3_endpoint_open_request`, `wt_http3_request_on_frame` | `test_http3_endpoint`, `test_http3_request` | tested |
 | 4.1 | Trailers may not carry pseudo-header fields | `wt_http3_endpoint_on_request_headers` | `test_http3_endpoint` | tested |
 | 4.2 | WebTransport streams are prefixed with their type and the session ID | `wt_webtransport_stream_prefix_write`, `wt_webtransport_stream_prefix_parse` | `test_webtransport_framing`, `test_http3_driver` | tested |
@@ -52,8 +53,16 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | -- | 0-RTT and resumption | -- | -- | -- |
 | -- | Session under a connection that changes its connection ID | -- | -- | partial |
 
-## The two partial rows, stated plainly
+## The partial rows, stated plainly
 
+- **Origin verification (§3.2)**: the LIBRARY exposes the field and nothing more. `wt_http3_message_field` reads
+  a named regular field (including `origin`) out of a decoded request section, and returns `WT_ERR_STATE` when
+  the section is well formed and simply does not carry it, because absent and present-but-empty are different
+  answers and the rule turns on the difference. Deciding **which** origins are acceptable -- the actual
+  verification, and the 403 -- is application policy and stays with the caller; the library cannot know a
+  deployment's allowed origins. The row is therefore `partial`, not `tested`: the test named above proves the
+  field is reachable, not that an origin policy is enforced. Before this pass the field was unreachable
+  entirely, which is why the row did not exist (`WT-235`/CAUD-7 is the finding).
 - **Server push**: the draft does not use it, and HTTP/3 push is refused deterministically by the endpoint
   (`WT_HTTP3_ID_ERROR` for a client, `WT_HTTP3_STREAM_CREATION_ERROR` for a server) rather than ignored. That is
   a deliberate refusal, not a missing feature.

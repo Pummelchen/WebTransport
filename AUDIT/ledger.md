@@ -1,7 +1,10 @@
 # Audit ledger — `audit/2026-09-15`
 
 Machine-readable twin: `AUDIT/ledger.json`. The ledger wins on any conflict with the wiki.
-Protocol: pre-production audit, Phases A–E (§0–§12 of the audit brief).
+Protocol: pre-production audit, Phases A–E (§0–§12 of the audit brief); **Phase F (the third pass) runs after
+them, on the same ledger** — see *Round 3* at the end of this file and `AUDIT/phaseF.md`. Phase F entries use
+the id scheme `F-audit3-<WT row number>`, and the tracker rows `WT-222`, `WT-224`, `WT-225`, `WT-226` and
+`WT-1` are closed by that pass.
 
 Base commit: `196324e` (main). Branch: `audit/2026-09-15`. **Landed on `main` at `6607d71`**
 (merge commit, 2026-09-16), owner-directed after Phase E passed.
@@ -47,9 +50,16 @@ Base commit: `196324e` (main). Branch: `audit/2026-09-15`. **Landed on `main` at
 | F-repo-ops-02 | S1 | c99 | Interop matrix must be re-run now that the client sends webtransport-h3 | BLOCKED (needs VPS approval) |
 | A-0007 | S3 | swift | Manifests not swift-format clean; CI format gate excludes them | START |
 | A-0005 | S3 | swift | `swift-tools-version: 6.3` vs mandated Swift 6.4 | SUPERSEDED (6.4 baseline landed; see Round 14) |
-| F-repo-ops-21 | S2 | repo-ops | Windows cross-compile sweep named private include dirs by hand: first real CI run failed on the audit's own F-28 test | AUDIT (fixed) |
-| F-repo-ops-22 | S2 | repo-ops | Wine runner's check total never matched (anchored pattern vs CRLF): "0 checks", and 91,674 was never a number the runner produced | AUDIT (fixed) |
+| F-repo-ops-21 | S2 | repo-ops | Windows cross-compile sweep named private include dirs by hand: first real CI run failed on the audit's own F-28 test | DONE (fix `4871ef1`) |
+| F-repo-ops-22 | S2 | repo-ops | Wine runner's check total never matched (anchored pattern vs CRLF): "0 checks", and 91,674 was never a number the runner produced | DONE (fix `4871ef1`; VPS re-measure 64,900 checks) |
 | F-repo-ops-20 | S3 | repo-ops | The Swift tree's Linux boundary was asserted, not measured: Swift 6.4 on the VPS builds 2 of 11 library targets | DONE (install + matrix) |
+| F-repo-ops-26 | S2 | repo-ops | Windows runtime staging copied the DLL once per target into one directory: a race that failed the native Windows build, which is why that leg was advisory | DONE (fix `a312253`; re-proved 90 copy edges → 1, CI run 35111066674 all six jobs green) |
+| F-audit3-* (37) | S1–S3 | swift + c99 | The third pass (Phase F): 25 fixed findings across `a312253`, `9d13d19`, `5818448`, `a31b0dc`, `59cb125` and `4a50c21`, plus the `WT-222` review closed and `WT-249`/`WT-251` filed open | 28 DONE, 9 OPEN — see *Round 3* |
+
+The 37 Phase F entries are not repeated one per row here (this board is the Phase A–E index); their full text,
+including the before/after evidence and the commit that landed each, is in `AUDIT/ledger.json` under the ids
+`F-audit3-WT-1`, `F-audit3-WT-227` … `F-audit3-WT-251`, and the run of them is summarised in *Round 3* at the
+end of this file.
 
 ## Task records
 
@@ -259,3 +269,57 @@ both accounted for).
 Also closed in the tracker this round: **`WT-201`**, whose guard fix had already landed in `73daab4` and whose
 row still read `open` — verified by reading every interpreter guard and running one with an interpreter-free
 `PATH`, then removed from the C99 table and recorded in its history (wiki `5f22441`).
+
+## Round 3 — the third audit pass (Phase F), and the seven commits that carry it
+
+Two independent read-only agents audited one tree each against a frozen head (`46937e2`): the Swift report is
+`AUDIT/third-pass-swift.md` (135 lines, SWAUD-1..7) and the C99 report is `AUDIT/third-pass-c99.md` (399 lines
+including its addendum, CAUD-1..16). `AUDIT/phaseF.md` is the pass's index and carries the fix log; **the ledger
+entries are authoritative** for each finding's before/after evidence. Numbering: every Phase F entry is
+`F-audit3-<WT row number>`, so an entry names exactly one tracker row — the scheme is stated once in
+`AUDIT/phaseF.md` and is used nowhere else in the ledger.
+
+**Fixed and committed (25 rows plus the `WT-222` review):** `WT-1`, `WT-227`, `WT-228`, `WT-229`, `WT-230`,
+`WT-231`, `WT-232`, `WT-233`, `WT-234`, `WT-235`, `WT-236`, `WT-237`, `WT-238`, `WT-239`, `WT-240`, `WT-241`,
+`WT-242`, `WT-243`, `WT-244`, `WT-245`, `WT-246`, `WT-247`, `WT-248`, `WT-250`.
+
+**Closed by the pass, not by a finding of its own:** `WT-222` (the unfinished line-by-line review — all 3381
+lines of `WebTransportInteroperableNetworkRuntime.swift` were read, which is what produced `WT-244`…`WT-248`),
+`WT-224` (the native Windows leg went from advisory to enforced), `WT-225` (a Debian 13 leg was added) and
+`WT-226` (the root README's "Phase 10 under way" was corrected).
+
+**Deliberately still open:** `WT-249` (`SWAUD-6`, suspected/unverified — CONNECT-stream capsules as raw bytes
+where RFC 9114 §4.4 permits only DATA frames; no external peer was reachable) and `WT-251` (the C99 agent's one
+`unfinished` item, what consumes the peer's SETTINGS payload in the shipped tools; **filed as a row this pass**,
+the next free number after WT-250, because it was flagged but not filed).
+
+**Carried, untouched:** `WT-85`, `WT-191`, `WT-197`, `WT-221` (Swift), `WT-39`, `WT-153`, `WT-223` (C99) and
+`WT-196` (infra). **`WT-191` and `WT-197` are UNFIXED** — this pass made no progress on either and says so
+rather than implying it.
+
+| commit | what it fixed | what was run to verify |
+| --- | --- | --- |
+| `a312253` | `F-repo-ops-26` (Windows staging race), `WT-224` (native leg enforced), `WT-225` (Debian 13 leg), `WT-226` (docs), and the docs naming those rows | 90 copy edges → **1 edge / 2 commands**; `cmake --build -j 8` exit 0, **352/352 steps**, **91/91 PE32+**, DLL in build root + `apps/` + `tests/`, **0** `Permission denied`; host path inert with ctest **97/97**; `check-workflows.py`, `check-matrix.sh` (91), `check-portability.sh`, `score-matrix.sh` |
+| `9d13d19` | C99 batch 1: `WT-227`, `WT-229`, `WT-230`, `WT-231`, `WT-232`, `WT-233`, `WT-234`, `WT-239`, `WT-240` | gate seen to fail first (Retry test 40 of 194 checks red → **199 green**); Debug/Release/ASan+UBSan **97/97** each, exit 0; cppcheck clean; static analysis **94 sources**, no findings; Windows cross-compile green |
+| `5818448` | Swift codec: `WT-1`, `WT-227` (Swift half), `WT-228`, `WT-250` | **369 tests in 7 bundles, 0 failures** under `-warnings-as-errors -strict-concurrency=complete -require-explicit-sendable`; `--sanitize=address` exit 0; `--sanitize=thread --skip CLIProcess --skip ReleaseArtifacts` exit 0; `swift format lint --strict` exit 0 |
+| `a31b0dc` | Swift runtime: `WT-244`, `WT-245`, `WT-246`, `WT-247`, `WT-248`, and the `WT-222` review completed | each reproduced against a real loopback QUIC session by a test that failed first; then the same 369-test strict run, ASan and TSan exit 0, format/import/manifest gates green |
+| `59cb125` | the Debian leg's own fix: `gcc` only RECOMMENDS `libc6-dev` and the step used `--no-install-recommends`, so `Scrt1.o`/`crti.o` were missing and CMake's compiler check failed; the package is now installed | CI run **35046915707** / job **104638677120** is the failure (`cannot find Scrt1.o`); after the fix `check-workflows.py` → "3 file(s) parse with no duplicate keys", exit 0 |
+| `3ca9720` | merge of the automated badge-refresh commit (`35c4329`), no content of its own | the tree C99 run 35111066674 is measured on |
+| `4a50c21` | C99 batch 2: `WT-235`, `WT-236`, `WT-237`, `WT-238`, `WT-241`, `WT-242`, `WT-243` | tests written first (two of those gates were themselves wrong and are recorded); Debug/Release/ASan+UBSan **97/97** each, exit 0; cppcheck clean; static analysis **94 sources**, no findings; Windows cross-compile green |
+
+**CI evidence (authoritative):** C99 run **35111066674** on `3ca9720` — **all six jobs success**: the newly
+enforced `windows-native` (MSYS2 MINGW64), the new `Debian 13 (trixie, gcc)`, both Ubuntu legs, macOS and
+`windows-wine`. The Debian job's first run failed and is recorded above as the reason `59cb125` exists. Swift CI
+on `a31b0dc` was green.
+
+**Local verification the lead auditor owns** (logs `/tmp/lead-swift-{strict,asan,tsan}.log`): the Swift numbers
+above; C99 **Debug 97/97, Release 97/97, ASan+UBSan 97/97**, cppcheck clean, static analysis 94 sources with no
+findings, and the Windows cross-compile gate green. Re-run on the committed tree while writing the fix log:
+`build-and-test.sh --all` exit 0 (all three legs 100% of 97), `check-cppcheck.sh` clean, `check-windows-build.sh`
+352/352 steps with 91 PE32+ executables, and the Swift suite 369 tests / 0 failures
+(`/tmp/sub-{c99-all,cppcheck,winbuild,swift-strict}.log`).
+
+**Ledger:** **149 entries — 102 AUDIT (fixed + verified), 38 DONE, 9 OPEN, 0 blocked.** 37 of those entries are
+this pass's `F-audit3-*` set (28 DONE, 9 OPEN). The honest gaps that remain are the Wine *execution* on a host
+without Wine, a FreeBSD/Debian-13 host beyond CI, and an external interop peer; the pass closed the Swift
+ASan/TSan gap and the missing Debian-13 leg.

@@ -270,9 +270,11 @@ What is here:
   `2^60` flow-control rules, drain, close and the CONNECT stream ending — mapped to the function that
   implements it and the test that exercises it. **The matrix cannot drift:** `scripts/check-matrix.sh`
   greps every symbol it names for a C declaration or a registered CTest name and fails if one is
-  missing, and CI runs it. The two rows that are not "tested" are stated rather than hidden — server
-  push is refused deterministically by design, and a peer that changes its connection ID during the
-  handshake is not tracked, which is the recorded transport gap.
+  missing, and CI runs it. The rows that are not "tested" are stated rather than hidden — the three are
+  the section 3.2 Origin rule (the library exposes the field through `wt_http3_message_field` and leaves
+  the origin policy to the application, so the row is `partial`), server push (refused deterministically
+  by design), and a peer that changes its connection ID during the handshake (not tracked, which is the
+  recorded transport gap).
 - **Five diagnostics, and what each one answers** (`docs/DIAGNOSTICS.md`): the environment-gated dumps
   that record what was on the wire — every packet sent, the TLS traffic secrets at derivation, the
   ClientHello this client hashed, the request's field section and the frames on the request stream, and
