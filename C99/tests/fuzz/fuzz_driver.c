@@ -45,8 +45,20 @@ static uint64_t next_random(uint64_t *state) {
   return x;
 }
 
+#ifdef WT_FUZZ_NO_CORPUS
+static unsigned run_corpus(const char *directory) {
+  (void)directory;
+  fprintf(stderr, "fuzz: no corpus support on this platform\n");
+  return 0U;
+}
+#else
 /* One file, capped: a corpus is a replay of inputs somebody chose, and a file larger than the parsers will ever
- * see is a slower way to test the same paths. */
+ * see is a slower way to test the same paths.
+ *
+ * It lives inside this branch because `run_corpus` is its only caller: with the corpus compiled out, a file-scope
+ * helper with no caller is an unused function, which the MSVC toolchains report (clang-cl's
+ * `-Werror,-Wunused-function`, and MSVC's C4505) while gcc and clang on POSIX never see this branch at all
+ * (WT-260). */
 static unsigned run_file(const char *path) {
   uint8_t buffer[MAX_INPUT];
   size_t length = 0U;
@@ -60,13 +72,6 @@ static unsigned run_file(const char *path) {
   return 1U;
 }
 
-#ifdef WT_FUZZ_NO_CORPUS
-static unsigned run_corpus(const char *directory) {
-  (void)directory;
-  fprintf(stderr, "fuzz: no corpus support on this platform\n");
-  return 0U;
-}
-#else
 static unsigned run_corpus(const char *directory) {
   unsigned files = 0U;
   DIR *dir = opendir(directory);
