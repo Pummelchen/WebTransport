@@ -8,7 +8,9 @@
 #
 # This configuration comes from the 2026-09-15 audit: gitleaks 8.30.1 over the
 # full history (588 commits at the time of that change) reported nine findings,
-# all of them accounted for below.
+# all of them accounted for below. A tenth arrived with the Go server-side
+# interop client (2026-09-17): `generic-api-key` reading the name of a
+# post-quantum key-agreement group out of a flag's help text.
 
 [extend]
 useDefault = true
@@ -30,3 +32,14 @@ description = "generic-api-key false positive on the Swift enum label `.elliptic
 condition = "AND"
 paths = ['''^Swift/Tests/WebTransportNetworkRuntimeTests/WebTransportServerIdentityTests\.swift$''']
 regexes = ['''^\.ellipticCurveP256$''']
+
+# 3. `generic-api-key` fires once on the Go interop client's `--all-curves` help text: the "secret" is
+#    the name of a post-quantum key-agreement group, read out of a sentence that happens to start with
+#    "key". The help text was reworded in the same change, but the finding lives in the commit that
+#    added it and gitleaks scans the full history, so the false positive is recorded here rather than
+#    rewritten away. Path AND secret must both match.
+[[allowlists]]
+description = "generic-api-key false positive on the post-quantum key-agreement group name in the Go interop client's flag help."
+condition = "AND"
+paths = ['''^C99/tests/interop/peer/go-client/main\.go$''']
+regexes = ['''X25519MLKEM768''']

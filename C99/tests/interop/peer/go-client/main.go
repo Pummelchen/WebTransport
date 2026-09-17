@@ -134,7 +134,7 @@ func main() {
 	message := flag.String("message", "hello-from-go", "the message to send on a stream")
 	timeoutSeconds := flag.Float64("timeout", 8.0, "seconds to wait for the session and the server's message")
 	allCurves := flag.Bool("all-curves", false,
-		"offer Go's whole default key-exchange list, X25519MLKEM768 first (reproduces the server's silence)")
+		"offer Go's whole default key-agreement list, the post-quantum hybrid group first (reproduces the silence)")
 	flag.Parse()
 
 	if *port == 0 {
