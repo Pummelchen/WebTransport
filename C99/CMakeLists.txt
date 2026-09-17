@@ -428,6 +428,10 @@ if(BUILD_SHARED_LIBS)
   # linker already exports everything.
   if(WIN32)
     set_target_properties(webtransport_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    # The one decoration CMake cannot generate: a DATA symbol's consumer has to know it is importing, so this
+    # reaches every target that links the DLL -- tests, apps and a consumer of the installed package -- and the
+    # library's own compilation never sees it. See `webtransport/quic/protection.h`.
+    target_compile_definitions(webtransport_shared INTERFACE WT_LINKING_SHARED_LIBRARY)
   endif()
 endif()
 

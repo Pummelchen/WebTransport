@@ -67,8 +67,22 @@ typedef struct wt_quic_packet_keys {
 
 /* The QUIC version 1 Initial salt, RFC 9001 section 5.2. Exposed because the
  * derivation takes the salt rather than hard-coding one, so that a version with a
- * different salt is a different constant and not a silent change. */
-extern const uint8_t wt_quic_initial_salt_v1[20];
+ * different salt is a different constant and not a silent change.
+ *
+ * A DATA symbol needs an explicit import declaration on the MSVC toolchains. A function call is bound through the
+ * import library's thunk, which is why every function in this header links against the DLL without a decoration,
+ * but a reference to an array has to go through the import table, and without `dllimport` the link fails with
+ * "unresolved external symbol wt_quic_initial_salt_v1" (WT-260, reported by two test executables). mingw's
+ * auto-import feature papers over the difference, so neither mingw leg had ever seen it. The shared library adds
+ * `WT_LINKING_SHARED_LIBRARY` as an INTERFACE definition, so it reaches exactly the targets that link the DLL --
+ * including a real consumer of the installed package -- and never the library's own compilation. */
+#if defined(_WIN32) && defined(WT_LINKING_SHARED_LIBRARY) && !defined(WT_BUILDING_LIBRARY)
+#define WT_QUIC_DATA __declspec(dllimport)
+#else
+#define WT_QUIC_DATA
+#endif
+
+extern WT_QUIC_DATA const uint8_t wt_quic_initial_salt_v1[20];
 
 /* initial_secret = HKDF-Extract(initial_salt, destination_connection_id).
  * `dcid` is the destination connection ID of the client's first Initial packet,
