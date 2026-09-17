@@ -418,6 +418,17 @@ if(BUILD_SHARED_LIBS)
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
   )
+  # Nothing in this tree carries an export annotation, and on Windows a DLL exports only what it is told to:
+  # mingw passes `--export-all-symbols` by itself, which is why both mingw legs have linked against this
+  # library's import library for as long as they have existed, and the MSVC toolchains link against an import
+  # library with no symbols at all -- every app and test failed with "undefined symbol: wt_cli_options_parse",
+  # and `link.exe` did not even write the import library, so the apps also failed with LNK1104 "cannot open file
+  # 'webtransport.lib'" (WT-260). This property makes CMake generate the module-definition file from the objects,
+  # which is the portable answer: the same property works for MSVC and clang-cl, and it changes nothing where the
+  # linker already exports everything.
+  if(WIN32)
+    set_target_properties(webtransport_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  endif()
 endif()
 
 # The target the apps and tests link: the shared library when it exists,
