@@ -76,4 +76,14 @@ function(wt_set_c99 target)
   if(UNIX AND NOT APPLE)
     target_compile_definitions(${target} PRIVATE _POSIX_C_SOURCE=200809L)
   endif()
+  # The MSVC toolchains (cl and clang-cl) mark the portable C library functions this tree uses as deprecated in
+  # favour of `*_s` variants that exist nowhere else: `getenv`, `fopen` and the rest of the diagnostics' file
+  # handling in `src/quic/connection_send.c` are the ones the Windows compiler probe hit first (WT-260). The
+  # `*_s` functions are Microsoft's, not C's, so adopting them would spread `_MSC_VER` branches through call
+  # sites that are correct as written; these two definitions are the documented way to say "this code is portable
+  # C, not a Windows application". The second covers the POSIX NAMES MSVC deprecates (`strdup`, `fileno`,
+  # `unlink`), which the same toolchains warn about by default.
+  if(MSVC)
+    target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+  endif()
 endfunction()

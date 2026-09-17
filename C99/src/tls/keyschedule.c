@@ -7,8 +7,14 @@
 /* RFC 8446 section 7.1's "0", a string of Hash.length zero bytes. It is the salt of
  * the Early Secret, the input keying material of the Master Secret, and the PSK of a
  * handshake that has none -- three uses of the same value, which is why it is one
- * constant here rather than three literals. */
-static const uint8_t wt_tls13_zeros[WT_TLS13_SECRET_LEN];
+ * constant here rather than three literals.
+ *
+ * The initializer is not decoration: C99 6.7.9p3 requires one for an object with static
+ * storage duration that is const-qualified, and an uninitialized `const` array is a
+ * constraint violation. GCC and Clang accept it and zero-fill (which is what this object
+ * wants), MSVC refuses it -- "C4132: const object should be initialized" -- which is how
+ * the MSVC leg of the Windows compiler probe found it (WT-260). */
+static const uint8_t wt_tls13_zeros[WT_TLS13_SECRET_LEN] = {0};
 
 /* ------------------------------------------------------------------- transcript */
 
