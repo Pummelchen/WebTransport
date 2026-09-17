@@ -217,6 +217,13 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
     public let transport: WebTransportNetworkTransport = .packet
 
     private let connection: NetworkConnection<QUIC>
+    /// The QUIC connection this session runs on.
+    ///
+    /// `internal` rather than `private` so the resource behaviour of a session's end is observable: the
+    /// framework declares no `cancel()` for a started `NetworkConnection`, so whether closing a session
+    /// releases its connection — and whether the peer sees that — can only be settled by looking at the
+    /// connection underneath. `WebTransportConnectionReleaseTests` does exactly that (WT-85).
+    internal var underlyingConnection: NetworkConnection<QUIC> { connection }
     private let inboundStreams: InteroperableQUICInboundStreamCollector
     private let inboundTask: Task<Void, Never>
     /// The listener's concurrency slot for this session's connection, when a
