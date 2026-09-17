@@ -6,6 +6,10 @@ import WebTransportQUICCore
 /// Client-side options for Swift concurrency WebTransport session establishment.
 public struct WebTransportClientConfiguration: Equatable, Sendable {
     /// The expected `:authority` value on the extended CONNECT request.
+    ///
+    /// Under the default system trust the client also checks the server's certificate against this name, so the
+    /// endpoint may be an address the name is merely reachable at; the certificate is still refused when it does
+    /// not cover the authority.
     public var authority: String
     /// The expected `:path` value on the extended CONNECT request.
     public var path: String

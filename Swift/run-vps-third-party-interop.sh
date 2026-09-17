@@ -1,19 +1,22 @@
 #!/bin/sh
 # The Swift client against the five independent implementations on the VPS (Phase 11's Swift half).
 #
-# `WEBTRANSPORT_VPS_INTEROP_HOST` is BOTH the address dialled and the authority the request names, because the Swift
-# client verifies the server's certificate against the name it connected to. It therefore has to be a name the
-# certificate carries: the deployed one covers `pummelchen.91.99.176.243.nip.io` (the address resolves through
-# nip.io), and dialling the host's tailnet name instead fails the handshake with a TLS `bad_certificate` alert --
-# the peer logs `Connection close received (code 0x12A, reason TLS alert error)` and the client reports only its
-# timeout. The C99 runner separates address from authority and cannot hit this; the Swift client has no override for
-# the verification name, which is why the default here is the certificate's name rather than the host's
-# (WT-261 records the gap).
+# The transport ADDRESS and the IDENTITY are separate on purpose, and the split is the point of the run rather than
+# a convenience: `WEBTRANSPORT_VPS_INTEROP_ADDRESS` is what the client dials and `WEBTRANSPORT_VPS_INTEROP_AUTHORITY`
+# is the name the request carries and the server's certificate has to prove. The deployed certificate covers
+# `pummelchen.91.99.176.243.nip.io` and carries no address at all, so dialling the address for that name is exactly
+# the case the certificate validator has to handle, and naming a name the certificate does not carry must still be
+# refused. Both were measured on 17 September 2026: the pair above connects, `--authority wrong.example.com` (and
+# the pre-WT-261 behaviour of validating against the dialled address) fails the handshake, and the peer logs
+# `Connection close received (code 0x12A/0x12E, reason TLS alert error)` while the client reports only its timeout.
+# Before WT-261 the Swift client validated against the address it dialled, which is why this runner used to dial the
+# certificate's own name and could not express the split at all.
 set -eu
 
 cd "$(dirname "$0")"
 
-host="${WEBTRANSPORT_VPS_INTEROP_HOST:-pummelchen.91.99.176.243.nip.io}"
+address="${WEBTRANSPORT_VPS_INTEROP_ADDRESS:-91.99.176.243}"
+authority="${WEBTRANSPORT_VPS_INTEROP_AUTHORITY:-pummelchen.91.99.176.243.nip.io}"
 os_name="${WEBTRANSPORT_VPS_INTEROP_OS:-Debian GNU/Linux 13 (trixie) x86_64}"
 test_date="${WEBTRANSPORT_VPS_INTEROP_DATE:-20 June 2026}"
 timeout_ms="${WEBTRANSPORT_VPS_INTEROP_TIMEOUT_MS:-60000}"
@@ -38,9 +41,9 @@ run_case() {
 
   set +e
   swift run WebTransportClient \
-    --connect "$host:$port" \
+    --connect "$address:$port" \
     --transport packet \
-    --authority "$host:$port" \
+    --authority "$authority:$port" \
     --path / \
     --origin none \
     --protocol none \
@@ -53,7 +56,7 @@ run_case() {
   status=$?
   set -e
 
-  python3 - "$json_file" "$implementation" "$version" "$url" "$host:$port" "$os_name" "$test_date" "$exchange" "$expected_message" "$expected_response" "$settings_validation" "$status" "$stdout_file" "$stderr_file" <<'PY'
+  python3 - "$json_file" "$implementation" "$version" "$url" "$authority" "$address" "$port" "$os_name" "$test_date" "$exchange" "$expected_message" "$expected_response" "$settings_validation" "$status" "$stdout_file" "$stderr_file" <<'PY'
 import json
 import pathlib
 import sys
@@ -64,7 +67,9 @@ from datetime import datetime, timezone
     implementation,
     version,
     url,
-    endpoint,
+    authority,
+    address,
+    port,
     os_name,
     test_date,
     exchange,
@@ -78,6 +83,9 @@ from datetime import datetime, timezone
 
 stdout = pathlib.Path(stdout_file).read_text(errors="replace")
 stderr = pathlib.Path(stderr_file).read_text(errors="replace")
+# `endpoint` is what was dialled and `authority` is the name that was asked for and verified; the URL is built from
+# the name, because that is the identity the request carries.
+endpoint = f"{address}:{port}"
 proof = {
     "timestamp": datetime.now(timezone.utc).isoformat(),
     "testDate": test_date,
@@ -86,7 +94,8 @@ proof = {
     "implementationVersion": version,
     "implementationURL": url,
     "endpoint": endpoint,
-    "url": f"https://{endpoint}/",
+    "authority": f"{authority}:{port}",
+    "url": f"https://{authority}:{port}/",
     "transport": "packet",
     "settingsValidation": settings_validation,
     "exchange": exchange,

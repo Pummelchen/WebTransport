@@ -32,10 +32,44 @@ public enum WebTransportQUICPeerTrustPolicy: Equatable, Sendable {
         }
     }
 
-    fileprivate func runtimeConfiguration(endpoint: WebTransportNetworkEndpoint) throws -> InteroperableQUICTrustConfiguration {
+    /// The name the server's certificate must be valid for, or `nil` when the framework's own validation — against
+    /// the address the connection is opened with — is already the right one.
+    ///
+    /// A certificate proves a NAME, and `authority` is the name the caller asked for ("The expected `:authority`
+    /// value on the extended CONNECT request"); the endpoint is where that name happens to be reachable. When the
+    /// two agree there is nothing to override, and when they differ the certificate has to be checked against the
+    /// NAME — that is the difference between dialling an address (an IP, a load balancer, a tailnet name) and being
+    /// told which name to expect, and without it such a connection fails the handshake with `bad_certificate`
+    /// (WT-261). This is a pure function so the decision itself is testable; the verification it feeds is
+    /// `InteroperableQUICCertificateVerification`, which changes only the name and leaves the trust anchors alone.
+    internal func certificateName(
+        endpoint: WebTransportNetworkEndpoint,
+        authority: String?
+    ) -> String? {
+        guard self == .systemTrust else {
+            // The local development bypass has no verification to name.
+            return nil
+        }
+        let requested = InteroperableQUICAuthority.host(of: authority ?? endpoint.host)
+        // Both sides are reduced the same way, so `example.com:443` and `example.com` agree rather than looking
+        // like two different names that happen to reach the same server.
+        let dialled = InteroperableQUICAuthority.host(of: endpoint.host)
+        guard !requested.isEmpty, requested.caseInsensitiveCompare(dialled) != .orderedSame else {
+            return nil
+        }
+        return requested
+    }
+
+    func runtimeConfiguration(
+        endpoint: WebTransportNetworkEndpoint,
+        authority: String?
+    ) throws -> InteroperableQUICTrustConfiguration {
         switch self {
         case .systemTrust:
-            return .systemTrust
+            guard let name = certificateName(endpoint: endpoint, authority: authority) else {
+                return .systemTrust
+            }
+            return .systemTrustForName(name)
         case .localDevelopmentSelfSigned:
             guard Self.isLoopbackHost(endpoint.host) else {
                 throw WebTransportNetworkRuntimeError.invalidTransport(
@@ -51,8 +85,10 @@ public enum WebTransportQUICPeerTrustPolicy: Equatable, Sendable {
     }
 }
 
-private enum InteroperableQUICTrustConfiguration: Sendable {
+enum InteroperableQUICTrustConfiguration: Sendable {
     case systemTrust
+    /// Verify the platform's trust chain against this name rather than against the address dialled (WT-261).
+    case systemTrustForName(String)
     case localLoopbackDevelopmentSelfSigned
 }
 
@@ -79,7 +115,7 @@ public struct WebTransportQUICClient: Sendable {
         settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSession {
-        let trustConfiguration = try trustPolicy.runtimeConfiguration(endpoint: endpoint)
+        let trustConfiguration = try trustPolicy.runtimeConfiguration(endpoint: endpoint, authority: authority)
         let host = InteroperableQUICRuntime.host(for: endpoint.host)
         let destination = NWEndpoint.hostPort(
             host: host,
@@ -348,15 +384,20 @@ public struct WebTransportQUICClient: Sendable {
     }
 }
 
-// `makeClientQUIC` stays fileprivate and in this file: its parameter type
-// `InteroperableQUICTrustConfiguration` is private, and a declaration may not be
-// more accessible than a type in its signature, so it cannot move to the shared
-// helper file without widening that type too.
+// `makeClientQUIC` stays in this file because it is the client's own construction
+// site, next to the policies whose selection it implements. Its parameter type is
+// internal rather than private so the tests can pin that selection.
 extension InteroperableQUICRuntime {
     fileprivate static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
         switch trustConfiguration {
         case .systemTrust:
             return makeBaseQUIC()
+        case .systemTrustForName(let name):
+            // The framework would verify the address it dialled; this verifies the name the caller asked for, with
+            // the platform's own anchors and its own SSL policy (WT-261).
+            return makeBaseQUIC().tls.certificateValidator { _, trust in
+                InteroperableQUICCertificateVerification.isValid(trust, forName: name)
+            }
         case .localLoopbackDevelopmentSelfSigned:
             return makeBaseQUIC().tls.peerAuthentication(.none)
         }

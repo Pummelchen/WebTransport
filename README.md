@@ -170,7 +170,11 @@ let response = try await stream.receive()
 try await session.close()
 ```
 
-Platform certificate trust is the client default. The local self-signed mode is explicit and restricted to loopback development endpoints.
+Platform certificate trust is the client default, and the certificate is verified against the configured
+`authority` rather than against the address dialled: `to:` may be an address the name is merely reachable at
+(a load balancer, a tailnet address, an `/etc/hosts` entry), while a certificate that does not cover the
+authority is still refused. The local self-signed mode is explicit and restricted to loopback development
+endpoints.
 
 A server needs a real identity. The default development certificate is refused on
 any non-loopback bind address, because a self-signed certificate cannot be
