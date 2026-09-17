@@ -40,9 +40,10 @@ because the declaration was this tree's own. Windows already has two CI legs —
 else**; the status sentences here and in the repository's root README are kept in step with each
 other.
 
-Of the plan's nine Definition-of-Done criteria **eight are met and one is partial** — and the
-partial one is CI *job* coverage (no FreeBSD leg, `WT-223`; and the plan's MSVC and Clang-CL Windows
-variants are not jobs), not the code on them.
+Of the plan's nine Definition-of-Done criteria **seven are met and two are partial** — CI *job*
+coverage (no FreeBSD leg, `WT-223`; and the plan's MSVC and Clang-CL Windows variants are not jobs),
+not the code on them, and the five-implementation interop matrix, which reproduces **5 of its 7
+Phase 11 proofs** because `erlang-webtransport` fails `status=trust` (`WT-196`), not the code here.
 `scripts/score-matrix.sh` prints that state from the matrix rather than from memory.
 
 What is here:
@@ -221,10 +222,14 @@ What is here:
   expected. Measured on the VPS (Debian 13, x86_64) on **13 September 2026: 7 of 7 proofs passed across all
   5 implementations**, every proof run with `--trust system`, so the chain is validated against the platform
   trust store and the certificate's name is checked rather than bypassed. The 1.5.0 re-run on
-  **17 September 2026** does not reproduce that: it gives **5 of 7**, because `erlang-webtransport`
-  fails `status=trust` while the other four accept the same certificate files (an RSA certificate
-  tried on the theory that the peer needed one made the other four fail, so key type is excluded).
-  The tracker records it as `WT-196`.
+  **17 September 2026** first gave **5 of 7**: `erlang-webtransport` failed `status=trust` for both
+  exchanges while the other four accepted the same certificate files (an RSA certificate tried on the
+  theory that the peer needed one made the other four fail, so key type is excluded). The cause was the
+  peer's own certificate handling: it kept only the FIRST certificate in the PEM and handed the leaf
+  alone to QUIC, so a validating client reported "unable to verify the first certificate". The deployed
+  `wt-erlang` image predated the chain patch below; rebuilt from the patched source it serves the full
+  chain, and the re-run is **7 of 7 across all five implementations**, every proof again under
+  `--trust system`. The tracker records this as `WT-196`.
 
   | Implementation | Version | URL | Third-party OS | Test date | Proof |
   | --- | --- | --- | --- | --- | --- |
@@ -243,7 +248,12 @@ What is here:
   which is the correct behaviour — and an interop result whose peer setup is not recorded is not
   reproducible. A fresh peer per proof matters as well: `erlang-webtransport` stops accepting after a couple
   of sessions, so the runner resets the peer set between proofs when told to
-  (`WEBTRANSPORT_VPS_INTEROP_RESET`).
+  (`WEBTRANSPORT_VPS_INTEROP_RESET`), and the command that variable names is the committed
+  `tests/interop/reset-vps-peers.sh`, installed by `tests/interop/deploy-vps-peers.sh`. The five
+  endpoints themselves, the Caddy project file that makes the certificate obtainable and renewable
+  (`tests/interop/vps/caddy/`) and the renewal sync that copies it to the peers
+  (`tests/interop/sync-vps-peer-certificates.sh`) are all in the repository now, so a fresh clone or a
+  rebuilt host can stand the environment up.
 - **A self-signed identity for local development** (Phase 9): `tls/self_signed.h` generates the
   pair a local server needs *in memory* — an ECDSA P-256 key and a certificate for the loopback
   names — and returns its SHA-256 fingerprint. The pin is the point: a self-signed certificate is
@@ -323,14 +333,13 @@ What is here:
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
   `scripts/score-matrix.sh` rather than from memory: **37 of 38 draft-16 requirements in
-  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, one is `partial`, and 8 of the plan's 9 completion
-  criteria are met, with 1 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
-  which is not the same as being done. The one partial criterion is outside the matrix: the FreeBSD
-  and Windows CI legs, both of which are now **measured** — the tree compiles, links and RUNS under
+  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, one is `partial`, and 7 of the plan's 9 completion
+  criteria are met, with 2 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
+  which is not the same as being done. The two partial criteria are outside the matrix. The FreeBSD
+  and Windows CI legs are both **measured** — the tree compiles, links and RUNS under
   Wine on Windows, and builds and passes its whole suite on a real FreeBSD 15.1 kernel — so what is
   missing there is a CI *job* GitHub does not provide natively rather than portability work. The
-  interop matrix, which used to be the other partial criterion, is **met on the implementation but
-  not reproduced in full**: 5 of the 7 Phase 11 proofs pass against five independent implementations
+  interop matrix is **partial**: 5 of the 7 Phase 11 proofs pass against five independent implementations
   on a routable host with `--trust system`, and the 7 of 7 an earlier run reported is not
   reproducible until `erlang-webtransport`'s `status=trust` failure (`WT-196`) is fixed. The
   conformance-coverage criterion is **met**, and the

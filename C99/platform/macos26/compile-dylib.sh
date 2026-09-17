@@ -17,6 +17,15 @@ fi
 build_dir="$c99_root/out/macos26/build-install"
 install_dir="$c99_root/out/macos26/install"
 
+# Start from nothing. A version bump renames `libwebtransport.<version>.dylib`,
+# and `cmake --install` writes the new name without removing the old one, so a
+# second packaging run left the PREVIOUS version in the install tree and the
+# release archive shipped both libraries (the first 1.5.0 dry run carried
+# libwebtransport.1.4.0.dylib AND libwebtransport.1.5.0.dylib). Clearing both
+# directories makes the install tree and the archive a function of this source
+# tree alone, which is what a release artifact has to be.
+rm -rf "$build_dir" "$install_dir"
+
 cmake -S "$c99_root" -B "$build_dir" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$install_dir" \

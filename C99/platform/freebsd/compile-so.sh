@@ -17,6 +17,14 @@ fi
 build_dir="$c99_root/out/freebsd/build-install"
 install_dir="$c99_root/out/freebsd/install"
 
+# Start from nothing. A version bump renames `libwebtransport.so.<version>`, and
+# `cmake --install` writes the new name without removing the old one, so a second
+# packaging run leaves the PREVIOUS version in the install tree and the archive
+# ships both libraries. Clearing both directories makes the install tree and the
+# archive a function of this source tree alone, which is what a release artifact
+# has to be.
+rm -rf "$build_dir" "$install_dir"
+
 cmake -S "$c99_root" -B "$build_dir" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$install_dir" \
