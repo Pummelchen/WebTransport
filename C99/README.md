@@ -26,20 +26,25 @@ layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1
 runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
 dynamic table, the draft-16 WebTransport session layer, and the public consumer API.
 
-**97 CTest tests pass on macOS 26 and on Ubuntu 24.04** (the two `ubuntu-24.04` CI
-legs), and the tree also runs on **Windows** (85
-test executables executed under Wine, 85 passing, plus a Windows-only test of the datagram layer
-itself) and **FreeBSD 15.1** (the whole suite on a real kernel, and in a CI leg since `WT-223`).
+**97 CTest tests pass on macOS 26, on Ubuntu 24.04** (the two `ubuntu-24.04` CI legs), **under
+MSVC and Clang-CL on Windows**, and on **FreeBSD 15.1**. The tree also *runs* on Windows: 85 test
+executables executed under Wine, 85 passing, plus a Windows-only test of the datagram layer itself.
 Running the Windows branch is what
 found and fixed `WT-199` and `WT-200` — a datagram
 receive that reported a truncated packet as a limit error and dropped the sender, and a
 hand-written `WSARecvMsg` prototype with one parameter too many, which a cross-compile cannot see
-because the declaration was this tree's own. Windows already has two CI legs — `windows-wine` and `windows-native` on
-`windows-latest` (MSYS2 MINGW64), both **enforced** — a `linux-debian13` leg runs the suite in a
+because the declaration was this tree's own. Windows has four CI legs, all **enforced**:
+`windows-wine` (mingw cross-build, then every test under Wine), `windows-native` on `windows-latest`
+(MSYS2 MINGW64), and `msvc` and `clang-cl`, which run the same configure, build and ctest under the
+two compilers the plan's Phase 12 matrix names. A `linux-debian13` leg runs the suite in a
 `debian:trixie` container, and `freebsd` boots a FreeBSD VM on an Ubuntu runner and runs the same
-configure, build and ctest there, so every platform the plan's Phase 12 names is a job. What that
-matrix still lacks is its two Windows **compiler** variants — Windows 11 MSVC and Clang-CL, where the
-jobs use mingw GCC. **Open work on this tree is listed on the
+configure, build and ctest there, so **every platform AND every compiler the plan's Phase 12 names is a
+job**. Making the last two pass found seven defects no GCC or Clang on POSIX could see — a static
+archive and a DLL import library claiming one file name, an uninitialized `const` object, the MSVC
+CRT's deprecation of portable C, a fuzzer probe that tested flags it did not apply, a DLL that
+exported nothing because mingw had been exporting it by accident, a DATA symbol's consumer needing
+`dllimport`, and a corpus helper that is unused where the corpus is compiled out (`WT-260`).
+**Open work on this tree is listed on the
 [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99) and nowhere
 else**; the status sentences here and in the repository's root README are kept in step with each
 other.
@@ -368,8 +373,7 @@ What is here:
   which is not the same as being done. Every platform the CI criterion names is a job: macOS, Ubuntu,
   Debian, **FreeBSD** (a VM on an Ubuntu runner, `WT-223`) and Windows 11, which has two — the tree
   compiles, links and RUNS under Wine, and `windows-native` runs the suite under MSYS2. Phase 12's
-  required *matrix* still lacks its two Windows compiler variants, MSVC and Clang-CL, where the legs use
-  mingw GCC; that gap is a tracker row (`WT-260`), not a criterion. The
+  required *matrix* is complete too: Windows 11 runs under mingw GCC, MSVC and Clang-CL. The
   interop matrix is **met**: 7 of the 7 Phase 11 proofs pass against five independent implementations
   on a routable host with `--trust system`, every proof on its first attempt in the
   17 September 2026 re-run — reproduced from a cold deploy on the same day — and the environment is
@@ -1321,11 +1325,10 @@ What is here:
   installed config did not declare its OpenSSL dependency, which no build inside
   this tree could have noticed.
 
-What is not here yet: Phase 12's two Windows compiler variants (Windows 11 MSVC and Clang-CL,
-tracked; the Windows *legs* run mingw GCC, by cross-compile and natively under MSYS2), the rest of
-Phase 10's test port and Phase 13's hardening. The library, the tools, the compliance matrix, the
-platform legs and the external interoperability evidence are all in place; what is left is a pair of
-compiler variants and release artifacts, not implementation.
+What is not here yet: the rest of Phase 10's test port and Phase 13's hardening, and the release
+artifacts. Every platform and every compiler the plan's Phase 12 matrix names runs in CI, the library,
+the tools, the compliance matrix and the external interoperability evidence are all in place; what is
+left is release work, not implementation or coverage.
 
 ## Building
 

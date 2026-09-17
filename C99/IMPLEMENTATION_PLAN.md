@@ -3227,6 +3227,47 @@ criterion. Writing one number and letting it
 mean everything is the failure the Definition of Done's own wording guards against, which is why the score is
 reported as three measured quantities rather than as a percentage.
 
+### WT-260: the two Windows compilers Phase 12 names, and the seven defects they found
+
+Both Windows legs used mingw GCC, so `cl` and `clang-cl` had never built this tree even though the plan's Phase 12
+matrix names them -- and the audit's own text said those variants "are rows on the C99 tracker" while no such row
+existed. A dispatch-only probe workflow (a job that cannot pass does not belong in `c99-ci.yml`, and a manual run
+cannot break `main`) found seven defects, every one of them invisible to GCC and to Clang on POSIX:
+
+1. **`webtransport.lib` was generated twice** -- once as the static archive and once as the DLL's import library,
+   which Ninja refuses before compiling anything ("multiple rules generate webtransport.lib"). mingw's import
+   library is `libwebtransport.dll.a`, so the collision existed only for the MSVC toolchains. The static archive is
+   now `webtransport_static.lib` there, and the DLL keeps the names a Windows consumer expects.
+2. **`wt_tls13_zeros` was an uninitialized `const` array**, which C99 6.7.9p3 forbids for static storage duration
+   and which GCC and Clang accept as an extension that zero-fills (MSVC: C4132).
+3. **The MSVC CRT deprecates portable C**: `getenv`, `fopen` and the POSIX names (`strdup`, `fileno`) in favour of
+   `*_s` functions that are Microsoft's rather than C's. Adopting them would spread `_MSC_VER` branches through
+   call sites that are correct as written, so `_CRT_SECURE_NO_WARNINGS` and `_CRT_NONSTDC_NO_DEPRECATE` are set
+   once, for the MSVC toolchains, in `wt_set_c99`.
+4. **The libFuzzer probe tested flags it did not apply**: it compiled with `-fsanitize=fuzzer` and then applied
+   `-fsanitize=fuzzer,address`, which clang-cl refuses with the debug CRT the Debug configuration selects
+   ("invalid argument '-MDd' not allowed with '-fsanitize=address'"). Worse, MSVC read the probe's `-o <file>` as
+   its own `/o`, compiled without linking and exited 0, so the probe certified a compiler it had never tested and
+   the fuzz target was created with both flags ignored (D9002). The probe now uses the exact flag pair and
+   requires the output file to exist -- a check that cannot run reports that it did not run.
+5. **The DLL exported nothing.** Nothing in this tree carries an export annotation, and a Windows DLL exports only
+   what it is told to; mingw passes `--export-all-symbols` by itself, which is why both mingw legs had been linking
+   against a complete import library for as long as they existed. MSVC wrote an import library with no symbols, so
+   every app and test failed with `undefined symbol: wt_cli_options_parse` (and `link.exe` did not even write the
+   file, so the apps also failed with LNK1104). `WINDOWS_EXPORT_ALL_SYMBOLS` makes CMake generate the module
+   definition from the objects.
+6. **A DATA symbol's consumer needs `dllimport`.** `wt_quic_initial_salt_v1` is an exported array; a function call
+   binds through the import library's thunk, but a data reference does not, so the test executables linked
+   `__imp_wt_quic_initial_salt_v1` and found nothing. The module definition generated for (5) covers functions
+   rather than data, so the header now carries both halves of the standard pair: `dllexport` while the shared
+   library is compiled (`WT_BUILDING_SHARED_LIBRARY`, private to that target) and `dllimport` for everything that
+   links it (`WT_LINKING_SHARED_LIBRARY`, an INTERFACE definition).
+7. **A corpus helper that is unused where the corpus is compiled out.** `WT_FUZZ_NO_CORPUS` is defined for Windows
+   without mingw, and `run_file` -- whose only caller is `run_corpus` -- was left at file scope with no caller
+   (clang-cl: `-Werror,-Wunused-function`; MSVC: C4505). It now lives inside the branch that uses it.
+
+Both jobs are green, run in `c99-ci.yml` on every push, and the probe workflow that found the defects is deleted.
+
 ## Definition of Done audit (measured, 89 rounds in)
 
 Every claim below names the evidence, and the ones that are NOT met name what they still need. This is the
@@ -3238,17 +3279,17 @@ honest state rather than an aspiration:
 | All Swift-equivalent conformance tests pass in C99 | **met** | Every Swift scenario has a C99 counterpart, and the walk that established it is the audit's evidence rather than a claim: the five interop matrices are mirrored case for case (`interop-stream`, `-datagram`, `-goaway-close-drain`, `-connect`, `-malformed-flow`), the two release checks are mirrored where packaging belongs (`scripts/check-package.sh` asserts the product list), and the rest map to a scenario or to a unit suite -- QPACK post-Base to `test_qpack_field_section`, stream reset and stop-sending to `test_quic_stream`, error mapping to the flow matrices and `test_api_session`, buffering to the split-prefix scenario, the smoke matrix to `multi-session-isolation` plus the two-process CLI tests. `protocol-structured-fields` was the one REAL gap the walk found; it is implemented and exercised end to end (`protocol-negotiation`). `zero-rtt-settings` is the one Swift rule with nothing to apply to: 0-RTT and resumption are not implemented at all, which the matrix records as a deliberate `--` row. Where a Swift assertion lives in its session MANAGER and here in the session OBJECT, the layer differs and the behaviour does not. `WT-133` closed. |
 | C99 client/server CLI passes local IPv4 and IPv6 | **met** | `wt-conformance-c99 --scenario all` runs both families (registered as `wt_conformance_scenarios`), and `wt-client-c99`/`wt-server-c99` exchange a session in two processes on IPv4 (registered as `wt_cli_session_stream`/`_datagram`). The tools themselves have not been driven over IPv6; the conformance tool has. `WT-133` covers extending them. |
 | C99 passes the five-implementation VPS interop matrix | **met** | All seven Phase 11 proofs reproduce against five independent implementations on a routable host, with `--trust system` so the chain is validated against the platform trust store and the certificate's name is checked: pywebtransport/aioquic (stream), web-transport-quinn (stream and datagram), web-transport-quiche (stream), hyperium/h3-webtransport (datagram) and erlang-webtransport (stream and datagram). The 17 September 2026 re-run is 7 of 7 -- `passedProofCount` 7, `requiredProofCount` 7, `allPassed` true, `failedProofs` empty -- every proof on its first attempt. Its first attempt reproduced five because the deployed `wt-erlang` image was stale: it kept only the first certificate in the PEM and served the leaf alone, and it was built before `tests/interop/peer/patch-erlang-chain.py` existed; rebuilt from the patched source, all five published ports verify. `scripts/run-vps-third-party-interop.sh` counts the aggregate from the proof files rather than asserting it. Two of the five peers needed a patch to interoperate, both kept under `tests/interop/peer/`. `WT-135` built the matrix and is closed, and `WT-196` is closed in `3de080b`, which also lands the deploy, reset and certificate-renewal scripts so the environment is reproducible from the repository. |
-| CI is green on macOS 26, Debian, FreeBSD and Windows 11 | **met** | `c99-ci.yml` builds and tests on macOS and Ubuntu 24.04 (the matrix's two `ubuntu-24.04` legs), with sanitizers, the package consumer and the CLI smoke. `linux-debian13` runs the suite in a `debian:trixie` container (`WT-225`), `freebsd` boots a FreeBSD VM on an Ubuntu runner and runs the same configure, build and ctest there (`WT-223`), and Windows 11 has two legs: the `_WIN32` branch compiles and links the whole tree under mingw (91 PE32+ executables and one shared library), RUNS under Wine with its suite green (**85 of 85 test executables, 64,900 checks**, including a Windows-only test that asserts the datagram layer's contract on both of its receive paths), and `windows-native` runs the suite on `windows-latest` under MSYS2 MINGW64 (`WT-224`). FreeBSD 15.1 builds the tree with its base clang and passes the suite once `python3` is installed, which the first hand pass found by failing 8 of 96 for that reason alone (`WT-201`, a harness dependency rather than a protocol defect); the VM leg installs the same package. Every platform this criterion names is therefore a job whose failure fails a pull request. The plan's Phase 12 *matrix* still lacks its two Windows compiler variants — Windows 11 MSVC and Clang-CL, where both legs use mingw GCC — and that gap is `WT-260` on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99), which is the single list of open work for this tree. |
+| CI is green on macOS 26, Debian, FreeBSD and Windows 11 | **met** | `c99-ci.yml` builds and tests on macOS and Ubuntu 24.04 (the matrix's two `ubuntu-24.04` legs), with sanitizers, the package consumer and the CLI smoke. `linux-debian13` runs the suite in a `debian:trixie` container (`WT-225`), `freebsd` boots a FreeBSD VM on an Ubuntu runner and runs the same configure, build and ctest there (`WT-223`), and Windows 11 has two legs: the `_WIN32` branch compiles and links the whole tree under mingw (91 PE32+ executables and one shared library), RUNS under Wine with its suite green (**85 of 85 test executables, 64,900 checks**, including a Windows-only test that asserts the datagram layer's contract on both of its receive paths), and `windows-native` runs the suite on `windows-latest` under MSYS2 MINGW64 (`WT-224`). FreeBSD 15.1 builds the tree with its base clang and passes the suite once `python3` is installed, which the first hand pass found by failing 8 of 96 for that reason alone (`WT-201`, a harness dependency rather than a protocol defect); the VM leg installs the same package. Every platform this criterion names is therefore a job whose failure fails a pull request. Phase 12's *matrix* is complete as well: `msvc` and `clang-cl` run the same configure, build and ctest under the two Windows compilers it names (`WT-260`), which took seven defects only those toolchains report. |
 | Sanitizers and static checks are clean | **met** | Every round's verification runs debug, release and ASan+UBSan; the build is warnings-as-errors with `-Wconversion -Wsign-conversion -Wcast-qual -Wswitch-enum -Wpedantic -Wshadow` and the rest. The static half is measured now as well: `scripts/check-static-analysis.sh` runs the Clang Static Analyzer over all 106 sources of the library and the tools (WT-176) and the tree is clean after the one finding it made -- a dead store in `wt_sha256_init`. Parser fuzzing is covered by `tests/fuzz/` (WT-175). `clang-tidy` itself has not been run; the analyzer is the path-sensitive half of the same idea, and `cppcheck` -- the other tool Phase 13 names -- runs beside it (`scripts/check-cppcheck.sh`, WT-177), where it found eight real items the analyzer and the compiler both missed. |
 | Public API is documented | **met** | `C99/docs/PUBLIC-API.md` covers trust, endpoints, sessions, streams, datagrams, backpressure, close, drain and ownership, and `apps/wt-api-sample` plus `test_public_api` check that the documented surface compiles and behaves. |
 | No placeholder, facade, deterministic test runtime or spike is exposed as production | **met** | The tools run real sessions; there is no test-only runtime in the library; the `api/`, `cli/`, `http3/`, `runtime/` modules are all reached by real callers. |
 | README status updated from `0%` to the measured final score | **met** | `scripts/score-matrix.sh` prints the score from `docs/COMPLIANCE-MATRIX.md` -- 39 of 40 draft-16 requirements exercised, all 9 criteria met -- and `C99/README.md` carries that number rather than a guess. That claim was false when it was written: the README's headline still read `Draft-16 score: 0%` and `Phases 6 to 14 are not started` while this row said otherwise, and a public reference library whose first paragraph is wrong is worse than one that says nothing. The headline and the closing "what is not here yet" paragraph now state the measured position. `WT-136` closed. |
 
 **What that means for "100%":** **all nine criteria are met**, and the two things the matrix does not yet carry
-are named with numbers rather than folded into that answer: one draft-16 requirement is `partial`, and Phase 12's
-matrix lacks the MSVC and Clang-CL Windows variants (`WT-260`), because the Windows legs run mingw GCC. Every
+is named with a number rather than folded into that answer: one draft-16 requirement is `partial`. Every
 platform the CI criterion names is a job: macOS, Debian, FreeBSD (a VM on an Ubuntu runner, `WT-223`) and Windows
-11 (cross-compiled under Wine, and natively under MSYS2, `WT-224`). The interop matrix is **met** again: all seven
+11 (cross-compiled under Wine, natively under MSYS2, and under MSVC and Clang-CL, `WT-224` and `WT-260`). Phase
+12's required matrix is complete on every platform and every compiler it names. The interop matrix is **met** again: all seven
 Phase 11 proofs reproduce against five independent implementations on a routable host, every proof under
 `--trust system` and every one on its first attempt in the 17 September 2026 re-run (`WT-196`, closed in
 `3de080b`).

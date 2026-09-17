@@ -31,7 +31,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 The Swift conformance matrix passes in full. The C99 implementation is **Phases 0
 to 11 complete — including Phase 10's test port, which is the 97 CTest tests below
-— and Phase 12's cross-platform CI runs on every platform that phase names**: it builds with CMake as a static and shared
+— and Phase 12's cross-platform CI runs on every platform and compiler that phase names**: it builds with CMake as a static and shared
 library with three CLI tools and carries the whole stack -- the core utilities, a QUIC wire core and
 crypto layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake
 that runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
@@ -59,13 +59,14 @@ jobs green in run 35179834689**. The tree also compiles, links and
 **runs** on Windows (85 of 85 test executables
 under Wine, including a Windows-only test of the datagram layer) and FreeBSD 15.1 (the whole suite
 on a real kernel) -- and running the Windows branch is what found and fixed `WT-199` and `WT-200`.
-Windows is covered by two enforced CI legs: `windows-wine` (mingw cross-build, then every test
-under Wine) and `windows-native` on `windows-latest` (MSYS2 MINGW64); a `linux-debian13` leg runs
+Windows is covered by four enforced CI legs: `windows-wine` (mingw cross-build, then every test
+under Wine), `windows-native` on `windows-latest` (MSYS2 MINGW64), and `msvc` and `clang-cl`, the two
+compilers the plan's Phase 12 matrix names; a `linux-debian13` leg runs
 the suite in a `debian:trixie` container; and `freebsd` boots a FreeBSD VM on an Ubuntu runner and runs
 the same configure, build and ctest there. Of the plan's
-nine completion criteria **all nine are met**. Phase 12's required *matrix* still lacks its two Windows
-compiler variants -- Windows 11 MSVC and Clang-CL, where the jobs use mingw GCC -- and that gap is a row
-on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99). The
+nine completion criteria **all nine are met**, and Phase 12's required *matrix* is complete on every
+platform and every compiler it names -- the last two took seven fixes that only MSVC and clang-cl
+report (`WT-260`). The
 draft-16 compliance matrix has **46 rows: 42 exercised by a test, two whose status is `--` (server push and
 0-RTT, both deliberately not this tree's), and two `partial`** (Origin policy, which the library exposes but
 leaves to the application, and a session under a connection that changes its connection ID during a handshake).

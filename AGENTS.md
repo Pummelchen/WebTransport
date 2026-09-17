@@ -117,7 +117,9 @@ they do not follow the library version and must not be bumped with it.
   `check-workflows.py`, and a CLI smoke step. A CMake configure fails when the
   version mirrors disagree. Three Windows checks: `check-windows-platform.sh`,
   `check-windows-build.sh` and `check-windows-wine.sh` on the Ubuntu leg, plus the
-  **enforced** `windows-native` job on `windows-latest` (MSYS2 MINGW64).
+  **enforced** `windows-native` job on `windows-latest` (MSYS2 MINGW64). Two more
+  Windows jobs run the same configure, build and ctest under the compilers the plan's
+  Phase 12 matrix names: `msvc` and `clang-cl`.
 - `security-scan.yml`: gitleaks 8.30.1 over full history, trivy 0.74.0.
 
 ## Traps
