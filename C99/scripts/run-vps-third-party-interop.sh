@@ -44,7 +44,12 @@ attempts="${WEBTRANSPORT_VPS_INTEROP_ATTEMPTS:-4}"
 # Some peers serve a bounded number of sessions -- `erlang-webtransport` stops accepting after a couple,
 # which is why its datagram proof passed alone and failed in a full run -- so a matrix needs them fresh.
 # This names a command to run before each proof, given the proof key as its argument. Unset leaves the
-# peers alone, which is the right default for a deployment that does not need it.
+# peers alone, which is the right default for a deployment that does not need it. The in-repository
+# command is `tests/interop/reset-vps-peers.sh`, installed on the host as
+# `/usr/local/sbin/webtransport-interop-reset-peers` by `tests/interop/deploy-vps-peers.sh`, so a run
+# from a checkout points at it with
+#   WEBTRANSPORT_VPS_INTEROP_RESET='ssh -o BatchMode=yes root@$WEBTRANSPORT_VPS_INTEROP_ADDRESS \
+#     /usr/local/sbin/webtransport-interop-reset-peers'
 reset_command="${WEBTRANSPORT_VPS_INTEROP_RESET:-}"
 out="${WEBTRANSPORT_VPS_INTEROP_OUT:-$root/out/vps-interop}"
 

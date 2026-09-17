@@ -1,0 +1,13 @@
+# WebTransport interop peers (WT-196).
+#
+# This file exists so the port-80 Caddy obtains and renews the Let's Encrypt
+# certificate that the interop peers serve on their QUIC ports. The peers are
+# not HTTP services, so the site itself only answers a status line.
+#
+# Caddy's default EC key. An RSA certificate was tried on 16 September 2026 to
+# see whether the erlang quicer peer needed one; it made the other four peers
+# fail, so the erlang trust failure is not a key-type problem and this is back
+# to the default.
+pummelchen.91.99.176.243.nip.io {
+	respond "WebTransport interop host" 200
+}

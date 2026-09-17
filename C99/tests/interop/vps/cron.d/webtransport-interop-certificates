@@ -1,0 +1,11 @@
+# Copy Caddy's auto-renewed interop certificate to the two paths the ten peers read, and restart them
+# when it changed (WT-196b). Installed by C99/tests/interop/deploy-vps-peers.sh.
+#
+# Caddy renews on its own schedule; this is the propagation half, because the peers read copies and a
+# peer that loaded a certificate at startup cannot see a new one. The script is a no-op when the bytes
+# match, so four runs a day are cheap and a renewal is picked up the same day. /etc/cron.d/certbot is
+# on this host for the same reason.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+17 */6 * * * root /usr/local/sbin/webtransport-interop-sync-certificates >/dev/null 2>&1

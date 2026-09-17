@@ -1,0 +1,15 @@
+FROM erlang:26-alpine AS builder
+WORKDIR /build
+RUN apk add --no-cache git openssl-dev gcc musl-dev make
+COPY rebar.config rebar.lock ./
+COPY src ./src
+COPY include ./include
+COPY examples ./examples
+RUN rebar3 compile
+RUN ERL_LIBS=/build/_build/default/lib erlc -I include         -o _build/default/lib/webtransport/ebin         examples/echo_server.erl examples/vps_echo.erl
+
+FROM erlang:26-alpine
+WORKDIR /app
+COPY --from=builder /build/_build/default/lib /app/lib
+ENV PORT=54007
+CMD erl -pa /app/lib/*/ebin -noshell -s vps_echo start
