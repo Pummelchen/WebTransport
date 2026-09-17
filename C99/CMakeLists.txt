@@ -381,6 +381,17 @@ function(wt_configure_library target)
     OUTPUT_NAME webtransport
     POSITION_INDEPENDENT_CODE ON
   )
+  # A SHARED library on Windows carries an IMPORT library beside the DLL, and the MSVC toolchains name it after
+  # the DLL: `webtransport.lib`. The static archive is named `webtransport.lib` as well, so the two targets claim
+  # one file and the build graph is refused before anything is compiled -- Ninja's "multiple rules generate
+  # webtransport.lib", which is what the first MSVC run of the Windows compiler probe reported (WT-260). mingw
+  # does not collide, because its import library is `libwebtransport.dll.a`, so this moves the STATIC archive's
+  # name only where the collision exists, and leaves the DLL and its import library under the names a Windows
+  # consumer expects.
+  get_target_property(_wt_library_type ${target} TYPE)
+  if(WIN32 AND NOT MINGW AND _wt_library_type STREQUAL "STATIC_LIBRARY")
+    set_target_properties(${target} PROPERTIES OUTPUT_NAME webtransport_static)
+  endif()
 endfunction()
 
 if(WEBTRANSPORT_C99_BUILD_STATIC)
