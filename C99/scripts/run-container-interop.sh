@@ -56,13 +56,19 @@ trap cleanup EXIT
 docker network create "$network" >/dev/null 2>&1 || true
 
 # The client image is built from this tree, so a change to the client is a rebuild rather than a surprise.
-docker build -q -t "$client_image" -f "$root/tests/interop/client/Dockerfile" "$root" >/dev/null
+docker build -q -t "$client_image" -f "$root/tests/interop/client/Dockerfile" "$repo" >/dev/null
 
 for peer in $peers; do
+  # The `:protocol` token is per peer and cannot be negotiated: this client sends the draft-16 value
+  # `webtransport-h3` unless told otherwise, and all three container peers predate the rename and reject exactly
+  # that value with H3_MESSAGE_ERROR before reading anything else. Without this the client completed its handshake,
+  # sent its CONNECT, and waited for a response the peer had already refused -- which is what "timeout, response 0"
+  # meant on every run. The VPS runner has carried the same table since its first proof; this one had not, and it
+  # also could not build (see the Dockerfile note in tests/interop/README.md), so nobody had noticed (WT-259).
   case "$peer" in
-    pywebtransport) port=54001 ;;
-    quinn) port=54002 ;;
-    quiche) port=54003 ;;
+    pywebtransport) port=54001; token="legacy" ;;
+    quinn) port=54002; token="legacy" ;;
+    quiche) port=54003; token="legacy" ;;
     *) echo "container interop: unknown peer $peer"; exit 2 ;;
   esac
   context="$swift_interop/$peer"
@@ -96,7 +102,7 @@ for peer in $peers; do
   # session that never completed read exactly like one that did.
   # shellcheck disable=SC2086
   if docker run --rm --network "container:wt-interop-$peer" -v "$log_dir:/logs" $client_env "$client_image" \
-       --connect "127.0.0.1:$port" --trust local-development --exchange stream \
+       --connect "127.0.0.1:$port" --trust local-development --exchange stream --upgrade-token "$token" \
        --message "${WT_INTEROP_MESSAGE:-hello-interop}" --timeout-ms "$timeout_ms"; then
     echo "container interop: $peer: the client completed the exchange"
   else

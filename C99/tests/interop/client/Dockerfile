@@ -15,8 +15,13 @@ RUN apt-get update \
         build-essential cmake ninja-build libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# The whole tree, because the client tool is built from apps/ against src/ and include/.
-COPY . /src/c99
+# The C99 tree, because the tools are built from apps/ against src/ and include/ -- and the VERSION file the tree
+# is locked to, which lives at the REPOSITORY root: CMake reads `../VERSION` and refuses to configure without it, so
+# the build context is the repository root and the file is copied to the place that name resolves to. Building with
+# `C99/` as the context instead cannot work, and did not: the configure failed before a single object was compiled,
+# and both container runners had been building that way (WT-259).
+COPY C99 /src/c99
+COPY VERSION /src/VERSION
 
 RUN cmake -S /src/c99 -B /build -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \

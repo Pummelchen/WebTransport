@@ -1769,6 +1769,29 @@ buffer has to clear the draft's largest capsule (`4 + WT_CAPSULE_CLOSE_MAX_REASO
 what an unknown type's varints could add). Both halves are pinned by scenarios, and the first was reproduced
 before the fix: the pre-fix run reported `refused=1, error=0x107, serverClosed=1` for the maximum close.
 
+**WT-258 and WT-259: the server direction gets a second client, and finds a QUIC rule.** The Phase 11 proofs run
+this tree's CLIENT against five implementations; the mirror -- a third-party client against `wt-server-c99` -- had
+one client (pywebtransport/aioquic), and one is not a matrix. `tests/interop/peer/go-client/` is the second:
+quic-go 0.60.0 with webtransport-go 0.11.0, a different language, a different QUIC stack and a different
+WebTransport layer, built as a container image and driven by `scripts/run-container-interop-server.sh`. It failed
+the first time with nothing but a timeout, and the packet was the evidence: quic-go's first Initial carries a
+ZERO-LENGTH Source Connection ID. That is legal -- RFC 9000 section 5.1, "a zero-length connection ID can be used
+when a connection ID is not needed to route to the correct endpoint", and section 5.1.1, "a zero-length
+Destination Connection ID field is used in all packets sent toward such an endpoint over any network path" -- and
+this listener required a non-empty Source Connection ID before it would learn the peer, so it dropped every
+datagram from such a client and said only that it had timed out. It now requires only the DESTINATION connection
+ID, which section 7.3 makes mandatory and which the client checks back as `original_destination_connection_id`.
+`test_quic_packet` pins the codec half (a zero-length destination connection ID encodes and decodes), and both
+clients complete a session with the server, in both directions, with the peer's close capsule read.
+
+Two defects in the harness itself came out of running it, WT-259. Both container runners built the C99 tools from
+`tests/interop/client/Dockerfile` with `C99/` as the build context, and that Dockerfile configures `-S /src/c99`
+whose version gate reads `../VERSION` -- a file that lives at the REPOSITORY root, so the configure failed before
+a single object was compiled. Neither runner could have run since the lockstep gate landed, and nothing noticed
+because both are by-hand. With the context fixed, the client-direction runner still failed, and for a second
+reason: it never passed `--upgrade-token`, so the client sent the draft-16 `webtransport-h3` to peers that predate
+the rename and every one of them refused the CONNECT before reading anything else. Both runners pass again.
+
 **Third part done: the session lifecycle.** `include/webtransport/webtransport/session.h` is the draft's
 three rules about what a session may DO, as opposed to what its bytes say: after a drain, in either direction,
 no new stream may be started for the session while existing ones may finish; after a close, nothing at all;

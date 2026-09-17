@@ -13,6 +13,11 @@
 #         (no arguments runs every peer client this repository knows how to start)
 #
 #   pywebtransport  python:3.12-slim + pywebtransport + aioquic   (a WebTransport client)
+#   go              golang + quic-go + webtransport-go            (a WebTransport client)
+#
+# Two clients rather than one, because one is not a matrix: a server that happened to suit aioquic's habits would
+# look correct. The Go client is also the reason `wt-server-c99` learned to answer a client that selects a
+# ZERO-LENGTH connection ID (RFC 9000 section 5.1, WT-258) -- it could not before, and said so only as a timeout.
 #
 # It EXITS NON-ZERO when a peer does not complete a session, unlike the client-side runner: this one exists to
 # prove the server, so a run that only prints is a run nobody will notice failing. It is deliberately NOT a CTest
@@ -27,7 +32,7 @@ if ! docker info >/dev/null 2>&1; then
   exit 0
 fi
 
-peers="${*:-pywebtransport}"
+peers="${*:-pywebtransport go}"
 failures=0
 network="wt-server-interop-net"
 server_image="wt-interop-c99-client"
@@ -45,13 +50,31 @@ cleanup() {
 trap cleanup EXIT
 
 docker network create "$network" >/dev/null 2>&1 || true
-docker build -q -t "$server_image" -f "$root/tests/interop/client/Dockerfile" "$root" >/dev/null
+docker build -q -t "$server_image" -f "$root/tests/interop/client/Dockerfile" "$repo" >/dev/null
 
 for peer in $peers; do
+  # Each peer is a container with its own image, entrypoint and arguments; the two that exist differ in all
+  # three, which is why they are variables rather than one `docker run` line per peer.
+  peer_entrypoint=""
+  peer_mount=""
   case "$peer" in
     pywebtransport)
       peer_image="wt-interop-pywebtransport"
       context="$repo/Swift/interop-docker/pywebtransport"
+      peer_entrypoint="--entrypoint python"
+      peer_mount="-v $root/tests/interop/peer/c99_server_client.py:/srv/c99_server_client.py:ro"
+      # aioquic derives `:authority` from ITS configured server name (localhost), not from the URL's host, so the
+      # peer may dial 127.0.0.1 and still match a server run with `--origin localhost`.
+      peer_command="/srv/c99_server_client.py --host 127.0.0.1 --port $port --message hello-from-$peer --timeout 8"
+      ;;
+    go)
+      peer_image="wt-interop-c99-go-client"
+      context="$root/tests/interop/peer/go-client"
+      # quic-go takes `:authority` AND the SNI from the URL, so this peer dials `localhost` -- the server is run
+      # with `--origin localhost` -- and the container shares the server's network namespace, where it resolves.
+      # The image's ENTRYPOINT is the client, so the command is only its flags: repeating the binary here would
+      # be a non-flag first argument, which Go's flag package takes as the end of the flags.
+      peer_command="--host localhost --port $port --message hello-from-$peer --timeout 8"
       ;;
     *) echo "server interop: unknown peer $peer"; exit 2 ;;
   esac
@@ -88,10 +111,10 @@ for peer in $peers; do
   # The peer joins the SERVER's namespace: the server is then 127.0.0.1 for the client, which is what the
   # self-signed identity and the development trust path expect, and no NAT is involved in either direction.
   status=0
-  docker run --rm --network "container:wt-server-under-test" \
-    -v "$root/tests/interop/peer/c99_server_client.py:/srv/c99_server_client.py:ro" \
-    --entrypoint python "$peer_image" /srv/c99_server_client.py \
-    --host 127.0.0.1 --port "$port" --message "hello-from-$peer" --timeout 8 || status=$?
+  # shellcheck disable=SC2086 # the entrypoint and the mount are argument LISTS, empty for a peer that needs
+  # neither, and quoting them would pass an empty argument to docker.
+  docker run --rm --network "container:wt-server-under-test" $peer_mount $peer_entrypoint "$peer_image" \
+    $peer_command || status=$?
   # The server serves ONE session and returns, so waiting for it to exit is also how the run is known to be over.
   # Its report is read afterwards, because that is when a buffered stdout reaches `docker logs`.
   waited=0

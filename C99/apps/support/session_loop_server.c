@@ -113,7 +113,17 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
      * possible (version and two 20-byte connection IDs), while an Initial is 1200. `wt_quic_long_header_connection_ids`
      * reads exactly those and refuses a header that is not all there -- the full decoder needs the Length field
      * and a view of the payload, so it cannot be asked for this at all, and requiring the whole datagram in the
-     * buffer meant no packet was ever accepted and the server timed out having read nothing. */
+     * buffer meant no packet was ever accepted and the server timed out having read nothing.
+     *
+     * The DESTINATION connection ID has to be there, because the client validates it back as
+     * `original_destination_connection_id` (RFC 9000 section 7.3), and a client's first Initial always has one.
+     * Its SOURCE connection ID may legitimately be EMPTY: "A zero-length connection ID can be used when a
+     * connection ID is not needed to route to the correct endpoint" (RFC 9000 section 5.1), and "a zero-length
+     * Destination Connection ID field is used in all packets sent toward such an endpoint over any network path"
+     * (section 5.1.1) -- which is what this listener then does, because the peer ID it configures the connection
+     * with is exactly this Source Connection ID. Requiring a non-empty one refused every conforming client that
+     * selects a zero-length ID, and said nothing about why: the listener simply timed out. quic-go is one such
+     * client (WT-258). */
     for (waited = 0U; waited < (unsigned)WT_LOOP_PEEK_ROUNDS_FOR(config->timeout_ms); waited++) {
       size_t datagram_length = 0U;
       size_t available = 0U;
@@ -127,7 +137,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
         size_t source_length = 0U;
         if (wt_quic_long_header_connection_ids(initial_header, available, &destination, &destination_length,
                                                &source, &source_length) == WT_OK &&
-            destination_length > 0U && source_length > 0U) {
+            destination_length > 0U) {
           loop.peer = candidate;
           client_destination_id = destination;
           client_destination_id_length = destination_length;

@@ -258,6 +258,23 @@ What is here:
   (`tests/interop/vps/caddy/`) and the renewal sync that copies it to the peers
   (`tests/interop/sync-vps-peer-certificates.sh`) are all in the repository now, so a fresh clone or a
   rebuilt host can stand the environment up.
+- **A third-party CLIENT against this server** (WT-153): the direction the Phase 11 proofs do not cover, and
+  the one where the most was at stake -- the server accepted only its own connection ID and would have refused
+  every client that chose its own (WT-151), which was found by reading code because nothing could talk to it.
+  `scripts/run-container-interop-server.sh` runs **two** independent clients against `wt-server-c99` on one
+  Docker network, each joined to the server's own namespace so the development identity applies: pywebtransport
+  /aioquic (`tests/interop/peer/c99_server_client.py`) and quic-go/webtransport-go 0.11.0
+  (`tests/interop/peer/go-client/`). The second earned its place immediately. It selects a **zero-length
+  connection ID** for its first Initial -- legal, and named in RFC 9000 section 5.1: "a zero-length connection ID
+  can be used when a connection ID is not needed to route to the correct endpoint" -- and this listener required
+  a non-empty one, so it dropped the packet and reported nothing but a timeout (WT-258). The listener now
+  requires only the client's DESTINATION connection ID, which section 7.3 makes mandatory and which the client
+  validates back as `original_destination_connection_id`, and `test_quic_packet` pins the zero-length form at the
+  codec. Both clients complete a session, exchange the message in both directions, and the peer's close capsule
+  is read. Both container runners also had to be repaired before either could run at all: they shared a
+  Dockerfile built with `C99/` as its context, where CMake's `../VERSION` does not exist, and the client-direction
+  runner never told the client which `:protocol` token its peers require, so every peer refused the CONNECT and
+  the run read as a timeout (WT-259).
 - **A self-signed identity for local development** (Phase 9): `tls/self_signed.h` generates the
   pair a local server needs *in memory* — an ECDSA P-256 key and a certificate for the loopback
   names — and returns its SHA-256 fingerprint. The pin is the point: a self-signed certificate is

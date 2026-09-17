@@ -1,11 +1,17 @@
 # C99 interop material
 
-Everything the C99 interoperability work needs beyond the test suite itself. Two
+Everything the C99 interoperability work needs beyond the test suite itself. Three
 environments live here, and they prove different things:
 
 - **`client/` + `peer/`** — the *container* matrix (`../scripts/run-container-interop.sh`):
   both ends on one Docker network with a self-signed certificate. It proves the
   protocol and nothing about trust, and it needs no host.
+- **the same containers, the other way round** (`../scripts/run-container-interop-server.sh`):
+  a third-party **client** against `wt-server-c99`, which is the direction the
+  Phase 11 proofs do not cover. Two independent clients run it — pywebtransport/
+  aioquic (`peer/c99_server_client.py`) and quic-go/webtransport-go
+  (`peer/go-client/`) — because one implementation is not a matrix, and the
+  second is what found WT-258.
 - **`vps/`** — the *public-host* matrix (`../scripts/run-vps-third-party-interop.sh`):
   five independent implementations on a routable host, each presenting a
   CA-issued certificate, driven with `--trust system`. That is the Phase 11
@@ -23,7 +29,13 @@ host-side scripts are all committed.
 rides inside `quic_opts`) and `patch-quinn-datagram.py` (WT-198:
 `web-transport-quinn` 0.11.9 never advertises QUIC DATAGRAM) — together with the
 diagnostic peers the investigations used (`server.py`, `aioquic_peer.py`,
-`decrypt_packet.py`, `c99_server_client.py`).
+`decrypt_packet.py`) and the two server-side clients above.
+
+Both container runners build the C99 tools from `client/Dockerfile`, whose context
+is the **repository root**: CMake reads `../VERSION` and refuses to configure
+without it, so the file has to be copied next to the tree. Building with `C99/` as
+the context does not work, and did not — the configure failed before anything was
+compiled, and both runners had been building that way.
 
 ## The public-host (VPS) matrix
 
