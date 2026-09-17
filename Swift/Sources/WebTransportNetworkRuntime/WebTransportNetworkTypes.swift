@@ -14,9 +14,14 @@ public enum WebTransportNetworkRuntimeError: Error, Equatable, CustomStringConve
     /// Distinguished from a plain timeout because the cause is known and the
     /// remedy is different: the transport can drop an inbound QUIC stream on a
     /// saturated host, and when the lost stream is the control stream both ends
-    /// wait for each other until the deadline. Nothing is recoverable on this
-    /// connection — the stream is not resent — so a caller seeing this should
-    /// establish a new one rather than wait longer.
+    /// wait for each other until the deadline. A standalone
+    /// `NetworkListener<QUIC>`/`NetworkConnection<QUIC>` harness loses one
+    /// unidirectional stream in about 0.8% of connections (13 of 1600) on
+    /// otherwise idle Macs with every core loaded. Nothing is recoverable on this
+    /// connection — the stream is not resent, so a ten-fold longer deadline
+    /// changes nothing — and the runtime cannot fail before the deadline, because
+    /// no other stream has to arrive for the drop to become observable. A caller
+    /// seeing this should establish a new one rather than wait longer.
     case peerControlStreamNotDelivered(role: String, timeoutMilliseconds: Int32)
     /// The peer ended a stream before sending the bytes that stream has to begin with.
     ///

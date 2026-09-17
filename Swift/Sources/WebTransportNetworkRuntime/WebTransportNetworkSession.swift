@@ -724,8 +724,11 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         let capsule = try await manager.withManager { manager in
             try manager.makeDrainSessionCapsule(sessionID: WebTransportSessionID(rawValue: self.sessionID))
         }
+        // The capsule travels in an HTTP/3 DATA frame, not as bare bytes: see
+        // `InteroperableCONNECTCapsuleFraming` for the RFC and peer evidence.
+        let frame = try InteroperableCONNECTCapsuleFraming.wrap(capsule)
         try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
-            try await self.connectStream.send(capsule, endOfStream: false)
+            try await self.connectStream.send(frame, endOfStream: false)
         }
     }
 
@@ -752,8 +755,11 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
                 message: reason
             )
         }
+        // The capsule travels in an HTTP/3 DATA frame: see
+        // `InteroperableCONNECTCapsuleFraming`.
+        let frame = try InteroperableCONNECTCapsuleFraming.wrap(capsule)
         try await InteroperableQUICHelpers.withTimeout(overrideTimeoutMilliseconds ?? timeoutMilliseconds) {
-            try await self.connectStream.send(capsule, endOfStream: true)
+            try await self.connectStream.send(frame, endOfStream: true)
         }
     }
 
@@ -791,48 +797,47 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
     }
 
-    /// The largest CONNECT-stream capsule payload permitted by
-    /// draft-ietf-webtrans-http3-16, in bytes.
-    ///
-    /// The only CONNECT-stream capsule whose payload is neither empty nor a
-    /// single QUIC varint is WT_CLOSE_SESSION: it carries a 32-bit application
-    /// error code followed by a UTF-8 message that the draft (Section 6) caps
-    /// at `wtCloseSessionMaxMessageBytes` (1024) bytes. Flow-control capsules
-    /// carry one varint and WT_DRAIN_SESSION is empty, so a conforming peer
-    /// can never declare a larger payload. The reader rejects a declared
-    /// length above this bound on the capsule header alone — before waiting
-    /// for, and therefore before buffering, the payload — so a peer cannot
-    /// pin unbounded memory by announcing a huge capsule and then stalling.
-    static let maximumConnectStreamCapsulePayloadBytes =
-        WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes + 4
-
     private static func receiveConnectCapsules(
         from stream: QUIC.Stream<QUICStream>,
         manager: WebTransportNetworkSessionManagerState,
         streamID: UInt64,
         initialBytes: Data
     ) async {
-        var buffered = initialBytes
-        do {
-            while !Task.isCancelled {
-                while let capsule = try popCompleteCapsule(from: &buffered) {
-                    let result = try await manager.withManager { manager in
-                        try manager.receiveConnectStreamCapsulesWithActions(
-                            streamID: streamID,
-                            bytes: capsule
-                        )
-                    }
-                    if result.connectResetFrame != nil {
-                        stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
-                        try? await stream.send(Data(), endOfStream: true)
-                        return
-                    }
-                }
+        var decoder = InteroperableCONNECTCapsuleDecoder()
 
+        /// Delivers capsules to the session manager in order, returning `true`
+        /// when one reset the CONNECT stream and this reader must stop.
+        func deliver(_ capsules: [Data]) async throws -> Bool {
+            for capsule in capsules {
+                let result = try await manager.withManager { manager in
+                    try manager.receiveConnectStreamCapsulesWithActions(
+                        streamID: streamID,
+                        bytes: capsule
+                    )
+                }
+                if result.connectResetFrame != nil {
+                    stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+                    try? await stream.send(Data(), endOfStream: true)
+                    return true
+                }
+            }
+            return false
+        }
+
+        do {
+            if try await deliver(try decoder.append(initialBytes)) {
+                return
+            }
+            while !Task.isCancelled {
                 let received = try await stream.receive(atMost: 8_192)
-                buffered.append(received.content)
+                if try await deliver(try decoder.append(received.content)) {
+                    return
+                }
                 if received.metadata.endOfStream {
-                    if !buffered.isEmpty {
+                    if decoder.hasPendingBytes {
+                        // Bytes that never completed a frame or a capsule: the
+                        // peer ended the stream mid-unit, which is a truncation
+                        // rather than the orderly close a bare FIN is.
                         stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
                         try? await stream.send(Data(), endOfStream: true)
                     } else {
@@ -862,45 +867,6 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
                 stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
             }
             try? await stream.send(Data(), endOfStream: true)
-        }
-    }
-
-    /// Internal rather than private so the draft-16 capsule-size bound can be
-    /// regression-tested directly: `receiveConnectCapsules` needs a live
-    /// `Network.framework` `QUIC.Stream` that a unit test cannot fabricate.
-    static func popCompleteCapsule(from buffer: inout Data) throws -> Data? {
-        guard !buffer.isEmpty else {
-            return nil
-        }
-        var cursor = QUICByteCursor(buffer)
-        do {
-            _ = try QUICVarInt.decode(from: &cursor)
-            let payloadLength = try QUICVarInt.decode(from: &cursor)
-            guard payloadLength <= UInt64(Int.max) else {
-                throw QUICCodecError.valueOutOfRange("CONNECT capsule length exceeds Int.max")
-            }
-            // Reject an over-long declaration on the header alone. Waiting for
-            // the announced payload would let a peer keep this loop buffering
-            // (and re-opening flow-control credit) without bound.
-            guard payloadLength <= UInt64(Self.maximumConnectStreamCapsulePayloadBytes) else {
-                throw QUICCodecError.valueOutOfRange(
-                    "CONNECT capsule payload length \(payloadLength) exceeds the draft-16 maximum of "
-                        + "\(Self.maximumConnectStreamCapsulePayloadBytes) bytes"
-                )
-            }
-            let headerLength = buffer.count - cursor.remaining
-            let (capsuleLength, overflow) = headerLength.addingReportingOverflow(Int(payloadLength))
-            guard !overflow else {
-                throw QUICCodecError.valueOutOfRange("CONNECT capsule length overflow")
-            }
-            guard buffer.count >= capsuleLength else {
-                return nil
-            }
-            let capsule = Data(buffer.prefix(capsuleLength))
-            buffer.removeFirst(capsuleLength)
-            return capsule
-        } catch QUICCodecError.truncated {
-            return nil
         }
     }
 }

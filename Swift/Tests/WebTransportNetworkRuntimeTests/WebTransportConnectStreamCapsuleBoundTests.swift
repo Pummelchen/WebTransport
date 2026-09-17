@@ -13,14 +13,14 @@ func connectStreamCapsuleReaderRejectsDeclaredLengthAboveDraft16Maximum() throws
     var buffer = Data()
     buffer.append(try QUICVarInt.encode(WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule))
     buffer.append(
-        try QUICVarInt.encode(UInt64(WebTransportNetworkSession.maximumConnectStreamCapsulePayloadBytes) + 1))
+        try QUICVarInt.encode(UInt64(InteroperableCONNECTCapsuleFraming.maximumCapsulePayloadBytes) + 1))
     // The peer never has to send the payload: announcing a capsule larger than
     // any CONNECT-stream capsule draft-16 permits is itself the violation, and
     // the reader must not sit waiting for the rest of it.
     buffer.append(Data(repeating: 0x41, count: 8))
 
     #expect(throws: Error.self) {
-        _ = try WebTransportNetworkSession.popCompleteCapsule(from: &buffer)
+        _ = try InteroperableCONNECTCapsuleFraming.popCompleteCapsule(from: &buffer)
     }
 }
 
@@ -29,7 +29,7 @@ func connectStreamCapsuleReaderRejectsDeclaredLengthAboveDraft16Maximum() throws
 /// being treated as an error.
 @Test
 func connectStreamCapsuleReaderAcceptsCapsulesUpToDraft16Maximum() throws {
-    let maximumPayloadBytes = WebTransportNetworkSession.maximumConnectStreamCapsulePayloadBytes
+    let maximumPayloadBytes = InteroperableCONNECTCapsuleFraming.maximumCapsulePayloadBytes
     var payload = Data([0x00, 0x00, 0x00, 0x01])
     payload.append(Data(repeating: 0x61, count: maximumPayloadBytes - payload.count))
 
@@ -40,11 +40,11 @@ func connectStreamCapsuleReaderAcceptsCapsulesUpToDraft16Maximum() throws {
     #expect(payload.count == WebTransportHTTP3DraftConstants.current.wtCloseSessionMaxMessageBytes + 4)
 
     var complete = capsule
-    #expect(try WebTransportNetworkSession.popCompleteCapsule(from: &complete) == capsule)
+    #expect(try InteroperableCONNECTCapsuleFraming.popCompleteCapsule(from: &complete) == capsule)
     #expect(complete.isEmpty)
 
     var partial = capsule
     partial.removeLast()
-    #expect(try WebTransportNetworkSession.popCompleteCapsule(from: &partial) == nil)
+    #expect(try InteroperableCONNECTCapsuleFraming.popCompleteCapsule(from: &partial) == nil)
     #expect(partial.count == capsule.count - 1)
 }

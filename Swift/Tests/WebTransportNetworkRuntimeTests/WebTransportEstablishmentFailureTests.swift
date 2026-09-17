@@ -68,6 +68,35 @@ func establishmentFailureDoesNotCoverTheDefectItGuards() {
             .isTransientEstablishmentFailure)
 }
 
+/// WT-221: a control stream that never arrives is named, and not as a plain timeout.
+///
+/// The loss is in the transport's stream delivery on a saturated receiver: the
+/// peer sent its control stream and nothing of it arrived, so both ends wait for
+/// each other. The runtime cannot see that from any other signal — no stream
+/// arrives to prove one was dropped — so the only honest report is the deadline
+/// expiring, and the caller's remedy is a fresh connection, which the error's
+/// documentation carries. The loss is not resented, so a longer deadline cannot
+/// recover it, and this test pins the classification the caller decides on rather
+/// than a duration.
+@Test
+func peerControlStreamThatNeverArrivesIsNamedRatherThanATimeout() async throws {
+    let collector = InteroperableQUICInboundStreamCollector()
+    do {
+        _ = try await InteroperableQUICHelpers.readPeerControlStream(
+            from: collector,
+            role: "client",
+            timeoutMilliseconds: 5
+        )
+        Issue.record("a collector that never sees a stream must not return control bytes")
+    } catch let error as WebTransportNetworkRuntimeError {
+        #expect(error == .peerControlStreamNotDelivered(role: "client", timeoutMilliseconds: 5))
+        #expect(!error.description.contains("timed out"), "the cause is not a slow peer")
+        #expect(error.description.contains("retried"), "the remedy is a fresh connection")
+    } catch {
+        Issue.record("expected the named runtime error, got \(error)")
+    }
+}
+
 /// The framework's own domain and code survive the translation, so a failure stays
 /// diagnosable from the error alone rather than only from a debug log.
 @Test

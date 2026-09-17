@@ -221,10 +221,11 @@ public struct WebTransportQUICClient: Sendable {
         let pendingSessionID = try WebTransportSessionID.fromRequestStreamID(requestStreamID)
         for capsule in optimisticCapsules {
             connectPayload.append(
-                try manager.makeOptimisticConnectStreamCapsule(
-                    sessionID: pendingSessionID,
-                    capsule: capsule
-                ))
+                try InteroperableCONNECTCapsuleFraming.wrap(
+                    manager.makeOptimisticConnectStreamCapsule(
+                        sessionID: pendingSessionID,
+                        capsule: capsule
+                    )))
         }
         let requestPayload = connectPayload
         try await runWithTimeout {
