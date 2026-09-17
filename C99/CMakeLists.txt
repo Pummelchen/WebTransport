@@ -432,6 +432,7 @@ if(BUILD_SHARED_LIBS)
     # reaches every target that links the DLL -- tests, apps and a consumer of the installed package -- and the
     # library's own compilation never sees it. See `webtransport/quic/protection.h`.
     target_compile_definitions(webtransport_shared INTERFACE WT_LINKING_SHARED_LIBRARY)
+    target_compile_definitions(webtransport_shared PRIVATE WT_BUILDING_SHARED_LIBRARY)
   endif()
 endif()
 

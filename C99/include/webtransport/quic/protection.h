@@ -75,8 +75,14 @@ typedef struct wt_quic_packet_keys {
  * "unresolved external symbol wt_quic_initial_salt_v1" (WT-260, reported by two test executables). mingw's
  * auto-import feature papers over the difference, so neither mingw leg had ever seen it. The shared library adds
  * `WT_LINKING_SHARED_LIBRARY` as an INTERFACE definition, so it reaches exactly the targets that link the DLL --
- * including a real consumer of the installed package -- and never the library's own compilation. */
-#if defined(_WIN32) && defined(WT_LINKING_SHARED_LIBRARY) && !defined(WT_BUILDING_LIBRARY)
+ * including a real consumer of the installed package -- and never the library's own compilation. The library's own
+ * compilation of the DLL gets `WT_BUILDING_SHARED_LIBRARY` instead, because a data symbol is exported by the
+ * DECLARATION and not by the module-definition file CMake generates for functions: the test executables linked
+ * against `__imp_wt_quic_initial_salt_v1` and the import library had no such entry until the definition itself
+ * said `dllexport` (WT-260). */
+#if defined(_WIN32) && defined(WT_BUILDING_SHARED_LIBRARY)
+#define WT_QUIC_DATA __declspec(dllexport)
+#elif defined(_WIN32) && defined(WT_LINKING_SHARED_LIBRARY)
 #define WT_QUIC_DATA __declspec(dllimport)
 #else
 #define WT_QUIC_DATA
