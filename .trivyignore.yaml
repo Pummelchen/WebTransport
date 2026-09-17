@@ -1,6 +1,7 @@
-# Accepted misconfiguration findings, per file (F-repo-ops-13).
+# Accepted findings, per file and per identifier (F-repo-ops-13): a misconfiguration
+# policy for the interop images, and one advisory the Go interop client cannot move off.
 #
-# The eleven interop Dockerfiles are TEST images: `scripts/run-container-interop*.sh`
+# The twelve interop Dockerfiles are TEST images: `scripts/run-container-interop*.sh`
 # starts them on a private Docker bridge network next to each other, waits on the
 # test, and tears them down. They are never published, never exposed, and never
 # shipped, so DS-0002 (image user is root) is accepted rather than fixed -- a
@@ -15,6 +16,11 @@
 # they are accepted on the same reasoning and reviewed one by one, which is what the per-path
 # scoping exists to force.
 #
+# `peer/go-client/` is the twelfth, added with the second server-side interop client (WT-153):
+# built and started by `C99/scripts/run-container-interop-server.sh` on the same private bridge
+# network, joined to the server's own namespace, and torn down with it. Same class, same
+# reasoning.
+#
 # The acceptance is scoped by `paths`, so a NEW Dockerfile is still checked and a
 # new image that DOES run as root for a real deployment fails the scan. The
 # reasoning is repeated in `.trivy.yaml`, which enables and points at this file.
@@ -22,6 +28,7 @@ misconfigurations:
   - id: DS-0002
     paths:
       - C99/tests/interop/client/Dockerfile
+      - C99/tests/interop/peer/go-client/Dockerfile
       - C99/tests/interop/peer/Dockerfile
       - C99/tests/interop/peer/Dockerfile.aioquic
       - Swift/interop-docker/pywebtransport/Dockerfile
@@ -36,6 +43,7 @@ misconfigurations:
   - id: DS-0026
     paths:
       - C99/tests/interop/client/Dockerfile
+      - C99/tests/interop/peer/go-client/Dockerfile
       - C99/tests/interop/peer/Dockerfile
       - C99/tests/interop/peer/Dockerfile.aioquic
       - Swift/interop-docker/pywebtransport/Dockerfile
@@ -47,3 +55,15 @@ misconfigurations:
       - C99/tests/interop/vps/peers/quiche/Dockerfile
       - C99/tests/interop/vps/peers/quinn/Dockerfile
     statement: Test-only interop image started and polled by a script; no HEALTHCHECK consumer.
+
+# GO-2026-5932 is `golang.org/x/crypto/openpgp`: "unmaintained, unsafe by design, and has known
+# security issues". It carries NO fixed version -- the package is deprecated rather than patched --
+# and it arrives as an INDIRECT module dependency of quic-go. The interop client below links no
+# openpgp code at all: it dials QUIC, opens one stream, reads the echo and exits. Scoped to the
+# module file, so a second Go module in this tree is still scanned in full.
+vulnerabilities:
+  - id: GO-2026-5932
+    paths:
+      - C99/tests/interop/peer/go-client/go.mod
+      - C99/tests/interop/peer/go-client/go.sum
+    statement: Test-only interop client; the advisory is on an indirect module's unused package with no fix to apply.

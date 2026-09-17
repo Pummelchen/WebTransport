@@ -8,8 +8,10 @@
 #   * `secret` is a second engine beside gitleaks.
 #   * `misconfig` covers Dockerfile and IaC hardening. It was off while the tree
 #     had 12 findings; `.trivyignore.yaml` is now the written policy that accepts
-#     exactly those two checks on exactly those six files (F-repo-ops-13), so the
-#     scanner runs and any NEW Dockerfile or new check still fails the job.
+#     exactly those two checks on exactly the interop images, and one advisory
+#     (`GO-2026-5932`, an indirect and unused `golang.org/x/crypto` package with no
+#     fixed version) on the one Go module in the tree (F-repo-ops-13), so the
+#     scanner runs and any NEW Dockerfile, check or advisory still fails the job.
 #
 # The one real dependency, OpenSSL 3.x, is the platform's: it is found with
 # `find_package(OpenSSL 3.0 REQUIRED)` (C99/CMakeLists.txt:40), never vendored,

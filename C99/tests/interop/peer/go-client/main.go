@@ -62,7 +62,7 @@ func run(host string, port int, path string, message string, timeout time.Durati
 	url := fmt.Sprintf("https://%s:%d%s", host, port, path)
 	result := report{
 		Role:           "peer-client",
-		Implementation: "quic-go/webtransport-go 0.11.0",
+		Implementation: "quic-go/webtransport-go 0.11.1",
 		URL:            url,
 		Received:       "",
 	}

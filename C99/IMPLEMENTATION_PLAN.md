@@ -1772,7 +1772,7 @@ before the fix: the pre-fix run reported `refused=1, error=0x107, serverClosed=1
 **WT-258 and WT-259: the server direction gets a second client, and finds a QUIC rule.** The Phase 11 proofs run
 this tree's CLIENT against five implementations; the mirror -- a third-party client against `wt-server-c99` -- had
 one client (pywebtransport/aioquic), and one is not a matrix. `tests/interop/peer/go-client/` is the second:
-quic-go 0.60.0 with webtransport-go 0.11.0, a different language, a different QUIC stack and a different
+quic-go 0.60.0 with webtransport-go 0.11.1, a different language, a different QUIC stack and a different
 WebTransport layer, built as a container image and driven by `scripts/run-container-interop-server.sh`. It failed
 the first time with nothing but a timeout, and the packet was the evidence: quic-go's first Initial carries a
 ZERO-LENGTH Source Connection ID. That is legal -- RFC 9000 section 5.1, "a zero-length connection ID can be used

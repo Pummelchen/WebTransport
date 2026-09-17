@@ -263,7 +263,7 @@ What is here:
   every client that chose its own (WT-151), which was found by reading code because nothing could talk to it.
   `scripts/run-container-interop-server.sh` runs **two** independent clients against `wt-server-c99` on one
   Docker network, each joined to the server's own namespace so the development identity applies: pywebtransport
-  /aioquic (`tests/interop/peer/c99_server_client.py`) and quic-go/webtransport-go 0.11.0
+  /aioquic (`tests/interop/peer/c99_server_client.py`) and quic-go/webtransport-go 0.11.1
   (`tests/interop/peer/go-client/`). The second earned its place immediately. It selects a **zero-length
   connection ID** for its first Initial -- legal, and named in RFC 9000 section 5.1: "a zero-length connection ID
   can be used when a connection ID is not needed to route to the correct endpoint" -- and this listener required
