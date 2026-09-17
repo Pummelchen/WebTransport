@@ -2,7 +2,7 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-16`, dated 2026-07-06.
 
-Draft-16 score: **37 of 38 requirements exercised by a test in this tree**, the remaining one
+Draft-16 score: **39 of 40 requirements exercised by a test in this tree**, the remaining one
 `partial` (Origin policy, which the library exposes and leaves to the application).
 The number is measured rather than remembered: `scripts/score-matrix.sh` counts it from
 `docs/COMPLIANCE-MATRIX.md`, and `scripts/check-matrix.sh` fails the build if a symbol the
@@ -29,22 +29,26 @@ dynamic table, the draft-16 WebTransport session layer, and the public consumer 
 **97 CTest tests pass on macOS 26 and on Ubuntu 24.04** (the two `ubuntu-24.04` CI
 legs), and the tree also runs on **Windows** (85
 test executables executed under Wine, 85 passing, plus a Windows-only test of the datagram layer
-itself) and **FreeBSD 15.1** (the whole suite on a real kernel). Running the Windows branch is what
+itself) and **FreeBSD 15.1** (the whole suite on a real kernel, and in a CI leg since `WT-223`).
+Running the Windows branch is what
 found and fixed `WT-199` and `WT-200` — a datagram
 receive that reported a truncated packet as a limit error and dropped the sender, and a
 hand-written `WSARecvMsg` prototype with one parameter too many, which a cross-compile cannot see
 because the declaration was this tree's own. Windows already has two CI legs — `windows-wine` and `windows-native` on
-`windows-latest` (MSYS2 MINGW64), both **enforced** — and a `linux-debian13` leg runs the suite in a
-`debian:trixie` container, so what the plan's Phase 12 matrix still lacks is a CI *job* for FreeBSD
-(`WT-223`) and the MSVC and Clang-CL Windows variants. **Open work on this tree is listed on the
+`windows-latest` (MSYS2 MINGW64), both **enforced** — a `linux-debian13` leg runs the suite in a
+`debian:trixie` container, and `freebsd` boots a FreeBSD VM on an Ubuntu runner and runs the same
+configure, build and ctest there, so every platform the plan's Phase 12 names is a job. What that
+matrix still lacks is its two Windows **compiler** variants — Windows 11 MSVC and Clang-CL, where the
+jobs use mingw GCC. **Open work on this tree is listed on the
 [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99) and nowhere
 else**; the status sentences here and in the repository's root README are kept in step with each
 other.
 
-Of the plan's nine Definition-of-Done criteria **eight are met and one is partial** — CI *job*
-coverage (no FreeBSD leg, `WT-223`; and the plan's MSVC and Clang-CL Windows variants are not jobs),
-not the code on them. The five-implementation interop matrix is met again at **7 of its 7
-Phase 11 proofs** (`WT-196`, fixed in `3de080b`).
+Of the plan's nine Definition-of-Done criteria **all nine are met**: every platform the CI criterion
+names (macOS 26, Debian, FreeBSD and Windows 11) is a job, and the FreeBSD one boots a VM with the
+project's own configure, build and ctest (`WT-223`). The five-implementation interop matrix is met again
+at **7 of its 7 Phase 11 proofs** (`WT-196`, fixed in `3de080b`), reproduced from a cold deploy on
+17 September 2026.
 `scripts/score-matrix.sh` prints that state from the matrix rather than from memory.
 
 What is here:
@@ -257,7 +261,12 @@ What is here:
   endpoints themselves, the Caddy project file that makes the certificate obtainable and renewable
   (`tests/interop/vps/caddy/`) and the renewal sync that copies it to the peers
   (`tests/interop/sync-vps-peer-certificates.sh`) are all in the repository now, so a fresh clone or a
-  rebuilt host can stand the environment up.
+  rebuilt host can stand the environment up. Measured on 17 September 2026: from a **fresh clone**
+  (`main` at `3bf3a3e`) on a host whose five peer images, the `python:3.12-slim`, `rust:1-slim`,
+  `debian:trixie-slim` and `erlang:26-alpine` bases and the whole builder cache had been removed, the
+  deploy script built and started all five peers in **7 m 38 s**, each reporting its listener — the
+  quinn, quiche and h3 peers compiling from a cold crates index and the erlang one cloned at its pinned
+  commit — and the suite then passed **7 of 7** against them, every proof on its first attempt.
 - **A third-party CLIENT against this server** (WT-153): the direction the Phase 11 proofs do not cover, and
   the one where the most was at stake -- the server accepted only its own connection ID and would have refused
   every client that chose its own (WT-151), which was found by reading code because nothing could talk to it.
@@ -353,19 +362,21 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **37 of 38 draft-16 requirements in
-  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, one is `partial`, and 8 of the plan's 9 completion
-  criteria are met, with 1 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
-  which is not the same as being done. The one partial criterion is outside the matrix. The FreeBSD
-  and Windows CI legs are both **measured** — the tree compiles, links and RUNS under
-  Wine on Windows, and builds and passes its whole suite on a real FreeBSD 15.1 kernel — so what is
-  missing there is a CI *job* GitHub does not provide natively rather than portability work. The
+  `scripts/score-matrix.sh` rather than from memory: **39 of 40 draft-16 requirements in
+  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, one is `partial`, and all 9 of the plan's
+  completion criteria are met.** The matrix coverage is 100% *of the matrix*,
+  which is not the same as being done. Every platform the CI criterion names is a job: macOS, Ubuntu,
+  Debian, **FreeBSD** (a VM on an Ubuntu runner, `WT-223`) and Windows 11, which has two — the tree
+  compiles, links and RUNS under Wine, and `windows-native` runs the suite under MSYS2. Phase 12's
+  required *matrix* still lacks its two Windows compiler variants, MSVC and Clang-CL, where the legs use
+  mingw GCC; that gap is a tracker row (`WT-260`), not a criterion. The
   interop matrix is **met**: 7 of the 7 Phase 11 proofs pass against five independent implementations
   on a routable host with `--trust system`, every proof on its first attempt in the
-  17 September 2026 re-run, and the environment is reproducible from the repository. The
+  17 September 2026 re-run — reproduced from a cold deploy on the same day — and the environment is
+  reproducible from the repository. The
   conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
-  fifty-five C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
+  fifty-seven C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
   product list is the three tools and nothing that tests them), and every remaining entry mapped to
   the unit suite that covers it. The walk found one real gap, `protocol-structured-fields`, which is
@@ -386,7 +397,7 @@ What is here:
   usability bug on its first run: `--help` was rejected as an **unknown flag** by the parser, so
   `--help` and `--version` are now the parser's business and are answered *before* the mode and
   address are checked — asking what a tool does is not asking it to do anything.
-- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-five scenarios, all
+- **The conformance tool's scenarios, positive and negative** (Phase 9-10): **fifty-seven scenarios, all
   passing** in one machine-readable report — the codec ones, **eleven refusal scenarios** (a wrong path
   is `404` compared exactly, an extended CONNECT for another protocol is not a WebTransport request, a
   server without `WT_ENABLED` refuses the session, a **repeated** SETTINGS identifier is
@@ -1310,11 +1321,11 @@ What is here:
   installed config did not declare its OpenSSL dependency, which no build inside
   this tree could have noticed.
 
-What is not here yet: a CI job that runs the Windows and FreeBSD legs (both are measured by
-hand today, and two Windows test programs fail — `WT-199`, `WT-200`), the rest of Phase 10's
-test port, Phase 13's hardening, and Phase 14's release artifacts. The library, the tools, the
-compliance matrix and the external interoperability evidence are all in place; what is left is
-enforcement and release, not implementation.
+What is not here yet: Phase 12's two Windows compiler variants (Windows 11 MSVC and Clang-CL,
+tracked; the Windows *legs* run mingw GCC, by cross-compile and natively under MSYS2), the rest of
+Phase 10's test port and Phase 13's hardening. The library, the tools, the compliance matrix, the
+platform legs and the external interoperability evidence are all in place; what is left is a pair of
+compiler variants and release artifacts, not implementation.
 
 ## Building
 

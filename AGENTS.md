@@ -19,7 +19,8 @@ separate CMake C99 library with its own CLI tools and test suite. The two are
 built and tested separately and versioned in lockstep from a single `VERSION` file,
 so a caller pairing them knows the pair is compatible. Both are released together
 (`1.5.0`, one artifact per library under one tag); the C99 side is built and
-exercised — 97 CTest tests, ASan/UBSan, Windows-under-Wine, FreeBSD by hand. The
+exercised — 97 CTest tests, ASan/UBSan, Windows under Wine and natively, and
+FreeBSD in a VM. The
 audience is protocol implementers reading a
 reference implementation, so exact wire behaviour matters more than convenience.
 Open work is tracked on the repository's wiki — [Project Tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker)
@@ -106,8 +107,10 @@ they do not follow the library version and must not be bumped with it.
   conformance suites (`--scenario all`), a 20000-iteration ASan fuzz run, and a
   thread-sanitizer job that skips `CLIProcess` / `ReleaseArtifacts`.
 - C99 (`.github/workflows/c99-ci.yml`): a macOS and `ubuntu-24.04` matrix (gcc and
-  clang) building Debug and Release and running the suite under ASan+UBSan, plus a
-  `linux-debian13` job in a `debian:trixie` container; `check-vectors.sh`,
+  clang) building Debug and Release and running the suite under ASan+UBSan, a
+  `linux-debian13` job in a `debian:trixie` container, and a `freebsd` job that boots
+  a FreeBSD VM on an Ubuntu runner and runs the same configure, build and ctest there;
+  `check-vectors.sh`,
   `check-package.sh` (builds a consumer of the installed package and *runs* all
   three installed tools), `check-matrix.sh`, `check-portability.sh`,
   `check-static-analysis.sh` (Clang Static Analyzer), `check-cppcheck.sh`,

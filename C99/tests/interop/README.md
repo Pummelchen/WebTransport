@@ -86,6 +86,15 @@ host-side units: `/usr/local/sbin/webtransport-interop-sync-certificates`,
 obtain the certificate — the Caddy project file above has to be in place and
 Caddy reloaded first, or every peer exits at startup on a missing file.
 
+Measured on the host on 17 September 2026, and this is the point of the script: from a **fresh clone**
+(`main` at `3bf3a3e`) with **no peer images, no base images and no build cache** — the five `wt-*`
+images and the `python:3.12-slim`, `rust:1-slim`, `debian:trixie-slim` and `erlang:26-alpine` bases
+removed, `docker builder prune -af` run, and the work directory deleted — it built and started all five
+in **7 m 38 s**, each reporting its listener: three Rust peers from a cold crates index and the erlang
+one cloned at its pinned commit and patched. The interop suite then passed **7 of 7** against them,
+every proof on its first attempt. Nothing is reused from a previous deployment and nothing is typed by
+hand.
+
 ### Running the suite
 
 ```sh

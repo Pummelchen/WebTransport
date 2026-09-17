@@ -31,7 +31,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 The Swift conformance matrix passes in full. The C99 implementation is **Phases 0
 to 11 complete — including Phase 10's test port, which is the 97 CTest tests below
-— with Phase 12's cross-platform CI partly in place**: it builds with CMake as a static and shared
+— and Phase 12's cross-platform CI runs on every platform that phase names**: it builds with CMake as a static and shared
 library with three CLI tools and carries the whole stack -- the core utilities, a QUIC wire core and
 crypto layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake
 that runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
@@ -47,23 +47,26 @@ proofs**, against **five independent implementations** on a routable host with
 the name is checked rather than bypassed. The 17 September 2026 re-run passed every proof on its
 first attempt, and the environment is reproducible from the repository
 (`C99/tests/interop/deploy-vps-peers.sh`, `reset-vps-peers.sh` and
-`sync-vps-peer-certificates.sh`), so a fresh clone or a rebuilt host can stand it up.
+`sync-vps-peer-certificates.sh`): from a fresh clone with **no peer images, no base images and no
+build cache**, the deploy script built and started all five peers in 7 m 38 s, and the suite then passed
+7 of 7 against them.
 84 test programs and 65,030 checks pass on macOS 26 (64,778 on Debian 13; the Wine runner sums 64,900
 over the 85 Windows executables), plus a 200,000-input parser fuzz run and a Clang Static
 Analyzer pass over all 106 sources. Every suite runs again under AddressSanitizer and
 UndefinedBehaviorSanitizer, on macOS and Linux in CI: **97 CTest tests pass on macOS 26 and on Linux in
-CI — two `ubuntu-24.04` legs and a `Debian 13 (trixie, gcc)` leg, all six jobs green in run
-35111066674**. The tree also compiles, links and
+CI — two `ubuntu-24.04` legs, a `Debian 13 (trixie, gcc)` leg and a `FreeBSD (VM, clang)` leg, all seven
+jobs green in run 35179834689**. The tree also compiles, links and
 **runs** on Windows (85 of 85 test executables
 under Wine, including a Windows-only test of the datagram layer) and FreeBSD 15.1 (the whole suite
 on a real kernel) -- and running the Windows branch is what found and fixed `WT-199` and `WT-200`.
 Windows is covered by two enforced CI legs: `windows-wine` (mingw cross-build, then every test
-under Wine) and `windows-native` on `windows-latest` (MSYS2 MINGW64), and a `linux-debian13` leg runs
-the suite in a `debian:trixie` container. FreeBSD 15.1 has no CI leg. Of the plan's
-nine completion criteria **8 are met and 1 is partial** (the CI *job* for the FreeBSD leg,
-`WT-223`, and the plan's MSVC and Clang-CL Windows variants, not the code on them; the outstanding
-work is listed on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99)). The
-draft-16 compliance matrix has **44 rows: 40 exercised by a test, two whose status is `--` (server push and
+under Wine) and `windows-native` on `windows-latest` (MSYS2 MINGW64); a `linux-debian13` leg runs
+the suite in a `debian:trixie` container; and `freebsd` boots a FreeBSD VM on an Ubuntu runner and runs
+the same configure, build and ctest there. Of the plan's
+nine completion criteria **all nine are met**. Phase 12's required *matrix* still lacks its two Windows
+compiler variants -- Windows 11 MSVC and Clang-CL, where the jobs use mingw GCC -- and that gap is a row
+on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99). The
+draft-16 compliance matrix has **46 rows: 42 exercised by a test, two whose status is `--` (server push and
 0-RTT, both deliberately not this tree's), and two `partial`** (Origin policy, which the library exposes but
 leaves to the application, and a session under a connection that changes its connection ID during a handshake).
 Every symbol and test name in the table is resolved by `C99/scripts/check-matrix.sh`, which is what keeps the
