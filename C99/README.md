@@ -385,11 +385,16 @@ What is here:
   the peer's application code while the connection stays up -- before WT-164 the first was silently skipped
   as an unknown HTTP/3 frame and the other two were parsed as frames and refused -- and a `MAX_DATA` capsule
   the client sends without having advertised a flow-control setting being IGNORED rather than applied, which
-  is section 5.1's MUST for a setting that was not negotiated), **two capsule refusals**
+  is section 5.1's MUST for a setting that was not negotiated; every one of them now travels inside the HTTP/3
+  `DATA` frame RFC 9114 section 4.4 requires on a CONNECT stream, and the driver frames the stream again -- a
+  capsule written raw is an unknown frame type, which a peer ignores in silence, WT-249), **two capsule refusals**
   (a capsule declaring more than the receiver will buffer closing the *connection* with `H3_EXCESSIVE_LOAD` and
   the peer reading that code, and a repeated grant closing the *session* with the draft's own
   `WT_WEBTRANSPORT_FLOW_CONTROL_ERROR` while both connections stay up -- the second is the case where returning
-  the failure to the transport would have closed the connection over the session's own error), the positive edge this project earned the hard way (half a prefix
+  the failure to the transport would have closed the connection over the session's own error), **two capsule-bound
+  scenarios** (a close carrying the draft's maximum 1024-byte reason -- 1032 bytes of capsule, which the tools
+  refused while their bound was applied per delivery rather than per capsule -- and 160 grants coalesced into one
+  DATA frame, which is walked in pieces; WT-257), the positive edge this project earned the hard way (half a prefix
   decides nothing until it is whole), **thirteen connection-control scenarios** (GOAWAY identifiers that must not
   increase and must name a client stream, the reject-at-or-above boundary, one control stream per
   connection, a request frame refused on it, SETTINGS that must come first, a closed critical stream,

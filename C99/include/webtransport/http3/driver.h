@@ -72,9 +72,10 @@ typedef struct wt_http3_driver_data_stream {
 
 /* How many WebTransport CONNECT streams this driver may remember at once. A CONNECT stream is marked when its
  * session is known -- by the client when it sends the CONNECT, by the server when it accepts one -- so that the
- * bytes after its single HEADERS frame are the SESSION's capsules rather than HTTP/3 frames (draft-16 section 5).
- * The bound is smaller than the data-stream table's because one session has many streams but a driver serves a
- * handful of sessions, and a caller past it is refused with WT_ERR_LIMIT rather than given more. */
+ * DATA frames after its single HEADERS frame are recognised as the SESSION's capsules rather than as an
+ * application's own DATA (RFC 9114 section 4.4, RFC 9297 section 3.2). The bound is smaller than the data-stream
+ * table's because one session has many streams but a driver serves a handful of sessions, and a caller past it is
+ * refused with WT_ERR_LIMIT rather than given more. */
 #define WT_HTTP3_DRIVER_CAPSULE_STREAMS_MAX 8U
 
 typedef struct wt_http3_driver_pending {
@@ -187,11 +188,12 @@ typedef struct wt_http3_driver {
   wt_http3_driver_data_stream_t data_streams[WT_HTTP3_DRIVER_DATA_STREAMS_MAX];
   size_t data_stream_count;
   /* The WebTransport CONNECT streams whose capsules have begun, by ID, and the ones whose single HEADERS frame is
-   * still to come. Draft-16 section 5 puts the session's control messages -- drain, close and the flow-control
-   * grants -- on the CONNECT stream as CAPSULES after that one HEADERS frame, and a capsule's type is a varint
-   * that this layer would otherwise read as a frame type: a flow-control capsule is an UNKNOWN frame type, so its
-   * length field is read as a frame length and the capsule is SKIPPED -- the peer's credit dropped without a
-   * word. Marking the stream is what stops the framing (WT-164). */
+   * still to come. RFC 9114 section 4.4 permits only DATA frames on a stream that carried CONNECT, and RFC 9297
+   * sections 3.1 and 3.2 make the capsule protocol the CONTENTS of those frames -- so the stream is still framed
+   * here, and marking it is what says a DATA frame's payload is the session's capsules rather than an
+   * application's, and that a known non-DATA frame on it is H3_FRAME_UNEXPECTED. Before WT-249 the mark meant the
+   * bytes were not framed at all, which is what put a capsule on the wire as the header of an unknown frame type:
+   * a peer ignored it in silence (section 9) and the session's credit or its close was dropped without a word. */
   wt_http3_driver_capsule_stream_t capsule_streams[WT_HTTP3_DRIVER_CAPSULE_STREAMS_MAX];
   size_t capsule_stream_count;
   /* The HTTP/3 error code of the last refusal this driver made, and the connection it belongs to when one has
@@ -512,21 +514,24 @@ wt_status_t wt_http3_driver_send_session_request(wt_http3_driver_t *driver,
                                                  const char *path, uint64_t peer_max_entries, uint64_t now,
                                                  wt_http3_error_t *out_error);
 
-/* Say that a stream is a WebTransport CONNECT stream, so that once its single HEADERS frame has passed, the rest
- * of what arrives on it is the SESSION's capsules rather than HTTP/3 frames (draft-16 section 5).
+/* Say that a stream is a WebTransport CONNECT stream, so that once its single HEADERS frame has passed, the DATA
+ * frames that arrive on it are read as the SESSION's capsules (RFC 9114 section 4.4, RFC 9297 section 3.2).
  *
  * `headers_pending` says whether that one frame is still to come. A CLIENT marks its request stream when it sends
  * the CONNECT, because the RESPONSE -- the stream's one inbound HEADERS frame -- has not arrived yet; a SERVER
  * marks the peer's stream when it accepts the request, whose HEADERS it has just read. Either way the HEADERS
- * frame is delivered to the frame sink exactly as before, and the bytes after it go to the stream-data sink,
- * because only the session can say what a capsule means. Marking a stream twice is not an error and does not
- * change the mark. WT_ERR_LIMIT when the table is full, which is a caller with more sessions than this driver
- * was built for rather than a peer's doing. */
+ * frame is delivered to the frame sink exactly as before, a DATA frame's payload goes to the stream-data sink
+ * because only the session can say what a capsule means, and a known non-DATA frame is refused with
+ * H3_FRAME_UNEXPECTED. Marking a stream twice is not an error and does not change the mark. WT_ERR_LIMIT when the
+ * table is full, which is a caller with more sessions than this driver was built for rather than a peer's doing. */
 wt_status_t wt_http3_driver_mark_capsule_stream(wt_http3_driver_t *driver, uint64_t stream_id,
                                                 int headers_pending);
 
 /* Whether a stream's CAPSULES have begun: it was marked, and its one HEADERS frame has been delivered. False for
- * a marked stream whose HEADERS frame is still to come, because that frame is still this layer's to frame. */
+ * a marked stream whose HEADERS frame is still to come, because that frame is still this layer's to frame.
+ *
+ * A sender owes the stream the framing this says the receiver expects: a capsule goes inside a DATA frame, which
+ * `wt_http3_frame_wrap_data_in_place` writes (WT-249). */
 int wt_http3_driver_is_capsule_stream(const wt_http3_driver_t *driver, uint64_t stream_id);
 
 /* Answer a request with a status: the response's HEADERS on the stream that carried the request. One per

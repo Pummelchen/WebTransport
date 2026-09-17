@@ -70,9 +70,11 @@ static void end_session_streams_if_closed(loop_side_t *side) {
 static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint64_t type,
                                          const uint8_t *payload, size_t length, int last) {
   loop_side_t *side = context;
-  /* A DIAGNOSTIC, gated by the same file the request's field section goes to: what this stream carries AFTER the
-   * response. Draft-16 puts the session's capsules on the CONNECT stream, and a third-party peer's flow-control
-   * capsule read as an HTTP/3 frame is a frame whose length runs past the end of the stream (WT-156). */
+  /* A DIAGNOSTIC, gated by the same file the request's field section goes to: every HTTP/3 frame this side is
+   * handed. The CONNECT stream's capsules are NOT among them any more -- RFC 9114 section 4.4 puts them inside DATA
+   * frames, which the driver routes to the stream-data sink (WT-249) -- so what is logged here is the peer's control
+   * stream and the response HEADERS. It was written when a third-party peer's flow-control capsule arrived as a
+   * frame whose length ran past the end of the stream (WT-156). */
   {
     const char *log_path = getenv("WT_HTTP3_SECTION_LOG");
     if (log_path != NULL) {

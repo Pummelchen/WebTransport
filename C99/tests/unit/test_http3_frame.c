@@ -10,8 +10,11 @@
 
 #include "wt_test.h"
 
+#include <string.h>
+
 #include "webtransport/http3/frame.h"
 #include "webtransport/quic/varint.h"
+#include "webtransport/webtransport/capsule.h"
 
 static void test_frame_type_names_and_reserved_range(void) {
   WT_EXPECT_STR("data is named", "data", wt_http3_frame_type_name(WT_HTTP3_FRAME_DATA));
@@ -193,6 +196,89 @@ static void test_encode_refusals(void) {
   }
 }
 
+/* The DATA frame a CONNECT stream's capsules travel in (WT-249).
+ *
+ * RFC 9297 section 3.1 makes the capsule protocol the CONTENTS of the request's data stream and RFC 9114 section 4.4
+ * permits only DATA frames on the stream that carried CONNECT, so a capsule is not the stream's raw bytes. A capsule
+ * carries its own length, so the frame header cannot be written first: this is the reservation-and-wrap pair that
+ * lets a caller write its payload once, in the buffer it is going to send. */
+static void test_the_data_frame_around_a_connect_streams_capsules(void) {
+  uint8_t buffer[32];
+  wt_writer_t w;
+  size_t payload_length;
+  size_t frame_length = 0U;
+  wt_http3_frame_t decoded;
+  wt_cursor_t c;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  /* The same capsule written without a reservation, which is what the framed payload has to be byte for byte. */
+  uint8_t raw[16];
+  wt_writer_t rw = wt_writer_init(raw, sizeof(raw));
+  size_t raw_length;
+
+  WT_EXPECT_OK("a real capsule is written", wt_webtransport_max_data_write(&rw, 4096U));
+  raw_length = wt_writer_offset(&rw);
+
+  /* A payload the reservation can hold, written where the writer put it: the capsule is what the sink sees, and the
+   * frame around it is the header the peer reads. */
+  w = wt_http3_frame_data_writer(buffer, sizeof(buffer));
+  WT_EXPECT_OK("and again through the reserved writer", wt_webtransport_max_data_write(&w, 4096U));
+  payload_length = wt_writer_offset(&w);
+  WT_EXPECT_U64("the reservation does not change what is written", (uint64_t)raw_length, (uint64_t)payload_length);
+  WT_EXPECT_OK("the payload is wrapped where it was written",
+               wt_http3_frame_wrap_data_in_place(buffer, sizeof(buffer), payload_length, &frame_length));
+  WT_EXPECT_U64("and the frame is its header plus that payload",
+                (uint64_t)(payload_length + wt_quic_varint_size(WT_HTTP3_FRAME_DATA) +
+                           wt_quic_varint_size((uint64_t)payload_length)),
+                (uint64_t)frame_length);
+
+  c = wt_cursor_init(buffer, frame_length);
+  WT_EXPECT_OK("the frame reads back", wt_http3_frame_decode(&c, &decoded, &error));
+  WT_EXPECT_U64("as a DATA frame", WT_HTTP3_FRAME_DATA, decoded.type);
+  WT_EXPECT_U64("whose payload is the capsule", (uint64_t)raw_length, (uint64_t)decoded.length);
+  WT_EXPECT_BYTES("byte for byte, wherever the reservation put it", raw, decoded.payload, raw_length);
+  /* This is the whole point of the fix: the bytes inside the frame DECODE AS A CAPSULE. The raw form did not. */
+  {
+    wt_cursor_t capsule_cursor = wt_cursor_init(decoded.payload, decoded.length);
+    wt_webtransport_capsule_t capsule;
+    uint64_t maximum = 0U;
+
+    memset(&capsule, 0, sizeof(capsule));
+    WT_EXPECT_OK("the payload decodes as a capsule",
+                 wt_webtransport_capsule_decode(&capsule_cursor, decoded.length, &capsule, &error));
+    WT_EXPECT_U64("of the type that was written", WT_CAPSULE_MAX_DATA, capsule.type);
+    WT_EXPECT_OK("with the value that was written", wt_webtransport_max_data_parse(&capsule, &maximum, &error));
+    WT_EXPECT_U64("which is the grant", 4096U, maximum);
+  }
+
+  /* An empty payload is a legal DATA frame, and the length varint is then one byte: the reservation is the CEILING
+   * of the header, not its size, so the payload has to move. */
+  frame_length = 0U;
+  WT_EXPECT_OK("an empty payload is wrapped too",
+               wt_http3_frame_wrap_data_in_place(buffer, sizeof(buffer), 0U, &frame_length));
+  WT_EXPECT_U64("as a two-byte frame", 2U, (uint64_t)frame_length);
+  c = wt_cursor_init(buffer, frame_length);
+  WT_EXPECT_OK("which reads back", wt_http3_frame_decode(&c, &decoded, &error));
+  WT_EXPECT_U64("as an empty DATA frame", 0U, decoded.length);
+
+  /* A buffer that cannot hold the reservation and the payload is refused, and nothing is written. */
+  frame_length = 7U;
+  WT_EXPECT_STATUS("a buffer without room for the reservation is refused", WT_ERR_LIMIT,
+                   wt_http3_frame_wrap_data_in_place(buffer, WT_HTTP3_FRAME_DATA_HEADER_MAX - 1U, 0U,
+                                                     &frame_length));
+  WT_EXPECT_U64("and the length is cleared", 0U, (uint64_t)frame_length);
+  WT_EXPECT_STATUS("as is one without room for the payload", WT_ERR_LIMIT,
+                   wt_http3_frame_wrap_data_in_place(buffer, sizeof(buffer), sizeof(buffer), &frame_length));
+  WT_EXPECT_STATUS("and a null buffer", WT_ERR_INVALID_ARGUMENT,
+                   wt_http3_frame_wrap_data_in_place(NULL, sizeof(buffer), 0U, &frame_length));
+
+  /* A writer over a buffer too small for the reservation has no capacity at all, so its first write is what fails
+   * rather than a frame the caller then cannot wrap. */
+  w = wt_http3_frame_data_writer(buffer, WT_HTTP3_FRAME_DATA_HEADER_MAX - 1U);
+  (void)wt_quic_writer_varint(&w, 1U);
+  WT_EXPECT_TRUE("a writer with no room refuses its first write", wt_writer_ok(&w) == 0);
+}
+
 static void test_stream_type_prefix(void) {
   uint8_t buffer[16];
   wt_writer_t w = wt_writer_init(buffer, sizeof(buffer));
@@ -229,6 +315,7 @@ int main(void) {
   test_empty_payload_and_prefix_decoding();
   test_truncated_frames_are_refused();
   test_encode_refusals();
+  test_the_data_frame_around_a_connect_streams_capsules();
   test_stream_type_prefix();
   WT_TEST_MAIN_END("wt_http3_frame");
 }

@@ -1,10 +1,11 @@
 /* The CONNECT stream's capsules, as an application sees them (draft-ietf-webtrans-http3-16 section 5).
  *
  * A WebTransport session's control messages -- drain, close, and the flow-control grants -- travel on the CONNECT
- * stream as CAPSULES once that stream's one HEADERS frame has passed, and the HTTP/3 driver routes those bytes to
- * the stream-data sink rather than framing them (WT-164). What is left is an application's job, and it is the same
- * job in both applications this tree builds: keep the bytes that have not completed a capsule, walk what has, apply
- * the session's own capsules to the session, and hand the rest to whoever owns them.
+ * stream as CAPSULES once that stream's one HEADERS frame has passed, inside the HTTP/3 DATA frames RFC 9114
+ * section 4.4 permits there; the HTTP/3 driver routes those frames' payloads to the stream-data sink. What is left
+ * is an application's job, and it is the same job in both applications this tree builds: keep the bytes that have
+ * not completed a capsule, walk what has, apply the session's own capsules to the session, and hand the rest to
+ * whoever owns them.
  *
  * The BYTES are kept here rather than in the session because a capsule may be split across STREAM frames and be
  * several to a frame, and because the bound on one capsule belongs to whoever owns the memory. The peer's
@@ -25,8 +26,15 @@
 #include "webtransport/webtransport/session.h"
 
 /* How much of the capsule stream one application will hold. A capsule longer than this is a bound this endpoint
- * enforces rather than a buffer it grows, and the value is the caller's to raise with its own copy. */
-#define WT_CAPSULE_STREAM_MAX 1024U
+ * enforces rather than a buffer it grows, and the value is the caller's to raise with its own copy.
+ *
+ * The bound is on ONE CAPSULE, and it has to clear the largest one the draft permits or the tools would refuse a
+ * message a conforming peer may send: WT_CLOSE_SESSION's value is a four-byte code plus a reason the section caps at
+ * 1024 bytes, so the capsule's own bytes are 4 + 1024 and the two varints in front of it are at most eight each.
+ * A KNOWN capsule is always shorter than that; the two eights are what an unknown type could add. A delivery LARGER
+ * than this is ordinary -- a peer may put any number of capsules in one DATA frame -- so `wt_capsule_stream_on_bytes`
+ * takes it in pieces rather than refusing it (WT-257). */
+#define WT_CAPSULE_STREAM_MAX (4U + WT_CAPSULE_CLOSE_MAX_REASON + 8U + 8U)
 
 typedef struct wt_capsule_stream {
   /* The session those capsules belong to, with the state a drain or a close moves. */
@@ -89,6 +97,10 @@ wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, cons
  * `wt_capsule_stream_apply_flow` with the stream itself to have the grants applied. `out_error` carries the HTTP/3
  * code of a refusal, because the caller has to state it to its connection; a session-level refusal is in the
  * stream's `refused_session_code` instead.
+ *
+ * A delivery may be LONGER than the buffer: a DATA frame may carry any number of capsules, so the bytes are taken
+ * in pieces and the walk repeats while any remain. The only bound that can refuse is `WT_CAPSULE_STREAM_MAX` on one
+ * CAPSULE (WT-257).
  *
  * WT_ERR_TRUNCATED is returned when the stream ENDS part way through a capsule: an incomplete capsule at FIN is a
  * refusal, the same rule an incomplete HTTP/3 frame follows (WT-158). A capsule that has merely not arrived is kept

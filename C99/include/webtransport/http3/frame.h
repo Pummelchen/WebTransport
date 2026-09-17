@@ -106,12 +106,42 @@ int wt_http3_frame_type_is_reserved(uint64_t type);
  * refusing the legal family and accepting the forbidden one. */
 int wt_http3_frame_type_is_exerciser(uint64_t type);
 
+/* True for the frame types RFC 9114 section 11.2.1 registers. The distinction matters on a CONNECT stream
+ * (section 4.4): "only DATA frames are permitted", and receipt of a KNOWN other frame type is H3_FRAME_UNEXPECTED,
+ * while an UNKNOWN type is ignored as section 9 requires. A predicate rather than a list at each call site, so the
+ * two rules cannot be confused -- which is exactly what a raw capsule relied on being confused. */
+int wt_http3_frame_type_is_known(uint64_t type);
+
 /* Write one frame. Refuses a type or payload length outside the varint range and
  * a null payload with a non-zero length. */
 wt_status_t wt_http3_frame_encode(wt_writer_t *w, const wt_http3_frame_t *frame);
 
 /* The bytes one frame occupies, without writing it. */
 wt_status_t wt_http3_frame_encoded_size(const wt_http3_frame_t *frame, size_t *out_size);
+
+/* The most bytes a DATA frame's header can take: its type is 0x00, a one-byte varint, and its length is a varint
+ * of up to eight. A caller that cannot know its payload's length before writing it -- which is every capsule,
+ * because a capsule carries its own length -- reserves this many bytes at the front of its buffer, writes the
+ * payload after them, and calls `wt_http3_frame_wrap_data_in_place`. */
+#define WT_HTTP3_FRAME_DATA_HEADER_MAX 9U
+
+/* A writer positioned to receive the payload that `wt_http3_frame_wrap_data_in_place` will put inside a DATA
+ * frame: the reservation is at the front of `buffer`, and the writer starts after it. The pair exists so that a
+ * caller writes its payload once, in the buffer it is going to send, without a second copy or a second buffer.
+ * The writer's capacity is `capacity - WT_HTTP3_FRAME_DATA_HEADER_MAX`, and a buffer smaller than the reservation
+ * yields a writer of capacity zero, whose every write is refused. */
+wt_writer_t wt_http3_frame_data_writer(uint8_t *buffer, size_t capacity);
+
+/* Put the `payload_length` bytes already written at `buffer + WT_HTTP3_FRAME_DATA_HEADER_MAX` inside the DATA
+ * frame RFC 9114 section 4.4 requires on a stream that carried CONNECT: write the header into the reserved space,
+ * move the payload down to sit directly behind it, and report the frame's total size in `*out_length`.
+ *
+ * This is not a convenience. RFC 9297 section 3.1 makes the capsule protocol's "data stream" the bytes sent in DATA
+ * frames, so a capsule's type and length written straight to the stream are not a capsule at all: they are the
+ * header of an unknown frame type, which RFC 9114 section 9 requires the peer to ignore. The capsule is dropped in
+ * silence rather than refused, which is what let a raw sender look interoperable (WT-249). */
+wt_status_t wt_http3_frame_wrap_data_in_place(uint8_t *buffer, size_t capacity, size_t payload_length,
+                                              size_t *out_length);
 
 /* Read one frame from a cursor, advancing it past the frame. `out->payload`
  * points into the cursor's buffer and lives as long as it does. `out_error` is

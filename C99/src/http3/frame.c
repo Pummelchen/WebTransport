@@ -2,6 +2,8 @@
 
 #include "webtransport/http3/frame.h"
 
+#include <string.h>
+
 #include "webtransport/quic/varint.h"
 
 wt_http3_frame_t wt_http3_frame_make(uint64_t type) {
@@ -57,6 +59,23 @@ int wt_http3_frame_type_is_exerciser(uint64_t type) {
   return ((type - (uint64_t)0x21) % (uint64_t)0x1f) == 0U;
 }
 
+int wt_http3_frame_type_is_known(uint64_t type) {
+  /* Section 11.2.1's registry, which is the same list `wt_http3_frame_type_name` puts a name to: a type with no
+   * name here is one an endpoint has never been told to give meaning to, and section 9 says to ignore it. */
+  switch (type) {
+    case WT_HTTP3_FRAME_DATA:
+    case WT_HTTP3_FRAME_HEADERS:
+    case WT_HTTP3_FRAME_CANCEL_PUSH:
+    case WT_HTTP3_FRAME_SETTINGS:
+    case WT_HTTP3_FRAME_PUSH_PROMISE:
+    case WT_HTTP3_FRAME_GOAWAY:
+    case WT_HTTP3_FRAME_MAX_PUSH_ID:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 wt_status_t wt_http3_frame_encode(wt_writer_t *w, const wt_http3_frame_t *frame) {
   if (w == NULL || frame == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (frame->payload == NULL && frame->length != 0U) return WT_ERR_INVALID_ARGUMENT;
@@ -83,6 +102,49 @@ wt_status_t wt_http3_frame_encoded_size(const wt_http3_frame_t *frame, size_t *o
   total = wt_quic_varint_size(frame->type) + wt_quic_varint_size((uint64_t)frame->length);
   if (total > SIZE_MAX - frame->length) return WT_ERR_OVERFLOW;
   *out_size = total + frame->length;
+  return WT_OK;
+}
+
+wt_writer_t wt_http3_frame_data_writer(uint8_t *buffer, size_t capacity) {
+  if (buffer == NULL || capacity < WT_HTTP3_FRAME_DATA_HEADER_MAX) return wt_writer_init(buffer, 0U);
+  return wt_writer_init(buffer + WT_HTTP3_FRAME_DATA_HEADER_MAX, capacity - WT_HTTP3_FRAME_DATA_HEADER_MAX);
+}
+
+wt_status_t wt_http3_frame_wrap_data_in_place(uint8_t *buffer, size_t capacity, size_t payload_length,
+                                              size_t *out_length) {
+  uint8_t header[WT_HTTP3_FRAME_DATA_HEADER_MAX];
+  size_t header_length = 0U;
+  size_t length_bytes;
+
+  if (buffer == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
+  *out_length = 0U;
+  /* The same two refusals `wt_http3_frame_encode` makes, for the same reason: the varint cannot carry the low
+   * bits of a value it cannot represent, so a caller's mistake is named here rather than put on the wire. */
+  if ((uint64_t)payload_length > WT_QUIC_VARINT_MAX) return WT_ERR_INVALID_ARGUMENT;
+  /* The payload is where the caller wrote it -- behind the reservation -- so a buffer that could not hold the
+   * reservation and the payload is one the caller's own write already ran past. The frame only ever gets SHORTER
+   * than that, because the header the reservation allows for is its ceiling, so this is the whole bound. */
+  if (capacity < WT_HTTP3_FRAME_DATA_HEADER_MAX ||
+      payload_length > capacity - WT_HTTP3_FRAME_DATA_HEADER_MAX) {
+    return WT_ERR_LIMIT;
+  }
+
+  /* The header is built in its own buffer first: the payload it describes lives in `buffer`, and a writer aimed at
+   * `buffer` would copy the payload onto itself. `WT_HTTP3_FRAME_DATA` is zero, whose varint is one byte, and the
+   * eight-byte reservation above is exactly `WT_HTTP3_FRAME_DATA_HEADER_MAX`. */
+  header[header_length] = (uint8_t)WT_HTTP3_FRAME_DATA;
+  header_length++;
+  length_bytes = wt_quic_varint_encode((uint64_t)payload_length, header + header_length,
+                                       sizeof(header) - header_length);
+  if (length_bytes == 0U) return WT_ERR_INVALID_ARGUMENT; /* unreachable: the reservation is the varint's ceiling */
+  header_length += length_bytes;
+  if (header_length > capacity - payload_length) return WT_ERR_LIMIT;
+
+  /* The payload moves down to sit directly behind the header it now has. memmove, not memcpy: the two regions
+   * overlap whenever the header is shorter than the reservation, which is every capsule under 64 bytes. */
+  memmove(buffer + header_length, buffer + WT_HTTP3_FRAME_DATA_HEADER_MAX, payload_length);
+  memcpy(buffer, header, header_length);
+  *out_length = header_length + payload_length;
   return WT_OK;
 }
 

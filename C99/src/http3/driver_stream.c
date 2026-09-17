@@ -275,6 +275,28 @@ static wt_status_t deliver_frame_payload(wt_http3_driver_t *driver, uint64_t str
                                                               length, last, out_error);
     if (status != WT_OK) return status;
   }
+  if (wt_http3_driver_is_capsule_stream(driver, stream_id)) {
+    /* RFC 9114 section 4.4: "only DATA frames are permitted to be sent on the stream" once CONNECT has completed,
+     * and receipt of any other frame type is a connection error of type H3_FRAME_UNEXPECTED. Unknown types are the
+     * exception section 9 makes everywhere -- they MUST be ignored -- and that exception is what a peer that wrote
+     * its capsule raw sends: a capsule's type is an unknown frame type, its length reads as a frame length, and the
+     * bytes are skipped rather than refused. Refusing them would break a peer this build has to interoperate with,
+     * and treating them as the capsule they were meant to be is the confusion WT-249 is about. */
+    if (type != WT_HTTP3_FRAME_DATA) {
+      if (wt_http3_frame_type_is_known(type) || wt_http3_frame_type_is_reserved(type)) {
+        if (out_error != NULL) *out_error = WT_HTTP3_FRAME_UNEXPECTED;
+        return WT_ERR_PROTOCOL;
+      }
+      return WT_OK;
+    }
+    /* The DATA frame's payload IS the capsule protocol's byte stream (RFC 9297 section 3.1), so it goes to the
+     * stream-data sink -- incrementally, so a peer that announces a large DATA frame is never buffered whole, and
+     * with no end-of-stream: whether a capsule is complete is the capsule walker's question, not the frame's. */
+    if (sink != NULL && sink->on_stream_data != NULL) {
+      return sink->on_stream_data(sink->context, stream_id, payload, length, 0);
+    }
+    return WT_OK;
+  }
   if (sink != NULL && sink->on_frame_payload != NULL) {
     return sink->on_frame_payload(sink->context, stream_id, type, payload, length, last);
   }
@@ -294,21 +316,15 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
   if (driver == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (data == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
 
-  /* A WebTransport CONNECT stream whose one HEADERS frame has passed carries the SESSION's capsules, not HTTP/3
-   * frames (draft-16 section 5): a capsule's type is a varint this parser would read as a frame type and its
-   * length as a frame length, and for a flow-control capsule -- an UNKNOWN frame type -- that means the grant is
-   * skipped in silence (WT-164). The stream-data sink is where the session's own bytes go, and capsules are
-   * exactly that; which stream they belong to is the caller's to know, and it does.
+  /* A WebTransport CONNECT stream whose one HEADERS frame has passed carries the SESSION's capsules -- and like
+   * every other stream, it carries them inside HTTP/3 frames: RFC 9114 section 4.4 permits only DATA frames after
+   * CONNECT, and RFC 9297 sections 3.1 and 3.2 make the capsule protocol the CONTENTS of those frames. So the
+   * stream is FRAMED here like any other, and `deliver_frame_payload` below routes a DATA frame's payload to the
+   * stream-data sink, where the session's capsule walker reads it.
    *
-   * The check is here AND at the top of the loop below, and the loop's copy is not redundant: the mark can settle
-   * DURING this call, because the sink marks the stream from inside the HEADERS frame's own delivery -- a server
-   * marks when it accepts the request, and a client's mark settles as its response is delivered. A single check
-   * before the loop would frame the capsules that arrived in the same STREAM frame as that HEADERS. */
-  if (wt_http3_driver_is_capsule_stream(driver, stream_id)) {
-    if (sink == NULL || sink->on_stream_data == NULL || (length == 0U && fin == 0)) return WT_OK;
-    return sink->on_stream_data(sink->context, stream_id, length == 0U ? NULL : data, length, fin);
-  }
-
+   * The bytes are not passed through raw, which is what this did until WT-249: a capsule's type written straight
+   * to the stream is not a capsule but the header of an unknown frame type, RFC 9114 section 9 requires a peer to
+   * ignore it, and the session's credit or its close was dropped in silence. */
   state = find_frame_state(driver, stream_id);
   if (state == NULL) {
     if (driver->frame_count >= WT_HTTP3_DRIVER_FRAMES_MAX) return WT_ERR_LIMIT;
@@ -328,10 +344,6 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
                WT_HTTP3_ENDPOINT_STREAM_CONTROL;
 
   while (position < length) {
-    if (wt_http3_driver_is_capsule_stream(driver, stream_id)) {
-      if (sink == NULL || sink->on_stream_data == NULL) return WT_OK;
-      return sink->on_stream_data(sink->context, stream_id, data + position, length - position, fin);
-    }
     if (!state->in_frame) {
       /* Fill the header before the payload: the length is what says how much payload to
        * expect, so the header has to be complete first. */
@@ -442,24 +454,26 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
     }
   }
 
-  /* The stream's own end, on a CONNECT stream whose capsules have begun: there is no frame state to report, but
-   * the session has to be told the stream is over. This is also where a mark that settled on the last byte of this
-   * buffer is honoured -- the loop above has no bytes left to test it with. */
-  if (fin != 0 && wt_http3_driver_is_capsule_stream(driver, stream_id)) {
-    if (sink == NULL || sink->on_stream_data == NULL) return WT_OK;
-    return sink->on_stream_data(sink->context, stream_id, NULL, 0U, fin);
-  }
-
+  /* The stream's own end, on a CONNECT stream whose capsules have begun: there is no frame to report, but the
+   * session has to be told the stream is over -- and that is only true when the framing is COMPLETE, so the
+   * incomplete-frame refusal below runs first and a stream that ended mid-DATA-frame is an error rather than an
+   * orderly end. This is also where a mark that settled on the last byte of this buffer is honoured: the loop above
+   * has no bytes left to test it with. */
   if (fin != 0) {
     /* The stream ended part way through a frame -- and a partial frame HEADER counts, which is the case a naive
      * implementation misses: one byte of a two-varint header is exactly as incomplete as one byte of a payload.
      * Nothing more is coming, which is what turns the wait into a refusal. Read BEFORE the slot is released,
      * because `state` points into the table. */
     int incomplete = state->in_frame || state->header_length > 0U;
+    int was_capsule = wt_http3_driver_is_capsule_stream(driver, stream_id);
     (void)wt_http3_driver_forget_frame(driver, stream_id);
     if (incomplete) {
       if (out_error != NULL) *out_error = WT_HTTP3_FRAME_ERROR;
       return WT_ERR_TRUNCATED;
+    }
+    if (was_capsule != 0) {
+      if (sink == NULL || sink->on_stream_data == NULL) return WT_OK;
+      return sink->on_stream_data(sink->context, stream_id, NULL, 0U, 1);
     }
   }
   return WT_OK;

@@ -1,4 +1,4 @@
-/* A session's own capsules, on the wire (WT-164).
+/* A session's own capsules, on the wire (WT-164, WT-249).
  *
  * Draft-16 section 5 puts a WebTransport session's control messages on the CONNECT stream as capsules once that
  * stream's one HEADERS frame has passed: the flow-control grants, a drain, and a close. The tree had the codec and
@@ -6,12 +6,21 @@
  * an UNKNOWN frame type, its length was read as a frame length and the capsule was SKIPPED. The peer's credit was
  * dropped without a word and the session simply stalled at its initial limit.
  *
+ * That wiring was half the answer. RFC 9297 section 3.1 makes the capsule protocol the CONTENTS of the request's
+ * data stream, and RFC 9114 section 4.4 permits only DATA frames on the stream that carried CONNECT, so a capsule
+ * belongs inside a DATA frame and a capsule's type written straight to the stream is not a capsule at all -- it is
+ * the header of an unknown frame type, which section 9 requires the peer to ignore. Both halves of that were true
+ * here and the exchange still "worked", which is the whole of WT-249: `capsules_send` below frames what it is
+ * given, and `raw_capsules_are_not_capsules` pins what the unframed form actually does.
+ *
  * This is that whole path exercised end to end over loopback: a real handshake, a real CONNECT and response, and
  * then capsules written by one endpoint and applied by the other -- a grant that moves the limit the receiver
  * enforces, a drain that stops new streams, and a close whose application code the peer ends up reporting.
  */
 
 #include "scenario_capsules.h"
+
+#include <string.h>
 
 #include "scenario_pair.h"
 #include "webtransport/http3/frame.h"
@@ -116,13 +125,24 @@ static int capsules_open_session(scenario_pair_t *pair, int advertise_flow, char
   return 1;
 }
 
-/* Send one capsule on this side's CONNECT stream: the session's own messages are capsules on the stream the
- * session was created on, and nothing else goes there (draft-16 section 5). */
-static wt_status_t capsules_send(scenario_pair_t *pair, int from_client, const uint8_t *bytes, size_t length) {
+/* Send one capsule on this side's CONNECT stream, FRAMED: the session's own messages are capsules inside the HTTP/3
+ * DATA frames RFC 9114 section 4.4 permits there, and `framed` is a buffer the caller filled through
+ * `wt_http3_frame_data_writer`, so its `payload_length` bytes start behind the reservation this writes the header
+ * into. One capsule per send, so a refusal is one frame on the wire. */
+static wt_status_t capsules_send(scenario_pair_t *pair, int from_client, uint8_t *framed,
+                                 size_t payload_length) {
   const wt_http3_driver_transport_t *transport = from_client ? &pair->client_transport : &pair->server_transport;
   uint64_t stream_id = from_client ? pair->client_side.request_stream_id : pair->server_side.request_stream_id;
+  /* The capacity the caller's own writer had, which is what proves the payload is inside the buffer: the payload
+   * was written at the reservation, so the reservation plus the payload is a bound the buffer meets by
+   * construction. */
+  size_t frame_length = 0U;
 
-  return transport->send_stream(transport->context, stream_id, bytes, length, 0, pair->now);
+  if (wt_http3_frame_wrap_data_in_place(framed, WT_HTTP3_FRAME_DATA_HEADER_MAX + payload_length, payload_length,
+                                        &frame_length) != WT_OK) {
+    return WT_ERR_LIMIT;
+  }
+  return transport->send_stream(transport->context, stream_id, framed, frame_length, 0, pair->now);
 }
 
 /* The two refusals a capsule can earn, each on its own pair because each ENDS something: a capsule whose declared
@@ -163,13 +183,15 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
 
   /* A capsule declaration whose length is past the receiver's bound. Only the HEADER is sent: the receiver knows
    * its own bound from the length alone, and waiting for 2000 bytes to prove it would be a buffer it refuses to
-   * allocate. */
+   * allocate. The frame around it is complete -- it declares four bytes of capsule, which is all there is -- and the
+   * capsule INSIDE it is what is incomplete, which is the case a bound is for. */
   {
-    uint8_t header[8];
-    size_t header_length = wt_quic_varint_encode(WT_CAPSULE_MAX_DATA, header, sizeof(header));
+    uint8_t capsule[WT_HTTP3_FRAME_DATA_HEADER_MAX + 8];
+    wt_writer_t cw = wt_http3_frame_data_writer(capsule, sizeof(capsule));
 
-    header_length += wt_quic_varint_encode(2000U, header + header_length, sizeof(header) - header_length);
-    if (capsules_send(&pair, 1, header, header_length) != WT_OK) {
+    (void)wt_quic_writer_varint(&cw, WT_CAPSULE_MAX_DATA);
+    (void)wt_quic_writer_varint(&cw, 2000U);
+    if (capsules_send(&pair, 1, capsule, wt_writer_offset(&cw)) != WT_OK) {
       capsules_add(report, k_bound, 0, "the oversized capsule could not be sent");
       capsules_add(report, k_flow, 0, "the oversized capsule could not be sent");
       scenario_pair_close(&pair);
@@ -227,7 +249,7 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
     unsigned grant;
 
     for (grant = 0U; grant < 2U; grant++) {
-      w = wt_writer_init(framed, sizeof(framed));
+      w = wt_http3_frame_data_writer(framed, sizeof(framed));
       if (wt_webtransport_max_data_write(&w, grant == 0U ? 4096U : 4096U) != WT_OK ||
           capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
         sent = 0;
@@ -293,7 +315,7 @@ static void capsules_run_unnegotiated(wt_cli_report_t *report) {
 
   /* The same MAX_DATA grant the negotiated scenario asserts, sent by a client that advertised no
    * flow-control setting: section 5.1 says the server ignores it. */
-  w = wt_writer_init(framed, sizeof(framed));
+  w = wt_http3_frame_data_writer(framed, sizeof(framed));
   if (wt_webtransport_max_data_write(&w, 65536U) != WT_OK ||
       capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
     capsules_add(report, k_ignored, 0, "the unnegotiated grant could not be sent");
@@ -321,6 +343,157 @@ static void capsules_run_unnegotiated(wt_cli_report_t *report) {
                    pair.server_side.capsules.refused,
                    (int)(pair.server_side.capsules.session.state == WT_WEBTRANSPORT_SESSION_CLOSED));
     capsules_add(report, k_ignored, passed, detail);
+  }
+  scenario_pair_close(&pair);
+}
+
+/* The largest capsule the draft allows, arriving in one delivery (WT-257).
+ *
+ * `WT_CAPSULE_STREAM_MAX` bounds how much of the capsule stream these tools hold, and its own contract is that it
+ * bounds a CAPSULE: "a capsule longer than this is a bound this endpoint enforces rather than a buffer it grows".
+ * The walker applied it to each DELIVERY instead, so the largest close the draft permits -- a 1024-byte reason,
+ * which is 1032 bytes of capsule and comfortably inside one DATA frame -- was refused with H3_EXCESSIVE_LOAD and the
+ * connection was closed over a message the peer was entitled to send. The same happened to any peer that put more
+ * than 1024 bytes of capsules in one DATA frame, however small those capsules were. */
+static void capsules_run_the_largest_capsule(wt_cli_report_t *report) {
+  static const char *const k_largest = "draft16-the-largest-close-capsule-is-accepted";
+  scenario_pair_t pair;
+  char detail[WT_CLI_SCENARIO_DETAIL_MAX];
+  char opened[WT_CLI_SCENARIO_DETAIL_MAX];
+  /* The close capsule's bytes plus the reservation the DATA frame writes its header into. 1032 bytes of capsule:
+   * the type and the value's length are two-byte varints and the value is the four-byte code plus the ceiling. */
+  uint8_t framed[WT_HTTP3_FRAME_DATA_HEADER_MAX + 8U + WT_CAPSULE_CLOSE_MAX_REASON];
+  static uint8_t reason[WT_CAPSULE_CLOSE_MAX_REASON];
+  wt_writer_t w;
+  unsigned round;
+  wt_cli_result_t result;
+
+  memset(reason, 'r', sizeof(reason));
+  opened[0] = '\0';
+  result = scenario_pair_open(&pair, 0, opened, sizeof(opened));
+  if (result != WT_CLI_RESULT_PASSED) {
+    /* The precision bounds the composed text on purpose, as above (WT-134). */
+    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %.120s", opened);
+    capsules_add(report, k_largest, 0, detail);
+    return;
+  }
+  if (capsules_open_session(&pair, 1, detail, sizeof(detail)) == 0) {
+    capsules_add(report, k_largest, 0, detail);
+    scenario_pair_close(&pair);
+    return;
+  }
+
+  w = wt_http3_frame_data_writer(framed, sizeof(framed));
+  if (wt_webtransport_close_session_write(&w, 0x42U, reason, sizeof(reason)) != WT_OK ||
+      capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
+    capsules_add(report, k_largest, 0, "the largest close capsule could not be sent");
+    scenario_pair_close(&pair);
+    return;
+  }
+  for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {
+    if (pair.server_side.capsules.session.close_received != 0) break;
+    scenario_pump_once(&pair);
+  }
+  {
+    int passed = pair.server_side.capsules.session.close_received != 0 &&
+                 pair.server_side.capsules.session.close_error_set != 0 &&
+                 pair.server_side.capsules.session.close_error_code == 0x42U &&
+                 pair.server_side.capsules.session.state == WT_WEBTRANSPORT_SESSION_CLOSED &&
+                 pair.server_side.capsules.refused == 0U &&
+                 pair.server_side.capsules.refused_session_code_set == 0 &&
+                 /* No refusal was recorded at all: zero is what the side starts with, and every refusal writes its
+                  * code here (the capsule-refusal scenarios assert the value a refusal DOES leave). */
+                 pair.server_side.capsule_error == 0U &&
+                 wt_quic_connection_is_closed(&pair.server.connection) == 0 &&
+                 wt_quic_connection_is_closed(&pair.client.connection) == 0;
+    (void)snprintf(detail, sizeof(detail),
+                   passed != 0 ? "a close capsule carrying the draft's maximum 1024-byte reason was applied and "
+                                 "ended the session, with both connections still up"
+                               : "the largest legal capsule was not accepted (received=%d, codeSet=%d, code=0x%x, "
+                                 "refused=%u, refusalCode=0x%llx, serverClosed=%d, clientClosed=%d, state=%d)",
+                   (int)pair.server_side.capsules.session.close_received,
+                   (int)pair.server_side.capsules.session.close_error_set,
+                   pair.server_side.capsules.session.close_error_code,
+                   pair.server_side.capsules.refused,
+                   (unsigned long long)pair.server_side.capsule_error,
+                   (int)wt_quic_connection_is_closed(&pair.server.connection),
+                   (int)wt_quic_connection_is_closed(&pair.client.connection),
+                   (int)pair.server_side.capsules.session.state);
+    capsules_add(report, k_largest, passed, detail);
+  }
+  scenario_pair_close(&pair);
+}
+
+/* The other half of the same bound (WT-257): the walker holds `WT_CAPSULE_STREAM_MAX` bytes, and a peer may put any
+ * number of capsules into one DATA frame. A delivery larger than the buffer has to be taken in pieces with every
+ * capsule applied, rather than the delivery refused for being large -- which is what the arithmetic bound used to do
+ * to a peer whose capsules were all tiny. */
+static void capsules_run_a_coalesced_delivery(wt_cli_report_t *report) {
+  static const char *const k_many = "draft16-many-capsules-in-one-delivery-are-all-applied";
+  /* Enough grants, at eight bytes each, to be well past the walker's buffer in one delivery. */
+  enum { k_grants = 160 };
+  scenario_pair_t pair;
+  char detail[WT_CLI_SCENARIO_DETAIL_MAX];
+  char opened[WT_CLI_SCENARIO_DETAIL_MAX];
+  uint8_t framed[WT_HTTP3_FRAME_DATA_HEADER_MAX + 4096U];
+  wt_writer_t w;
+  unsigned round;
+  unsigned index;
+  int sent = 1;
+  wt_cli_result_t result;
+
+  opened[0] = '\0';
+  result = scenario_pair_open(&pair, 0, opened, sizeof(opened));
+  if (result != WT_CLI_RESULT_PASSED) {
+    /* The precision bounds the composed text on purpose, as above (WT-134). */
+    (void)snprintf(detail, sizeof(detail), "the pair could not be opened: %.120s", opened);
+    capsules_add(report, k_many, 0, detail);
+    return;
+  }
+  /* Flow control negotiated on both sides, so each grant is APPLIED rather than ignored (section 5.1). */
+  if (capsules_open_session(&pair, 1, detail, sizeof(detail)) == 0) {
+    capsules_add(report, k_many, 0, detail);
+    scenario_pair_close(&pair);
+    return;
+  }
+
+  w = wt_http3_frame_data_writer(framed, sizeof(framed));
+  for (index = 0U; index < (unsigned)k_grants; index++) {
+    /* Strictly increasing, which is what section 5.1 requires of a MAX_DATA: a repeat would be a flow-control
+     * error and the session would end before the interesting half of this ran. */
+    if (wt_webtransport_max_data_write(&w, 1000U + (uint64_t)index) != WT_OK) {
+      sent = 0;
+      break;
+    }
+  }
+  if (sent == 0 || capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
+    capsules_add(report, k_many, 0, "the coalesced grant run could not be sent");
+    scenario_pair_close(&pair);
+    return;
+  }
+  for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {
+    if (pair.server_side.capsules.peer_limits.max_data == 1000U + (uint64_t)(k_grants - 1)) break;
+    scenario_pump_once(&pair);
+  }
+  {
+    int passed = pair.server_side.capsules.peer_limits.max_data_set != 0 &&
+                 pair.server_side.capsules.peer_limits.max_data == 1000U + (uint64_t)(k_grants - 1) &&
+                 pair.server_side.capsules.refused == 0U &&
+                 pair.server_side.capsules.refused_session_code_set == 0 &&
+                 pair.server_side.capsules.session.state != WT_WEBTRANSPORT_SESSION_CLOSED &&
+                 wt_quic_connection_is_closed(&pair.server.connection) == 0 &&
+                 wt_quic_connection_is_closed(&pair.client.connection) == 0;
+    (void)snprintf(detail, sizeof(detail),
+                   passed != 0 ? "all 160 grants in one DATA frame were applied, past the walker's buffer, with "
+                                 "nothing refused"
+                               : "the coalesced delivery was not walked (set=%d, limit=%llu, wanted=%llu, "
+                                 "refused=%u, state=%d)",
+                   pair.server_side.capsules.peer_limits.max_data_set,
+                   (unsigned long long)pair.server_side.capsules.peer_limits.max_data,
+                   (unsigned long long)(1000U + (uint64_t)(k_grants - 1)),
+                   pair.server_side.capsules.refused,
+                   (int)pair.server_side.capsules.session.state);
+    capsules_add(report, k_many, passed, detail);
   }
   scenario_pair_close(&pair);
 }
@@ -356,7 +529,7 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
 
   /* The client grants the server credit: a MAX_DATA capsule, whose value only the session layer knows how to read.
    * Before WT-164 the server skipped it as an unknown HTTP/3 frame. */
-  w = wt_writer_init(framed, sizeof(framed));
+  w = wt_http3_frame_data_writer(framed, sizeof(framed));
   if (wt_webtransport_max_data_write(&w, 65536U) != WT_OK ||
       capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
     capsules_add(report, k_grant, 0, "the grant could not be sent");
@@ -384,7 +557,7 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
 
   /* A drain stops new streams without ending the session, and a close ends it with the peer's code -- and both are
    * the SESSION's, so the QUIC connection stays up: nothing about this is visible in a transport-level report. */
-  w = wt_writer_init(framed, sizeof(framed));
+  w = wt_http3_frame_data_writer(framed, sizeof(framed));
   if (wt_webtransport_drain_session_write(&w) != WT_OK ||
       capsules_send(&pair, 0, framed, wt_writer_offset(&w)) != WT_OK) {
     capsules_add(report, k_ends, 0, "the drain could not be sent");
@@ -398,7 +571,7 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
   {
     int drained = pair.client_side.capsules.session.drain_received != 0 &&
                   wt_webtransport_session_allows_new_streams(&pair.client_side.capsules.session) == 0;
-    w = wt_writer_init(framed, sizeof(framed));
+    w = wt_http3_frame_data_writer(framed, sizeof(framed));
     if (!drained || wt_webtransport_close_session_write(&w, 0x42U, (const uint8_t *)"bye", 3U) != WT_OK ||
         capsules_send(&pair, 0, framed, wt_writer_offset(&w)) != WT_OK) {
       capsules_add(report, k_ends, 0, "the drain did not stop new streams, or the close could not be sent");
@@ -431,4 +604,7 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
   capsules_run_refusals(report);
   /* And the other half of section 5.1: what happens when flow control was NOT negotiated (WT-252). */
   capsules_run_unnegotiated(report);
+  /* The bound the tools hold capsules to is a bound on a CAPSULE, not on one delivery of them (WT-257). */
+  capsules_run_the_largest_capsule(report);
+  capsules_run_a_coalesced_delivery(report);
 }

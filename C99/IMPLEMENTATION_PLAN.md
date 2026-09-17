@@ -1738,6 +1738,37 @@ value longer than the caller will buffer is H3_EXCESSIVE_LOAD, because the bound
 now the fourth, fifth and sixth appearances of the same three decisions, which is why they are recorded as this
 project's standing rules rather than as each part's local choice.
 
+**WT-249: a capsule travels inside a DATA frame.** RFC 9297 section 3.1 defines a request's "data stream" as the
+bytes sent in DATA frames, and section 3.2 makes the capsule protocol the CONTENTS of that stream; RFC 9114
+section 4.4 says the same from the CONNECT side -- "only DATA frames are permitted to be sent on the stream". A
+capsule's type and length written straight to the stream are therefore not a capsule at all: they are the header
+of an unknown frame type, which section 9 requires the peer to IGNORE. The capsule is dropped in silence, never
+refused, which is why a raw sender can interop for a long time without noticing -- the echo still works and only
+the credit or the close goes missing. It was found in the Swift library first, against five peers whose own
+source wraps: `web-transport-quinn`'s `session.rs` says so in a comment, aioquic's `send_data` writes the DATA
+header, Chromium's quiche writes it in `WriteOrBufferBody`.
+
+So both directions frame. On receive the CONNECT stream is framed like any other, and `deliver_frame_payload`
+routes a DATA frame's payload to the stream-data sink, skips an unknown frame (section 9, which is also what a
+peer written before this fix sends) and refuses a KNOWN non-DATA frame with H3_FRAME_UNEXPECTED (section 4.4).
+On send, `wt_http3_frame_data_writer` and `wt_http3_frame_wrap_data_in_place` are the pair that makes it
+possible in one buffer: a capsule carries its own length, so the frame header cannot be written first, and the
+caller reserves `WT_HTTP3_FRAME_DATA_HEADER_MAX` bytes, writes the capsule behind them and has the header put in
+front. Every sender uses them -- `wt_session_write_drain`/`write_close` emit wire-ready bytes, and the support
+layer's close-on-refusal and the conformance tool's `capsules_send` do the same.
+
+**WT-257: the tools' capsule bound is per capsule, not per delivery.** `WT_CAPSULE_STREAM_MAX` is what the CLI and
+conformance tools hold of the capsule stream, and its own comment said it bounds "a capsule longer than this". The
+walker applied it to each DELIVERY, so the largest close the draft permits -- a 1024-byte reason, which is 1032
+bytes of capsule because the type and the value's length are two-byte varints and the value is the four-byte code
+plus the reason -- was refused with `H3_EXCESSIVE_LOAD` and the connection was CLOSED over a message a conforming
+peer may send. A peer that put more than 1024 bytes of smaller capsules into one DATA frame fared the same. Two
+things follow from the framing above: a delivery is not a capsule, because a DATA frame may carry any number of
+them, so the walker takes what fits and walks again while bytes remain (`wt_capsule_stream_on_bytes`), and the
+buffer has to clear the draft's largest capsule (`4 + WT_CAPSULE_CLOSE_MAX_REASON + 8 + 8`, the two eights being
+what an unknown type's varints could add). Both halves are pinned by scenarios, and the first was reproduced
+before the fix: the pre-fix run reported `refused=1, error=0x107, serverClosed=1` for the maximum close.
+
 **Third part done: the session lifecycle.** `include/webtransport/webtransport/session.h` is the draft's
 three rules about what a session may DO, as opposed to what its bytes say: after a drain, in either direction,
 no new stream may be started for the session while existing ones may finish; after a close, nothing at all;

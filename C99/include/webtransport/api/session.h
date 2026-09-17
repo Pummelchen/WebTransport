@@ -108,11 +108,23 @@ wt_session_error_t wt_session_last_error(const wt_session_t *session);
 wt_status_t wt_session_established(wt_session_t *session);
 
 /* Handle one capsule from the CONNECT stream: a drain or a close is applied to the
- * session, and anything else is accepted and left to a layer that understands it. */
+ * session, and anything else is accepted and left to a layer that understands it.
+ *
+ * The bytes are a CAPSULE, not the stream's bytes: RFC 9114 section 4.4 permits only DATA
+ * frames on the stream that carried CONNECT, and RFC 9297 section 3.1 makes the capsule
+ * protocol their contents, so a caller reading the stream has to hand the DATA frames'
+ * payloads here rather than the raw stream. */
 wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, size_t length);
 
-/* Write the capsule that goes with a transition. The reason is the CALLER's text and is
- * bounded by the draft's ceiling. */
+/* Write the capsule that goes with a transition, FRAMED: `out` receives the bytes to put on the
+ * CONNECT stream, which is the capsule inside the HTTP/3 DATA frame RFC 9114 section 4.4 requires
+ * there. `out_length` is the frame's size, so a caller writes exactly that many bytes and needs to
+ * know nothing about the framing -- a capsule written raw is not a capsule but the header of an
+ * unknown frame type, which a peer ignores in silence (WT-249).
+ *
+ * The reason is the CALLER's text and is bounded by the draft's ceiling. `capacity` must hold the
+ * reservation the framing needs on top of the capsule; a buffer that cannot is WT_ERR_LIMIT and
+ * nothing is written. */
 wt_status_t wt_session_write_drain(wt_session_t *session, uint8_t *out, size_t capacity,
                                    size_t *out_length);
 wt_status_t wt_session_write_close(wt_session_t *session, uint32_t error_code, const char *reason,

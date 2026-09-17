@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "session_internal.h"
+#include "webtransport/http3/frame.h"
 #include "webtransport/webtransport/capsule.h"
 #include "webtransport/webtransport/session.h"
 #include "webtransport/writer.h"
@@ -276,16 +277,28 @@ wt_status_t wt_session_write_drain(wt_session_t *session, uint8_t *out, size_t c
                                    size_t *out_length) {
   wt_writer_t w;
   wt_status_t status;
+  size_t payload_length;
+  size_t frame_length = 0U;
 
   if (session == NULL || out == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
   *out_length = 0U;
-  w = wt_writer_init(out, capacity);
+  /* The capsule is written AFTER the reservation and then wrapped: RFC 9114 section 4.4 permits only DATA frames
+   * on the stream that carried CONNECT, and RFC 9297 section 3.2 makes the capsule protocol their contents, so the
+   * capsule's own bytes are not what goes on the wire. The reservation is what makes one buffer enough -- a
+   * capsule's length is inside the capsule, so the frame header cannot be written first. */
+  w = wt_http3_frame_data_writer(out, capacity);
   status = wt_webtransport_session_write_drain(&session->machine, &w);
   if (status != WT_OK) {
     wt_session_set_error(session, status, 0U);
     return status;
   }
-  *out_length = wt_writer_offset(&w);
+  payload_length = wt_writer_offset(&w);
+  status = wt_http3_frame_wrap_data_in_place(out, capacity, payload_length, &frame_length);
+  if (status != WT_OK) {
+    wt_session_set_error(session, status, 0U);
+    return status;
+  }
+  *out_length = frame_length;
   wt_session_set_error(session, WT_OK, 0U);
   return WT_OK;
 }
@@ -295,17 +308,25 @@ wt_status_t wt_session_write_close(wt_session_t *session, uint32_t error_code, c
   wt_writer_t w;
   wt_status_t status;
   size_t reason_length = reason == NULL ? 0U : strlen(reason);
+  size_t payload_length;
+  size_t frame_length = 0U;
 
   if (session == NULL || out == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
   *out_length = 0U;
-  w = wt_writer_init(out, capacity);
+  w = wt_http3_frame_data_writer(out, capacity);
   status = wt_webtransport_session_write_close(&session->machine, &w, error_code,
                                               (const uint8_t *)reason, reason_length);
   if (status != WT_OK) {
     wt_session_set_error(session, status, 0U);
     return status;
   }
-  *out_length = wt_writer_offset(&w);
+  payload_length = wt_writer_offset(&w);
+  status = wt_http3_frame_wrap_data_in_place(out, capacity, payload_length, &frame_length);
+  if (status != WT_OK) {
+    wt_session_set_error(session, status, 0U);
+    return status;
+  }
+  *out_length = frame_length;
   wt_session_set_error(session, WT_OK, 0U);
   return WT_OK;
 }

@@ -67,7 +67,7 @@ Note the two writing to different places: the script uses
 `--scenario all` is the conformance suite the two Swift CLIs share (40 scenarios,
 one catalog for the client and the server); the two Release scenarios need the
 repository as the working directory (see Traps). The C99 conformance tool has its own
-`--scenario all`, a separate suite of 55 scenarios and not the same catalog.
+`--scenario all`, a separate suite of 57 scenarios and not the same catalog.
 
 ## Identity
 

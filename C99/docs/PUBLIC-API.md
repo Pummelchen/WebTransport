@@ -223,16 +223,21 @@ wt_session_write_drain(session, out, sizeof(out), &n);
 wt_session_write_close(session, 0, "bye", out, sizeof(out), &n);
 ```
 
-Each call moves the state AND writes the capsule into the caller's buffer: there is no way
-to send the bytes without the state or the state without the bytes, and both are refused
-once the session is closed. Capsules arriving from the peer go the other way:
+Each call moves the state AND writes the capsule into the caller's buffer *as the bytes that
+go on the CONNECT stream* — the capsule inside the HTTP/3 `DATA` frame RFC 9114 section 4.4
+requires there — so there is no way to send the bytes without the state, the state without the
+bytes, or the bytes without the framing. A capsule written raw is not a capsule: its type is the
+header of an unknown frame type, which a peer ignores in silence. Both calls are refused once
+the session is closed. Capsules arriving from the peer go the other way, and the argument is a
+capsule — the payload of a `DATA` frame — not the stream's raw bytes:
 
 ```c
 wt_session_on_capsule(session, bytes, length);   /* drain, close, and the flow-control capsules */
 ```
 
 A capsule value larger than `max_capsule_bytes` is refused with `WT_ERR_LIMIT` and the
-load code, and the session is left as it was.
+load code, and the session is left as it was. A buffer too small for the frame is refused the
+same way rather than truncated.
 
 ## Bounds a caller sets
 
