@@ -41,12 +41,13 @@ sessions**: the conformance tool stands up both endpoints in one process over IP
 `C99/scripts/run-container-interop.sh` completes a whole session **and the message exchange** against
 an independent implementation (`pywebtransport`/`aioquic`) in a container -- the peer logs
 `stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. Outside a
-container, `C99/scripts/run-vps-third-party-interop.sh` reproduces **5 of the 7 Phase 11
-proofs, not 7**, against **five independent implementations** on a routable host with
+container, `C99/scripts/run-vps-third-party-interop.sh` reproduces **7 of the 7 Phase 11
+proofs**, against **five independent implementations** on a routable host with
 `--trust system`, so the certificate chain is validated against the platform trust store and
-the name is checked rather than bypassed: `erlang-webtransport` fails `status=trust` while the
-other four accept the same certificate files, and an RSA certificate tried on the theory that
-the peer needed one made the *other four* fail, which excludes key type (`WT-196`).
+the name is checked rather than bypassed. The 17 September 2026 re-run passed every proof on its
+first attempt, and the environment is reproducible from the repository
+(`C99/tests/interop/deploy-vps-peers.sh`, `reset-vps-peers.sh` and
+`sync-vps-peer-certificates.sh`), so a fresh clone or a rebuilt host can stand it up.
 84 test programs and 65,030 checks pass on macOS 26 (64,778 on Debian 13; the Wine runner sums 64,900
 over the 85 Windows executables), plus a 200,000-input parser fuzz run and a Clang Static
 Analyzer pass over all 106 sources. Every suite runs again under AddressSanitizer and
