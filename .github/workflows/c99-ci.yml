@@ -266,6 +266,33 @@ jobs:
       - name: Unit tests
         run: ctest --test-dir C99/out/ci/build --output-on-failure
 
+  # The plan's Phase 12 names FreeBSD, GitHub provides no FreeBSD runner, and the platform was
+  # therefore measured by hand -- on a real kernel, but as a measurement that no pull request
+  # could fail on (WT-223). This boots FreeBSD in a VM on an Ubuntu runner, which is the same
+  # mechanism the hand measurement used, so a FreeBSD-only regression can now fail a PR.
+  freebsd:
+    name: C99 / FreeBSD (VM, clang)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Build and test on FreeBSD
+        uses: vmactions/freebsd-vm@4469451fe39bee80be4066836c5170362e9349f3 # v1.5.7
+        with:
+          usesh: true
+          # python3 is the harness dependency the first hand-run found the hard way (WT-201);
+          # everything else is the same toolchain the Linux legs use, from FreeBSD's packages.
+          # OpenSSL 3 and the C compiler come from the base system, which is what the CMake
+          # configure looks for.
+          prepare: |
+            pkg install -y cmake ninja python3
+          run: |
+            cmake -S C99 -B C99/out/ci/build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DWEBTRANSPORT_C99_BUILD_APPS=ON
+            cmake --build C99/out/ci/build
+            ctest --test-dir C99/out/ci/build --output-on-failure
+
   # The Windows leg, RUN rather than linked: the cross-build above says the tree compiles and links for Windows,
   # and this says it EXECUTES there. It runs the binaries through Wine on Linux, which is as far as a hosted
   # runner without Windows can take it -- `windows-native` below is the job that goes further.
