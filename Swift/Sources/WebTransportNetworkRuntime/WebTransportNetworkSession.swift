@@ -278,12 +278,22 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         // question, because a freed session's pages are not returned to the OS.
         // Counting these two lines can.
         InteroperableQUICDebug.log("session established")
+        // The peer's close ends this CONNECTION, because it serves one session: the capsule that says so has
+        // arrived, nothing is in flight towards the peer, and cancelling the inbound task is what closes the
+        // socket — measured, the peer's connection fails within 50 ms of it (`WebTransportConnectionReleaseTests`,
+        // WT-85). The closure captures the two resources rather than `self`, which is not fully initialized where
+        // this task is created, and the reader task itself is already returning at the points that call it.
+        let releaseConnection: @Sendable () -> Void = { [inboundTask, lease] in
+            inboundTask.cancel()
+            lease?.release()
+        }
         self.connectCapsuleTask = Task {
             await Self.receiveConnectCapsules(
                 from: connectStream,
                 manager: managerState,
                 streamID: sessionID.rawValue,
-                initialBytes: initialConnectCapsuleBytes
+                initialBytes: initialConnectCapsuleBytes,
+                releaseConnection: releaseConnection
             )
         }
     }
@@ -808,7 +818,8 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         from stream: QUIC.Stream<QUICStream>,
         manager: WebTransportNetworkSessionManagerState,
         streamID: UInt64,
-        initialBytes: Data
+        initialBytes: Data,
+        releaseConnection: @Sendable () -> Void
     ) async {
         var decoder = InteroperableCONNECTCapsuleDecoder()
 
@@ -825,6 +836,9 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
                 if result.connectResetFrame != nil {
                     stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
                     try? await stream.send(Data(), endOfStream: true)
+                    // The peer closed the session (this is the frame its WT_CLOSE_SESSION capsule produces), so
+                    // there is nothing left for this connection to carry.
+                    releaseConnection()
                     return true
                 }
             }
@@ -851,6 +865,9 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
                         _ = try? await manager.withManager { manager in
                             try manager.finishConnectStream(streamID: streamID)
                         }
+                        // The peer ended the CONNECT stream, which ends the session (draft-16 section 4.4), so the
+                        // connection has no further use either.
+                        releaseConnection()
                     }
                     return
                 }

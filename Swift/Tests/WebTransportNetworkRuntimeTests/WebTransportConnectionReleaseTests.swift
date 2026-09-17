@@ -15,18 +15,16 @@ import Testing
 ///    to send for the connection, or received from the peer" and it has a setter. Writing it to a ready
 ///    connection stores the value and does nothing else — the state stays `.ready` — so it is a code to
 ///    carry when the connection ends, not a way to end it.
-/// 2. Closing the session sends WT_CLOSE_SESSION and leaves BOTH connections `.ready`. That is the leak
-///    WT-85 records.
-/// 3. Dropping the session cancels its tasks (`deinit`) and the peer's connection then fails within a few
-///    hundred milliseconds. The connection IS releaseable from this package; what stops `close()` from
-///    doing it is the close message itself — releasing the connection abandons what is still in flight on
-///    it, and what is in flight is the capsule carrying the peer the session's code and reason (draft-16
-///    section 5.4). A release at close time needs a bounded grace for that capsule, which is a policy
-///    choice rather than a missing API.
+/// 2. Closing the session sends WT_CLOSE_SESSION, and the side that RECEIVES it releases its connection: the
+///    capsule has arrived, nothing is in flight towards the peer, and the connection serves one session. That
+///    closes the socket on both ends within about 50 ms, which is the fix for the leak WT-85 recorded — and it
+///    needs no grace period, because the message it must not overtake is the one that triggered it.
+/// 3. Dropping a session that was never closed cancels its tasks (`deinit`) and releases the connection the same
+///    way, which the peer notices just as quickly.
 ///
-/// A failure of the "still ready" expectations below is not necessarily bad news: it means the framework
-/// (or this runtime) began releasing the connection on one of those steps, and the tracker row and
-/// [[Known Limitations]] need updating rather than the test.
+/// The closing side's own initiative is still the one that needs a policy: a peer that does not release (a
+/// third-party implementation) leaves the closing side's socket open until QUIC's idle timeout, or until the
+/// session object is dropped. That is recorded in the tracker row and in [[Known Limitations]].
 @Test
 func applicationErrorIsNotAReleasePath() async throws {
     let server = try WebTransportQUICServer(
@@ -59,9 +57,9 @@ func applicationErrorIsNotAReleasePath() async throws {
     clientSession = nil
 }
 
-/// The half that names the release path, and the one a fix would build on.
+/// The fix: the peer that receives the close releases its connection, and the socket goes away on BOTH ends.
 @Test
-func closingASessionLeavesItsConnectionUntilTheSessionIsDropped() async throws {
+func closingASessionReleasesTheConnectionOnThePeerThatReceivesIt() async throws {
     let server = try WebTransportQUICServer(
         endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 0),
         authority: "localhost",
@@ -73,10 +71,39 @@ func closingASessionLeavesItsConnectionUntilTheSessionIsDropped() async throws {
     )
     defer { server.shutdown() }
 
-    // Established inline rather than through the helper below: the helper returns both halves as a tuple,
-    // and a `let` binding of the client half would keep the session alive past the `clientSession = nil`
-    // that is the measurement. `serverHalf` has to be held all the same — dropping it ends the peer's
-    // session and releases its connection, which is the mechanism this test measures.
+    let (clientHalf, serverHalf) = try await connectSessionPair(server: server)
+    let clientConnection = clientHalf.underlyingConnection
+    let peerConnection = serverHalf.underlyingConnection
+    #expect(clientConnection.state == .ready)
+    #expect(peerConnection.state == .ready)
+
+    try await clientHalf.close(applicationErrorCode: 0, reason: "wt-85")
+
+    // The server releases when the capsule arrives; the client's own connection then fails because the socket it
+    // was using is gone. Neither side waits for the idle timeout, and the caller does not have to drop anything.
+    let peerGone = try await waitUntilNotReady(peerConnection, withinMilliseconds: 3_000)
+    #expect(peerGone != nil, "the peer did not release the connection its session's close ended")
+    let clientGone = try await waitUntilNotReady(clientConnection, withinMilliseconds: 3_000)
+    #expect(clientGone != nil, "the closing side's connection outlived the peer's release")
+}
+
+/// The other release path, unchanged by the fix: a session dropped without a close still hands its connection back,
+/// and the peer notices just as quickly.
+@Test
+func droppingASessionWithoutClosingItReleasesTheConnection() async throws {
+    let server = try WebTransportQUICServer(
+        endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 0),
+        authority: "localhost",
+        path: "/wt",
+        allowedOrigin: "https://localhost",
+        protocols: ["demo.v1"],
+        localOnly: true,
+        admission: WebTransportAdmissionPolicy(maxConcurrentConnections: 2)
+    )
+    defer { server.shutdown() }
+
+    // Inline for the same reason as ever: a `let` binding of the client half would keep the session alive past
+    // the `nil` that is the measurement.
     let endpoint = try await server.waitForListening(timeoutMilliseconds: 5_000)
     async let accepted = server.acceptSession(timeoutMilliseconds: 10_000)
     var clientSession: WebTransportNetworkSession? = try await WebTransportQUICClient(
@@ -92,29 +119,13 @@ func closingASessionLeavesItsConnectionUntilTheSessionIsDropped() async throws {
         timeoutMilliseconds: 8_000
     )
     let serverHalf = try await accepted
-    let clientConnection = try #require(clientSession?.underlyingConnection)
     let peerConnection = serverHalf.underlyingConnection
-    #expect(clientConnection.state == .ready)
     #expect(peerConnection.state == .ready)
+    #expect(clientSession != nil, "the session has to exist before it is dropped")
 
-    try await clientSession?.close(applicationErrorCode: 0, reason: "wt-85")
-
-    try await Task.sleep(for: .milliseconds(1_500))
-    #expect(
-        clientConnection.state == .ready,
-        "the closing side released its own connection at close(), so WT-85 is fixed on that side"
-    )
-    #expect(
-        peerConnection.state == .ready,
-        "the peer released its connection on the close capsule, so WT-85 is fixed on that side"
-    )
-
-    // Dropping the session is the path that exists. It has to be prompt — the point of the row is that the
-    // alternative is the QUIC idle timeout, which is thirty seconds — so a release inside three seconds is
-    // the assertion, and the measured figure is in the row's note.
     clientSession = nil
-    let releasedAfter = try await waitUntilNotReady(peerConnection, withinMilliseconds: 3_000)
-    #expect(releasedAfter != nil, "dropping the session did not release the peer's connection within 3s")
+    let peerGone = try await waitUntilNotReady(peerConnection, withinMilliseconds: 3_000)
+    #expect(peerGone != nil, "dropping the session did not release the peer's connection within 3s")
 }
 
 /// Establishes one session on a loopback `server` and returns both halves.
