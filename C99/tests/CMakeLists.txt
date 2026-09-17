@@ -187,14 +187,24 @@ set_tests_properties(fuzz_parsers_smoke PROPERTIES TIMEOUT 300)
 # The driver probe: compile AND link a libFuzzer program that has no `main` of its own, which is exactly what the
 # target needs. `execute_process` rather than a check module because the flag has to reach the link line, which
 # `CMAKE_REQUIRED_FLAGS` does not.
+#
+# The probe uses the SAME flag pair the target gets, and requires the output to EXIST. Both halves were wrong
+# until the MSVC run of the Windows compiler probe (WT-260): it probed `-fsanitize=fuzzer` alone and trusted the
+# exit status, so it certified a compiler for flags it would never be given. clang-cl then failed on
+# `-fsanitize=fuzzer,address` with the debug CRT the Debug configuration selects ("invalid argument '-MDd' not
+# allowed with '-fsanitize=address'"), and MSVC took the probe as a SUCCESS because it reads `-o <file>` as its own
+# `/o`, compiles without linking, and exits 0 -- after which the fuzz target was created and both sanitizer flags
+# were ignored with D9002 warnings. Testing the exact flags and requiring the file closes both.
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/fuzz_driver_probe.c
   "int LLVMFuzzerTestOneInput(const unsigned char *data, unsigned long size) { (void)data; (void)size; return 0; }\n")
 execute_process(
-  COMMAND ${CMAKE_C_COMPILER} -fsanitize=fuzzer ${CMAKE_CURRENT_BINARY_DIR}/fuzz_driver_probe.c
+  COMMAND ${CMAKE_C_COMPILER} -fsanitize=fuzzer,address ${CMAKE_CURRENT_BINARY_DIR}/fuzz_driver_probe.c
           -o ${CMAKE_CURRENT_BINARY_DIR}/fuzz_driver_probe
   RESULT_VARIABLE WT_FUZZER_PROBE_RESULT
   OUTPUT_QUIET ERROR_QUIET)
-if(WT_FUZZER_PROBE_RESULT EQUAL 0 AND NOT WT_SANITIZER_FLAGS)
+if(WT_FUZZER_PROBE_RESULT EQUAL 0
+   AND EXISTS ${CMAKE_CURRENT_BINARY_DIR}/fuzz_driver_probe
+   AND NOT WT_SANITIZER_FLAGS)
   add_executable(fuzz_parsers fuzz/fuzz_parsers.c)
   wt_set_c99(fuzz_parsers)
   wt_apply_warnings(fuzz_parsers)

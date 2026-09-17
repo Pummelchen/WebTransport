@@ -106,11 +106,18 @@ static int receive_now(SOCKET handle, wt_receive_path_t receive, wt_udp_platform
   return receive(handle, message);
 }
 
-/* The expectations every path must meet, against one datagram size at a time. */
+/* The expectations every path must meet, against one datagram size at a time.
+ *
+ * The two receive buffers are called `small_buffer` and `large_buffer` rather than `small` and `large` because a
+ * Windows header this file reaches (the platform header's `<winsock2.h>`, and `rpcndr.h` underneath it) defines
+ * `small` as a MACRO -- `#define small char` -- so `uint8_t small[8]` becomes `uint8_t char[8]` and the MSVC
+ * toolchains refuse it: "C2628: 'uint8_t' followed by 'char' is illegal", which is what the first MSVC run of
+ * the Windows compiler probe reported (WT-260). mingw's headers do not define it, which is why neither Windows
+ * leg had ever seen this. Do not shorten these names back. */
 static void test_path(const char *path, wt_receive_path_t receive) {
   uint8_t datagram[64];
-  uint8_t small[8];
-  uint8_t large[64];
+  uint8_t small_buffer[8];
+  uint8_t large_buffer[64];
   struct sockaddr_storage to;
   struct sockaddr_storage from;
   wt_udp_address_t expected;
@@ -142,21 +149,21 @@ static void test_path(const char *path, wt_receive_path_t receive) {
    * have been truncated" guess gets wrong, and the reason the truncation is reported rather than inferred. */
   WT_EXPECT_OK(label_for(path, "a fitting datagram is sent"),
                wt_udp_platform_send_message(sender, (const struct sockaddr *)(const void *)&to, (int)to_length,
-                                            datagram, sizeof(small), NULL));
+                                            datagram, sizeof(small_buffer), NULL));
   memset(&from, 0, sizeof(from));
   memset(&message, 0, sizeof(message));
   from_length = (int)sizeof(from);
-  message.bytes = small;
-  message.capacity = sizeof(small);
+  message.bytes = small_buffer;
+  message.capacity = sizeof(small_buffer);
   message.address = &from;
   message.address_length = &from_length;
   WT_EXPECT_INT(label_for(path, "a datagram that exactly fills the buffer is received"), 0,
                 receive_now(listener, receive, &message));
-  WT_EXPECT_U64(label_for(path, "with its whole length"), (uint64_t)sizeof(small),
+  WT_EXPECT_U64(label_for(path, "with its whole length"), (uint64_t)sizeof(small_buffer),
                 (uint64_t)message.bytes_out);
   WT_EXPECT_INT(label_for(path, "and is NOT called truncated"), 0,
                 message.flags_out & WT_UDP_PLATFORM_TRUNCATED);
-  WT_EXPECT_BYTES(label_for(path, "with its bytes"), datagram, small, sizeof(small));
+  WT_EXPECT_BYTES(label_for(path, "with its bytes"), datagram, small_buffer, sizeof(small_buffer));
   WT_EXPECT_OK(label_for(path, "and the sender converts"),
                wt_udp_platform_address_from_storage((const struct sockaddr *)(const void *)&from,
                                                     (wt_udp_socklen_t)from_length, &reported));
@@ -167,12 +174,12 @@ static void test_path(const char *path, wt_receive_path_t receive) {
    * still named, because "who sent what I could not receive" is the useful half of the report (WT-36). */
   WT_EXPECT_OK(label_for(path, "an oversized datagram is sent"),
                wt_udp_platform_send_message(sender, (const struct sockaddr *)(const void *)&to, (int)to_length,
-                                            large, sizeof(large), NULL));
+                                            large_buffer, sizeof(large_buffer), NULL));
   memset(&from, 0, sizeof(from));
   memset(&message, 0, sizeof(message));
   from_length = (int)sizeof(from);
-  message.bytes = small;
-  message.capacity = sizeof(small);
+  message.bytes = small_buffer;
+  message.capacity = sizeof(small_buffer);
   message.address = &from;
   message.address_length = &from_length;
   WT_EXPECT_INT(label_for(path, "receiving it into a small buffer is a truncation"), 0,
@@ -186,18 +193,18 @@ static void test_path(const char *path, wt_receive_path_t receive) {
   /* The buffer was filled, so the datagram was at least as long as it: the honest floor when the platform
    * cannot report past the buffer. */
   WT_EXPECT_TRUE(label_for(path, "and the reported length fills the buffer"),
-                 message.bytes_out >= (size_t)sizeof(small));
+                 message.bytes_out >= (size_t)sizeof(small_buffer));
 
   /* 3. A PEEK of a datagram that does not fit leaves it in the queue: the listener learns its peer from the
    * first datagram without consuming it, which is the whole reason `wt_udp_peek` exists. */
   WT_EXPECT_OK(label_for(path, "a datagram for the peek is sent"),
                wt_udp_platform_send_message(sender, (const struct sockaddr *)(const void *)&to, (int)to_length,
-                                            large, sizeof(large), NULL));
+                                            large_buffer, sizeof(large_buffer), NULL));
   memset(&from, 0, sizeof(from));
   memset(&message, 0, sizeof(message));
   from_length = (int)sizeof(from);
-  message.bytes = small;
-  message.capacity = sizeof(small);
+  message.bytes = small_buffer;
+  message.capacity = sizeof(small_buffer);
   message.address = &from;
   message.address_length = &from_length;
   message.flags_in = WT_UDP_PLATFORM_PEEK | WT_UDP_PLATFORM_FULL_LENGTH;
@@ -212,36 +219,36 @@ static void test_path(const char *path, wt_receive_path_t receive) {
   /* The receive that follows proves the peek did not consume it, and gets the whole datagram this time. */
   memset(&message, 0, sizeof(message));
   from_length = (int)sizeof(from);
-  message.bytes = large;
-  message.capacity = sizeof(large);
+  message.bytes = large_buffer;
+  message.capacity = sizeof(large_buffer);
   message.address = &from;
   message.address_length = &from_length;
   WT_EXPECT_INT(label_for(path, "and the datagram is still in the queue"), 0,
                 receive_now(listener, receive, &message));
-  WT_EXPECT_U64(label_for(path, "whole"), (uint64_t)sizeof(large), (uint64_t)message.bytes_out);
+  WT_EXPECT_U64(label_for(path, "whole"), (uint64_t)sizeof(large_buffer), (uint64_t)message.bytes_out);
   WT_EXPECT_INT(label_for(path, "with no truncation"), 0,
                 message.flags_out & WT_UDP_PLATFORM_TRUNCATED);
-  WT_EXPECT_BYTES(label_for(path, "and its bytes"), large, (const uint8_t *)message.bytes, sizeof(large));
+  WT_EXPECT_BYTES(label_for(path, "and its bytes"), large_buffer, (const uint8_t *)message.bytes, sizeof(large_buffer));
 
   /* 4. A PEEK of a datagram that FITS reports what it copied and names the sender, which is the case the
    * runtime listener actually runs for a 64-byte header prefix. */
   WT_EXPECT_OK(label_for(path, "a fitting datagram for the peek is sent"),
                wt_udp_platform_send_message(sender, (const struct sockaddr *)(const void *)&to, (int)to_length,
-                                            datagram, sizeof(small), NULL));
+                                            datagram, sizeof(small_buffer), NULL));
   memset(&from, 0, sizeof(from));
   memset(&message, 0, sizeof(message));
   from_length = (int)sizeof(from);
-  message.bytes = small;
-  message.capacity = sizeof(small);
+  message.bytes = small_buffer;
+  message.capacity = sizeof(small_buffer);
   message.address = &from;
   message.address_length = &from_length;
   message.flags_in = WT_UDP_PLATFORM_PEEK | WT_UDP_PLATFORM_FULL_LENGTH;
   WT_EXPECT_INT(label_for(path, "the peek reads it whole"), 0, receive_now(listener, receive, &message));
-  WT_EXPECT_U64(label_for(path, "reporting every byte"), (uint64_t)sizeof(small),
+  WT_EXPECT_U64(label_for(path, "reporting every byte"), (uint64_t)sizeof(small_buffer),
                 (uint64_t)message.bytes_out);
   WT_EXPECT_INT(label_for(path, "with no truncation"), 0,
                 message.flags_out & WT_UDP_PLATFORM_TRUNCATED);
-  WT_EXPECT_BYTES(label_for(path, "and its bytes"), datagram, small, sizeof(small));
+  WT_EXPECT_BYTES(label_for(path, "and its bytes"), datagram, small_buffer, sizeof(small_buffer));
   WT_EXPECT_OK(label_for(path, "and names the sender"),
                wt_udp_platform_address_from_storage((const struct sockaddr *)(const void *)&from,
                                                     (wt_udp_socklen_t)from_length, &reported));
@@ -252,8 +259,8 @@ static void test_path(const char *path, wt_receive_path_t receive) {
    * caller uses. */
   memset(&message, 0, sizeof(message));
   from_length = (int)sizeof(from);
-  message.bytes = small;
-  message.capacity = sizeof(small);
+  message.bytes = small_buffer;
+  message.capacity = sizeof(small_buffer);
   message.address = &from;
   message.address_length = &from_length;
   WT_EXPECT_INT(label_for(path, "the peeked datagram is then consumed"), 0,
