@@ -1,9 +1,19 @@
 #!/bin/sh
+# The Swift client against the five independent implementations on the VPS (Phase 11's Swift half).
+#
+# `WEBTRANSPORT_VPS_INTEROP_HOST` is BOTH the address dialled and the authority the request names, because the Swift
+# client verifies the server's certificate against the name it connected to. It therefore has to be a name the
+# certificate carries: the deployed one covers `pummelchen.91.99.176.243.nip.io` (the address resolves through
+# nip.io), and dialling the host's tailnet name instead fails the handshake with a TLS `bad_certificate` alert --
+# the peer logs `Connection close received (code 0x12A, reason TLS alert error)` and the client reports only its
+# timeout. The C99 runner separates address from authority and cannot hit this; the Swift client has no override for
+# the verification name, which is why the default here is the certificate's name rather than the host's
+# (WT-261 records the gap).
 set -eu
 
 cd "$(dirname "$0")"
 
-host="${WEBTRANSPORT_VPS_INTEROP_HOST:-vpn-germany.tail1c3b90.ts.net}"
+host="${WEBTRANSPORT_VPS_INTEROP_HOST:-pummelchen.91.99.176.243.nip.io}"
 os_name="${WEBTRANSPORT_VPS_INTEROP_OS:-Debian GNU/Linux 13 (trixie) x86_64}"
 test_date="${WEBTRANSPORT_VPS_INTEROP_DATE:-20 June 2026}"
 timeout_ms="${WEBTRANSPORT_VPS_INTEROP_TIMEOUT_MS:-60000}"
