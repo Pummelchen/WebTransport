@@ -426,7 +426,11 @@ if(BUILD_SHARED_LIBS)
   # 'webtransport.lib'" (WT-260). This property makes CMake generate the module-definition file from the objects,
   # which is the portable answer: the same property works for MSVC and clang-cl, and it changes nothing where the
   # linker already exports everything.
-  if(WIN32)
+  # NOT on mingw: that toolchain exports every symbol by itself (`--export-all-symbols`), and asking CMake for a
+  # module definition as well REPLACES the implicit export-all with the generated list, which left internal
+  # functions such as `wt_udp_close` and `wt_runtime_session_clear` unexported and broke the link of the
+  # conformance tool on both mingw legs (WT-260).
+  if(WIN32 AND NOT MINGW)
     set_target_properties(webtransport_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
     # The one decoration CMake cannot generate: a DATA symbol's consumer has to know it is importing, so this
     # reaches every target that links the DLL -- tests, apps and a consumer of the installed package -- and the
