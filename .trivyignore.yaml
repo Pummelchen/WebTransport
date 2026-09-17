@@ -1,6 +1,6 @@
 # Accepted misconfiguration findings, per file (F-repo-ops-13).
 #
-# The six interop Dockerfiles are TEST images: `scripts/run-container-interop*.sh`
+# The eleven interop Dockerfiles are TEST images: `scripts/run-container-interop*.sh`
 # starts them on a private Docker bridge network next to each other, waits on the
 # test, and tears them down. They are never published, never exposed, and never
 # shipped, so DS-0002 (image user is root) is accepted rather than fixed -- a
@@ -8,6 +8,12 @@
 # measurement behind it. DS-0026 (no HEALTHCHECK) is accepted for the same reason:
 # the only consumer of these containers is the script that starts them, which
 # polls the protocol rather than `docker inspect`.
+#
+# The five `vps/peers/` images were added by the 2026-09-17 interop work that moved the peer
+# contexts (and the certificate sync) into the repository. They are the same class as the six
+# above -- built and started by `C99/tests/interop/deploy-vps-peers.sh`, never published -- so
+# they are accepted on the same reasoning and reviewed one by one, which is what the per-path
+# scoping exists to force.
 #
 # The acceptance is scoped by `paths`, so a NEW Dockerfile is still checked and a
 # new image that DOES run as root for a real deployment fails the scan. The
@@ -21,6 +27,11 @@ misconfigurations:
       - Swift/interop-docker/pywebtransport/Dockerfile
       - Swift/interop-docker/quiche/Dockerfile
       - Swift/interop-docker/quinn/Dockerfile
+      - C99/tests/interop/vps/peers/erlang/Dockerfile.vps
+      - C99/tests/interop/vps/peers/h3/Dockerfile
+      - C99/tests/interop/vps/peers/pywebtransport/Dockerfile
+      - C99/tests/interop/vps/peers/quiche/Dockerfile
+      - C99/tests/interop/vps/peers/quinn/Dockerfile
     statement: Test-only interop image on a private bridge network; root inside it is accepted.
   - id: DS-0026
     paths:
@@ -30,4 +41,9 @@ misconfigurations:
       - Swift/interop-docker/pywebtransport/Dockerfile
       - Swift/interop-docker/quiche/Dockerfile
       - Swift/interop-docker/quinn/Dockerfile
+      - C99/tests/interop/vps/peers/erlang/Dockerfile.vps
+      - C99/tests/interop/vps/peers/h3/Dockerfile
+      - C99/tests/interop/vps/peers/pywebtransport/Dockerfile
+      - C99/tests/interop/vps/peers/quiche/Dockerfile
+      - C99/tests/interop/vps/peers/quinn/Dockerfile
     statement: Test-only interop image started and polled by a script; no HEALTHCHECK consumer.
