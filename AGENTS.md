@@ -18,7 +18,7 @@ plus layered QUIC/TLS/HTTP-3 modules and two CLI peers) and, under `C99/`, a
 separate CMake C99 library with its own CLI tools and test suite. The two are
 built and tested separately and versioned in lockstep from a single `VERSION` file,
 so a caller pairing them knows the pair is compatible. Both are released together
-(`1.4.0`, one artifact per library under one tag); the C99 side is built and
+(`1.5.0`, one artifact per library under one tag); the C99 side is built and
 exercised — 97 CTest tests, ASan/UBSan, Windows-under-Wine, FreeBSD by hand. The
 audience is protocol implementers reading a
 reference implementation, so exact wire behaviour matters more than convenience.
@@ -67,7 +67,7 @@ Note the two writing to different places: the script uses
 `--scenario all` is the conformance suite the two Swift CLIs share (40 scenarios,
 one catalog for the client and the server); the two Release scenarios need the
 repository as the working directory (see Traps). The C99 conformance tool has its own
-`--scenario all`, a separate suite of 54 scenarios and not the same catalog.
+`--scenario all`, a separate suite of 55 scenarios and not the same catalog.
 
 ## Identity
 
@@ -77,7 +77,7 @@ compatible, so the unchanged one is recompiled at the new number rather than lef
 behind.
 
 **The lockstep is landed and enforced.** `VERSION` at the repository root (currently
-`1.4.0`) is the single source; it is mirrored in
+`1.5.0`) is the single source; it is mirrored in
 `C99/include/webtransport/version.h` (`WT_VERSION_MAJOR/MINOR/PATCH`) and in
 `Swift/Sources/WebTransport/WebTransportVersion.swift` (`WebTransportVersion.library`).
 A bump is one edit plus one command: write `VERSION`, then run

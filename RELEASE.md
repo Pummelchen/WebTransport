@@ -135,7 +135,7 @@ repository, so `gh release list` shows another project's releases and
 
 ## 1.8 Release notes
 
-- Full notes in `docs/release-notes-vX.Y.md` (or the repository's equivalent),
+- Full notes in `docs/release-notes-vX.Y.Z.md` (or the repository's equivalent),
   one section per user-visible change, each naming the check that backs it.
 - End with a checksum block carrying `SHA256_PENDING` and
   `ARCHIVE_BYTES_PENDING`, substituted at publish time. **Never copy a size out
@@ -144,12 +144,21 @@ repository, so `gh release list` shows another project's releases and
   real value. A release quoting the wrong digest is worse than one quoting none.
 - Name **every** check that did not run, and why.
 - The README gets **no release callout**. It changes only when a fact it states
-  changes. The changelog is the announcement.
+  changes. The release notes are the announcement.
+- **There is no separate changelog file: the release notes *are* the changelog.**
+  Each release's notes — `docs/release-notes-vX.Y.Z.md` here, and the body published
+  for the tag — are organised as `### Swift`, then `### C99`, then `### Both`, because
+  the two libraries are independent and a reader of one should not have to filter the
+  other's entries out. Each library's changes go under its own heading and nowhere
+  else; a change that is genuinely one item — a wire fix made on both sides for the
+  same RFC reason, the version lockstep, repository-wide tooling — is one entry under
+  `### Both`, with both halves named, rather than two entries. The split starts with
+  1.5.0; earlier releases keep the form they were published with.
 
 ## 1.9 After publishing
 
 Verify the Release: the notes quote the digest in the `.sha256` beside it, the
-assets are the archive and its checksum, and the changelog points at the same tag.
+assets are the archive and its checksum, and the release notes point at the same tag.
 Leave previous releases' notes and performance tables alone.
 
 ## 1.10 Rules, agents and other repositories

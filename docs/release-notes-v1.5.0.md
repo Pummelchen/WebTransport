@@ -5,73 +5,84 @@ and the portable C99 library built for Apple Silicon (arm64), with a `.sha256` b
 archive. This release carries the third audit pass's fixes — several of them wire-visible —
 and two corrections to how the C99 tools negotiate flow control.
 
-## Wire-visible fixes in this release
+These notes are the changelog for this release. Each change is under the library it belongs
+to, and the work that is genuinely one item for both is under **Both**.
 
-- **A Retry packet's `Unused` field is ignored, as the RFC requires.** RFC 9000 section
-  17.2.5 gives a Retry an `Unused (4)` field whose value "is set to an arbitrary value by
-  the server" and which "a client MUST ignore". Both implementations required it to be
-  zero, so each refused RFC 9001 appendix A.4's own Retry — which begins `0xff` — and with
-  it every Retry a conformant server writes with those bits set. Fixed in both, asserted
-  against the RFC's own extracted packet.
-- **The Swift Retry Integrity Tag is now computed and verified** (RFC 9001 section 5.8).
-  It was parsed and never checked, so a caller that treated `decode` as validation would
-  accept a forged Retry. `QUICRetryIntegrityTag` holds the section's fixed key and nonce,
-  and the verifying decode needs the original Destination Connection ID — which is
-  authenticated by the tag but never appears in the packet.
-- **A received HTTP/3 SETTINGS payload is validated** (C99). A SETTINGS frame carrying a
-  duplicate identifier was accepted and delivered; RFC 9114 section 7.2.4 says the same
-  identifier MUST NOT occur more than once and permits `H3_SETTINGS_ERROR`, which is now
-  what it gets.
-- **The C99 tools negotiate flow control, and ignore the capsules when they have not.**
-  Draft-ietf-webtrans-http3-16 section 5.1 makes flow control conditional and says an
-  endpoint that did not negotiate it MUST ignore the flow-control capsules. The tools
-  applied them unconditionally; they now advertise the three settings and honour the rule.
-- **Swift runtime:** an unknown or reserved unidirectional stream type is ignored instead
-  of being reported as a session error (RFC 9114 section 6.2 — "MUST NOT consider unknown
-  stream types to be a connection error of any kind"); an over-limit flow-control capsule
-  arriving on the CONNECT stream closes the session with `WT_FLOW_CONTROL_ERROR` as section
-  5.6.2 requires; a second control or QPACK stream raises `H3_STREAM_CREATION_ERROR`; and
-  critical-stream retention is bounded to the connection's entitlement instead of growing
-  without limit.
+### Swift
 
-## What changed for a caller
+Fixed:
 
-New public Swift API, all additive:
+- **The Retry Integrity Tag is computed and verified** (RFC 9001 section 5.8, WT-1). It was parsed and never checked, so a caller that treated `decode` as validation accepted a forged Retry. `QUICRetryIntegrityTag` holds the section's fixed key and nonce, verification goes through `AES.GCM.open` so the comparison is the platform's constant-time authentication, and the verifying decode takes the original Destination Connection ID, which the tag authenticates but the packet never carries. Asserted against RFC 9001 appendix A.4's own extracted packet and tag, which caught a defect in the first version: `compute` passed an empty associated data value and so disagreed with the RFC while `verify` agreed with itself.
+- **An unknown or reserved unidirectional stream type is ignored** (RFC 9114 section 6.2, WT-244). The accept path and `readPeerControlStream` threw `unexpectedFrame` for the reserved type `0x21`, naming an ignorable stream as the session's problem; they now drop a reserved or unknown type and continue waiting, while a malformed varint is still reported and a defined-but-unserved type (push) keeps its previous report.
+- **An over-limit flow-control capsule on the CONNECT stream closes the session with `WT_FLOW_CONTROL_ERROR`** (draft-16 section 5.6.2, WT-245). The direct entry point did close; the CONNECT-stream entry point parsed the capsule first, so the parse error was thrown before the close path was reached and the local state stayed `accepted` while the peer was told `H3_MESSAGE_ERROR`. The failure now routes through the existing `closeForFlowControlViolation`.
+- **A duplicate control or QPACK stream raises `H3_STREAM_CREATION_ERROR`, and critical-stream retention is bounded** (RFC 9114 section 6.2.1, RFC 9204 section 4.2, WT-246 and WT-247). A duplicate was silently retained, and retention had no ceiling: the audit measured `retainCritical accepted=100000 retainedCount=100000` against `enqueue accepted=16 refused=1584`, and in a live session a peer's unidirectional-stream credit was never returned. Retention is now exactly one control, one encoder and one decoder stream, and a duplicate or unentitled type is refused through the existing `HTTP3ConnectionError(.streamCreationError)`.
+- **`acceptUnidirectionalStream` recomputes its remaining budget before each await** (WT-248). It computed the budget once per iteration and reused it across two awaits, so one iteration could wait twice its documented deadline. Both the audit and the fix record that the double wait is not reachable on this transport, because a unidirectional stream is delivered only once its first byte exists; the test is kept as a budget guard rather than a reproduction.
+- **`QUICTransportParameters.validated()` enforces RFC 9000 section 4.6's 2^60 cap** on `initial_max_streams_bidi` and `initial_max_streams_uni`, the one section 18.2 rule it did not check (WT-250). Exactly 2^60 is accepted, because the rule refuses values greater than it.
+- **`connectionTransportFailed(role:domain:code:)` names the transport failure at the two queue boundaries** (WT-197). `InteroperableQUICConnectionQueue.dequeue` and `InteroperableQUICInboundStreamCollector.next` still rethrew the framework's bare `POSIXErrorCode` after WT-185 translated it at `waitForReady`; the measured error is `NWError.posix(.ENOTCONN)`, which bridges to code 57. It is deliberately not the establishment case: both queues are used after establishment as well, and calling this an establishment failure would invite a caller to re-drive a session that may already have carried data. A caller's own error, `CancellationError` and the runtime's own cases pass through untouched, and the parked-waiter resume — a third escape path the row did not name — is closed too. `InteroperableQUICConnectionQueue` is generic over its element with a `release` closure, so the boundary can be driven by a test without a live QUIC connection.
+- **The PKCS#12 test fixture uses a container OpenSSL 3 accepts** (WT-191). The old one was a LibreSSL 3.3.6 bundle using RC2-40-CBC, which OpenSSL 3.6.4 refuses outright; it is regenerated with PBES2/PBKDF2/AES-256-CBC and a SHA-256 MAC. The certificate DER, the RSA modulus and public key and the passphrase are unchanged, so the wrong-passphrase test still returns -25293. Recorded rather than smoothed over: the row's `OSStatus -26276` does not reproduce on macOS 27.0, so the change is justified by the obsolete container and by OpenSSL 3 rejecting it, not by a reproduction.
 
-- `QUICRetryIntegrityTag` — `key`, `nonce`, `compute(pseudoPacket:)` and
-  `verify(pseudoPacket:integrityTag:)`, the last going through `AES.GCM.open` so the
-  comparison is the platform's constant-time authentication.
-- `QUICRetryPacket.unusedBits`, and
-  `QUICRetryPacket.decode(_:originalDestinationConnectionID:integrityTagVerifier:)`, which
-  returns a packet only when its tag validates.
-- `QUICRetryPacket.encodedWithoutIntegrityTag()` and
-  `integrityPseudoPacket(originalDestinationConnectionID:retryPacketWithoutIntegrityTag:)`.
-- `WebTransportNetworkRuntimeError.connectionTransportFailed(role:domain:code:)`, so a
-  transport failure on a connection the runtime had already taken on is named as that
-  rather than as an establishment failure.
+Added:
 
-One declaration changed form and no caller can tell: the session manager's eleven
-collection properties are `public internal(set) var` rather than `public private(set) var`.
-The setter was never visible outside the module and still is not; the in-module setter is
-what let the type be split across files without changing its copy semantics.
+- `QUICRetryIntegrityTag` (`key`, `nonce`, `compute(pseudoPacket:)`, `verify(pseudoPacket:integrityTag:)`); `QUICRetryPacket.encodedWithoutIntegrityTag()` and `integrityPseudoPacket(originalDestinationConnectionID:retryPacketWithoutIntegrityTag:)`; and `QUICRetryPacket.decode(_:originalDestinationConnectionID:integrityTagVerifier:)`, which returns a packet only when the tag validates. The unverified entry point now says in its documentation that it is not validation.
+- `WebTransportNetworkRuntimeError.connectionTransportFailed(role:domain:code:)`, which claims only what is true at both sites — the transport failed while the runtime was using the connection — and keeps the framework's domain and code for diagnosis.
 
-## Repository and gates
+Changed:
 
-No source file in the repository is 1,000 lines or more — the largest is 996, down from
-4,154 — and the split moved code rather than rewriting it: the Swift suite is unchanged at
-**376 tests, 0 failures**, and the C99 CTest name list is byte-identical at **97 tests**,
-with the per-binary check counts unchanged in the binaries the splits touched.
+- `QUICLongHeaderPacket.decode`'s precondition is documented rather than implied: it reads the reserved bits and the packet-number length out of a header-protected first byte, so it is sound only for an already-unmasked header (WT-228). No public shape changed; the C99 library reports the condition to the authenticating caller instead (WT-167).
+- The session manager's eleven collection properties are `public internal(set) var` rather than `public private(set) var`, so its mutating core could move to four files without changing the type's copy semantics; the setter was never visible outside the module and still is not. The first attempt — an `internal final class` state holder behind computed get-only properties — was thrown away, because it preserved every declaration line but made two copies of the public `Sendable` struct share one mutable store, which is a data race papered over with `@unchecked Sendable`.
+- The Swift-only part of the 1000-line refactor: `WebTransportInteroperableNetworkRuntime.swift` (3639 lines) became the runtime plus `WebTransportQUICConnectionAdmission.swift` and `WebTransportQUICRuntimeSupport.swift`; `QUICCoreState.swift`, `DeterministicNetworkRuntimeSupport.swift`, `WebTransportCLIConformance.swift`, `LibrarySmokeClient/main.swift` and `WebTransportProcessTests.swift` were split on their own seams; and the session manager's mutating core became `WebTransportSessionLifecycle.swift`, `WebTransportSessionStreams.swift`, `WebTransportSessionFlowControl.swift` and `WebTransportSessionDatagrams.swift`. It is a move rather than a rewrite: the Swift suite is unchanged at 376 tests, 0 failures, and the `public`/`open` declaration multiset is identical. The ceiling itself and the splits that touched both libraries are under **Both**.
 
-- Swift: `swift test` under `-warnings-as-errors -strict-concurrency=complete
-  -require-explicit-sendable`, plus ASan and TSan, the formatter over both manifests, the
-  API-compatibility consumer build, `check-manifest-sync.sh`, `check-target-imports.sh` and
-  `check-version-sync.sh`.
-- C99: Debug, Release and ASan+UBSan, each **97/97**; `check-cppcheck.sh`; the Clang Static
-  Analyzer over 106 sources with no findings; `check-matrix.sh`; `check-portability.sh`;
-  the Windows cross-compile and the mingw `-Werror` link; and `wt-conformance-c99
-  --scenario all` at **55/55**.
-- CI on the released commit: C99 CI (macOS, both Ubuntu legs, Debian 13, Wine, and the
-  **enforced** native Windows leg), Swift CI, and the security scan — all green.
+Checks: `swift test` under `-warnings-as-errors -strict-concurrency=complete
+-require-explicit-sendable`, plus ASan and TSan, the formatter over both manifests, the
+API-compatibility consumer build, `check-manifest-sync.sh`, `check-target-imports.sh` and
+`check-version-sync.sh`.
+
+### C99
+
+Fixed:
+
+- **The public API applies the session-termination gates the machine walker already applied** (WT-229, WT-230). `wt_session_on_capsule` accepted a capsule after the session had closed — raising the peer's data limit with it — and accepted a `WT_DRAIN_SESSION` carrying a value, while the walker refused both on the same bytes (section 6; section 4.7 Figure 5 fixes Length at 0); `wt_session_on_stream_opened`, `_on_stream_data` and `_on_datagram` still delivered consumer callbacks after termination. Both now apply the gate before the lookup and before the callback.
+- **`:scheme` must be `https`** (draft-16 section 3.2, WT-231). It was required to be present but never compared, so any scheme passed. The comparison is ASCII case-insensitive, so `HTTPS` still passes, per RFC 3986 section 3.1.
+- **The 2^60 ceiling on a Maximum Streams value is enforced on both sides** (draft-16 sections 5.6.2 and 5.6.3, WT-232 and WT-233). The writers emitted 2^61 and the readers accepted it, leaving the session ESTABLISHED where the draft says an over-limit value MUST close it with `WT_FLOW_CONTROL_ERROR`; one ceiling helper now covers both capsule families and both directions.
+- **A NULL capsule value and an out-of-range status are refused** (WT-234). `wt_webtransport_close_session_parse` dereferenced NULL on a caller-filled capsule with a NULL value (ASan SEGV; not reachable through the shipped decoder, but a public entry point), and the response-status encoder accepted 5, 99, 600 and 999 — writing `:status: 005`, which its own decoder refuses — where RFC 9114 section 4.3.2 allows 100..599.
+- **`SETTINGS_H3_DATAGRAM` is boolean** (RFC 9297 section 2.1.1, WT-236). The setter stored any value, so a peer that sent a value the RFC forbids got a session with datagrams enabled; the rule the file already applies to `ENABLE_CONNECT_PROTOCOL` now covers it.
+- **An extended CONNECT requires `:scheme` and `:path`** (RFC 8441 section 4, WT-237). The check was "every request needs `:scheme`, every non-CONNECT needs `:path`", which refused a legal plain CONNECT (a latent defect the new test found) and accepted an extended CONNECT with no path; the exemption is now the plain CONNECT's alone.
+- **`wt_quic_packet_keys_update(&keys, &keys)` returns the old header protection key** (RFC 9001 section 6.1, WT-238). `wt_quic_derive_packet_keys` memsets and rewrites its output, so with the two arguments aliased the copy read `hp` back out of the object it had just written, and the caller could no longer unmask a packet from its peer. The function snapshots `hp` and its length before the derivation and zeroes the snapshot on both exits, and the header documents that aliasing is supported instead of leaving the caller to guess.
+- **`wt_sha256_final(ctx, NULL)` returns `WT_ERR_INVALID_ARGUMENT`** (WT-241) rather than dereferencing NULL inside libcrypto (ASan SEGV), like the ten sibling entry points in the same file.
+- **The QPACK string-length and index sites keep a malformed prefixed integer apart from a truncated one** (RFC 9204 section 4.1.1, WT-242). A value wider than 62 bits was collapsed into `WT_ERR_TRUNCATED`, which tells the caller to wait for bytes that can never arrive, and a genuine short read at the index sites became `WT_ERR_PROTOCOL`; each site now propagates the integer decoder's own answer. The test's first vectors were wrong — they used `0x7f` as a continuation byte, which clears the continuation bit, so they encoded the legal value 190 — and are `0x80` now.
+- **A NULL field name is refused before any comparison.** The Clang Static Analyzer on the Linux legs found `memcmp(field->name, name, 0)` reachable with both `NULL` and 0, which is undefined even though it compares nothing; this host's Apple clang does not carry that checker. `name == NULL` now answers "not this field" first, which loses nothing because no field has an empty name: RFC 9110 section 5.1 makes a field name a non-empty token and the header validator refuses one.
+- **`wt_quic_retry_packet_encode` refuses a NULL connection ID or token** (WT-239), as the long-header encoder already did. Beside it, the Retry decoder's comment described a zero-length-token refusal the code does not implement (WT-240): the field is `Retry Token (..)`, so this parser reports it and section 17.2.5.2's MUST stays with the client, which `on_retry_packet` enforces.
+
+Added:
+
+- `wt_http3_message_field`, which reads one named regular field out of a section the caller has already decoded and returns `WT_ERR_STATE` when the section is well formed and simply does not carry it — absent and present-but-empty are different answers, and draft-16 section 3.2 turns on the difference (WT-235). The message layer validated regular fields and then discarded them, so no public-API consumer could apply the section's Origin rule at all. It deliberately does not decide which origins are acceptable: that is application policy, so the library exposes the value and the caller judges it. It is a new function rather than a field on `wt_http3_message_t` because the field version would be an ABI break covering only the one field this draft names; no public struct changed, so `WT_ABI_VERSION` stays 1.
+
+Changed:
+
+- **A received SETTINGS payload is validated** (RFC 9114 section 7.2.4, WT-251). A SETTINGS frame carrying a duplicate identifier was accepted and delivered; it now meets the parser that already refused duplicates and enforced the section's value rules, which had only ever run on hand-built vectors and the fuzzers. The control machine reassembles the payload into a 512-byte fixed buffer that is reset when SETTINGS is accepted, overflow is reported as `H3_EXCESSIVE_LOAD` and is sticky for the rest of the frame, the driver's own `max_frame_bytes` is checked first, and every control-stream frame is routed through `wt_http3_endpoint_on_control_frame`, which makes the section 6.2.1 and 7.2.4 frame-type rules reachable on the real receive path. Two limits the fix records rather than smooths over: a direct `wt_http3_driver_on_stream_bytes` call on a stream the endpoint has not classified still returns OK, because framing cannot know it is the control stream until the `0x00` prefix is classified, and the duplicate rule is the paragraph in section 7.2.4, not 7.2.4.2. A second SETTINGS frame is a different rule (`H3_FRAME_UNEXPECTED`), which the library already applied and a new test now pins.
+- **The CLI tools negotiate flow control and obey draft-16 section 5.1's ignore rule** (WT-252). The library API already applied the rule; the tools applied the capsules unconditionally and advertised nothing, so every grant they acted on was one the draft says to drop. They now send the three settings — `WT_INITIAL_MAX_DATA = 100000` and `WT_INITIAL_MAX_STREAMS_BIDI/UNI = 8`, taken from the same `wt_runtime_session_advertise(&session, 100000, 4096, 8, 8)` call they already made — learn the peer's by reassembling its SETTINGS payload, which the driver now delivers already validated, using the existing parser, and ignore every flow-control capsule unless both sides advertised. The fix is the complete one rather than the gate alone, because gating without advertising would have made the tools correct by making them useless. The new conformance scenario `draft16-a-flow-capsule-with-no-negotiation-is-ignored` takes the suite to 55/55, and no existing expectation changed: the grant and refusal scenarios now negotiate on both sides rather than being inverted.
+- The C99-only part of the 1000-line refactor: `src/http3/driver.c` (1343), `src/tls/session.c` (1175), `tests/unit/test_http3_driver.c` (1282) and `apps/support/session_loop.c` (1221) were split, with four private headers carrying what crosses a unit. `C99/include/webtransport/` is untouched, every CMake source list is explicit, and no `add_test` name changed, so the sorted CTest name list is byte-identical. The split's one build defect was fixed rather than left: a redundant redeclaration of `side_on_frame`, which Apple clang accepts and GCC and Linux clang refuse under `-Wredundant-decls`, failed five CI jobs, and `check-windows-build.sh` — which compiles and links the whole Windows tree under the project's `-Werror` set — is now part of the verification sweep.
+
+Checks: Debug, Release and ASan+UBSan, each **97/97**; `check-cppcheck.sh`; the Clang Static
+Analyzer over 106 sources with no findings; `check-matrix.sh`; `check-portability.sh`;
+the Windows cross-compile and the mingw `-Werror` link; and `wt-conformance-c99
+--scenario all` at **55/55**.
+
+Still open, and recorded here rather than smoothed over:
+
+- **The interop matrix reproduces 5 of the 7 proofs, not 7.** The certificate half of that environment was repaired for this release: the certificate for `pummelchen.91.99.176.243.nip.io` is now issued and renewed automatically and the five peers could be restarted with it for the first time since the old certificate was lost. `erlang-webtransport` then fails `status=trust` while the other four accept the same certificate files, and an RSA certificate tried on the theory that the peer needed one made the *other four* fail, which excludes key type and leaves that peer's own TLS handling. It is `WT-196` on the tracker, and the README's "seven Phase 11 proofs" claim is not reproducible until it is fixed.
+
+### Both
+
+- **A Retry packet's `Unused` field is ignored**, as RFC 9000 section 17.2.5 requires (WT-227). This is one item with two halves, because both libraries were changed for the same reason: each required the field to be zero and so refused RFC 9001 appendix A.4's own Retry, which begins `0xff`, and with it every Retry a conformant server writes with those bits set. The Swift half drops the check, retains the parsed nibble on the type and writes it back in `encode()` — without that, a re-encode produced `0xf0` where the server sent `0xff`, so the pseudo-packet a verifier built was not the packet that arrived and the RFC's tag could not verify — exposes it as `QUICRetryPacket.unusedBits`, and inverts the test that asserted the wrong rule into an acceptance loop over all sixteen values. The C99 half drops the same check, and its new test decodes the repository's own A.4 vector and then all sixteen values.
+- **The version is 1.5.0 in the lockstep.** `VERSION` and both mirrors agree, written with `./Swift/check-version-sync.sh --write` rather than by hand, so `check-version-sync.sh` and the C99 configure check both pass. Minor rather than patch because the release adds public Swift API and breaks no caller.
+- **No source file is 1,000 lines or more** — the largest is 996, down from 4,154 — and the change moved code rather than rewriting it. Two of the splits touched both libraries in one change and are recorded here rather than split: `WebTransportInteroperableNetworkRuntime.swift` (2843) and `src/quic/connection.c` (3448) with `tests/unit/test_quic_connection.c` (4154); and the session core, `WebTransportSession.swift` (2080) with `tests/unit/test_runtime_session_pair.c` (1611). Each split test file stayed one executable and one CTest test, so the 97-test name list is byte-identical, and the Swift suite is unchanged at 376 tests.
+- **The Windows DLL staging race is gone and the CI matrix grew.** `wt_stage_windows_runtime` attached a POST_BUILD copy of `libwebtransport.dll` to every test and app target, so 90 copies of the same file were scheduled in parallel into two directories and the loser failed with `Permission denied`; that flake is why the native Windows leg was advisory. The copies are now one sequential edge per distinct directory, attached to the shared library, re-proved as 90 edges and 90 commands before and 1 edge and 2 commands after. `windows-native` lost `continue-on-error`, and a `linux-debian13` job runs the same Debug configure, build and ctest in a `debian:trixie` container; that leg's first run failed at CMake's compiler check because Debian's `gcc` only recommends `libc6-dev` and the step uses `--no-install-recommends`, so `libc6-dev` is named (WT-224, WT-225).
+- **The third audit pass's record was committed and then its working material removed.** `AUDIT/` held both agents' verbatim reports, the pass's index and a 149-entry ledger; it left the tree once every result was in the code, the tests, the READMEs, the compliance matrix and the wiki, because the ledger still carried 102 historical `AUDIT` entries that read as open findings to anyone who did not know the status field, and a future audit reading it would have been misled. The `audit/2026-09-15` branch and about 2.3 GB of scratch trees and logs went with it. Every removed file was committed, so it stays recoverable with `git log --all --diff-filter=D -- AUDIT`, and the references to it were re-pointed rather than left dangling.
+- **The documentation was reviewed claim by claim against the tree** (`AGENTS.md`, `RELEASE.md`, both READMEs): the layout lists the targets and directories that exist, the gates are the list the three workflows run including the enforced Windows job and the Debian leg, the READMEs' check counts are what a fresh build reports, and the repository's "what remains" sentences name the tracker row instead of keeping a second list that can drift. The hand-maintained `Views (14d)` badge and its committed `.github/traffic.json` snapshot were refreshed by hand once more (`56` to `60`), still with no workflow regenerating them.
+
+Checks: CI on the released commit: C99 CI (macOS, both Ubuntu legs, Debian 13, Wine, and the
+**enforced** native Windows leg), Swift CI, and the security scan — all green.
 
 ## What is not in this release
 
@@ -82,17 +93,6 @@ with the per-binary check counts unchanged in the binaries the splits touched.
   binaries are arm64 only.
 
 ## Checks that ran elsewhere, and what did not run
-
-The C99 interop matrix against independent implementations was re-run for this release and
-**reproduces 5 of the 7 proofs, not 7**. The certificate half of that environment was
-repaired during the same work — the certificate for `pummelchen.91.99.176.243.nip.io` is
-now issued and renewed automatically, and the five peer containers could be restarted with
-it for the first time since the old certificate was lost — but the **erlang-webtransport
-peer fails with `status=trust`** while the other four accept the same certificate files.
-An RSA certificate was tried on the theory that the peer needed one; it made the *other
-four* fail, so key type is excluded, and the cause is that peer's own TLS handling. The
-tracker records it as `WT-196` with the next steps, and the README's "seven Phase 11
-proofs" claim is not reproducible until it is fixed.
 
 Not run here, and reported as not checked rather than assumed: the Wine suite runs on the
 Linux CI host (Wine is not installable on this machine), the FreeBSD suite is a by-hand

@@ -23,7 +23,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.4.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.4.0) |
+| Latest release | [1.5.0](https://github.com/Pummelchen/WebTransport/releases/tag/1.5.0) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 27 or later, Swift 6.4 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -41,12 +41,15 @@ sessions**: the conformance tool stands up both endpoints in one process over IP
 `C99/scripts/run-container-interop.sh` completes a whole session **and the message exchange** against
 an independent implementation (`pywebtransport`/`aioquic`) in a container -- the peer logs
 `stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. Outside a
-container, `C99/scripts/run-vps-third-party-interop.sh` completes all seven Phase 11 proofs against
-**five independent implementations** on a routable host with `--trust system`, so the certificate
-chain is validated against the platform trust store and the name is checked rather than bypassed.
+container, `C99/scripts/run-vps-third-party-interop.sh` reproduces **5 of the 7 Phase 11
+proofs, not 7**, against **five independent implementations** on a routable host with
+`--trust system`, so the certificate chain is validated against the platform trust store and
+the name is checked rather than bypassed: `erlang-webtransport` fails `status=trust` while the
+other four accept the same certificate files, and an RSA certificate tried on the theory that
+the peer needed one made the *other four* fail, which excludes key type (`WT-196`).
 84 test programs and 65,030 checks pass on macOS 26 (64,778 on Debian 13; the Wine runner sums 64,900
 over the 85 Windows executables), plus a 200,000-input parser fuzz run and a Clang Static
-Analyzer pass over all 94 sources. Every suite runs again under AddressSanitizer and
+Analyzer pass over all 106 sources. Every suite runs again under AddressSanitizer and
 UndefinedBehaviorSanitizer, on macOS and Linux in CI: **97 CTest tests pass on macOS 26 and on Linux in
 CI — two `ubuntu-24.04` legs and a `Debian 13 (trixie, gcc)` leg, all six jobs green in run
 35111066674**. The tree also compiles, links and
@@ -59,7 +62,7 @@ the suite in a `debian:trixie` container. FreeBSD 15.1 has no CI leg. Of the pla
 nine completion criteria **8 are met and 1 is partial** (the CI *job* for the FreeBSD leg,
 `WT-223`, and the plan's MSVC and Clang-CL Windows variants, not the code on them; the outstanding
 work is listed on the [C99 tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99)). The
-draft-16 compliance matrix has **43 rows: 39 exercised by a test, two whose status is `--` (server push and
+draft-16 compliance matrix has **44 rows: 40 exercised by a test, two whose status is `--` (server push and
 0-RTT, both deliberately not this tree's), and two `partial`** (Origin policy, which the library exposes but
 leaves to the application, and a session under a connection that changes its connection ID during a handshake).
 Every symbol and test name in the table is resolved by `C99/scripts/check-matrix.sh`, which is what keeps the
@@ -83,7 +86,7 @@ timeout was lost. Several conformance gaps are closed too — `NEW_CONNECTION_ID
 long-header validity, HKDF output length, transport-parameter values, and the
 `retire_prior_to` watermark — and a PKCS#12 bundle whose certificate carries explicit
 curve parameters now throws a catchable error instead of terminating the process. See
-the [changelog](CHANGELOG.md) for the full list.
+the [release notes](https://github.com/Pummelchen/WebTransport/releases) for the full list.
 
 1.3.8 reports a peer that ends a stream before sending the bytes that stream has to
 begin with as exactly that, instead of as `QUICCodecError.truncated(needed: 1,
@@ -105,7 +108,7 @@ was silent: the process stayed healthy, every other transport it served kept wor
 and only new WebTransport sessions timed out. The runtime now counts in-flight
 connections itself and returns each slot when a session ends, and a connection over
 the ceiling is still refused before its handshake is driven. Reported in issue #23;
-see the [changelog](CHANGELOG.md) for the full list.
+see the [release notes](https://github.com/Pummelchen/WebTransport/releases) for the full list.
 
 One change is deliberately not backwards compatible: the built-in development
 certificate is now **refused on any non-loopback bind address**. A server that
@@ -134,7 +137,7 @@ before adopting this in production.
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.4.0"
+    exact: "1.5.0"
 )
 ```
 
@@ -195,14 +198,14 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 
 ## Prebuilt binaries
 
-The [1.4.0 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.4.0)
+The [1.5.0 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.5.0)
 carries **both libraries** of this repository, at the same version, with the source of
 both as the Release's own source archives:
 
-- `WebTransport-swift-1.4.0-macos-arm64.tar.gz` — `WebTransportClient`,
+- `WebTransport-swift-1.5.0-macos-arm64.tar.gz` — `WebTransportClient`,
   `WebTransportServer`, `SHA256SUMS`, `LICENSE`, `THIRD_PARTY_NOTICES.md` and a
   `README-binaries.txt`.
-- `WebTransport-c99-1.4.0-macos-arm64.tar.gz` — `libwebtransport.1.4.0.dylib` and
+- `WebTransport-c99-1.5.0-macos-arm64.tar.gz` — `libwebtransport.1.5.0.dylib` and
   `libwebtransport.a`, the 64 public headers, the `find_package(webtransport_c99)`
   CMake package, the three `wt-*-c99` tools, `LICENSE`, `THIRD_PARTY_NOTICES.md` and a
   `README-binaries.txt` that names the OpenSSL 3 runtime dependency.
@@ -214,8 +217,8 @@ quarantines them on first run; an archive unpacks with its modes, so verify the
 digest, unpack, then clear the quarantine flag:
 
 ```sh
-shasum -a 256 -c WebTransport-swift-1.4.0-macos-arm64.tar.gz.sha256
-tar -xzf WebTransport-swift-1.4.0-macos-arm64.tar.gz
+shasum -a 256 -c WebTransport-swift-1.5.0-macos-arm64.tar.gz.sha256
+tar -xzf WebTransport-swift-1.5.0-macos-arm64.tar.gz
 shasum -a 256 -c SHA256SUMS
 xattr -dr com.apple.quarantine WebTransportClient WebTransportServer
 ./WebTransportServer --scenario all

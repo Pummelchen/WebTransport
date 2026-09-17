@@ -2980,7 +2980,7 @@ Tasks:
 - Update `C99/README.md` with actual C99 status.
 - Add generated API docs.
 - Update root README status table.
-- Update `CHANGELOG.md`.
+- Update `docs/release-notes-vX.Y.Z.md` (the release notes are the changelog).
 - Generate release artifacts for all supported platforms.
 - Publish SHA256 checksums.
 - Add external interop proof table.

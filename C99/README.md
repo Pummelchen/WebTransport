@@ -2,7 +2,8 @@
 
 Protocol reference: IETF `draft-ietf-webtrans-http3-16`, dated 2026-07-06.
 
-Draft-16 score: **35 of 35 requirements**, every one exercised by a test in this tree.
+Draft-16 score: **37 of 38 requirements exercised by a test in this tree**, the remaining one
+`partial` (Origin policy, which the library exposes and leaves to the application).
 The number is measured rather than remembered: `scripts/score-matrix.sh` counts it from
 `docs/COMPLIANCE-MATRIX.md`, and `scripts/check-matrix.sh` fails the build if a symbol the
 matrix names stops existing, so the document cannot drift away from the code.
@@ -10,10 +11,14 @@ matrix names stops existing, so the document cannot drift away from the code.
 ## Current Status
 
 **Phases 0 to 9 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) are complete, and so is
-Phase 11 (external interoperability): the C99 client completes all seven Phase 11 proofs against
-five independent implementations on a routable host, with `--trust system`, so the certificate
-chain is validated against the platform trust store and the name is checked rather than
-bypassed.** The tree is a CMake project that builds a static and a shared library, three CLI
+Phase 11 (external interoperability) apart from one honest qualification: the C99 client
+reproduces **5 of the 7 Phase 11 proofs, not 7**, against five independent implementations on a
+routable host, with `--trust system`, so the certificate chain is validated against the platform
+trust store and the name is checked rather than bypassed.** The certificate environment was
+repaired for the 1.5.0 re-run, but `erlang-webtransport` fails `status=trust` while the other
+four accept the same certificate files, and an RSA certificate tried on the theory that the peer
+needed one made the *other four* fail, which excludes key type and leaves that peer's own TLS
+handling (`WT-196`). The tree is a CMake project that builds a static and a shared library, three CLI
 tools (`wt-client-c99`, `wt-server-c99`, `wt-conformance-c99`) and an install tree a consumer can
 `find_package`, and it carries the whole stack: the core utilities, a QUIC wire core and crypto
 layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake that
@@ -215,7 +220,11 @@ What is here:
   `requiredProofCount`, `allPassed` — by counting the proof files rather than by asserting what the run
   expected. Measured on the VPS (Debian 13, x86_64) on **13 September 2026: 7 of 7 proofs passed across all
   5 implementations**, every proof run with `--trust system`, so the chain is validated against the platform
-  trust store and the certificate's name is checked rather than bypassed.
+  trust store and the certificate's name is checked rather than bypassed. The 1.5.0 re-run on
+  **17 September 2026** does not reproduce that: it gives **5 of 7**, because `erlang-webtransport`
+  fails `status=trust` while the other four accept the same certificate files (an RSA certificate
+  tried on the theory that the peer needed one made the other four fail, so key type is excluded).
+  The tracker records it as `WT-196`.
 
   | Implementation | Version | URL | Third-party OS | Test date | Proof |
   | --- | --- | --- | --- | --- | --- |
@@ -313,18 +322,20 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **35 of 35 draft-16 requirements in
-  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, and 8 of the plan's 9 completion
+  `scripts/score-matrix.sh` rather than from memory: **37 of 38 draft-16 requirements in
+  `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, one is `partial`, and 8 of the plan's 9 completion
   criteria are met, with 1 partial and none unmet.** The matrix coverage is 100% *of the matrix*,
   which is not the same as being done. The one partial criterion is outside the matrix: the FreeBSD
   and Windows CI legs, both of which are now **measured** — the tree compiles, links and RUNS under
   Wine on Windows, and builds and passes its whole suite on a real FreeBSD 15.1 kernel — so what is
   missing there is a CI *job* GitHub does not provide natively rather than portability work. The
-  interop matrix, which used to be the other partial criterion, is now **met**: all seven Phase 11
-  proofs pass against five independent implementations on a routable host with `--trust system`,
-  reproduced by two independent full runs. The conformance-coverage criterion is **met**, and the
+  interop matrix, which used to be the other partial criterion, is **met on the implementation but
+  not reproduced in full**: 5 of the 7 Phase 11 proofs pass against five independent implementations
+  on a routable host with `--trust system`, and the 7 of 7 an earlier run reported is not
+  reproducible until `erlang-webtransport`'s `status=trust` failure (`WT-196`) is fixed. The
+  conformance-coverage criterion is **met**, and the
   evidence is the audit rather than a total: the Swift suite was walked scenario by scenario --
-  fifty-four C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
+  fifty-five C99 scenarios, all five of that suite's interop matrices mirrored case for case, its two
   release checks mirrored into `scripts/check-package.sh` (which installs the tree and asserts the
   product list is the three tools and nothing that tests them), and every remaining entry mapped to
   the unit suite that covers it. The walk found one real gap, `protocol-structured-fields`, which is
@@ -769,13 +780,13 @@ What is here:
   WT-147 fix as an assertion).
 - **Static analysis, run over every source** (WT-176): the Definition of Done's "sanitizers and static checks are
   clean" criterion was carried by warnings-as-errors, and the plan's Phase 13 asks for static analysis by name.
-  `scripts/check-static-analysis.sh` runs the **Clang Static Analyzer** (`clang --analyze`) over all **94 sources**
+  `scripts/check-static-analysis.sh` runs the **Clang Static Analyzer** (`clang --analyze`) over all **106 sources**
   of the library and the tools, replaying each file's own command from `compile_commands.json` so the include
   paths, defines and C standard are the ones the code is really compiled with. It is symbolic execution, not a
   warning flag: it finds the use-after-free, the null dereference on a branch no test takes, the value read
   uninitialised on one path. It found a **dead store in `wt_sha256_init`** (the storage view was taken, then
   wiped by the `memset`, then taken again -- the analyzer called the first assignment what it was), and the tree
-  is clean at 94/94 after the fix. The Linux leg then found what the macOS one could not, because only glibc
+  is clean at 106/106 after the fix. The Linux leg then found what the macOS one could not, because only glibc
   declares `memcpy`/`memcmp` nonnull: **seven `core.NonNullParamChecker` findings** where a NULL with a zero
   length -- legal at these entry points -- was handed to those calls, on paths no test took. Each call is now
   guarded (WT-184), the guards have tests, and both legs are clean. A machine without clang reports `unsupported`
