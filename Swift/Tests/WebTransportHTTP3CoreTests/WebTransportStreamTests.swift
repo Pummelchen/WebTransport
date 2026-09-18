@@ -128,7 +128,7 @@ func webTransportStreamReceivePayloadEnforcesBackpressure() throws {
     )
     _ = try client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
 
-    let session = server.session(forRequestStreamID: 0)!
+    let session = try #require(server.session(forRequestStreamID: 0))
     let prefix = try client.openBidirectionalStream(streamID: 4, sessionID: session.id)
     _ = try server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
 
@@ -160,7 +160,7 @@ func webTransportStreamResetAndStopSendingEmitFrames() throws {
         frame: decision.responseFrame
     )
 
-    let session = pair.server.session(forRequestStreamID: 0)!
+    let session = try #require(pair.server.session(forRequestStreamID: 0))
     let prefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: session.id)
     _ = try pair.server.acceptBidirectionalStream(streamID: 4, firstBytes: prefix)
 
@@ -210,7 +210,7 @@ func webTransportSessionTeardownSignalsOnlyTheHalvesThisEndpointOwns() throws {
     )
     _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
 
-    let session = pair.server.session(forRequestStreamID: 0)!
+    let session = try #require(pair.server.session(forRequestStreamID: 0))
 
     // Bidirectional: the server owns both halves, so both frames belong.
     let bidirectionalPrefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: session.id)
@@ -271,7 +271,7 @@ func webTransportPublicStreamSignalsApplyTheHalfOwnershipRule() throws {
     )
     _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
 
-    let session = pair.server.session(forRequestStreamID: 0)!
+    let session = try #require(pair.server.session(forRequestStreamID: 0))
 
     // Bidirectional: the server owns both halves.
     let bidirectionalPrefix = try pair.client.openBidirectionalStream(streamID: 4, sessionID: session.id)

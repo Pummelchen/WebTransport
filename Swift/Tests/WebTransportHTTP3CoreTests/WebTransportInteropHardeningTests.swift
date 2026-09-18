@@ -69,7 +69,7 @@ func webTransportStreamStressLongRunningOpenReceiveLoop() throws {
         policy: try WebTransportServerSessionPolicy()
     )
     _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
-    let session = pair.client.session(forRequestStreamID: 0)!
+    let session = try #require(pair.client.session(forRequestStreamID: 0))
 
     for index in 0..<512 {
         let streamID = QUICStreamID.make(index: UInt64(index + 1), direction: .bidirectional, initiator: .client)
@@ -96,7 +96,7 @@ func webTransportDatagramStressLongRunningRoundTripLoop() throws {
         policy: try WebTransportServerSessionPolicy()
     )
     _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
-    let session = pair.client.session(forRequestStreamID: 0)!
+    let session = try #require(pair.client.session(forRequestStreamID: 0))
 
     for index in 0..<1_024 {
         let payload = Data(repeating: UInt8(index % 251), count: (index % 24) + 1)

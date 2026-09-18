@@ -156,7 +156,7 @@ enum InteroperableQUICHelpers {
         _ stream: QUIC.Stream<QUICStream>,
         into inboundStreams: InteroperableQUICStreamQueue<QUIC.Stream<QUICStream>>,
         role: String
-    ) async -> InteroperableQUICInboundStreamDisposition {
+    ) async -> InboundStreamDisposition {
         let direction = streamDirectionKey(stream.directionality)
         let disposition = await inboundStreams.enqueue(
             stream,
@@ -589,12 +589,14 @@ enum InteroperableQUICHelpers {
     /// reported instead of being mistaken for one, and bytes that do not begin
     /// with a decodable stream type are reported because no HTTP/3 stream grammar
     /// admits them.
-    // internal, not fileprivate: the session file classifies an unprefixed stream with this.
+    ///
+    /// - Note: internal, not fileprivate, because the session file classifies an unprefixed
+    ///   stream with this.
     internal static func classifyPeerUnprefixedUnidirectionalStream(
         _ stream: QUIC.Stream<QUICStream>,
         firstBytes: Data,
         in inboundStreams: InteroperableQUICInboundStreamCollector
-    ) async throws -> InteroperableQUICPeerStreamClassification {
+    ) async throws -> PeerStreamClassification {
         guard let prefix = try? HTTP3StreamTypeParser.parsePrefix(firstBytes) else {
             return .malformed
         }

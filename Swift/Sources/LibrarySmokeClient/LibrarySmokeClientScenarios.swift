@@ -220,7 +220,7 @@ extension LibrarySmokeRunner {
     }
 
     mutating func runDatagramIntegrityScenario() throws {
-        let _ = try establishAcceptedSession(
+        _ = try establishAcceptedSession(
             authority: "example.com",
             path: "/wt",
             requestStreamID: nextRequestStreamID()

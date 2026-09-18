@@ -157,7 +157,10 @@ public enum Phase11FramePacket {
 
 public enum Phase11Payload {
     public static func utf8(_ data: Data) -> String {
-        String(decoding: data, as: UTF8.self)
+        // Failable rather than lossy: a payload that is not valid UTF-8 must not be
+        // reported as text with replacement characters, which would make a malformed
+        // message look like a differently-shaped valid one.
+        String(bytes: data, encoding: .utf8) ?? ""
     }
 
     public static func utf8(_ text: String) -> Data {

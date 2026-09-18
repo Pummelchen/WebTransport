@@ -120,7 +120,7 @@ public enum WebTransportLoopbackTestLock {
         guard let data = FileManager.default.contents(atPath: filePath), !data.isEmpty else {
             return "unknown owner"
         }
-        return String(decoding: data, as: UTF8.self)
+        return String(bytes: data, encoding: .utf8) ?? "unknown owner"
     }
 }
 

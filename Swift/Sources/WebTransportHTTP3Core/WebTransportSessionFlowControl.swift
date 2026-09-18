@@ -88,7 +88,7 @@ extension WebTransportSessionManager {
         var received: [WebTransportReceivedFlowControlCapsule] = []
         var terminationActions: WebTransportSessionTerminationActions?
         while !remaining.isEmpty {
-            if requestStreamIDsClosedByReceivedCloseCapsule.contains(streamID) {
+            if closedRequestStreamIDs.contains(streamID) {
                 return WebTransportConnectStreamCapsuleResult(
                     receivedCapsules: received,
                     connectResetFrame: connectMessageErrorReset(streamID: streamID),

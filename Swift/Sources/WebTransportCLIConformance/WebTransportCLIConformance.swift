@@ -346,7 +346,8 @@ internal func require(_ condition: Bool, _ message: String) throws {
 /// and in exit status. The tokens do not match C99's, and neither do the JSON keys — Swift
 /// prints `PASS` / `FAIL` / `SKIP` with a `status` field and a `skipped` count — so a
 /// consumer must not parse one report's words as the other's.
-// internal because the scenario catalogue and the report writers are in separate files
+///
+/// - Note: internal because the scenario catalogue and the report writers are in separate files.
 internal func statusToken(_ status: WebTransportCLIConformanceStatus) -> String {
     switch status {
     case .passed: return "PASS"

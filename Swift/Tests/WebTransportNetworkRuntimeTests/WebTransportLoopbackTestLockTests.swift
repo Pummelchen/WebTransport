@@ -19,6 +19,10 @@ struct WebTransportLoopbackTestLockTests {
         let path = makeUniqueLockPath()
         defer { try? FileManager.default.removeItem(atPath: path) }
 
+        // `-> Void` is load-bearing: without it the closure infers `#expect`'s result type,
+        // `withLockAsync` becomes generic over a non-Void result, and the call is an unused
+        // result under strict memory safety. An autofix removed it once and the test target
+        // stopped compiling, so it is spelled out.
         try await WebTransportLoopbackTestLock.withLockAsync(label: "holder", filePath: path) { () async throws -> Void in
             await #expect(throws: WebTransportLoopbackTestLockTimeout.self) {
                 try await WebTransportLoopbackTestLock.withLockAsync(

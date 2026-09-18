@@ -296,7 +296,7 @@ actor InteroperableQUICInboundRegistration {
 /// refusal by accident. A stream the collector did not retain is one the peer
 /// still believes is open, so the caller has to refuse it at the transport; see
 /// ``InteroperableQUICStreamQueue/enqueue(_:direction:streamID:)``.
-enum InteroperableQUICInboundStreamDisposition: Equatable, Sendable {
+enum InboundStreamDisposition: Equatable, Sendable {
     /// The stream was handed to a parked caller, queued for the next one, or
     /// recognised as a repeat of a stream already delivered. In every one of
     /// those cases the caller must leave the stream alone — a duplicate is the
@@ -317,7 +317,7 @@ enum InteroperableQUICInboundStreamDisposition: Equatable, Sendable {
 /// retained stream is parked and the wait continues, an ignored one is an unknown
 /// stream type discarded under RFC 9114 section 6.2, a defined-but-unserved type
 /// is reported, and malformed bytes are the one case reported for their grammar.
-enum InteroperableQUICPeerStreamClassification: Equatable, Sendable {
+enum PeerStreamClassification: Equatable, Sendable {
     /// A control or QPACK-encoder/decoder stream, retained for the connection's
     /// life and not delivered to the application.
     case retained
@@ -338,7 +338,7 @@ enum InteroperableQUICPeerStreamClassification: Equatable, Sendable {
 /// 4.2 exactly one QPACK encoder and one decoder stream. Spelled out as a set so
 /// the bound on retention is structural: a type outside it is refused on sight,
 /// whatever a future caller passes.
-enum InteroperableQUICCriticalStreamEntitlement {
+enum CriticalStreamEntitlement {
     static let types: Set<UInt64> = [
         HTTP3StreamType.control,
         HTTP3StreamType.qpackEncoder,
@@ -445,7 +445,7 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     /// was entitled to one of that type.
     ///
     /// Returns `false` for any type outside
-    /// ``InteroperableQUICCriticalStreamEntitlement`` and for a second stream of
+    /// ``CriticalStreamEntitlement`` and for a second stream of
     /// a type already retained; the caller reports the latter as
     /// `H3_STREAM_CREATION_ERROR`. Refusing rather than appending is also what
     /// bounds the memory this collector holds: the entitlement is one control,
@@ -453,7 +453,7 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     /// three entries.
     @discardableResult
     func retainCritical(_ stream: Element, type: UInt64) -> Bool {
-        guard InteroperableQUICCriticalStreamEntitlement.types.contains(type),
+        guard CriticalStreamEntitlement.types.contains(type),
             retainedCriticalTypes.insert(type).inserted
         else {
             return false
@@ -490,7 +490,7 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
     /// ends.
     ///
     /// A stream that does not fit is **not** retained and is reported as
-    /// ``InteroperableQUICInboundStreamDisposition/refusedQueueFull(limit:)``.
+    /// ``InboundStreamDisposition/refusedQueueFull(limit:)``.
     /// The caller owns refusing it: dropping the handle alone tells the peer
     /// nothing, and the peer keeps writing into a stream this endpoint has
     /// forgotten. ``InteroperableQUICHelpers/enqueueInboundStream(_:into:role:)``
@@ -500,7 +500,7 @@ actor InteroperableQUICStreamQueue<Element: Sendable> {
         _ stream: Element,
         direction: Int,
         streamID: UInt64
-    ) -> InteroperableQUICInboundStreamDisposition {
+    ) -> InboundStreamDisposition {
         guard failure == nil else {
             return .refusedInboundDeliveryFailed
         }

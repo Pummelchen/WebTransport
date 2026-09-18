@@ -1,0 +1,95 @@
+# SwiftLint configuration.
+#
+# The audit standard requires a committed SwiftLint config run with `--strict`, so that a
+# linter warning also fails the build. This file is that config, and every deviation from
+# SwiftLint's defaults is justified here and has a task in AUDIT/ledger.json. Deviations are
+# not a way to make the gate pass: a rule that is turned off has an explicit reason and an
+# open task that owns the finding.
+
+# The formatter and the linter must agree about line length or one rewrites what the other
+# requires. `.swift-format` (committed, run by CI with `--strict`) sets `lineLength: 160`,
+# so that is the authority; SwiftLint's 120/200 defaults contradict it and are aligned here.
+line_length:
+  warning: 160
+  error: 160
+  ignores_urls: true
+
+# The repository's own documented ceiling is 1000 lines per file (the refactor series brought
+# every file under it and CI has kept them there). SwiftLint's 400-line warning is a second,
+# undocumented standard; the warning is aligned to the documented one rather than the other
+# way round.
+file_length:
+  warning: 1000
+  error: 1200
+
+# Excluded, not renamed, and each for a reason that renaming would make worse. The rest of
+# the naming findings were fixed for real: the internal types and variables that were over
+# the length limit were shortened (`InteroperableQUIC*` -> `*`, the long producer and
+# request-stream names), and the short locals were given meaningful names (`fd` ->
+# `descriptor`, `i` -> `index`, `z` -> `hash`).
+identifier_name:
+  excluded:
+    # SwiftLint's own default exclusion list is REPLACED by this key, not extended, so the
+    # default entry has to be repeated or it silently becomes a finding. Caught by the count
+    # going UP after this list was added (13 -> 43, all of them `id`).
+    - id
+    # RFC 9001 sections 5.3 and 5.4 call this value the "IV"; it is the AEAD nonce. The
+    # abbreviation is the document's, and `iv` is what a reader checking the code against
+    # the RFC expects to see. AUD-0015.
+    - iv
+    # The TLS registry entry is `TLS_AES_128_GCM_SHA256` (RFC 8446 section B.4). The Swift
+    # name is that entry, and it is PUBLIC API: renaming it breaks every consumer, which the
+    # API-compatibility gate would (correctly) refuse. AUD-0015.
+    - aes128GCM_SHA256
+    # Public API again: the constant is named for the peer it exists for, and shortening it
+    # would make a public name less clear to save three characters. AUD-0015.
+    - webTransportPyWebTransportStreamInteropDefaults
+
+# `.swift-format` deliberately disables its own `NeverForceUnwrap` (`"NeverForceUnwrap":
+# false` in the committed config), so force-unwrapping would otherwise be unowned. SwiftLint's
+# `force_unwrapping` is opt-in, and the audit standard requires a force-unwrap to fail the
+# linter, so it is enabled here.
+opt_in_rules:
+  - force_unwrapping
+
+# Justified rule deviations. Each names the ledger task that owns the finding.
+disabled_rules:
+  # RFC 8446 section 7.1 defines "master secret" and "exporter_master_secret"; the QUIC
+  # exporter this library derives is named from that spec. Renaming the Swift symbols away
+  # from the RFC would make a reference implementation harder to read against the document
+  # it implements, which is the opposite of what inclusive naming is for. AUD-0012.
+  - inclusive_language
+
+  # Trailing commas: the committed `.swift-format` enforces them (its `TrailingComma` rule)
+  # and CI runs `swift format lint --strict` over both manifests. SwiftLint's default
+  # `trailing_comma` rule REMOVES them, so the two tools rewrote each other's output and
+  # `swiftlint --fix` broke a gate that was green. One tool has to own comma placement and
+  # the formatter is the one already committed and enforced. Proven, not assumed: after
+  # `swiftlint --fix`, `swift format lint --strict` failed with `[TrailingComma] add trailing
+  # comma to the last element`. AUD-0013.
+  - trailing_comma
+
+  # Opening braces: the committed `.swift-format` puts the brace of a multi-line condition on
+  # its own line (`lineBreakBeforeControlFlowKeywords: false` plus its wrap style), and
+  # SwiftLint's default requires it on the declaration's line. Proven the same way as the
+  # comma rule: after `swift format --in-place` over the tree, `swiftlint lint` still reports
+  # 13 `opening_brace` violations, so the two cannot both be satisfied. The formatter is the
+  # committed, CI-enforced owner of brace placement. AUD-0014.
+  - opening_brace
+
+  # `redundant_void_return`'s fix BREAKS THE BUILD here, which is the definition of a check
+  # that is wrong for its input: `WebTransportLoopbackTestLockTests` passes `{ () async throws
+  # -> Void in ... }` to a generic `withLockAsync`, and removing the `-> Void` lets the
+  # closure infer `#expect`'s result type, so the call becomes an unused non-Void result and
+  # the test target fails to compile under `#no_usage`. Observed, not theorised: `swiftlint
+  # --fix` removed it and `swift build --build-tests` failed with "result of call to
+  # 'withLockAsync(label:maximumWait:filePath:_:)' is unused". Restoring it compiles, and
+  # `swift format lint --strict` accepts it. AUD-0016.
+  - redundant_void_return
+
+# The rule set is SwiftLint's defaults plus the opt-in rules above. Function body length,
+# type body length and cyclomatic complexity stay at their defaults: the findings they report
+# are real maintainability work, enumerated as tasks in the ledger and refactored rather than
+# configured away.
+
+reporter: "xcode"

@@ -9,11 +9,11 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 1 |
-| DONE | 5 |
+| DONE | 10 |
 | OPEN | 5 |
 
 Non-terminal (open): 5
-Terminal: 6
+Terminal: 11
 
 ## Tasks
 
@@ -30,6 +30,11 @@ Terminal: 6
 | AUD-0009 | S2 | B | P2 | OPEN | No C99 coverage measurement exists, so one baseline metric is missing | C99/CMakeLists.txt |
 | AUD-0010 | S3 | B | P2 | OPEN | No committed .clang-format and the tree is not clang-format clean | C99/ |
 | AUD-0011 | S3 | C | both | DONE | Repository convention says audit ledgers are not kept in the tree; this audit mandates committing one | AUDIT/ledger.json |
+| AUD-0012 | S2 | A | P1 | DONE | SwiftLint inclusive_language conflicts with RFC 8446 terminology | .swiftlint.yml |
+| AUD-0013 | S1 | A | P1 | DONE | SwiftLint trailing_comma and swift-format rewrote each other, breaking a green gate | .swiftlint.yml |
+| AUD-0014 | S1 | A | P1 | DONE | SwiftLint opening_brace conflicts with the committed formatter's multi-line condition style | .swiftlint.yml |
+| AUD-0015 | S3 | A | P1 | DONE | identifier_name: rename what is internal, exclude only RFC-registry and public-API names | .swiftlint.yml |
+| AUD-0016 | S1 | A | P1 | DONE | SwiftLint redundant_void_return's fix does not compile | .swiftlint.yml |
 
 ## Detail
 
@@ -90,8 +95,8 @@ Terminal: 6
 - category: standards | discovered by: phase-a
 - where: Package.swift
 - evidence before: git ls-files shows no .swiftlint.yml; no workflow step invokes swiftlint; `swiftlint lint Swift/Sources` reports 317 findings (292 warning, 25 error) that nothing consumes
-- fix: 
-- evidence after: 
+- fix: In progress. Added the committed .swiftlint.yml the standard requires: SwiftLint's default rules plus opt_in force_unwrapping, line_length aligned to the committed .swift-format 160 and file_length to the repository's documented 1000-line ceiling, with five justified rule deviations each carrying its own task (AUD-0012..AUD-0016). Fixed every non-structural finding: 10 force_unwraps and 1 force-try (production and tests), 3 lossy String(decoding:), 4 orphaned doc comments, 18 naming findings, and the mechanical correctables.
+- evidence after: Unconfigured `swiftlint lint`: 556 findings -> 85 with the committed config. Remaining: 39 function_body_length, 18 cyclomatic_complexity, 11 type_body_length (68 structural, S2 refactors), 10 line_length (lines over 160 that swift-format cannot split), 3 function_parameter_count, 2 large_tuple, 2 nesting. `swift test` 400 passed; `swift format lint --strict` clean. The CI gate is NOT wired yet, because wiring it before the structural findings are refactored would add a red gate, and configuring the thresholds up would be the weakening the standard forbids.
 - commit: 
 
 ### AUD-0007 — Ruff has no config, so B, E722, S101 and PT are not enabled
@@ -142,5 +147,55 @@ Terminal: 6
 - evidence before: The wiki's Project Tracker states the audits' working material (ledgers, per-area findings, reports) is deliberately not kept in the tree, because a later audit should read the code rather than a finished pass
 - fix: Followed the audit instruction, which is the more specific and more recent authority, and recorded the conflict here and in the final report instead of silently diverging. AUDIT/ is additive and on the audit branch only
 - evidence after: This entry
+- commit: 
+
+### AUD-0012 — SwiftLint inclusive_language conflicts with RFC 8446 terminology
+
+- severity: S2 | tier: A | project: P1 | status: DONE | host: Mac14,3
+- category: standards | discovered by: phase-b
+- where: .swiftlint.yml
+- evidence before: 8 findings, all `masterSecret` / `exporterMasterSecret` in WebTransportTLSCore
+- fix: Rule disabled in the committed config with the reason: RFC 8446 section 7.1 defines the master secret, and renaming a reference implementation's symbols away from the document it implements makes it harder to read against the spec.
+- evidence after: `swiftlint lint` reports no inclusive_language findings; the reason is in .swiftlint.yml and here
+- commit: 
+
+### AUD-0013 — SwiftLint trailing_comma and swift-format rewrote each other, breaking a green gate
+
+- severity: S1 | tier: A | project: P1 | status: DONE | host: Mac14,3
+- category: standards | discovered by: phase-b
+- where: .swiftlint.yml
+- evidence before: 43 trailing_comma findings; `swiftlint --fix` removed the trailing commas the committed .swift-format requires
+- fix: Rule disabled: the formatter owns comma placement. Proven rather than asserted -- after `swiftlint --fix`, `swift format lint --strict` failed with `[TrailingComma] add trailing comma to the last element`, and `swift format --in-place` restored it.
+- evidence after: `swift format lint --strict` exits 0; `swiftlint lint` reports no trailing_comma findings; 400 Swift tests pass
+- commit: 
+
+### AUD-0014 — SwiftLint opening_brace conflicts with the committed formatter's multi-line condition style
+
+- severity: S1 | tier: A | project: P1 | status: DONE | host: Mac14,3
+- category: standards | discovered by: phase-b
+- where: .swiftlint.yml
+- evidence before: 13 opening_brace findings that survive `swift format --in-place`
+- fix: Rule disabled: after the formatter ran in place over the tree, `swiftlint lint` still reported 13 opening_brace violations, so the two cannot both be satisfied; the formatter is the CI-enforced owner.
+- evidence after: `swift format lint --strict` exits 0 and no opening_brace findings remain
+- commit: 
+
+### AUD-0015 — identifier_name: rename what is internal, exclude only RFC-registry and public-API names
+
+- severity: S3 | tier: A | project: P1 | status: DONE | host: Mac14,3
+- category: standards | discovered by: phase-b
+- where: .swiftlint.yml
+- evidence before: 13 findings: `iv` x5, `aes128GCM_SHA256`, `fd`, `ok`, `i`/`z` x3, and two over-length names
+- fix: Renamed the internal identifiers for real (InteroperableQUIC* -> *, the long producer/request-stream names, fd -> descriptor, i -> index, z -> hash, ok -> accepted, the long test suite type). Excluded only `iv` (RFC 9001's own term), `aes128GCM_SHA256` and `webTransportPyWebTransportStreamInteropDefaults` (public API; renaming would break consumers and the api-compat gate), and restored SwiftLint's DEFAULT exclusion (`id`), which setting `excluded` had silently replaced -- caught because the finding count went UP, 13 -> 43.
+- evidence after: `swiftlint lint` reports zero identifier_name findings; 400 Swift tests pass; a rename that also hit the POSIX `pollfd(fd:)` label was caught by the compiler and corrected
+- commit: 
+
+### AUD-0016 — SwiftLint redundant_void_return's fix does not compile
+
+- severity: S1 | tier: A | project: P1 | status: DONE | host: Mac14,3
+- category: standards | discovered by: phase-b
+- where: .swiftlint.yml
+- evidence before: `swiftlint --fix` removed an explicit `-> Void` from a closure in WebTransportLoopbackTestLockTests; `swift build --build-tests` then failed with `result of call to 'withLockAsync(label:maximumWait:filePath:_:)' is unused`
+- fix: Rule disabled with the reproduction: the closure's signature participates in generic inference, so dropping `-> Void` makes `withLockAsync` return a non-Void whose result is unused under strict memory safety. The `-> Void` is restored and commented as load-bearing.
+- evidence after: `swift build --build-tests` succeeds; `swift test` 400 passed; `swift format lint --strict` accepts the restored signature
 - commit: 
 

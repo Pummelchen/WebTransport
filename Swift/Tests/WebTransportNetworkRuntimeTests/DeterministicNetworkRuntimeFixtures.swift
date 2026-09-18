@@ -298,30 +298,10 @@ struct WebTransportQUICPacketHandshakeContext: Equatable, Sendable {
     var serverHandshakeMessages: [TLSHandshakeMessage]
     var clientApplicationKeys: QUICPacketProtectionKeys
     var serverApplicationKeys: QUICPacketProtectionKeys
-
-    init(
-        request: WebTransportQUICPacketProbeRequest,
-        message: String,
-        serverHandshakeMessages: [TLSHandshakeMessage],
-        clientApplicationKeys: QUICPacketProtectionKeys,
-        serverApplicationKeys: QUICPacketProtectionKeys
-    ) {
-        self.request = request
-        self.message = message
-        self.serverHandshakeMessages = serverHandshakeMessages
-        self.clientApplicationKeys = clientApplicationKeys
-        self.serverApplicationKeys = serverApplicationKeys
-    }
 }
 
 struct WebTransportQUICPacketApplicationRequest: Equatable, Sendable {
     var message: String
     var packetNumber: UInt64
     var requestHeaders: [HTTPFieldLine]
-
-    init(message: String, packetNumber: UInt64, requestHeaders: [HTTPFieldLine]) {
-        self.message = message
-        self.packetNumber = packetNumber
-        self.requestHeaders = requestHeaders
-    }
 }

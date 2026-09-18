@@ -464,9 +464,9 @@ func webTransportStatusRejectsNonThreeDigitForms() throws {
     }
 
     // Exactly three digits still parse, and the range rule is unchanged.
-    let ok = [try HTTPFieldLine(name: ":status", value: "200")]
-    #expect(try WebTransportSessionHeaders.status(from: ok) == 200)
-    try WebTransportHTTP3Headers.validateSuccessfulResponse(ok)
+    let accepted = [try HTTPFieldLine(name: ":status", value: "200")]
+    #expect(try WebTransportSessionHeaders.status(from: accepted) == 200)
+    try WebTransportHTTP3Headers.validateSuccessfulResponse(accepted)
     #expect(
         throws: QUICCodecError.malformed("WebTransport response requires a valid :status")
     ) {

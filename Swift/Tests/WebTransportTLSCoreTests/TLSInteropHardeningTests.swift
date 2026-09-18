@@ -25,8 +25,11 @@ func tlsTrustPolicyAcceptsPinnedLeafAndRejectsWrongFingerprint() throws {
 }
 
 @Test
-func tlsIdentityRejectsMalformedKeyMaterialWithoutPrompt() {
-    let identity = try! TLSPromptFreeServerIdentity(
+func tlsIdentityRejectsMalformedKeyMaterialWithoutPrompt() throws {
+    // `try`, not `try!`: the point of the test is that this material is REJECTED, and a
+    // force-try would turn a rejection at construction into a crashed test process instead
+    // of a reported failure.
+    let identity = try TLSPromptFreeServerIdentity(
         certificateChainDER: [Data([0x30, 0x01])],
         privateKeyDER: Data([0x00, 0x01, 0x02]),
         privateKeyType: kSecAttrKeyTypeRSA,

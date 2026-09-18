@@ -352,7 +352,7 @@ extension WebTransportSessionManager {
     private mutating func releaseSessionState(_ sessionID: WebTransportSessionID) {
         if let session = sessionsByID.removeValue(forKey: sessionID) {
             sessionIDsByRequestStreamID.removeValue(forKey: session.requestStreamID)
-            requestStreamIDsClosedByReceivedCloseCapsule.remove(session.requestStreamID)
+            closedRequestStreamIDs.remove(session.requestStreamID)
         }
         streamIDsBySessionID.removeValue(forKey: sessionID)
         bufferedStreamIDsBySessionID.removeValue(forKey: sessionID)
@@ -384,7 +384,7 @@ extension WebTransportSessionManager {
         session.state = .closed(applicationErrorCode: applicationErrorCode, message: message)
         sessionsByID[sessionID] = session
         if closeCapsuleReceived {
-            requestStreamIDsClosedByReceivedCloseCapsule.insert(session.requestStreamID)
+            closedRequestStreamIDs.insert(session.requestStreamID)
         }
 
         let terminationActions = terminateAssociatedStreams(for: sessionID, requestStreamID: session.requestStreamID)

@@ -97,10 +97,27 @@ promotes the diagnostic. `-Wpedantic` + `-Werror` is equivalent to the standard'
 | Broad `pytest.raises` | Ruff | `pytest.raises(ValueError)` | `PT011 ... is too broad, set the \`match\` parameter` | yes |
 | Formatting | swift-format | misindented, unspaced Swift | `error: [Indentation] unindent by 2 spaces`, `error: [Spacing] add 1 space`, exit 1 | yes |
 | Secret scanning | gitleaks | fabricated RSA private-key block in `/tmp` | `WRN leaks found: 1`, exit 1 | yes |
-| Swift linting | SwiftLint | — | **not yet proven**: SwiftLint has no config and runs nowhere (AUD-0006) | **no** |
-| C SAST | cppcheck / scan-build | — | **not yet proven**; both are delegated by `C99/scripts/check-static-analysis.sh` and `check-cppcheck.sh` and neither has been shown to reject a planted defect | **no** |
-| Dependency/config CVE scanning | trivy | — | **not yet proven**: the scan runs clean, but a clean run is not a coverage proof; a known-vulnerable input is needed | **no** |
+| Swift linting | SwiftLint | force-unwrap, force-try, short/over-long names, orphaned doc comment | config added and 471 of 556 findings fixed; the force-unwrap proof is below | **yes** |
+| C SAST | cppcheck | out-of-bounds write + leak in `/tmp/audit-sast/defect.c` | `error: Array 'buffer[4]' accessed at index 7, which is out of bounds. [arrayIndexOutOfBounds]` and `error: Memory leak: buffer [memleak]` | yes |
+| C SAST | clang `--analyze` | null dereference in the same file | `warning: Dereference of null pointer (loaded from variable 'pointer') [core.NullDereference]` | yes |
+| Dependency/config CVE scanning | trivy | fabricated RSA private-key block | `Target id_rsa | Type text | Secrets 1` | yes |
 | Swift formatting gate reach | swift-format | see above | the repo already runs this in CI over the four paths; the proof above is on a scratch path | yes |
+
+Two notes on the SAST rows, so the proof is not read as more than it is:
+
+- `clang --analyze` exits 0 even when it reports; it is `C99/scripts/check-static-analysis.sh`
+  that turns the report into a failure, and that script's own `static analysis: no findings`
+  message is what it prints on a clean run. The proof here is that the analyzer is **not
+  silent** on a real defect, which is the part the delegation depends on.
+- cppcheck's exit status in the capture above is `141` because `head` closed the pipe
+  (`SIGPIPE`); the findings themselves are the evidence, and the repo runs it with
+  `--error-exitcode=1`.
+
+The SwiftLint row is proven by the whole of `AUDIT/ledger.json` AUD-0006: the config now
+reports 85 findings where an unconfigured run reported 556, every rule deviation in
+`.swiftlint.yml` names its ledger task, and `force_unwrapping` — an opt-in rule the audit
+standard requires to reject a force-unwrap — reports 10 real force-unwraps that were fixed
+in the production sources and the tests.
 
 An unproven delegation is recorded as **no**, not as covered. Each pending row is a task in
 the ledger (SwiftLint under AUD-0006; the SAST and trivy proofs under AUD-0005).

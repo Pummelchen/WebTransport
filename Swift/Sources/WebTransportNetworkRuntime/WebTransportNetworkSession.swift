@@ -168,7 +168,7 @@ public final class WebTransportNetworkUnidirectionalStream: Sendable {
 ///
 /// Internal on purpose: opening a unidirectional stream is not part of the
 /// shipped surface, and the finding this supports is about accepting one.
-final class WebTransportNetworkUnidirectionalStreamProducer: Sendable {
+final class UnidirectionalStreamProducer: Sendable {
     let streamID: UInt64
 
     private let stream: QUIC.Stream<QUICStream>
@@ -548,7 +548,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         firstPayload: Data = Data(),
         endOfStream: Bool = false,
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
-    ) async throws -> WebTransportNetworkUnidirectionalStreamProducer {
+    ) async throws -> UnidirectionalStreamProducer {
         let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
         let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
             try await self.connection.openStream(directionality: .unidirectional)
@@ -567,7 +567,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
                 sessionID: targetSessionID
             )
         }
-        let producer = WebTransportNetworkUnidirectionalStreamProducer(
+        let producer = UnidirectionalStreamProducer(
             stream: stream,
             timeoutMilliseconds: timeout,
             prefix: prefix
@@ -591,12 +591,12 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         firstPayload: Data,
         endOfStream: Bool = false,
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
-    ) async throws -> WebTransportNetworkUnidirectionalStreamProducer {
+    ) async throws -> UnidirectionalStreamProducer {
         let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
         let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
             try await self.connection.openStream(directionality: .unidirectional)
         }
-        let producer = WebTransportNetworkUnidirectionalStreamProducer(
+        let producer = UnidirectionalStreamProducer(
             stream: stream,
             timeoutMilliseconds: timeout,
             prefix: Data()
@@ -687,19 +687,26 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         )
         let contextBytes = context.isEmpty ? [UInt8(0)] : [UInt8](context)
         let labelBytes = Array(WebTransportExporter.tlsLabel.utf8CString)
-        // SAFETY: Both arrays remain alive for the synchronous Security call.
-        // The UTF-8 label includes a terminator excluded from its byte count;
-        // the context pointer is nonnil even when its declared length is zero.
+        // The base addresses are guarded rather than force-unwrapped. The label always
+        // carries its terminator and the context is substituted with one byte when empty, so
+        // nil is unreachable today -- but "unreachable" is exactly what `!` asserts, and it
+        // is what a future edit can falsify silently. `flatMap` keeps both pointers optional
+        // through to the call, and a nil flows into the existing `guard let exported` below,
+        // which already reports `exporterUnavailable`.
         let exported = labelBytes.withUnsafeBufferPointer { labelBuffer in
-            contextBytes.withUnsafeBufferPointer { contextBuffer in
-                unsafe sec_protocol_metadata_create_secret_with_context(
-                    connection.securityProtocolMetadata,
-                    labelBytes.count - 1,
-                    labelBuffer.baseAddress!,
-                    context.count,
-                    contextBuffer.baseAddress!,
-                    outputByteCount
-                )
+            unsafe labelBuffer.baseAddress.flatMap { labelPointer in
+                contextBytes.withUnsafeBufferPointer { contextBuffer in
+                    unsafe contextBuffer.baseAddress.flatMap { contextPointer in
+                        unsafe sec_protocol_metadata_create_secret_with_context(
+                            connection.securityProtocolMetadata,
+                            labelBytes.count - 1,
+                            labelPointer,
+                            context.count,
+                            contextPointer,
+                            outputByteCount
+                        )
+                    }
+                }
             }
         }
         guard let exported else {
