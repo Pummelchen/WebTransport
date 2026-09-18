@@ -23,7 +23,9 @@ set(WT_UNIT_TESTS
   test_quic_frame
   test_quic_frame_encoding
   test_quic_packet
+  test_quic_packet_connection_ids
   test_quic_transport_parameters
+  test_quic_transport_parameters_limits
   test_quic_connection_id
   test_quic_retry_token
   test_quic_malformed
@@ -39,6 +41,7 @@ set(WT_UNIT_TESTS
   test_quic_handshake
   test_quic_peer_limits
   test_crypto
+  test_crypto_aead
   test_quic_protection
   test_quic_protection_retry
   test_tls13_keyschedule
@@ -77,6 +80,7 @@ set(WT_UNIT_TESTS
   test_http3_driver_streams
   test_http3_driver_capsules
   test_http3_endpoint
+  test_http3_endpoint_requests
   test_http3_limits
   test_http3_malformed
   test_api_events
