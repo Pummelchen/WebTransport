@@ -152,8 +152,11 @@ func cryptoReassemblyPerFrameCostDoesNotGrowWithBufferedBytes() throws {
     let elapsed = Date().timeIntervalSince(started)
 
     #expect(reassembler.pendingByteCount == frameCount)
+    let detail =
+        "\(frameCount) one-byte CRYPTO frames took \(elapsed)s with a "
+        + "\(reassembler.pendingByteCount)-byte buffer; per-frame accounting must not rescan the buffer"
     #expect(
         elapsed < 4,
-        "\(frameCount) one-byte CRYPTO frames took \(elapsed)s with a \(reassembler.pendingByteCount)-byte buffer; per-frame accounting must not rescan the buffer"
+        "\(detail)"
     )
 }

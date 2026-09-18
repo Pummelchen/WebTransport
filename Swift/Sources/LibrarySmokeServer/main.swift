@@ -23,8 +23,8 @@ enum LibrarySmokeServer {
         }
     }
 
-    private static func parseArgs() throws -> Runner.Config {
-        var config = Runner.Config()
+    private static func parseArgs() throws -> LibrarySmokeServerConfig {
+        var config = LibrarySmokeServerConfig()
 
         var index = 1
         let args = CommandLine.arguments
@@ -33,7 +33,7 @@ enum LibrarySmokeServer {
             switch arg {
             case "--port":
                 guard index + 1 < args.count, let value = UInt16(args[index + 1]) else {
-                    throw Runner.Error.syntax("missing or invalid value for --port")
+                    throw LibrarySmokeServerError.syntax("missing or invalid value for --port")
                 }
                 config.port = value
                 index += 2
@@ -44,7 +44,7 @@ enum LibrarySmokeServer {
                 printUsage()
                 exit(0)
             default:
-                throw Runner.Error.syntax("unknown argument: \(arg)")
+                throw LibrarySmokeServerError.syntax("unknown argument: \(arg)")
             }
         }
         return config
@@ -56,32 +56,32 @@ enum LibrarySmokeServer {
         print("  --suite         Keep connection open for multi-scenario suites")
     }
 
-    struct Runner {
-        struct Config {
-            var port: UInt16 = 45500
-            var suiteMode: Bool = false
-        }
+    enum LibrarySmokeServerError: Swift.Error, CustomStringConvertible {
+        case syntax(String)
+        case runtime(String)
 
-        enum Error: Swift.Error, CustomStringConvertible {
-            case syntax(String)
-            case runtime(String)
-
-            var description: String {
-                switch self {
-                case .syntax(let message):
-                    return "syntax error: \(message)"
-                case .runtime(let message):
-                    return "runtime error: \(message)"
-                }
+        var description: String {
+            switch self {
+            case .syntax(let message):
+                return "syntax error: \(message)"
+            case .runtime(let message):
+                return "runtime error: \(message)"
             }
         }
+    }
 
-        let config: Config
+    struct LibrarySmokeServerConfig {
+        var port: UInt16 = 45500
+        var suiteMode: Bool = false
+    }
+
+    struct Runner {
+        let config: LibrarySmokeServerConfig
         let server: QUICUDPPort
         let policy: WebTransportServerSessionPolicy
         var manager: WebTransportSessionManager
 
-        init(config: Config) throws {
+        init(config: LibrarySmokeServerConfig) throws {
             self.config = config
             self.server = try QUICUDPPort(bindPort: config.port)
             self.policy = try WebTransportServerSessionPolicy(
@@ -149,7 +149,7 @@ enum LibrarySmokeServer {
             }
 
             if !completed {
-                throw Error.runtime(
+                throw LibrarySmokeServerError.runtime(
                     "smoke test did not reach completion" + (config.suiteMode ? " (suite mode)" : "")
                 )
             }
@@ -165,7 +165,7 @@ enum LibrarySmokeServer {
                 )
             case .control:
                 guard let payload = envelope.payload else {
-                    throw Error.runtime("control envelope missing payload")
+                    throw LibrarySmokeServerError.runtime("control envelope missing payload")
                 }
                 _ = try manager.receivePeerControlStream(payload)
                 let localControl = try manager.http3.localControlStreamBytes()
@@ -179,7 +179,7 @@ enum LibrarySmokeServer {
                 guard let requestStreamID = envelope.requestStreamID,
                     let payload = envelope.payload
                 else {
-                    throw Error.runtime("sessionRequest envelope missing stream id or payload")
+                    throw LibrarySmokeServerError.runtime("sessionRequest envelope missing stream id or payload")
                 }
                 let requestFrame = try Phase11FramePacket.decodeHTTP3Frame(payload)
                 let decision = try manager.receiveClientSessionRequest(
@@ -209,7 +209,7 @@ enum LibrarySmokeServer {
                     let streamKind = envelope.streamKind,
                     let payload = envelope.payload
                 else {
-                    throw Error.runtime("streamOpen envelope missing fields")
+                    throw LibrarySmokeServerError.runtime("streamOpen envelope missing fields")
                 }
                 switch streamKind {
                 case .bidirectional:
@@ -226,7 +226,7 @@ enum LibrarySmokeServer {
                 )
             case .streamData:
                 guard let streamID = envelope.streamID, let payload = envelope.payload else {
-                    throw Error.runtime("streamData envelope missing stream id or payload")
+                    throw LibrarySmokeServerError.runtime("streamData envelope missing stream id or payload")
                 }
                 try manager.receiveStreamPayload(streamID: streamID, payload: payload)
                 let echoed = manager.popStreamPayload(streamID: streamID) ?? Data()
@@ -239,7 +239,7 @@ enum LibrarySmokeServer {
                 )
             case .datagram:
                 guard let payload = envelope.payload else {
-                    throw Error.runtime("datagram envelope missing payload")
+                    throw LibrarySmokeServerError.runtime("datagram envelope missing payload")
                 }
                 do {
                     let frame = try Phase11FramePacket.decodeQUICFrame(payload)
@@ -262,7 +262,7 @@ enum LibrarySmokeServer {
                 }
             case .streamReset:
                 guard let streamID = envelope.streamID else {
-                    throw Error.runtime("missing stream id for reset")
+                    throw LibrarySmokeServerError.runtime("missing stream id for reset")
                 }
                 let errorCode = envelope.errorCode ?? 0
                 let resetFrame = try manager.resetStream(streamID: streamID, applicationErrorCode: errorCode)

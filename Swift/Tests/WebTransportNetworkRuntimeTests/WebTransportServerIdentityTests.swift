@@ -351,6 +351,13 @@ func rejectedRSAKeyNamesTheEncodingAppleExpects() throws {
     #expect(message.contains("PKCS#1"), "message was: \(message)")
 }
 
+/// One curve's documented private-key encoding: a struct rather than a three-member tuple.
+private struct ExpectedKeyEncoding {
+    let kind: WebTransportPrivateKeyKind
+    let bits: Int
+    let bytes: Int
+}
+
 @Test
 func documentedPrivateKeyLengthsMatchWhatThePlatformProduces() throws {
     // The error message and the documentation both state exact EC private-key lengths,
@@ -359,10 +366,10 @@ func documentedPrivateKeyLengthsMatchWhatThePlatformProduces() throws {
     //
     // Measured on this platform: the private representation is the raw uncompressed
     // point followed by the private scalar, which is why it is larger than the point.
-    let expected: [(kind: WebTransportPrivateKeyKind, bits: Int, bytes: Int)] = [
-        (.ellipticCurveP256, 256, 97),
-        (.ellipticCurveP384, 384, 145),
-        (.ellipticCurveP521, 521, 199),
+    let expected: [ExpectedKeyEncoding] = [
+        ExpectedKeyEncoding(kind: .ellipticCurveP256, bits: 256, bytes: 97),
+        ExpectedKeyEncoding(kind: .ellipticCurveP384, bits: 384, bytes: 145),
+        ExpectedKeyEncoding(kind: .ellipticCurveP521, bits: 521, bytes: 199),
     ]
 
     for entry in expected {

@@ -49,7 +49,8 @@ struct WebTransportServerCLI {
                 for result in results {
                     let session = result.sessionEstablished ? " session=established" : ""
                     print(
-                        "network \(result.transport.rawValue) session served: remote=\(result.remoteEndpoint.commandLineValue)\(session) message=\"\(WebTransportLogText.escaped(result.message))\""
+                        "network \(result.transport.rawValue) session served: remote=\(result.remoteEndpoint.commandLineValue)\(session) "
+                            + "message=\"\(WebTransportLogText.escaped(result.message))\""
                     )
                 }
                 // Serving nothing is a failure, not a success. Every session attempt
