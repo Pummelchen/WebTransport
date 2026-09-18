@@ -40,6 +40,7 @@ set(WT_UNIT_TESTS
   test_quic_peer_limits
   test_crypto
   test_quic_protection
+  test_quic_protection_retry
   test_tls13_keyschedule
   test_tls13_handshake
   test_tls13_handshake_messages
