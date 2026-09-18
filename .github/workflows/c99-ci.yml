@@ -130,8 +130,11 @@ jobs:
       # The same tests under AddressSanitizer and UndefinedBehaviorSanitizer.
       # A separate configuration because CMake caches compiler flags: enabling
       # sanitizers in a directory that was configured without them does nothing.
+      # Every matrix entry runs this one, gcc included. It used to be gated to
+      # clang, and that gate is why a clang-only sanitizer flag went unnoticed for
+      # the whole life of the tree: the single leg that would have rejected it was
+      # the one being skipped. CMakeLists.txt now picks the flags per compiler.
       - name: Sanitizer build and tests
-        if: matrix.cc == 'clang'
         # One env block, because a step with two of them is a workflow file
         # GitHub rejects outright -- the run fails before any job exists, with
         # no job list and only "This run likely failed because of a workflow
