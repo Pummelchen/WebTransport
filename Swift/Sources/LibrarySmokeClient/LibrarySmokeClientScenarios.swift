@@ -73,9 +73,56 @@ extension LibrarySmokeRunner {
             requestStreamID: nextRequestStreamID()
         )
         let streamCount = max(2, min(config.iterations, 4))
+        let opened = try openInterleavedStreams(session: session, streamCount: streamCount)
+        let bidirectionalStreams = opened.bidirectional
+        let unidirectionalStreams = opened.unidirectional
+
+        try sendInterleavedPayloads(
+            bidirectionalStreams: bidirectionalStreams,
+            unidirectionalStreams: unidirectionalStreams
+        )
+
+        var expectedPayloads: [UInt64: Set<String>] = [:]
+        var observedPayloads: [UInt64: Set<String>] = [:]
+        for index in 0..<streamCount {
+            expectedPayloads[bidirectionalStreams[index], default: Set<String>()].insert("bidi-\(index)")
+            expectedPayloads[unidirectionalStreams[index], default: Set<String>()].insert("uni-\(index)")
+        }
+
+        for _ in 0..<(streamCount * 2) {
+            let response = try receive(expect: .streamEcho)
+            guard let streamID = response.streamID, let payload = response.payload,
+                let text = String(data: payload, encoding: .utf8)
+            else {
+                throw Error.runtime("interleaved stream response missing stream/payload")
+            }
+            observedPayloads[streamID, default: Set<String>()].insert(text)
+        }
+
+        try verifyEchoes(
+            expected: expectedPayloads,
+            observed: observedPayloads,
+            streams: bidirectionalStreams,
+            label: "bidi"
+        )
+        try verifyEchoes(
+            expected: expectedPayloads,
+            observed: observedPayloads,
+            streams: unidirectionalStreams,
+            label: "uni"
+        )
+
+        print("client: interleaved stream scenario passed")
+    }
+
+    /// Opens `streamCount` bidirectional and as many unidirectional streams, and waits for
+    /// each to be acknowledged before opening the next.
+    private mutating func openInterleavedStreams(
+        session: WebTransportSession,
+        streamCount: Int
+    ) throws -> (bidirectional: [UInt64], unidirectional: [UInt64]) {
         var bidirectionalStreams: [UInt64] = []
         var unidirectionalStreams: [UInt64] = []
-
         for _ in 0..<streamCount {
             let bidiID = nextBidirectionalStreamID()
             let bidiPrefix = try manager.openBidirectionalStream(streamID: bidiID, sessionID: session.id)
@@ -105,8 +152,15 @@ extension LibrarySmokeRunner {
             _ = try receive(expect: .streamOpenAck)
             unidirectionalStreams.append(uniID)
         }
+        return (bidirectionalStreams, unidirectionalStreams)
+    }
 
-        for index in 0..<streamCount {
+    /// Sends one payload per stream, alternating directions so the echoes interleave.
+    private mutating func sendInterleavedPayloads(
+        bidirectionalStreams: [UInt64],
+        unidirectionalStreams: [UInt64]
+    ) throws {
+        for index in 0..<bidirectionalStreams.count {
             try send(
                 Phase11Envelope(
                     scenario: .echoStreams,
@@ -124,43 +178,23 @@ extension LibrarySmokeRunner {
                 )
             )
         }
+    }
 
-        var expectedPayloads: [UInt64: Set<String>] = [:]
-        var observedPayloads: [UInt64: Set<String>] = [:]
-        for index in 0..<streamCount {
-            expectedPayloads[bidirectionalStreams[index], default: Set<String>()].insert("bidi-\(index)")
-            expectedPayloads[unidirectionalStreams[index], default: Set<String>()].insert("uni-\(index)")
-        }
-
-        for _ in 0..<(streamCount * 2) {
-            let response = try receive(expect: .streamEcho)
-            guard let streamID = response.streamID, let payload = response.payload,
-                let text = String(data: payload, encoding: .utf8)
-            else {
-                throw Error.runtime("interleaved stream response missing stream/payload")
-            }
-            observedPayloads[streamID, default: Set<String>()].insert(text)
-        }
-
-        for index in 0..<streamCount {
-            let streamID = bidirectionalStreams[index]
-            let expected = expectedPayloads[streamID] ?? []
-            let observed = observedPayloads[streamID] ?? []
-            if expected != observed {
-                throw Error.runtime("bidi interleaved echo mismatch at index \(index)")
+    /// Every stream's expected payload set must equal what came back, or the interleaving is
+    /// not deterministic.
+    private func verifyEchoes(
+        expected: [UInt64: Set<String>],
+        observed: [UInt64: Set<String>],
+        streams: [UInt64],
+        label: String
+    ) throws {
+        for (index, streamID) in streams.enumerated() {
+            let expectedForStream = expected[streamID] ?? []
+            let observedForStream = observed[streamID] ?? []
+            if expectedForStream != observedForStream {
+                throw Error.runtime("\(label) interleaved echo mismatch at index \(index)")
             }
         }
-
-        for index in 0..<streamCount {
-            let streamID = unidirectionalStreams[index]
-            let expected = expectedPayloads[streamID] ?? []
-            let observed = observedPayloads[streamID] ?? []
-            if expected != observed {
-                throw Error.runtime("uni interleaved echo mismatch at index \(index)")
-            }
-        }
-
-        print("client: interleaved stream scenario passed")
     }
 
     mutating func runStreamIdentityAndDuplicateOpenScenario() throws {
