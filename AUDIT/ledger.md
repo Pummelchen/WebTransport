@@ -76,7 +76,7 @@ Terminal: 38
 - evidence before: Only Mac14,3 exists in this session; Phase E requires a fresh clone on one independent host, and a fresh clone on the same host is not independent
 - fix: The owner took option (2) and nominated two existing hosts: `node1` (Mac mini M2, macOS 27.0, the pinned toolchain exactly plus cppcheck 2.21.0 from Homebrew) and `deltasona` (Intel VPS, Debian 13 x86_64, gcc 14.2.0 / clang 19.1.7 / cmake 3.31.6). Phase E ran on both; the record and the not-checked list are in AUDIT/convergence.md.
 - evidence after: node1: `AUDIT/run-sweep.sh` -- **28 gates ran, 0 failed**, EXIT=0, on a clean clone at the audit branch's commit. deltasona: C99 build + ctest **100% tests passed, 0 failed out of 97** with gcc; the same suite under ASan/UBSan **97/97** with gcc and with clang, the gcc run with LeakSanitizer active, which Darwin cannot do; and the workflows, ledger, vectors, matrix, portability, dead-local and package gates clean. Phase E found `AUD-0038` on its first cross-platform run (the sanitizer configuration could not be built with gcc, and CI's sanitizer step was gated to the compiler that would not have said so), fixed in f6c7879 before these runs. The Swift half and seven tools are reported not checked on deltasona, with reasons, rather than as passes.
-- commit: PENDING
+- commit: 771239c
 
 ### AUD-0003 — Inventory, dependency graph, trust boundaries and tier table
 
