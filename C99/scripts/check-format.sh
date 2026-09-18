@@ -5,10 +5,13 @@
 # this script applies it to exactly the files the tree owns. Two sets are excluded, and both
 # are still checked elsewhere rather than left unguarded:
 #
-#   tests/vectors/*.h  generated from RFC text by tests/vectors/extract_*.py and compared
-#                      byte for byte by scripts/check-vectors.sh. Reformatting them would
-#                      break that comparison and be undone by the next regeneration, so they
-#                      are excluded here and remain guarded there.
+#   generated headers  written by tests/vectors/extract_*.py and compared byte for byte by
+#                      scripts/check-vectors.sh. Most land in tests/vectors/, but two are
+#                      rendered into the library itself: src/http3/qpack_huffman_table.h and
+#                      src/http3/qpack_static_table.h. All are excluded here and guarded
+#                      there. Getting this list wrong once already cost a broken generator
+#                      output, and check-vectors.sh is what caught it -- which is the argument
+#                      for keeping that check rather than trusting this exclusion list.
 #   third_party/       vendored, and not ours to restyle.
 #
 # Everything else is checked, with no file excluded, no rule relaxed and no threshold set.
@@ -31,6 +34,8 @@ cd "$repo_root"
 files=$(
   git ls-files 'C99/**/*.c' 'C99/**/*.h' |
     grep -v '^C99/tests/vectors/' |
+    grep -v '^C99/src/http3/qpack_huffman_table\.h$' |
+    grep -v '^C99/src/http3/qpack_static_table\.h$' |
     grep -v '^C99/third_party/' || true
 )
 
