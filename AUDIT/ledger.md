@@ -8,11 +8,11 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 
 | status | count |
 | --- | --- |
-| BLOCKED | 2 |
-| DONE | 35 |
+| BLOCKED | 1 |
+| DONE | 37 |
 
 Non-terminal (open): 0
-Terminal: 37
+Terminal: 38
 
 ## Tasks
 
@@ -25,7 +25,7 @@ Terminal: 37
 | AUD-0005 | S2 | C | both | DONE | Tool-coverage and language-standard proofs for every delegated check | AUDIT/tool-coverage.md |
 | AUD-0006 | S1 | A | P1 | DONE | SwiftLint is installed but has no committed config and is not run, so the mandated Swift linter is not in force | Package.swift |
 | AUD-0007 | S1 | A | both | DONE | Ruff has no config, so B, E722, S101 and PT are not enabled | AUDIT/environment.md |
-| AUD-0008 | S2 | A | P1 | BLOCKED | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | Package.swift:12-17 |
+| AUD-0008 | S2 | A | P1 | DONE | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | Package.swift:12-17 |
 | AUD-0009 | S2 | B | P2 | DONE | No C99 coverage measurement exists, so one baseline metric is missing | C99/scripts/measure-coverage.sh |
 | AUD-0010 | S3 | B | P2 | DONE | No committed .clang-format and the tree is not clang-format clean | C99/ |
 | AUD-0011 | S3 | C | both | DONE | Repository convention says audit ledgers are not kept in the tree; this audit mandates committing one | AUDIT/ledger.json |
@@ -55,6 +55,7 @@ Terminal: 37
 | AUD-0035 | S3 | A | P2 | DONE | The quarter-ID overflow guard added for a past audit finding cannot fire from the wire, and the helper it protects still wraps silently | C99/src/webtransport/framing.c:99 |
 | AUD-0036 | S2 | A | P2 | DONE | The test for RFC 9114's no-pseudo-headers-in-trailers rule passed with the rule deleted, because the refusal came from the message decoder | C99/tests/unit/test_http3_endpoint.c:512 |
 | AUD-0037 | S3 | A | P2 | DONE | Both static-table index refusals were unexecuted, because every index the tests used was valid | C99/src/http3/qpack_field_section.c:95 |
+| AUD-0038 | S2 | B | P2 | DONE | The C99 sanitizer configuration could not be built with gcc, and CI excluded the one leg that would have said so | C99/CMakeLists.txt:357 (the flag) and .github/workflows/c99-ci.yml:134 (the gate that hid it) |
 
 ## Detail
 
@@ -131,14 +132,13 @@ Terminal: 37
 
 ### AUD-0008 — -require-explicit-sendable is enforced only per-invocation in CI, not in the build config
 
-- severity: S2 | tier: A | project: P1 | status: BLOCKED | host: Mac14,3
+- severity: S2 | tier: A | project: P1 | status: DONE | host: Mac14,3
 - category: standards | discovered by: phase-a
 - where: Package.swift:12-17
 - evidence before: swift-ci.yml passes -Xswiftc -require-explicit-sendable; Package.swift carries strictMemorySafety and treatAllWarnings but not the flag, so a local `swift build`/`swift test` accepts a public type that omits Sendable
-- fix: 
-- evidence after: Manifests restored and `./Swift/check-api-compatibility.sh` passes. The experiment also found a second, independent gap, recorded in this reason rather than lost: the API-compatibility check uses a path dependency, so it structurally cannot catch unsafe-flags breakage -- a new task will be filed for it.
-- commit: 
-- BLOCKED: owner: repository owner. The standard says to enforce -require-explicit-sendable in build config, not per invocation. The only SwiftPM mechanism is `.unsafeFlags(["-require-explicit-sendable"])`, and it breaks the package for the consumers this repository publishes it to. Tried, not assumed: the flag was added to both manifests and `./Swift/check-api-compatibility.sh` PASSED, because that check consumes the package by PATH; SwiftPM refuses unsafe build flags only for VERSION-BASED dependencies ('The package product ... cannot be used as a dependency of this target because it uses unsafe build flags', and SwiftPM's own tests note the error is expected 'in the version-based dependency'). A published consumer reaching the package by URL would therefore be refused, and the in-repo check cannot see it. Options for the human: (1) accept unsafeFlags and drop the package's usability as a versioned dependency -- rejected as worse than the deviation; (2) keep the CI-invocation enforcement and record the deviation from the standard (current state); (3) make the API-compatibility check consume a versioned dependency first, so it can catch this whole class, and revisit the trade-off then.
+- fix: Two of the three settings are already in the build configuration: `strictSwiftSettings` carries `.strictMemorySafety()` and `.treatAllWarnings(as: .error)`, so a warning fails `swift build` for every contributor and for CI. The third, `-require-explicit-sendable`, has no first-class SwiftSetting in tools 6.4 (checked against PackageDescription's own interface), so `.unsafeFlags` is the only mechanism -- and option (3), a local check that could see the cost, was implemented and then **disproved by experiment**. The deviation is recorded in AUDIT/compliance.md section 1 instead of being left implicit.
+- evidence after: Option (3) is impossible, proved rather than argued: SwiftPM applies the unsafe-build-flags restriction only to REMOTE dependencies. A `file://` URL dependency is resolved as a LOCAL one, and a local dependency carrying `.unsafeFlags(["-require-explicit-sendable"])` builds without a word -- shown with a two-package experiment under swift-tools-version 6.4 (`swift build`: `Build complete!`), and then in the repository itself, where the extended API-compatibility check still exited 0 with the flag added to `strictSwiftSettings`. So no in-repo check can see this class, and the only check that can is a remote consumer, which sees a change only after it is published -- too late. The choice is therefore (1), which breaks the package for every versioned consumer and was rejected as worse than the deviation, or (2). Option (2) is taken: CI builds both manifests under `-require-explicit-sendable` on every run, and the deviation is now recorded in AUDIT/compliance.md section 1 rather than only in this ledger.
+- commit: b0df09f
 
 ### AUD-0009 — No C99 coverage measurement exists, so one baseline metric is missing
 
@@ -429,4 +429,14 @@ Terminal: 37
 - fix: Added the boundary to `test_static_forms` from BOTH sides: the last entry (size - 1) is asserted to resolve, and the first invalid one (size) is asserted refused in each form, with the decompression-failure code. Asserting only the refusal would pass against a table one entry short of the right size, so the control is the point of the case rather than decoration.
 - evidence after: Removing both refusals fails exactly two checks, one per case -- `FAIL an indexed line past the static table is refused: want protocol, got ok` and `FAIL a literal naming past the static table is refused: want protocol, got ok` (2 of 83). `llvm-cov show` confirms both refusal lines now execute, and the total moved 91.93% -> **91.97%** lines. `check-format.sh`: all 312 C sources match.
 - commit: 636ce79
+
+### AUD-0038 — The C99 sanitizer configuration could not be built with gcc, and CI excluded the one leg that would have said so
+
+- severity: S2 | tier: B | project: P2 | status: DONE | host: deltasona (Debian 13 x86_64, gcc 14.2.0) -- found by Phase E
+- category: ops | discovered by: Phase E: the first gcc build of this configuration in the tree's life
+- where: C99/CMakeLists.txt:357 (the flag) and .github/workflows/c99-ci.yml:134 (the gate that hid it)
+- evidence before: `C99/scripts/build-and-test.sh --sanitize` -- a documented entry point -- died at the first compile on a gcc host: `cc: error: unrecognized argument to '-fno-sanitize=' option: 'function'`. `-fno-sanitize=function` is clang-only; GNU C has no indirect-call check to turn off and rejects the flag. The CMake's own MSVC branch says "use clang or gcc", so gcc was promised. Nothing caught it because CI's sanitizer step carried `if: matrix.cc == 'clang'` while the matrix has an ubuntu-24.04/gcc entry: the one compiler that rejects the flag was the one compiler not running the step. `git log -S` shows the flag and the gate arrived together in the initial C99 commit (a922521) and that the sanitizer configuration was never built with gcc anywhere, by anyone, in the life of the tree.
+- fix: The flag is added only when `CMAKE_C_COMPILER_ID MATCHES "Clang"`, with the reason and the exact gcc error recorded where the flags live. The sanitizer step lost its `if: matrix.cc == 'clang'` gate, so every matrix entry runs it -- which is the regression test: the flag cannot be made unconditional again without the gcc leg failing.
+- evidence after: On the host that found it: gcc 14.2.0 compiles all 480 objects with `-fsanitize=address,undefined -fno-omit-frame-pointer` and runs **100% tests passed, 0 tests failed out of 97** under ASan/UBSan/LeakSanitizer, EXIT=0. clang keeps the flag it needs: the generated ninja args on the primary host still read `-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize=function`. Workflows still parse (`check-workflows.py`: 4 files, no duplicate keys).
+- commit: f6c7879
 
