@@ -46,6 +46,22 @@ not as TODO markers in the tree.
   `tests/`, `third_party/`. `out/` is generated build output (only its
   `.gitignore` and `README.md` are tracked).
 
+**Files are kept under 500 code lines** (non-blank, non-comment) where that can be done without
+weakening something. Three exceed it deliberately, each with the reason recorded beside the list it
+belongs to rather than left as a puzzle for the next person who counts lines:
+
+- `C99/src/quic/connection_receive.c` — every seam crosses a file-static boundary, so splitting it
+  means exporting internal symbols, which is an ABI change.
+- `C99/tests/unit/test_quic_handshake.c` — two tests sharing 26 top-level declarations; telling a
+  top-level declaration from a local one needs a parse, not a line scan.
+- The larger Swift files (`WebTransportNetworkSession`, `QPACK`, `WebTransportQUICServer`,
+  `LibrarySmokeClientScenarios` and others) — their methods are extensions over file-private state.
+  Splitting them means widening `private` to `internal`, which trades an encapsulated invariant for
+  a line count. They are candidates for a genuine restructure, not a mechanical split.
+
+The C99 exceptions are recorded in `C99/CMakeLists.txt` and `C99/tests/CMakeLists.txt`; this note is
+the Swift side of the same decision.
+
 ## Build, test, run
 
 ```bash
