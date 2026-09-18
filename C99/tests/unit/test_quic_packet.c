@@ -148,9 +148,104 @@ static void test_a_retry_encoder_refuses_missing_argument_bytes(void) {
                 (uint64_t)(1U + 4U + 1U + 0U + 1U + sizeof(k_source) + sizeof(k_token) + 16U),
                 (uint64_t)wt_writer_offset(&w));
 }
+
+/* AUD-0023. RFC 9000 section 17.2.1 makes the low bits of a Version Negotiation packet's first byte
+ * ARBITRARY, so its type bits can read as Initial -- and before the fix `wt_quic_initial_token` read its
+ * version list as a Token Length field and accepted a one-byte token from a packet that is not an Initial at
+ * all. This is a full Version Negotiation packet -- connection IDs and a version list -- unlike the five-byte
+ * classifier fixture, which stops before the token. The function must refuse version zero with the code the
+ * source returns for it, WT_ERR_PROTOCOL (`wt_quic_initial_token`, src/quic/packet.c), and report no token. The
+ * other two long-header walkers are pinned beside it so all three answers for a Version Negotiation are
+ * asserted in one place. */
+static void test_a_version_negotiation_is_not_an_initial(void) {
+  static const uint8_t k_version_negotiation[] = {
+      0xc0U,                                                  /* long header, fixed, type 00 */
+      0x00U, 0x00U, 0x00U, 0x00U,                             /* version zero */
+      0x04U, 0x01U, 0x02U, 0x03U, 0x04U,                      /* destination connection ID */
+      0x04U, 0x05U, 0x06U, 0x07U, 0x08U,                      /* source connection ID */
+      0x80U, 0x00U, 0x00U, 0x01U, 0xaaU, 0xbbU, 0xccU, 0xddU, /* supported versions */
+  };
+  wt_quic_packet_kind_t kind = WT_QUIC_PACKET_KIND_LONG;
+  const uint8_t *token = NULL;
+  size_t token_length = 0U;
+
+  WT_EXPECT_STATUS(
+      "a full version negotiation is classified", WT_OK,
+      wt_quic_packet_kind(k_version_negotiation, sizeof(k_version_negotiation), &kind));
+  WT_EXPECT_INT("  as version negotiation", (long)WT_QUIC_PACKET_KIND_VERSION_NEGOTIATION,
+                (long)kind);
+  WT_EXPECT_STATUS("a version negotiation is not an Initial", WT_ERR_PROTOCOL,
+                   wt_quic_initial_token(k_version_negotiation, sizeof(k_version_negotiation),
+                                         &token, &token_length));
+  WT_EXPECT_INT("  leaving no token length", 0, (long)token_length);
+  WT_EXPECT_TRUE("  and no token", token == NULL);
+  /* The packet-number walk refuses version zero too, and that guard is older than the fix -- it is the one
+   * `wt_quic_initial_token` was missing. */
+  {
+    size_t offset = 0U;
+    size_t total = 0U;
+    int short_header = 1;
+    WT_EXPECT_STATUS("and the packet-number walk refuses it", WT_ERR_INVALID_ARGUMENT,
+                     wt_quic_protected_pn_offset(k_version_negotiation,
+                                                 sizeof(k_version_negotiation), 0U, &offset, &total,
+                                                 &short_header));
+  }
+  /* The connection-ID reader accepts it, deliberately: RFC 9000 section 17.2.1 puts a Version Negotiation's
+   * connection IDs at the same offsets as any other long header, so reading them is correct -- and this
+   * function reports no version, so it is not the place that decides. The decision belongs to
+   * `wt_quic_initial_token` above, which is why the two are asserted together. */
+  {
+    const uint8_t *destination = NULL;
+    const uint8_t *source = NULL;
+    size_t destination_length = 0U;
+    size_t source_length = 0U;
+    WT_EXPECT_STATUS("the connection-ID reader reads its IDs", WT_OK,
+                     wt_quic_long_header_connection_ids(
+                         k_version_negotiation, sizeof(k_version_negotiation), &destination,
+                         &destination_length, &source, &source_length));
+    WT_EXPECT_INT("  the destination as the VN packet spells it", 4, (long)destination_length);
+    WT_EXPECT_INT("  and the source", 4, (long)source_length);
+  }
+}
+
+/* The two guards `wt_quic_initial_token` applies before it reads anything: the header form and the fixed bit
+ * together, then the packet type. AUD-0029: both are reachable from the server, which peeks the token of
+ * whatever a peer sends (`runtime/server_retry.c`). A well-formed Initial sits behind each first byte, so the
+ * FIRST BYTE IS THE MESSAGE'S ONLY FAULT -- with either guard deleted the parse continues, succeeds, and this
+ * test fails. */
+static void test_the_leading_guards_of_initial_token(void) {
+  static const uint8_t k_body[] = {0x00U, 0x00U, 0x00U, 0x01U, 0x04U, 0x01U, 0x02U, 0x03U,
+                                   0x04U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U, 0x00U};
+  static const struct {
+    const char *label;
+    uint8_t first;
+  } cases[] = {
+      {"a short header is not an Initial", 0x40U}, /* the long header bit is clear */
+      {"a long header without the fixed bit is refused", 0x80U},
+      {"a Handshake long header is not an Initial", 0xe0U}, /* type bits 10 */
+  };
+  uint8_t message[sizeof(k_body) + 1U];
+  const uint8_t *token = NULL;
+  size_t token_length = 0U;
+  size_t i;
+
+  /* The unmodified first byte parses, so each refusal below is about the byte and not the body. */
+  message[0] = 0xc0U;
+  memcpy(message + 1U, k_body, sizeof(k_body));
+  WT_EXPECT_OK("a well-formed Initial is accepted for the guard checks",
+               wt_quic_initial_token(message, sizeof(message), &token, &token_length));
+  for (i = 0U; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    message[0] = cases[i].first;
+    WT_EXPECT_STATUS(cases[i].label, WT_ERR_PROTOCOL,
+                     wt_quic_initial_token(message, sizeof(message), &token, &token_length));
+  }
+}
+
 int main(void) {
   test_the_connection_ids_of_a_long_header_can_be_read_from_a_prefix();
   test_a_retry_ignores_the_unused_bits();
   test_a_retry_encoder_refuses_missing_argument_bytes();
+  test_a_version_negotiation_is_not_an_initial();
+  test_the_leading_guards_of_initial_token();
   WT_TEST_MAIN_END("test_quic_packet");
 }
