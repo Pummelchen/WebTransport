@@ -108,6 +108,7 @@ foreach(test IN LISTS WT_UNIT_TESTS)
     set(_wt_test_sources
       unit/test_quic_connection.c
       unit/test_quic_connection_support.c
+      unit/test_quic_connection_retry_support.c
       unit/test_quic_connection_basics.c
       unit/test_quic_connection_permissions.c
       unit/test_quic_connection_streams.c
