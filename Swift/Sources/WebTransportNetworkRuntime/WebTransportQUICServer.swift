@@ -143,26 +143,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         transportLimits: WebTransportTransportLimits = .default
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
-        // `maxConcurrentConnections` predates the admission policy. An explicit value
-        // overrides whatever the policy carries, and `nil` (the argument not being
-        // supplied) leaves the policy's own limit alone.
-        //
-        // The override used to be tied to the default argument `16`, so an operator
-        // who explicitly asked for 16 while supplying another policy got the policy's
-        // number instead — 256 for `.publicFacing`. Representing "not supplied" as
-        // `nil` rather than as a valid value is what makes the two distinguishable.
-        // The value is validated on the same terms as the policy field so an
-        // out-of-range override is refused rather than accepted here and rejected
-        // elsewhere.
-        var admission = try admission.validated()
-        if let maxConcurrentConnections {
-            guard maxConcurrentConnections > 0 else {
-                throw WebTransportNetworkRuntimeError.invalidTransport(
-                    "maxConcurrentConnections must be positive"
-                )
-            }
-            admission.maxConcurrentConnections = maxConcurrentConnections
-        }
+        let admission = try Self.resolvedAdmission(admission, maxConcurrentConnections: maxConcurrentConnections)
         let transportLimits = try transportLimits.validated()
         self.admission = admission
         self.rateLimiter = ConnectionRateLimiter(policy: admission)
@@ -208,78 +189,13 @@ public final class WebTransportQUICServer: @unchecked Sendable {
             InteroperableQUICDebug.log("server listener state update: \(state)")
         }
 
-        let listener = self.listener
-        let acceptedConnections = self.acceptedConnections
-        let rateLimiter = self.rateLimiter
-        let connectionBudget = self.connectionBudget
-        // The listener task must not retain the server to read these, and each
-        // accepted connection builds its own collector from them.
-        let advertisedStreamLimits = transportLimits
-        listenerTask = Task {
-            do {
-                try await listener.run { connection in
-                    // Refuse over-rate connections here, before the handshake is
-                    // driven, so a peer cycling connections cannot make the
-                    // server do unbounded work. The connection is neither
-                    // started nor queued, so it is released on return and the
-                    // refusal costs nothing beyond the accept itself.
-                    if let rateLimiter, !rateLimiter.allow() {
-                        InteroperableQUICDebug.log("server refused connection: rate limit")
-                        return
-                    }
-                    // Refuse over-budget connections before the handshake is
-                    // driven. Returning from the accept handler without starting
-                    // the connection is what hands it back to Network.framework.
-                    guard let lease = connectionBudget.admit() else {
-                        InteroperableQUICDebug.log(
-                            "server refused connection: concurrency limit \(connectionBudget.limit)"
-                        )
-                        return
-                    }
-                    InteroperableQUICDebug.log("server accepted connection")
-                    // Attach the stream handler before starting the connection.
-                    // The peer opens its control stream as soon as the handshake
-                    // completes, which is typically while this connection is
-                    // still queued and long before anything calls `serveOne`.
-                    // The collector's per-direction ceiling is the stream count
-                    // this listener advertised: retaining more would hold stream
-                    // objects the peer was never allowed to open, and fewer would
-                    // refuse streams the advertisement promised.
-                    let inboundStreams = InteroperableQUICInboundStreamCollector(
-                        bidirectionalLimit: advertisedStreamLimits.initialMaxBidirectionalStreams,
-                        unidirectionalLimit: advertisedStreamLimits.initialMaxUnidirectionalStreams
-                    )
-                    let inboundRegistration = InteroperableQUICInboundRegistration()
-                    let inboundTask = Task {
-                        do {
-                            await inboundRegistration.markEntered()
-                            try await connection.inboundStreams { stream in
-                                await InteroperableQUICHelpers.enqueueInboundStream(
-                                    stream,
-                                    into: inboundStreams,
-                                    role: "server"
-                                )
-                            }
-                        } catch {
-                            await inboundRegistration.markEntered()
-                            await inboundStreams.fail(error, role: "server")
-                        }
-                    }
-                    await inboundRegistration.waitUntilEntered()
-                    _ = connection.start()
-                    await acceptedConnections.enqueue(
-                        InteroperableQUICAcceptedConnection(
-                            connection: connection,
-                            inboundStreams: inboundStreams,
-                            inboundTask: inboundTask,
-                            lease: lease
-                        )
-                    )
-                }
-            } catch {
-                await acceptedConnections.fail(error, role: "server")
-            }
-        }
+        listenerTask = Self.makeListenerTask(
+            listener: listener,
+            acceptedConnections: acceptedConnections,
+            rateLimiter: rateLimiter,
+            connectionBudget: connectionBudget,
+            advertisedStreamLimits: transportLimits
+        )
     }
 
     public func waitForListening(timeoutMilliseconds: Int32 = 5_000) async throws -> WebTransportNetworkEndpoint {
@@ -686,5 +602,139 @@ extension WebTransportQUICServer {
         let payload = try await stream.receive(timeoutMilliseconds: timeoutMilliseconds)
         try await stream.send(payload, endOfStream: true, timeoutMilliseconds: timeoutMilliseconds)
         return payload
+    }
+}
+
+extension WebTransportQUICServer {
+    /// The inbound collector for one accepted connection, with its handler already
+    /// registered and waited for.
+    private static func startInboundCollection(
+        connection: NetworkConnection<QUIC>,
+        advertisedStreamLimits: WebTransportTransportLimits
+    ) async -> (streams: InteroperableQUICInboundStreamCollector, task: Task<Void, Never>) {
+        let inboundStreams = InteroperableQUICInboundStreamCollector(
+            bidirectionalLimit: advertisedStreamLimits.initialMaxBidirectionalStreams,
+            unidirectionalLimit: advertisedStreamLimits.initialMaxUnidirectionalStreams
+        )
+        let inboundRegistration = InteroperableQUICInboundRegistration()
+        let inboundTask = Task {
+            do {
+                await inboundRegistration.markEntered()
+                try await connection.inboundStreams { stream in
+                    await InteroperableQUICHelpers.enqueueInboundStream(
+                        stream,
+                        into: inboundStreams,
+                        role: "server"
+                    )
+                }
+            } catch {
+                await inboundRegistration.markEntered()
+                await inboundStreams.fail(error, role: "server")
+            }
+        }
+        await inboundRegistration.waitUntilEntered()
+        return (inboundStreams, inboundTask)
+    }
+
+    /// The accept loop, built so that it captures the values it needs rather than the server.
+    ///
+    /// A connection refused by rate or budget is neither started nor queued, so returning
+    /// from the accept handler is what hands it back to Network.framework and the refusal
+    /// costs nothing beyond the accept itself. The stream handler is attached before the
+    /// connection is started, because the peer opens its control stream as soon as the
+    /// handshake completes — typically while this connection is still queued and long before
+    /// anything calls `serveOne`. The collector's per-direction ceiling is the stream count
+    /// this listener advertised: retaining more would hold stream objects the peer was never
+    /// allowed to open, and fewer would refuse streams the advertisement promised.
+    private static func makeListenerTask(
+        listener: NetworkListener<QUIC>,
+        acceptedConnections: InteroperableQUICConnectionQueue<InteroperableQUICAcceptedConnection>,
+        rateLimiter: ConnectionRateLimiter?,
+        connectionBudget: InteroperableQUICConnectionBudget,
+        advertisedStreamLimits: WebTransportTransportLimits
+    ) -> Task<Void, Never> {
+        // The listener task must not retain the server to read these, and each accepted
+        // connection builds its own collector from them.
+        let listener = listener
+        let acceptedConnections = acceptedConnections
+        let rateLimiter = rateLimiter
+        let connectionBudget = connectionBudget
+        let advertisedStreamLimits = advertisedStreamLimits
+        return Task {
+            do {
+                try await listener.run { connection in
+                    // Refuse over-rate connections here, before the handshake is
+                    // driven, so a peer cycling connections cannot make the
+                    // server do unbounded work. The connection is neither
+                    // started nor queued, so it is released on return and the
+                    // refusal costs nothing beyond the accept itself.
+                    if let rateLimiter, !rateLimiter.allow() {
+                        InteroperableQUICDebug.log("server refused connection: rate limit")
+                        return
+                    }
+                    // Refuse over-budget connections before the handshake is
+                    // driven. Returning from the accept handler without starting
+                    // the connection is what hands it back to Network.framework.
+                    guard let lease = connectionBudget.admit() else {
+                        InteroperableQUICDebug.log(
+                            "server refused connection: concurrency limit \(connectionBudget.limit)"
+                        )
+                        return
+                    }
+                    InteroperableQUICDebug.log("server accepted connection")
+                    // Attach the stream handler before starting the connection.
+                    // The peer opens its control stream as soon as the handshake
+                    // completes, which is typically while this connection is
+                    // still queued and long before anything calls `serveOne`.
+                    // The collector's per-direction ceiling is the stream count
+                    // this listener advertised: retaining more would hold stream
+                    // objects the peer was never allowed to open, and fewer would
+                    // refuse streams the advertisement promised.
+                    let (inboundStreams, inboundTask) = await Self.startInboundCollection(
+                        connection: connection,
+                        advertisedStreamLimits: advertisedStreamLimits
+                    )
+                    _ = connection.start()
+                    await acceptedConnections.enqueue(
+                        InteroperableQUICAcceptedConnection(
+                            connection: connection,
+                            inboundStreams: inboundStreams,
+                            inboundTask: inboundTask,
+                            lease: lease
+                        )
+                    )
+                }
+            } catch {
+                await acceptedConnections.fail(error, role: "server")
+            }
+        }
+    }
+
+    /// The admission policy with the legacy `maxConcurrentConnections` override applied.
+    ///
+    /// `maxConcurrentConnections` predates the admission policy. An explicit value overrides
+    /// whatever the policy carries, and `nil` (the argument not being supplied) leaves the
+    /// policy's own limit alone.
+    ///
+    /// The override used to be tied to the default argument `16`, so an operator who
+    /// explicitly asked for 16 while supplying another policy got the policy's number
+    /// instead — 256 for `.publicFacing`. Representing "not supplied" as `nil` rather than as
+    /// a valid value is what makes the two distinguishable. The value is validated on the
+    /// same terms as the policy field, so an out-of-range override is refused rather than
+    /// accepted here and rejected elsewhere.
+    private static func resolvedAdmission(
+        _ admission: WebTransportAdmissionPolicy,
+        maxConcurrentConnections: Int?
+    ) throws -> WebTransportAdmissionPolicy {
+        var resolved = try admission.validated()
+        if let maxConcurrentConnections {
+            guard maxConcurrentConnections > 0 else {
+                throw WebTransportNetworkRuntimeError.invalidTransport(
+                    "maxConcurrentConnections must be positive"
+                )
+            }
+            resolved.maxConcurrentConnections = maxConcurrentConnections
+        }
+        return resolved
     }
 }
