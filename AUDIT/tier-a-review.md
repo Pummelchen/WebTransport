@@ -33,7 +33,8 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | --- | --- |
 | `C99/src/quic/transport_parameters.c` | **Read in full** (485 lines) — `AUD-0021` |
 | `C99/src/quic/frame.c` | **Read in full** (726 lines) — `AUD-0022` |
-| `C99/src/quic/{connection_receive,packet,connection_send,stream}.c` | Read in the structural refactors (packet-range merge, STREAM receive); not yet in full |
+| `C99/src/quic/packet.c` | **Read in part** (1-256 of 669: the classification, peek and long-header paths) — `AUD-0023` |
+| `C99/src/quic/{connection_receive,connection_send,stream}.c` | Read in the structural refactors (packet-range merge, STREAM receive); not yet in full |
 | `C99/src/http3/qpack_encoder_stream.c` | Read around the finding — `AUD-0021`; not yet in full |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
@@ -94,3 +95,24 @@ that was found and is now documented where the next person will read it.
 **Found:** `AUD-0022` — `new_token.token_length`, assigned from unvalidated input before the take
 was known to have succeeded, and read by nothing in the tree. Fixed without an ABI change, with a
 regression test that was checked to fail against the unfixed code.
+
+## `C99/src/quic/packet.c` — read in part (the untrusted-input front half)
+
+Lines 1-256: packet classification, the two connection-ID peeks, the Initial token peek and
+`wt_quic_protected_pn_offset`. The encode half and the Retry parser are not read yet.
+
+Three functions walk the same long header and two of them skip the version unread. That
+asymmetry is the finding. `wt_quic_protected_pn_offset` refuses version zero and says why in a
+comment; `wt_quic_initial_token` and `wt_quic_long_header_connection_ids` did not, and the first
+of those is the one that matters because it reports no version to its caller -- so the caller
+cannot make the decision itself, which is exactly what `wt_quic_long_header_decode` allows by
+putting the version in its output structure.
+
+**Found:** `AUD-0023` — a Version Negotiation packet read as an Initial with a token, proven with
+a probe against the built library rather than argued from the RFC text. Fixed and regression-
+tested.
+
+The bounds work in the same half is otherwise careful: `wt_quic_initial_token` guards its
+subtraction with `c.offset > length` before computing `length - c.offset`, the connection-ID
+reader refuses a length above twenty, and the short-header path checks
+`local_connection_id_len > WT_QUIC_MAX_CID_LEN` before using it in an offset.

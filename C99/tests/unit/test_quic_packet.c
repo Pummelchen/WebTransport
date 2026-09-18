@@ -273,6 +273,34 @@ int main(void) {
     /* A long header that stops before its version cannot be classified. */
     WT_EXPECT_STATUS("three bytes of long header is truncated", WT_ERR_TRUNCATED,
                      wt_quic_packet_kind(long_packet, 3U, &kind));
+
+    /* AUD-0023. RFC 9000 section 17.2.1 makes the low bits of a Version Negotiation's first
+     * byte arbitrary, so the 0xc0 above gives it Initial's type bits. The five-byte fixture is
+     * too short to reach the token; this one carries connection IDs and a version list, and
+     * before the fix `wt_quic_initial_token` read the version list as a Token Length field and
+     * accepted a one-byte token -- from a packet that is not an Initial at all. */
+    {
+      static const uint8_t full_version_negotiation[] = {
+          0xc0U,                                                  /* long header, fixed, type 00 */
+          0x00U, 0x00U, 0x00U, 0x00U,                             /* version zero */
+          0x04U, 0x01U, 0x02U, 0x03U, 0x04U,                      /* destination connection ID */
+          0x04U, 0x05U, 0x06U, 0x07U, 0x08U,                      /* source connection ID */
+          0x80U, 0x00U, 0x00U, 0x01U, 0xaaU, 0xbbU, 0xccU, 0xddU, /* supported versions */
+      };
+      const uint8_t *token = NULL;
+      size_t token_length = 0U;
+      WT_EXPECT_STATUS(
+          "a full version negotiation is classified", WT_OK,
+          wt_quic_packet_kind(full_version_negotiation, sizeof(full_version_negotiation), &kind));
+      WT_EXPECT_INT("  as version negotiation", (long)WT_QUIC_PACKET_KIND_VERSION_NEGOTIATION,
+                    (long)kind);
+      WT_EXPECT_STATUS("a version negotiation is not an Initial", WT_ERR_PROTOCOL,
+                       wt_quic_initial_token(full_version_negotiation,
+                                             sizeof(full_version_negotiation), &token,
+                                             &token_length));
+      WT_EXPECT_INT("  leaving no token length", 0, (long)token_length);
+      WT_EXPECT_TRUE("  and no token", token == NULL);
+    }
   }
 
   /* A handshake packet with a 2-byte packet number, a token of zero length and

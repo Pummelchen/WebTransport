@@ -110,7 +110,18 @@ wt_status_t wt_quic_initial_token(const uint8_t *data, size_t length, const uint
 
   c = wt_cursor_init(data, length);
   (void)wt_cursor_u8(&c);
-  if (wt_cursor_bytes(&c, WT_BE32_SIZE) == NULL) return WT_ERR_TRUNCATED;
+  {
+    const uint8_t *version = wt_cursor_bytes(&c, WT_BE32_SIZE);
+    if (version == NULL) return WT_ERR_TRUNCATED;
+    /* A Version Negotiation packet is a long header with version zero, and RFC 9000 section 17.2.1
+     * makes the low bits of its first byte ARBITRARY -- so its type bits can read as Initial, and
+     * its version list then parses as this function's Token Length field and token. Demonstrated
+     * rather than assumed (AUD-0023): a VN packet built with a 0xC0 first byte was accepted here
+     * with a one-byte token. `wt_quic_protected_pn_offset` refuses version zero for the same
+     * reason; this is that guard, and without it a caller cannot tell the two apart -- unlike
+     * `wt_quic_long_header_decode`, this function reports no version. */
+    if (wt_load_be32(version) == WT_QUIC_VERSION_NEGOTIATION) return WT_ERR_PROTOCOL;
+  }
   /* The reader writes through both of its outputs, so it is given somewhere to write: skipping a connection ID is
    * not what it is for, and passing NULL here would be a null dereference rather than a skip. */
   {

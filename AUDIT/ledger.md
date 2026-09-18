@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 20 |
+| DONE | 21 |
 
 Non-terminal (open): 0
-Terminal: 22
+Terminal: 23
 
 ## Tasks
 
@@ -40,6 +40,7 @@ Terminal: 22
 | AUD-0020 | S2 | C | P1 | DONE | The Swift address-sanitizer job ran three tests, not the suite, so the standard's 'sanitizers run the suite' was only partly true | .github/workflows/swift-ci.yml |
 | AUD-0021 | S3 | A | P2 | DONE | Dead local variables were hidden from the compiler by (void) casts, so the earlier unused-code pass could not see them | C99/src/quic/transport_parameters.c:151 |
 | AUD-0022 | S3 | A | P2 | DONE | NEW_TOKEN stored the wire's unvalidated length in a public field that nothing reads, before knowing the token was taken | C99/src/quic/frame.c:259 |
+| AUD-0023 | S2 | A | P2 | DONE | wt_quic_initial_token read a Version Negotiation packet as an Initial with a token, and reported no version the caller could check | C99/src/quic/packet.c:113 |
 
 ## Detail
 
@@ -264,4 +265,14 @@ Terminal: 22
 - fix: Assign it only when the take succeeded, so a refused frame is left zeroed like every other field, and documented the field in `frame.h`: read `length` (the narrowed size that bounds `token` and that the encoder writes), nothing reads `token_length`, and it is kept because removing a field from a public structure is an ABI change under `WT_ABI_VERSION`'s own rule -- a maintainer's decision, not an audit cleanup. Added a regression test to `test_quic_frame.c` beside the existing truncation cases: a NEW_TOKEN whose body is missing must be refused AND must leave no length behind.
 - evidence after: The new check fails against the unfixed code -- `wt_quic_frame: 1 of 1334 checks FAILED`, 1 of 97 tests failing, exit 8 -- and passes with the fix restored: `100% tests passed out of 97`. That is the deliberate-violation proof for the test itself, not just for the code. `check-format.sh` reports all 312 C sources match .clang-format.
 - commit: 52bb353
+
+### AUD-0023 — wt_quic_initial_token read a Version Negotiation packet as an Initial with a token, and reported no version the caller could check
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: parsing | discovered by: the Tier A deep review (AUDIT/tier-a-review.md)
+- where: C99/src/quic/packet.c:113
+- evidence before: RFC 9000 section 17.2.1 makes the low bits of a Version Negotiation packet's first byte ARBITRARY, so its type bits can read as Initial. `wt_quic_initial_token` checked the header form, the fixed bit and the type bits but skipped the version field unread, so the version list parsed as its Token Length field and token. Proven with a probe program linked against the built library: `wt_quic_packet_kind` classified the bytes as VERSION_NEGOTIATION (kind=2) while `wt_quic_initial_token` returned WT_OK with `token_length = 1`. Unlike `wt_quic_long_header_decode`, which reports the version to its caller, this function reports none -- so `read_initial` in server_retry.c had no way to tell, treated the datagram as an Initial, and a crafted version-0 packet with a non-zero 'token' suppressed the server's Retry. `wt_quic_protected_pn_offset` already refuses version zero for exactly this reason, with a comment saying so; this function and `wt_quic_long_header_connection_ids` were the two that did not.
+- fix: Read the version in `wt_quic_initial_token` and refuse version zero with WT_ERR_PROTOCOL, mirroring the guard and the comment `wt_quic_protected_pn_offset` already had. Added a regression test to `test_quic_packet.c` with a full Version Negotiation packet -- connection IDs and a version list, unlike the existing five-byte fixture which is too short to reach the token -- asserting that the packet is classified as version negotiation AND refused as an Initial, with no token and no token length.
+- evidence after: The probe, before: `initial_token -> 0 (WT_OK)`, `token_length accepted -> 1`. After: `initial_token -> 4` (WT_ERR_PROTOCOL), `token_length accepted -> 0`, with `packet_kind` still reporting VERSION_NEGOTIATION. The regression test was proved by deliberate violation: against the unfixed code it fails with `FAIL a version negotiation is not an Initial: want protocol, got ok` (3 of 210 checks, 1 of 97 tests, exit 8), and with the fix `100% tests passed out of 97`. `check-format.sh`: all 312 C sources match.
+- commit: PENDING
 
