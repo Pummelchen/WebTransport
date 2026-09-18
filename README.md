@@ -29,113 +29,18 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
 | Protocol | WebTransport over HTTP/3, draft 16 |
 
-The Swift conformance matrix passes in full. The C99 implementation is **Phases 0
-to 11 complete — including Phase 10's test port, which is the 97 CTest tests below
-— and Phase 12's cross-platform CI runs on every platform and compiler that phase names**: it builds with CMake as a static and shared
-library with three CLI tools and carries the whole stack -- the core utilities, a QUIC wire core and
-crypto layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake
-that runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
-dynamic table, the draft-16 WebTransport session layer, and the public consumer API. It **runs
-sessions**: the conformance tool stands up both endpoints in one process over IPv4 and IPv6,
-`wt-client-c99` and `wt-server-c99` exchange a session in two processes, and
-`C99/scripts/run-container-interop.sh` completes a whole session **and the message exchange** against
-an independent implementation (`pywebtransport`/`aioquic`) in a container -- the peer logs
-`stream in: 13 bytes` / `stream echoed` and the client reports `received 13 byte(s)`. Outside a
-container, `C99/scripts/run-vps-third-party-interop.sh` reproduces **7 of the 7 Phase 11
-proofs**, against **five independent implementations** on a routable host with
-`--trust system`, so the certificate chain is validated against the platform trust store and
-the name is checked rather than bypassed. The 17 September 2026 re-run passed every proof on its
-first attempt, and the environment is reproducible from the repository
-(`C99/tests/interop/deploy-vps-peers.sh`, `reset-vps-peers.sh` and
-`sync-vps-peer-certificates.sh`): from a fresh clone with **no peer images, no base images and no
-build cache**, the deploy script built and started all five peers in 7 m 38 s, and the suite then passed
-7 of 7 against them.
-84 test programs and 65,030 checks pass on macOS 26 (64,778 on Debian 13; the Wine runner sums 64,900
-over the 85 Windows executables), plus a 200,000-input parser fuzz run and a Clang Static
-Analyzer pass over all 106 sources. Every suite runs again under AddressSanitizer and
-UndefinedBehaviorSanitizer, on macOS and Linux in CI: **97 CTest tests pass on macOS 26 and on Linux in
-CI — two `ubuntu-24.04` legs, a `Debian 13 (trixie, gcc)` leg and a `FreeBSD (VM, clang)` leg, all seven
-jobs green in run 35179834689**. The tree also compiles, links and
-**runs** on Windows (85 of 85 test executables
-under Wine, including a Windows-only test of the datagram layer) and FreeBSD 15.1 (the whole suite
-on a real kernel) -- and running the Windows branch is what found and fixed `WT-199` and `WT-200`.
-Windows is covered by four enforced CI legs: `windows-wine` (mingw cross-build, then every test
-under Wine), `windows-native` on `windows-latest` (MSYS2 MINGW64), and `msvc` and `clang-cl`, the two
-compilers the plan's Phase 12 matrix names; a `linux-debian13` leg runs
-the suite in a `debian:trixie` container; and `freebsd` boots a FreeBSD VM on an Ubuntu runner and runs
-the same configure, build and ctest there. Of the plan's
-nine completion criteria **all nine are met**, and Phase 12's required *matrix* is complete on every
-platform and every compiler it names -- the last two took seven fixes that only MSVC and clang-cl
-report (`WT-260`). The
-draft-16 compliance matrix has **46 rows: 42 exercised by a test, two whose status is `--` (server push and
-0-RTT, both deliberately not this tree's), and two `partial`** (Origin policy, which the library exposes but
-leaves to the application, and a session under a connection that changes its connection ID during a handshake).
-Every symbol and test name in the table is resolved by `C99/scripts/check-matrix.sh`, which is what keeps the
-counts above honest. See
-[C99/README.md](C99/README.md) and the
-[C99 implementation plan](C99/IMPLEMENTATION_PLAN.md).
+Both libraries implement the draft-16 session layer, and both are exercised against independent
+implementations rather than only against themselves: the Swift conformance matrix passes in full,
+the C99 suite is 100 CTest tests plus a 57-scenario conformance tool, and the C99 client completes
+sessions and message exchanges against five third-party implementations on a routable host with
+system trust.
 
-1.3.0 added server TLS identity injection, graceful shutdown, connection admission
-limits, and certificate expiry reporting, and was the first release verified end to
-end against a browser. 1.3.1 refuses an inbound stream that the transport delivers
-twice, which a QUIC connection never legitimately does. 1.3.3 attributes the
-remaining establishment failures to the transport and names them in the error it
-reports. 1.3.4 brings the QPACK Required Insert Count onto the encoding RFC 9204
-specifies and bounds the CRYPTO reassembly buffer. The code audit for the 1.3 series was performed by Claude Opus 5.
-
-1.3.6 is a defect-fix release from a further audit of the codecs, the runtime and the
-command-line tools. The one with the widest reach is a **timed-out accept**, which used
-to leave a waiter at the head of the connection queue and swallow the next connection:
-under the documented accept loop every client arriving slower than the one-second
-timeout was lost. Several conformance gaps are closed too — `NEW_CONNECTION_ID` and
-long-header validity, HKDF output length, transport-parameter values, and the
-`retire_prior_to` watermark — and a PKCS#12 bundle whose certificate carries explicit
-curve parameters now throws a catchable error instead of terminating the process. See
-the [release notes](https://github.com/Pummelchen/WebTransport/releases) for the full list.
-
-1.3.8 reports a peer that ends a stream before sending the bytes that stream has to
-begin with as exactly that, instead of as `QUICCodecError.truncated(needed: 1,
-available: 0)`. The runtime read the first chunk of a stream and dropped the
-`endOfStream` flag, so a peer that FINed an inbound stream without writing to it
-produced a message that reads like an internal truncation rather than a peer that is
-not following the protocol. `WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID:)`
-names the stream and the cause, and a read that returns no bytes while the stream is
-still open is now waited out, so "nothing yet" and "the peer is done" cannot be
-confused. Reported in issue #24.
-
-1.3.7 fixes a listener that stopped accepting for the rest of its life once it had
-served `maxConcurrentConnections` sessions in total. The ceiling was handed to
-Network.framework's `newConnectionLimit`, which counts connections over the
-listener's whole life rather than at one time — measured with a minimal listener, a
-limit of 2 accepts two connections and never a third, however long ago the first two
-ended. The default of 16 is low enough to reach in normal operation, and the failure
-was silent: the process stayed healthy, every other transport it served kept working,
-and only new WebTransport sessions timed out. The runtime now counts in-flight
-connections itself and returns each slot when a session ends, and a connection over
-the ceiling is still refused before its handshake is driven. Reported in issue #23;
-see the [release notes](https://github.com/Pummelchen/WebTransport/releases) for the full list.
-
-One change is deliberately not backwards compatible: the built-in development
-certificate is now **refused on any non-loopback bind address**. A server that
-previously bound `0.0.0.0` with default settings now fails at startup with an
-error naming the fix, rather than starting and being unreachable by every real
-client.
-
-Session establishment is reliable on a machine that is not saturated, and degrades
-under heavy CPU contention. On four idle Macs, 4000 loopback sessions per release
-completed without a single failure; with every core saturated on those same
-machines, roughly 1% failed to establish.
-
-The cause is below this package. Network.framework can drop an inbound QUIC stream
-on a saturated host, and when the stream it drops is the peer's HTTP/3 control
-stream, both ends wait for each other. This reproduces with about 50 lines of
-plain `NetworkConnection<QUIC>` and no WebTransport code at all, at 13 connections
-in 1600. Nothing here can recover such a connection, because the stream is never
-resent — which is also why a longer timeout does not help. The runtime reports
-`peerControlStreamNotDelivered` rather than a bare timeout so the condition is
-recognisable; **treat it as a signal to open a new connection**. See the
-[known limitations](https://github.com/Pummelchen/WebTransport/wiki/Known-Limitations)
-before adopting this in production.
+What works today, and what does not, is on the wiki --
+[Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Implementation-Status) and
+[Known Limitations](https://github.com/Pummelchen/WebTransport/wiki/Known-Limitations) -- with the
+per-release evidence in
+[Release and Interoperability](https://github.com/Pummelchen/WebTransport/wiki/Release-and-Interoperability).
+The phase-by-phase development record is in the git history and the release notes.
 
 ## Add the package
 

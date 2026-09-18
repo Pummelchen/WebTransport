@@ -19,7 +19,7 @@ separate CMake C99 library with its own CLI tools and test suite. The two are
 built and tested separately and versioned in lockstep from a single `VERSION` file,
 so a caller pairing them knows the pair is compatible. Both are released together
 (`1.5.2`, one artifact per library under one tag); the C99 side is built and
-exercised — 97 CTest tests, ASan/UBSan, Windows under Wine and natively, and
+exercised — 100 CTest tests, ASan/UBSan, Windows under Wine and natively, and
 FreeBSD in a VM. The
 audience is protocol implementers reading a
 reference implementation, so exact wire behaviour matters more than convenience.
