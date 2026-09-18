@@ -111,7 +111,9 @@ foreach(test IN LISTS WT_UNIT_TESTS)
       unit/test_quic_connection_basics.c
       unit/test_quic_connection_permissions.c
       unit/test_quic_connection_streams.c
+      unit/test_quic_connection_reset.c
       unit/test_quic_connection_ids.c
+      unit/test_quic_connection_id_use.c
       unit/test_quic_connection_retry.c
       unit/test_quic_connection_keys.c
       unit/test_quic_connection_loss.c
