@@ -123,8 +123,11 @@ and the C99 CMake configure both accept a two-component `VERSION` and compare th
 mirror the way the string is printed; a three-component value still validates so the
 existing `1.5.2` line keeps working, but a new release must not add one.
 
-The **ABI version** (`WT_ABI_VERSION`) and the **protocol draft** are separate axes:
-they do not follow the library version and must not be bumped with it.
+The **ABI version** (`WT_ABI_VERSION`, mirrored as `WebTransportVersion.abi`) and the
+**protocol draft** are separate axes: they do not follow the library version and must not
+be bumped with it. They are, however, **identical across the two libraries on a release** —
+a caller pairing them checks one ABI number, so a disagreement is the same class of defect
+as a version mismatch. `check-version-sync.sh` fails on it.
 
 ## Gates
 

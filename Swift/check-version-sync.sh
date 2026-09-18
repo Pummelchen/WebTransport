@@ -93,8 +93,21 @@ c_version="$c_major.$c_minor"
 s_version="$(sed -n 's/.*public static let library = "\([0-9][0-9.]*\)".*/\1/p' "$SWIFT_SOURCE" | head -n1)"
 [ -n "$s_version" ] || fail "$SWIFT_SOURCE: could not read 'public static let library'"
 
+# --- the ABI mirror ----------------------------------------------------------
+# The two libraries must carry the SAME ABI version on a release, even though the
+# ABI is a separate axis from the library version: a caller pairing them checks one
+# number, so a disagreement is the same class of defect as a version mismatch.
+c_abi="$(read_macro "$C99_HEADER" WT_ABI_VERSION)"
+s_abi="$(sed -n 's/.*public static let abi = \([0-9][0-9]*\).*/\1/p' "$SWIFT_SOURCE" | head -n1)"
+[ -n "$c_abi" ] || fail "$C99_HEADER: could not read WT_ABI_VERSION"
+[ -n "$s_abi" ] || fail "$SWIFT_SOURCE: could not read 'public static let abi'"
+
 # --- they must all say the same thing ----------------------------------------
 status=0
+if [ "$c_abi" != "$s_abi" ]; then
+    echo "error: ABI versions disagree: $C99_HEADER declares $c_abi, $SWIFT_SOURCE declares $s_abi; they must be identical on a release" >&2
+    status=1
+fi
 if [ "$c_version" != "$version" ]; then
     echo "error: $C99_HEADER declares $c_version, but $VERSION_FILE says $version" >&2
     status=1

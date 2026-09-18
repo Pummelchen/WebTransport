@@ -15,15 +15,15 @@ the work that is genuinely one item for both is under **Both**.
 
 ### Swift
 
-Changed, and visible to a consumer of the package rather than to its users:
+No user-visible changes.
 
-- **The package refuses unsafe build flags** (`AUD-0017`). The API-compatibility check consumed the
-  package *by path*, so it could not see a configuration that only breaks a consumer — a dependency
-  declared with `unsafeFlags` is rejected by SwiftPM when the package is used as a dependency, but
-  not when it is built in place. The package now refuses such a configuration itself, so the failure
-  happens where the mistake is rather than in the consumer's build.
+One guard was added that is worth knowing about even though it changes no artifact: a repository
+gate (`Swift/check-unsafe-flags.sh`, `AUD-0017`) now refuses a package configuration carrying
+dependency `unsafeFlags`. The API-compatibility check consumed the package *by path*, so it could
+not see this — SwiftPM rejects such a package when it is used as a dependency but builds it happily
+in place — and the gate exists so the mistake is caught here rather than in a consumer's build.
 
-No user-visible behaviour change. The rest of the audit's Swift findings were about enforcement:
+The rest of the audit's Swift findings were about enforcement: The rest of the audit's Swift findings were about enforcement:
 SwiftLint had no committed config and was not run (`AUD-0006`), its rules and the formatter rewrote
 each other's output (`AUD-0013`, `AUD-0014`), one autofix did not compile (`AUD-0016`), and the
 address-sanitizer job ran three tests rather than the suite (`AUD-0020`). The public API surface is
@@ -43,18 +43,22 @@ Fixed:
   a Version Negotiation packet — which has no token and no version the reader can honour — was
   parsed as one and its bytes reported as a token. It also reported no version the caller could
   check, so a caller could not tell which version the peer had answered with. Backed by
-  `C99/tests/unit/test_quic_packet.c`, which now pins every walker's answer for a Version
-  Negotiation packet, and by `AUD-0029`, which executes the two leading guards the defect sat
-  behind.
+  `80f5b1c`, and backed by `C99/tests/unit/test_quic_packet.c`, which pins a Version Negotiation
+  packet's answer and executes the two leading guards the defect sat behind (`AUD-0029`). Before,
+  the version list parsed as a Token Length and a one-byte "token", and the function returned
+  `WT_OK` — which let a crafted version-zero packet suppress the server's Retry, since the caller
+  had no version to check.
 - **`NEW_TOKEN` no longer stores unvalidated wire input in a public field** (`AUD-0022`). The frame
   wrote the wire's declared token length into a public field — one nothing in this build reads —
   before the token had been checked as taken and before its length was known to be sane. The impact
   was latent rather than observable: the field is public, so it is part of what a consumer may read,
   and it held a value from the network rather than a validated one. It is now written only after
   validation.
-- **A QPACK decoder capacity this build cannot honour is refused** (`AUD-0027`). The public API
-  accepted a dynamic-table capacity that cannot work, because nothing in this build parses the QPACK
-  encoder stream. The refusal is now at the API boundary rather than a silent later failure.
+- **A QPACK decoder capacity this build cannot honour is refused, and changing one is no longer
+  silent** (`AUD-0027`, superseded by `7417aec`). 1.5.2 accepted any capacity and, on a changed
+  value, re-initialised the decoder table — discarding whatever the peer had already inserted.
+  `wt_http3_endpoint_set_decoder_capacity` now returns `WT_ERR_STATE` for a second call with a
+  different capacity, and is a no-op when the capacity is unchanged.
 - **The C99 sanitizer configuration builds with gcc** (`AUD-0038`). `-fno-sanitize=function` is a
   clang-only flag, and passing it to gcc made the sanitizer configuration unbuildable — on the one
   leg that would have caught it, because CI excluded it. The flag is now applied only when the
@@ -62,13 +66,24 @@ Fixed:
 
 Added:
 
-- **The QPACK dynamic table is wired into the C99 HTTP/3 endpoint** (`WT-265`). The encoder and
-  decoder stream handling is reachable from the endpoint rather than only from the core.
-  **This moves `WT_ABI_VERSION` from 1 to 2**, because it changes the public
-  `C99/include/webtransport/http3/endpoint.h`: a caller compiled against 1.5.2 must recompile. The
-  library version and the ABI version are separate axes, and this release moves both — the version
-  because a release is a release, the ABI because a public layout changed. Backed by
-  `C99/tests/unit/test_http3_endpoint.c`.
+- **The QPACK dynamic-table receive half is implemented and reachable through the public API**
+  (`WT-265`). `wt_http3_endpoint_set_decoder_capacity` now honours a non-zero capacity, the endpoint
+  applies the peer's encoder-stream instructions (`wt_http3_endpoint_on_qpack_encoder_bytes`) and
+  reports how much of a chunk it consumed, and it writes Insert Count Increment and Section
+  Acknowledgment (`wt_http3_endpoint_write_qpack_decoder_acks`). Before this release the encoder
+  stream could not be parsed at all, so any dynamic reference from a peer failed with a
+  decompression error that blamed the peer. This is the feature `AUD-0027` pointed at, and it is
+  library-level: the shipped C99 tools call neither new function, so their wire behaviour is
+  unchanged. Backed by `C99/tests/unit/test_http3_endpoint_requests.c`
+  (`test_the_dynamic_table_is_filled_and_acknowledged`, and the re-pointed
+  `test_request_headers_are_decoded`).
+- **This release moves `WT_ABI_VERSION` from 1 to 2.** The public `wt_http3_endpoint_t` gained a
+  field (`uint64_t decoder_acked_insert_count`), so a consumer compiled against an earlier header
+  must recompile, and `wt_abi_version()` returns 2. `WebTransportVersion.abi` is 2 as well: the two
+  libraries' ABI versions are identical on a release, and `check-version-sync.sh` now fails if they
+  differ. The library version and the ABI version are separate axes; this release moves both, the
+  version because a release is a release and the ABI because a public layout changed. Backed by
+  `C99/tests/unit/test_version.c` (`wt_abi_version() == WT_ABI_VERSION`) and the Swift gate.
 
 Checks: `C99/scripts/build-and-test.sh` — **105 CTest tests** in Debug, Release and ASan+UBSan — a
 fresh scratch configure and build with **0 warnings** scanned from the log, and
