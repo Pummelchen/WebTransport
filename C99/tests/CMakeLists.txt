@@ -72,6 +72,7 @@ set(WT_UNIT_TESTS
   test_cli_report
   test_http3_driver
   test_http3_driver_streams
+  test_http3_driver_capsules
   test_http3_endpoint
   test_http3_limits
   test_http3_malformed
