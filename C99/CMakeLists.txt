@@ -159,6 +159,8 @@ set(WT_QUIC_SOURCES
   src/quic/varint.c
   src/quic/packet_number.c
   src/quic/frame.c
+  src/quic/frame_names.c
+  src/quic/frame_encode.c
   src/quic/packet.c
   src/quic/packet_encode.c
   src/quic/transport_parameters.c
