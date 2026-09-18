@@ -19,7 +19,7 @@ separate CMake C99 library with its own CLI tools and test suite. The two are
 built and tested separately and versioned in lockstep from a single `VERSION` file,
 so a caller pairing them knows the pair is compatible. Both are released together
 (`1.5.2`, one artifact per library under one tag); the C99 side is built and
-exercised — 100 CTest tests, ASan/UBSan, Windows under Wine and natively, and
+exercised — 105 CTest tests, ASan/UBSan, Windows under Wine and natively, and
 FreeBSD in a VM. The
 audience is protocol implementers reading a
 reference implementation, so exact wire behaviour matters more than convenience.
@@ -112,6 +112,16 @@ C99-only build cannot produce a library whose filename and whose
 `wt_version_string()` disagree. The C99 tests derive the expected string from the
 header (`WT_TEST_VERSION_STRING`) instead of repeating a literal, because a literal
 is a second place to bump.
+
+**Releases are `MAJOR.MINOR`** — never `X.Y.Z`. A bug-fix release moves the minor
+number (`1.5` -> `1.6`), because from a caller's side a fix and a feature are the same
+thing: a new number to pair. The `WT_VERSION_PATCH` macro is kept and is always `0`
+for a release — it is part of the public header and removing it would stop existing
+consumers compiling — and `wt_version_string()` prints `1.6` rather than `1.6.0`, so
+the string agrees with the tag and with the artifact names. `check-version-sync.sh`
+and the C99 CMake configure both accept a two-component `VERSION` and compare the
+mirror the way the string is printed; a three-component value still validates so the
+existing `1.5.2` line keeps working, but a new release must not add one.
 
 The **ABI version** (`WT_ABI_VERSION`) and the **protocol draft** are separate axes:
 they do not follow the library version and must not be bumped with it.

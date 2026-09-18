@@ -12,7 +12,8 @@
 /// recompiled at the new number rather than left behind on the old one — the
 /// version tracks the release, not the diff.
 public enum WebTransportVersion {
-    /// The library version, `MAJOR.MINOR.PATCH`. Mirrors `VERSION`.
+    /// The library version, `MAJOR.MINOR` -- releases carry no third component. Mirrors
+    /// `VERSION`.
     public static let library = "1.5.2"
 
     /// The ABI version this build exposes.

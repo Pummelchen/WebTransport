@@ -35,7 +35,8 @@ extern "C" {
  * an earlier header would get wrong. */
 #define WT_ABI_VERSION 2
 
-/* "MAJOR.MINOR.PATCH" from the macros above. Static storage; never freed. No
+/* "MAJOR.MINOR" from the macros above -- releases carry no third component, so a
+ * zero patch prints as nothing; see version.c. Static storage; never freed. No
  * literal here to go stale -- the string is stringified from them. */
 const char *wt_version_string(void);
 

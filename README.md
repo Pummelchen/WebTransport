@@ -31,7 +31,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 Both libraries implement the draft-16 session layer, and both are exercised against independent
 implementations rather than only against themselves: the Swift conformance matrix passes in full,
-the C99 suite is 100 CTest tests plus a 57-scenario conformance tool, and the C99 client completes
+the C99 suite is 105 CTest tests plus a 57-scenario conformance tool, and the C99 client completes
 sessions and message exchanges against five third-party implementations on a routable host with
 system trust.
 

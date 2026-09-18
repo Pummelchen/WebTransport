@@ -39,13 +39,20 @@ read_macro() {  # <file> <MACRO>
 # --- the authoritative value -------------------------------------------------
 [ -f "$VERSION_FILE" ] || fail "$VERSION_FILE is missing; it is the single source of the library version"
 version="$(head -n1 "$VERSION_FILE" | tr -d '[:space:]')"
-printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
-    || fail "$VERSION_FILE must be MAJOR.MINOR.PATCH (got '$version')"
+# Releases are MAJOR.MINOR. A third component is still accepted so the existing
+# 1.5.2 line keeps validating, but a release must not introduce one: the C99 side
+# prints no patch when it is 0, so a three-part release would ship a version
+# string that disagrees with the tag.
+printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+    || fail "$VERSION_FILE must be MAJOR.MINOR (got '$version')"
 
 major="${version%%.*}"
 rest="${version#*.}"
 minor="${rest%%.*}"
-patch="${rest#*.}"
+case "$rest" in
+    *.*) patch="${rest#*.}" ;;
+    *) patch=0 ;;
+esac
 
 # `--write` propagates VERSION into the two mirrors, so a release needs one edit
 # (VERSION) plus one command -- not three careful edits and a hope. It runs
@@ -75,6 +82,12 @@ c_patch="$(read_macro "$C99_HEADER" WT_VERSION_PATCH)"
 [ -n "$c_major" ] && [ -n "$c_minor" ] && [ -n "$c_patch" ] \
     || fail "$C99_HEADER: could not read WT_VERSION_MAJOR/MINOR/PATCH"
 
+# The mirror is read back the way wt_version_string() prints it: a zero patch is
+# omitted, so a release at 1.6 is compared as "1.6" and not "1.6.0". Without this
+# the write below succeeds and the comparison immediately rejects its own output.
+c_version="$c_major.$c_minor"
+[ "$c_patch" = "0" ] || c_version="$c_version.$c_patch"
+
 # --- the Swift mirror --------------------------------------------------------
 [ -f "$SWIFT_SOURCE" ] || fail "$SWIFT_SOURCE is missing"
 s_version="$(sed -n 's/.*public static let library = "\([0-9][0-9.]*\)".*/\1/p' "$SWIFT_SOURCE" | head -n1)"
@@ -82,8 +95,8 @@ s_version="$(sed -n 's/.*public static let library = "\([0-9][0-9.]*\)".*/\1/p' 
 
 # --- they must all say the same thing ----------------------------------------
 status=0
-if [ "$c_major.$c_minor.$c_patch" != "$version" ]; then
-    echo "error: $C99_HEADER declares $c_major.$c_minor.$c_patch, but $VERSION_FILE says $version" >&2
+if [ "$c_version" != "$version" ]; then
+    echo "error: $C99_HEADER declares $c_version, but $VERSION_FILE says $version" >&2
     status=1
 fi
 if [ "$s_version" != "$version" ]; then

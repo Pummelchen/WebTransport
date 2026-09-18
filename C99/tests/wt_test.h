@@ -39,9 +39,14 @@
  * A preprocessor concatenation, so it is usable as a WT_EXPECT_STR `want`. */
 #define WT_TEST_STRINGIFY_INNER(x) #x
 #define WT_TEST_STRINGIFY(x) WT_TEST_STRINGIFY_INNER(x)
+#if WT_VERSION_PATCH == 0
+#define WT_TEST_VERSION_STRING                                                                     \
+  WT_TEST_STRINGIFY(WT_VERSION_MAJOR) "." WT_TEST_STRINGIFY(WT_VERSION_MINOR)
+#else
 #define WT_TEST_VERSION_STRING                                                                     \
   WT_TEST_STRINGIFY(WT_VERSION_MAJOR)                                                              \
   "." WT_TEST_STRINGIFY(WT_VERSION_MINOR) "." WT_TEST_STRINGIFY(WT_VERSION_PATCH)
+#endif
 
 /* Shared rather than file-local so a test may be built from more than one translation
  * unit: a `static` tally would leave each file counting into its own copy, and

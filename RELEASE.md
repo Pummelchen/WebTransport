@@ -51,8 +51,10 @@ hope.
 - **One authoritative value.** A file at the repository root — `VERSION` for a
   semantic version, `BUILD_NUMBER` for a build number. Anywhere else it appears
   is a **mirror**, and the build or CI must fail when a mirror disagrees.
-- **Pick one scheme and state it.** Semantic versions (`vX.Y.Z`) or build numbers
-  (`b1`, `b2`). Do not mix them, and do not "helpfully" introduce versions into a
+- **Pick one scheme and state it.** Semantic versions (`vX.Y` or `vX.Y.Z`) or build
+  numbers (`b1`, `b2`). Whichever you pick, a release must not *introduce* a further
+  component: if the scheme is `X.Y`, a bug-fix release is `X.(Y+1)` and not `X.Y.1`.
+  Do not mix them, and do not "helpfully" introduce versions into a
   project that uses build numbers.
 - **The build refuses a malformed or inconsistent identity.** Fail at configure
   or compile time, not at release time.

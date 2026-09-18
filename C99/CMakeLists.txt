@@ -30,9 +30,9 @@ if(NOT EXISTS "${WT_VERSION_FILE}")
 endif()
 file(STRINGS "${WT_VERSION_FILE}" WT_VERSION LIMIT_COUNT 1)
 string(STRIP "${WT_VERSION}" WT_VERSION)
-if(NOT WT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+if(NOT WT_VERSION MATCHES "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$")
   message(FATAL_ERROR
-    "VERSION must be MAJOR.MINOR.PATCH (got '${WT_VERSION}' in ${WT_VERSION_FILE})")
+    "VERSION must be MAJOR.MINOR (got '${WT_VERSION}' in ${WT_VERSION_FILE})")
 endif()
 
 # The header is a MIRROR of that value, so verify it agrees here as well.
@@ -57,8 +57,12 @@ foreach(WT_PART MAJOR MINOR PATCH)
   endif()
   set(WT_HEADER_${WT_PART} "${CMAKE_MATCH_1}")
 endforeach()
-set(WT_HEADER_VERSION
-  "${WT_HEADER_MAJOR}.${WT_HEADER_MINOR}.${WT_HEADER_PATCH}")
+# Read back the way wt_version_string() prints it: a zero patch is omitted, so a
+# release at 1.6 compares as "1.6". The macros keep the third component.
+set(WT_HEADER_VERSION "${WT_HEADER_MAJOR}.${WT_HEADER_MINOR}")
+if(NOT WT_HEADER_PATCH EQUAL 0)
+  set(WT_HEADER_VERSION "${WT_HEADER_VERSION}.${WT_HEADER_PATCH}")
+endif()
 if(NOT WT_HEADER_VERSION STREQUAL WT_VERSION)
   message(FATAL_ERROR
     "version mismatch: ${WT_VERSION_FILE} says ${WT_VERSION} but "
