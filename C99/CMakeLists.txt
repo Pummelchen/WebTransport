@@ -205,6 +205,7 @@ set(WT_TLS_SOURCES
   src/tls/keyschedule.c
   src/tls/extension.c
   src/tls/handshake.c
+  src/tls/handshake_messages.c
   src/tls/keyshare.c
   src/tls/self_signed.c
   src/tls/trust.c
