@@ -10,9 +10,9 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | --- | --- |
 | BLOCKED | 2 |
 | DONE | 12 |
-| OPEN | 2 |
+| OPEN | 3 |
 
-Non-terminal (open): 2
+Non-terminal (open): 3
 Terminal: 14
 
 ## Tasks
@@ -35,6 +35,7 @@ Terminal: 14
 | AUD-0014 | S1 | A | P1 | DONE | SwiftLint opening_brace conflicts with the committed formatter's multi-line condition style | .swiftlint.yml |
 | AUD-0015 | S3 | A | P1 | DONE | identifier_name: rename what is internal, exclude only RFC-registry and public-API names | .swiftlint.yml |
 | AUD-0016 | S1 | A | P1 | DONE | SwiftLint redundant_void_return's fix does not compile | .swiftlint.yml |
+| AUD-0017 | S2 | B | P1 | OPEN | The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage | Swift/check-api-compatibility.sh |
 
 ## Detail
 
@@ -96,7 +97,7 @@ Terminal: 14
 - where: Package.swift
 - evidence before: git ls-files shows no .swiftlint.yml; no workflow step invokes swiftlint; `swiftlint lint Swift/Sources` reports 317 findings (292 warning, 25 error) that nothing consumes
 - fix: In progress. Added the committed .swiftlint.yml the standard requires: SwiftLint's default rules plus opt_in force_unwrapping, line_length aligned to the committed .swift-format 160 and file_length to the repository's documented 1000-line ceiling, with five justified rule deviations each carrying its own task (AUD-0012..AUD-0016). Fixed every non-structural finding: 10 force_unwraps and 1 force-try (production and tests), 3 lossy String(decoding:), 4 orphaned doc comments, 18 naming findings, and the mechanical correctables.
-- evidence after: Unconfigured `swiftlint lint`: 556 findings -> 58 with the committed config, and all 58 are now function-level: 40 function_body_length, 18 cyclomatic_complexity (every type_body_length finding is fixed by splitting the eleven oversized types into extensions). Every other rule is at zero, including the opt-in force_unwrapping. `swift test` 400 passed; `swift format lint --strict` exits 0. The CI gate is still not wired, because it cannot be green until those 69 findings are refactored rather than configured away.
+- evidence after: Unconfigured `swiftlint lint`: 556 findings -> 55 with the committed config, and 55 remain, all function-level (37 function_body_length, 18 cyclomatic_complexity) (every type_body_length finding is fixed by splitting the eleven oversized types into extensions). Every other rule is at zero, including the opt-in force_unwrapping. `swift test` 400 passed; `swift format lint --strict` exits 0. The CI gate is still not wired, because it cannot be green until those 69 findings are refactored rather than configured away.
 - commit: 
 
 ### AUD-0007 — Ruff has no config, so B, E722, S101 and PT are not enabled
@@ -198,5 +199,15 @@ Terminal: 14
 - evidence before: `swiftlint --fix` removed an explicit `-> Void` from a closure in WebTransportLoopbackTestLockTests; `swift build --build-tests` then failed with `result of call to 'withLockAsync(label:maximumWait:filePath:_:)' is unused`
 - fix: Rule disabled with the reproduction: the closure's signature participates in generic inference, so dropping `-> Void` makes `withLockAsync` return a non-Void whose result is unused under strict memory safety. The `-> Void` is restored and commented as load-bearing.
 - evidence after: `swift build --build-tests` succeeds; `swift test` 400 passed; `swift format lint --strict` accepts the restored signature
+- commit: 
+
+### AUD-0017 — The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage
+
+- severity: S2 | tier: B | project: P1 | status: OPEN | host: Mac14,3
+- category: tests | discovered by: AUD-0008
+- where: Swift/check-api-compatibility.sh
+- evidence before: Found while testing AUD-0008: adding `.unsafeFlags(["-require-explicit-sendable"])` to the library targets still let `./Swift/check-api-compatibility.sh` pass. SwiftPM refuses unsafe build flags only for VERSION-BASED dependencies, and the check builds a consumer with `.package(path: ...)`, so the one gate whose job is to prove a consumer still builds is structurally unable to catch a change that stops consumers building.
+- fix: 
+- evidence after: 
 - commit: 
 
