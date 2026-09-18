@@ -19,12 +19,12 @@ separate CMake C99 library with its own CLI tools and test suite. The two are
 built and tested separately and versioned in lockstep from a single `VERSION` file,
 so a caller pairing them knows the pair is compatible. Both are released together
 (`1.5.2`, one artifact per library under one tag); the C99 side is built and
-exercised — 105 CTest tests, ASan/UBSan, Windows under Wine and natively, and
+exercised — 100 CTest tests, ASan/UBSan, Windows under Wine and natively, and
 FreeBSD in a VM. The
 audience is protocol implementers reading a
 reference implementation, so exact wire behaviour matters more than convenience.
-Open work is tracked on the repository's wiki — [Project Tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker)
-and the C99 tree's [Project Tracker C99](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker-C99) —
+Open work is tracked in exactly one place, the repository wiki's
+[Project Tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker) —
 not as TODO markers in the tree.
 
 ## Layout
@@ -113,16 +113,6 @@ C99-only build cannot produce a library whose filename and whose
 header (`WT_TEST_VERSION_STRING`) instead of repeating a literal, because a literal
 is a second place to bump.
 
-**Releases are `MAJOR.MINOR`** — never `X.Y.Z`. A bug-fix release moves the minor
-number (`1.5` -> `1.6`), because from a caller's side a fix and a feature are the same
-thing: a new number to pair. The `WT_VERSION_PATCH` macro is kept and is always `0`
-for a release — it is part of the public header and removing it would stop existing
-consumers compiling — and `wt_version_string()` prints `1.6` rather than `1.6.0`, so
-the string agrees with the tag and with the artifact names. `check-version-sync.sh`
-and the C99 CMake configure both accept a two-component `VERSION` and compare the
-mirror the way the string is printed; a three-component value still validates so the
-existing `1.5.2` line keeps working, but a new release must not add one.
-
 The **ABI version** (`WT_ABI_VERSION`) and the **protocol draft** are separate axes:
 they do not follow the library version and must not be bumped with it.
 
@@ -207,6 +197,26 @@ they do not follow the library version and must not be bumped with it.
 - The built-in development certificate is refused on any non-loopback bind
   address, so a server that previously bound `0.0.0.0` now fails at startup by
   design.
+
+## Task tracker
+
+Open work lives in exactly one place: the wiki's **[Project Tracker](https://github.com/Pummelchen/WebTransport/wiki/Project-Tracker)**.
+It is a single table under `## Tasks`, and it is the only backlog — no Open/Blocked/
+Parked sections, no second list, status is a column rather than a heading.
+
+The rules that govern the table — the columns, the four types, the three statuses, the
+S/M/L sizes, ownership, and the ordering that *is* the priority — are defined once in
+[`docs/task-table-standard.md`](docs/task-table-standard.md). Read it before adding,
+changing or closing a row.
+
+- **An epic is a project, not a row.** Split it until each row is one independently
+  closable outcome.
+- **IDs are stable and never reused.** Closing deletes the row; the gap is correct.
+- **Every row has a next step.** If you cannot name one, split it, block it or park it.
+- **History does not live in the table.** What was tried, measured or rejected goes to
+  `CHANGELOG.md` and the closing commit; the open row links to the evidence.
+- **Update a row the moment its state changes**, and read the table top to bottom
+  before starting work — the top Open row is the default next task.
 
 ## Releasing
 
