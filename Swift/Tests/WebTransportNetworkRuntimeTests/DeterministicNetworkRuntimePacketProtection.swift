@@ -24,18 +24,34 @@ enum QUICInitialPacketProtection {
         var payloadEndOffset: Int
     }
 
-    static func seal(
-        packetType: QUICPacketType,
-        version: UInt32,
-        destinationConnectionID: Data,
-        sourceConnectionID: Data,
-        token: Data,
-        packetNumber: UInt64,
-        packetNumberLength: Int,
-        plaintextPayload: Data,
-        keyPhase: KeyPhase,
-        initialSecretConnectionID: Data
-    ) throws -> Data {
+    /// Everything one sealed packet is built from, as a single value.
+    ///
+    /// A struct rather than ten parameters: they are one packet's header plus its payload,
+    /// which is how RFC 9001 describes the sealing input, and ten was over SwiftLint's limit.
+    struct SealRequest {
+        var packetType: QUICPacketType
+        var version: UInt32
+        var destinationConnectionID: Data
+        var sourceConnectionID: Data
+        var token: Data
+        var packetNumber: UInt64
+        var packetNumberLength: Int
+        var plaintextPayload: Data
+        var keyPhase: KeyPhase
+        var initialSecretConnectionID: Data
+    }
+
+    static func seal(_ request: SealRequest) throws -> Data {
+        let packetType = request.packetType
+        let version = request.version
+        let destinationConnectionID = request.destinationConnectionID
+        let sourceConnectionID = request.sourceConnectionID
+        let token = request.token
+        let packetNumber = request.packetNumber
+        let packetNumberLength = request.packetNumberLength
+        let plaintextPayload = request.plaintextPayload
+        let keyPhase = request.keyPhase
+        let initialSecretConnectionID = request.initialSecretConnectionID
         guard packetType == .initial else {
             throw WebTransportNetworkRuntimeError.unexpectedPacket
         }

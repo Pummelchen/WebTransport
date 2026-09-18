@@ -250,35 +250,40 @@ enum WebTransportProcessSupport {
     }
 
     // internal because the interop hook test that calls it is in another file
+    /// The ten description fields a proof file records, as one value.
+    internal struct ExternalInteropProofRequest {
+        var implementation: String
+        var endpoint: String
+        var authority: String
+        var path: String
+        var origin: String
+        var wtProtocol: String
+        var transport: String
+        var trust: String
+        var message: String
+        var timeoutMilliseconds: String
+    }
+
     internal static func writeExternalInteropProof(
-        implementation: String,
-        endpoint: String,
-        authority: String,
-        path: String,
-        origin: String,
-        wtProtocol: String,
-        transport: String,
-        trust: String,
-        message: String,
-        timeoutMilliseconds: String,
+        _ request: ExternalInteropProofRequest,
         result: ProcessResult
     ) throws {
         let directory = packageDirectory.appendingPathComponent(".build/external-interop", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let proof: [String: Any] = [
             "timestamp": ISO8601DateFormatter().string(from: Date()),
-            "independentImplementation": implementation,
-            "endpoint": endpoint,
-            "authority": authority,
-            "path": path,
-            "origin": origin == "none" ? NSNull() : origin,
-            "protocol": wtProtocol == "none" ? NSNull() : wtProtocol,
-            "transport": transport,
-            "trust": trust,
-            "message": message,
-            "timeoutMilliseconds": Int(timeoutMilliseconds) ?? 0,
+            "independentImplementation": request.implementation,
+            "endpoint": request.endpoint,
+            "authority": request.authority,
+            "path": request.path,
+            "origin": request.origin == "none" ? NSNull() : request.origin,
+            "protocol": request.wtProtocol == "none" ? NSNull() : request.wtProtocol,
+            "transport": request.transport,
+            "trust": request.trust,
+            "message": request.message,
+            "timeoutMilliseconds": Int(request.timeoutMilliseconds) ?? 0,
             "exitCode": Int(result.exitCode),
-            "passed": result.exitCode == 0 && result.stdout.contains("connected") && result.stdout.contains(message),
+            "passed": result.exitCode == 0 && result.stdout.contains("connected") && result.stdout.contains(request.message),
             "stdout": result.stdout,
             "stderr": result.stderr,
         ]

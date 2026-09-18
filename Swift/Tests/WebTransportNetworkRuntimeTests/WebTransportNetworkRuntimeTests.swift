@@ -249,20 +249,21 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
     }
 
     let mismatchedServerInitial = try QUICInitialPacketProtection.seal(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
-        destinationConnectionID: Data([0x01, 0x02, 0x03, 0x04]),
-        sourceConnectionID: decodedRequest.destinationConnectionID,
-        token: Data(),
-        packetNumber: 0,
-        packetNumberLength: 2,
-        plaintextPayload: try QUICFrame.encodeFrames([
-            .ack(largestAcknowledged: decodedRequest.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
-            .crypto(offset: 0, data: Data("WT-QUIC-SERVER-FLIGHT\0hello".utf8)),
-        ]),
-        keyPhase: .server,
-        initialSecretConnectionID: decodedRequest.destinationConnectionID
-    )
+        QUICInitialPacketProtection.SealRequest(
+            packetType: .initial,
+            version: WebTransportQUICPacketProbeCodec.quicVersion,
+            destinationConnectionID: Data([0x01, 0x02, 0x03, 0x04]),
+            sourceConnectionID: decodedRequest.destinationConnectionID,
+            token: Data(),
+            packetNumber: 0,
+            packetNumberLength: 2,
+            plaintextPayload: try QUICFrame.encodeFrames([
+                .ack(largestAcknowledged: decodedRequest.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
+                .crypto(offset: 0, data: Data("WT-QUIC-SERVER-FLIGHT\0hello".utf8)),
+            ]),
+            keyPhase: .server,
+            initialSecretConnectionID: decodedRequest.destinationConnectionID
+        ))
     #expect(throws: Error.self) {
         _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
             mismatchedServerInitial,
@@ -396,20 +397,7 @@ private func protectedClientInitial(
 ) throws -> Data {
     var payload = try QUICFrame.encodeFrames(frames)
     var encoded = try QUICInitialPacketProtection.seal(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
-        destinationConnectionID: destinationConnectionID,
-        sourceConnectionID: sourceConnectionID,
-        token: Data(),
-        packetNumber: 0,
-        packetNumberLength: 2,
-        plaintextPayload: payload,
-        keyPhase: .client,
-        initialSecretConnectionID: destinationConnectionID
-    )
-    while padToMinimumInitialSize && encoded.count < WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes {
-        payload.append(0x00)
-        encoded = try QUICInitialPacketProtection.seal(
+        QUICInitialPacketProtection.SealRequest(
             packetType: .initial,
             version: WebTransportQUICPacketProbeCodec.quicVersion,
             destinationConnectionID: destinationConnectionID,
@@ -420,7 +408,22 @@ private func protectedClientInitial(
             plaintextPayload: payload,
             keyPhase: .client,
             initialSecretConnectionID: destinationConnectionID
-        )
+        ))
+    while padToMinimumInitialSize && encoded.count < WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes {
+        payload.append(0x00)
+        encoded = try QUICInitialPacketProtection.seal(
+            QUICInitialPacketProtection.SealRequest(
+                packetType: .initial,
+                version: WebTransportQUICPacketProbeCodec.quicVersion,
+                destinationConnectionID: destinationConnectionID,
+                sourceConnectionID: sourceConnectionID,
+                token: Data(),
+                packetNumber: 0,
+                packetNumberLength: 2,
+                plaintextPayload: payload,
+                keyPhase: .client,
+                initialSecretConnectionID: destinationConnectionID
+            ))
     }
     return encoded
 }
@@ -433,17 +436,18 @@ private func protectedServerInitial(
         [.ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: [])]
         + (try TLSHandshakeFlight(messages: messages).cryptoFrames(maxFramePayloadBytes: 9))
     return try QUICInitialPacketProtection.seal(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
-        destinationConnectionID: request.sourceConnectionID,
-        sourceConnectionID: request.destinationConnectionID,
-        token: Data(),
-        packetNumber: 0,
-        packetNumberLength: 2,
-        plaintextPayload: try QUICFrame.encodeFrames(frames),
-        keyPhase: .server,
-        initialSecretConnectionID: request.destinationConnectionID
-    )
+        QUICInitialPacketProtection.SealRequest(
+            packetType: .initial,
+            version: WebTransportQUICPacketProbeCodec.quicVersion,
+            destinationConnectionID: request.sourceConnectionID,
+            sourceConnectionID: request.destinationConnectionID,
+            token: Data(),
+            packetNumber: 0,
+            packetNumberLength: 2,
+            plaintextPayload: try QUICFrame.encodeFrames(frames),
+            keyPhase: .server,
+            initialSecretConnectionID: request.destinationConnectionID
+        ))
 }
 
 private func clientHelloForValidationTest(

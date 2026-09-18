@@ -273,16 +273,19 @@ func webTransportExternalInteropHookRunsWhenConfigured() throws {
         #expect(result.stdout.contains("connected"))
         #expect(result.stdout.contains(message))
         try WebTransportProcessSupport.writeExternalInteropProof(
-            implementation: environment["WEBTRANSPORT_EXTERNAL_INTEROP_IMPLEMENTATION"] ?? "configured independent WebTransport endpoint",
-            endpoint: endpoint,
-            authority: authority,
-            path: path,
-            origin: origin,
-            wtProtocol: wtProtocol,
-            transport: transport,
-            trust: trust,
-            message: message,
-            timeoutMilliseconds: timeoutMilliseconds,
+            WebTransportProcessSupport.ExternalInteropProofRequest(
+                implementation: environment["WEBTRANSPORT_EXTERNAL_INTEROP_IMPLEMENTATION"]
+                    ?? "configured independent WebTransport endpoint",
+                endpoint: endpoint,
+                authority: authority,
+                path: path,
+                origin: origin,
+                wtProtocol: wtProtocol,
+                transport: transport,
+                trust: trust,
+                message: message,
+                timeoutMilliseconds: timeoutMilliseconds
+            ),
             result: result
         )
     }

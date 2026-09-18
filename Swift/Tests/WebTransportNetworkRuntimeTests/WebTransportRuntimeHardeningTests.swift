@@ -107,20 +107,7 @@ private func protectedClientInitialForRuntimeHardening(
         try TLSHandshakeFlight(messages: [hello]).cryptoFrames(maxFramePayloadBytes: 8) + [.ping]
     )
     var encoded = try QUICInitialPacketProtection.seal(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
-        destinationConnectionID: Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65]),
-        sourceConnectionID: Data([0x77, 0x74, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e]),
-        token: Data(),
-        packetNumber: 0,
-        packetNumberLength: 2,
-        plaintextPayload: payload,
-        keyPhase: .client,
-        initialSecretConnectionID: Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65])
-    )
-    while encoded.count < WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes {
-        payload.append(0x00)
-        encoded = try QUICInitialPacketProtection.seal(
+        QUICInitialPacketProtection.SealRequest(
             packetType: .initial,
             version: WebTransportQUICPacketProbeCodec.quicVersion,
             destinationConnectionID: Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65]),
@@ -131,7 +118,22 @@ private func protectedClientInitialForRuntimeHardening(
             plaintextPayload: payload,
             keyPhase: .client,
             initialSecretConnectionID: Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65])
-        )
+        ))
+    while encoded.count < WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes {
+        payload.append(0x00)
+        encoded = try QUICInitialPacketProtection.seal(
+            QUICInitialPacketProtection.SealRequest(
+                packetType: .initial,
+                version: WebTransportQUICPacketProbeCodec.quicVersion,
+                destinationConnectionID: Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65]),
+                sourceConnectionID: Data([0x77, 0x74, 0x2d, 0x63, 0x6c, 0x69, 0x65, 0x6e]),
+                token: Data(),
+                packetNumber: 0,
+                packetNumberLength: 2,
+                plaintextPayload: payload,
+                keyPhase: .client,
+                initialSecretConnectionID: Data([0x77, 0x74, 0x2d, 0x73, 0x65, 0x72, 0x76, 0x65])
+            ))
     }
     return encoded
 }
