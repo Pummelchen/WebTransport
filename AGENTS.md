@@ -18,7 +18,7 @@ plus layered QUIC/TLS/HTTP-3 modules and two CLI peers) and, under `C99/`, a
 separate CMake C99 library with its own CLI tools and test suite. The two are
 built and tested separately and versioned in lockstep from a single `VERSION` file,
 so a caller pairing them knows the pair is compatible. Both are released together
-(`1.6`, one artifact per library under one tag); the C99 side is built and
+(`1.7`, one artifact per library under one tag); the C99 side is built and
 exercised — 105 CTest tests, ASan/UBSan, Windows under Wine and natively, and
 FreeBSD in a VM. The
 audience is protocol implementers reading a
@@ -102,7 +102,7 @@ compatible, so the unchanged one is recompiled at the new number rather than lef
 behind.
 
 **The lockstep is landed and enforced.** `VERSION` at the repository root (currently
-`1.6`) is the single source; it is mirrored in
+`1.7`) is the single source; it is mirrored in
 `C99/include/webtransport/version.h` (`WT_VERSION_MAJOR/MINOR/PATCH`) and in
 `Swift/Sources/WebTransport/WebTransportVersion.swift` (`WebTransportVersion.library`).
 A bump is one edit plus one command: write `VERSION`, then run
@@ -117,7 +117,7 @@ is a second place to bump.
 number (`1.5` -> `1.6`), because from a caller's side a fix and a feature are the same
 thing: a new number to pair. The `WT_VERSION_PATCH` macro is kept and is always `0`
 for a release — it is part of the public header and removing it would stop existing
-consumers compiling — and `wt_version_string()` prints `1.6` rather than `1.6.0`, so
+consumers compiling — and `wt_version_string()` prints `1.7` rather than `1.7.0`, so
 the string agrees with the tag and with the artifact names. `check-version-sync.sh`
 and the C99 CMake configure both accept a two-component `VERSION` and compare the
 mirror the way the string is printed; a three-component value still validates so the

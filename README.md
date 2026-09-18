@@ -23,7 +23,7 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 
 | | |
 | --- | --- |
-| Latest release | [1.6](https://github.com/Pummelchen/WebTransport/releases/tag/1.6) |
+| Latest release | [1.7](https://github.com/Pummelchen/WebTransport/releases/tag/1.7) |
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 27 or later, Swift 6.4 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
@@ -47,7 +47,7 @@ The phase-by-phase development record is in the git history and the release note
 ```swift
 .package(
     url: "https://github.com/Pummelchen/WebTransport.git",
-    exact: "1.6"
+    exact: "1.7"
 )
 ```
 
@@ -112,14 +112,14 @@ See [Implementation Status](https://github.com/Pummelchen/WebTransport/wiki/Impl
 
 ## Prebuilt binaries
 
-The [1.6 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.6)
+The [1.7 release](https://github.com/Pummelchen/WebTransport/releases/tag/1.7)
 carries **both libraries** of this repository, at the same version, with the source of
 both as the Release's own source archives:
 
-- `WebTransport-swift-1.6-macos-arm64.tar.gz` — `WebTransportClient`,
+- `WebTransport-swift-1.7-macos-arm64.tar.gz` — `WebTransportClient`,
   `WebTransportServer`, `SHA256SUMS`, `LICENSE`, `THIRD_PARTY_NOTICES.md` and a
   `README-binaries.txt`.
-- `WebTransport-c99-1.6-macos-arm64.tar.gz` — `libwebtransport.1.6.dylib` and
+- `WebTransport-c99-1.7-macos-arm64.tar.gz` — `libwebtransport.1.7.dylib` and
   `libwebtransport.a`, the 64 public headers, the `find_package(webtransport_c99)`
   CMake package, the three `wt-*-c99` tools, `LICENSE`, `THIRD_PARTY_NOTICES.md` and a
   `README-binaries.txt` that names the OpenSSL 3 runtime dependency.
@@ -131,8 +131,8 @@ quarantines them on first run; an archive unpacks with its modes, so verify the
 digest, unpack, then clear the quarantine flag:
 
 ```sh
-shasum -a 256 -c WebTransport-swift-1.6-macos-arm64.tar.gz.sha256
-tar -xzf WebTransport-swift-1.6-macos-arm64.tar.gz
+shasum -a 256 -c WebTransport-swift-1.7-macos-arm64.tar.gz.sha256
+tar -xzf WebTransport-swift-1.7-macos-arm64.tar.gz
 shasum -a 256 -c SHA256SUMS
 xattr -dr com.apple.quarantine WebTransportClient WebTransportServer
 ./WebTransportServer --scenario all
