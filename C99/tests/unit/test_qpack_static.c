@@ -27,13 +27,14 @@ static void test_entries(void) {
 
   /* The last entry, which is where an off-by-one in the extraction would show. */
   WT_EXPECT_OK("the last entry reads", wt_qpack_static_entry(98U, &entry));
-  WT_EXPECT_BYTES("as x-frame-options", (const uint8_t *)"x-frame-options", (const uint8_t *)entry.name, 15U);
-  WT_EXPECT_BYTES("with sameorigin", (const uint8_t *)"sameorigin", (const uint8_t *)entry.value, 10U);
+  WT_EXPECT_BYTES("as x-frame-options", (const uint8_t *)"x-frame-options",
+                  (const uint8_t *)entry.name, 15U);
+  WT_EXPECT_BYTES("with sameorigin", (const uint8_t *)"sameorigin", (const uint8_t *)entry.value,
+                  10U);
 
   WT_EXPECT_STATUS("and one past the end is refused", WT_ERR_LIMIT,
                    wt_qpack_static_entry(99U, &entry));
-  WT_EXPECT_STATUS("as is a null output", WT_ERR_INVALID_ARGUMENT,
-                   wt_qpack_static_entry(0U, NULL));
+  WT_EXPECT_STATUS("as is a null output", WT_ERR_INVALID_ARGUMENT, wt_qpack_static_entry(0U, NULL));
 }
 
 static void test_exact_lookups(void) {

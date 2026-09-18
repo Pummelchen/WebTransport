@@ -10,8 +10,8 @@
 
 #include <string.h>
 
-#include "webtransport/http3/driver.h"
 #include "webtransport/cursor.h"
+#include "webtransport/http3/driver.h"
 #include "webtransport/http3/frame.h"
 #include "webtransport/http3/message.h"
 #include "webtransport/http3/settings.h"
@@ -36,7 +36,8 @@ typedef struct recording {
   size_t datagrams;
 } recording_t;
 
-static wt_status_t record_open(void *context, int bidirectional, uint64_t *out_stream_id, uint64_t now) {
+static wt_status_t record_open(void *context, int bidirectional, uint64_t *out_stream_id,
+                               uint64_t now) {
   recording_t *recording = context;
   (void)now;
   if (recording->count >= RECORDED_STREAMS) return WT_ERR_LIMIT;
@@ -48,8 +49,8 @@ static wt_status_t record_open(void *context, int bidirectional, uint64_t *out_s
   return WT_OK;
 }
 
-static wt_status_t record_send(void *context, uint64_t stream_id, const uint8_t *data, size_t length, int fin,
-                               uint64_t now) {
+static wt_status_t record_send(void *context, uint64_t stream_id, const uint8_t *data,
+                               size_t length, int fin, uint64_t now) {
   recording_t *recording = context;
   (void)fin;
   (void)now;
@@ -92,8 +93,8 @@ static void test_the_streams_a_session_start_opens(void) {
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
 
   WT_EXPECT_OK("a session starts",
-               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat", 0U, 1000U,
-                                             &request_stream_id, &error));
+               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat",
+                                             0U, 1000U, &request_stream_id, &error));
   /* The control stream, the two QPACK streams and the request. */
   WT_EXPECT_U64("four streams are opened", 4U, (uint64_t)recording.count);
 
@@ -114,7 +115,8 @@ static void test_the_streams_a_session_start_opens(void) {
                 (uint64_t)recording.streams[0].bytes[2]);
   WT_EXPECT_TRUE("and it advertises WT_ENABLED (0x2c7cf000) with the value 1",
                  recording.streams[0].bytes[3] == 0xacU && recording.streams[0].bytes[4] == 0x7cU &&
-                     recording.streams[0].bytes[5] == 0xf0U && recording.streams[0].bytes[6] == 0x00U &&
+                     recording.streams[0].bytes[5] == 0xf0U &&
+                     recording.streams[0].bytes[6] == 0x00U &&
                      recording.streams[0].bytes[7] == 0x01U);
 
   /* The QPACK streams: 0x02 is the encoder's, 0x03 the decoder's, and their prefixes are all they carry. */
@@ -147,13 +149,16 @@ static void test_the_streams_a_session_start_opens(void) {
     payload = wt_cursor_rest(&cursor, &available);
     WT_EXPECT_U64("that matches what follows it", (uint64_t)available, frame_length);
     WT_EXPECT_OK("and the field section decodes",
-                 wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, payload, (size_t)frame_length, NULL,
-                                         0U, 0U, scratch, sizeof(scratch), &decode_error));
+                 wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, payload,
+                                         (size_t)frame_length, NULL, 0U, 0U, scratch,
+                                         sizeof(scratch), &decode_error));
     WT_EXPECT_BYTES("into a CONNECT", (const uint8_t *)"CONNECT", message.method, 7U);
-    WT_EXPECT_BYTES("for the WebTransport protocol", (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN,
-                    message.protocol, strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN));
+    WT_EXPECT_BYTES("for the WebTransport protocol",
+                    (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN, message.protocol,
+                    strlen(WT_WEBTRANSPORT_PROTOCOL_TOKEN));
     WT_EXPECT_BYTES("at the path asked for", (const uint8_t *)"/chat", message.path, 5U);
-    WT_EXPECT_BYTES("for the authority asked for", (const uint8_t *)"example.com", message.authority, 11U);
+    WT_EXPECT_BYTES("for the authority asked for", (const uint8_t *)"example.com",
+                    message.authority, 11U);
   }
 
   /* The stream the driver reported is the one it opened for the request. */
@@ -188,7 +193,8 @@ typedef struct data_stream_sink {
   int fin;
 } data_stream_sink_t;
 
-static wt_status_t data_stream_open(void *context, int bidirectional, uint64_t *out_stream_id, uint64_t now) {
+static wt_status_t data_stream_open(void *context, int bidirectional, uint64_t *out_stream_id,
+                                    uint64_t now) {
   data_stream_fake_t *fake = context;
   (void)now;
   if (fake->opened != 0) return WT_ERR_STATE;
@@ -201,8 +207,8 @@ static wt_status_t data_stream_open(void *context, int bidirectional, uint64_t *
   return WT_OK;
 }
 
-static wt_status_t data_stream_send(void *context, uint64_t stream_id, const uint8_t *data, size_t length,
-                                    int fin, uint64_t now) {
+static wt_status_t data_stream_send(void *context, uint64_t stream_id, const uint8_t *data,
+                                    size_t length, int fin, uint64_t now) {
   data_stream_fake_t *fake = context;
   (void)now;
   if (stream_id != fake->stream_id) return WT_ERR_INVALID_ARGUMENT;
@@ -213,8 +219,8 @@ static wt_status_t data_stream_send(void *context, uint64_t stream_id, const uin
   return WT_OK;
 }
 
-static wt_status_t data_stream_on_data(void *context, uint64_t stream_id, const uint8_t *data, size_t length,
-                                       int fin) {
+static wt_status_t data_stream_on_data(void *context, uint64_t stream_id, const uint8_t *data,
+                                       size_t length, int fin) {
   data_stream_sink_t *sink = context;
   sink->calls++;
   sink->stream_id = stream_id;
@@ -238,7 +244,8 @@ typedef struct class_fake {
   size_t send_count;
 } class_fake_t;
 
-static wt_status_t class_open(void *context, int bidirectional, uint64_t *out_stream_id, uint64_t now) {
+static wt_status_t class_open(void *context, int bidirectional, uint64_t *out_stream_id,
+                              uint64_t now) {
   class_fake_t *fake = context;
   (void)now;
   if (bidirectional != 0) {
@@ -251,8 +258,8 @@ static wt_status_t class_open(void *context, int bidirectional, uint64_t *out_st
   return WT_OK;
 }
 
-static wt_status_t class_send(void *context, uint64_t stream_id, const uint8_t *data, size_t length, int fin,
-                              uint64_t now) {
+static wt_status_t class_send(void *context, uint64_t stream_id, const uint8_t *data, size_t length,
+                              int fin, uint64_t now) {
   class_fake_t *fake = context;
   (void)fin;
   (void)now;
@@ -307,22 +314,23 @@ static void test_the_session_start_can_be_split_around_a_data_stream(void) {
   WT_EXPECT_U64("and the session ID set to it", 0U, driver.session_id);
 
   WT_EXPECT_OK("a data stream opens before the CONNECT",
-               wt_http3_driver_open_data_stream(&driver, &transport, 0, (const uint8_t *)"early", 5U, 1,
-                                                1000U, &data_stream_id));
+               wt_http3_driver_open_data_stream(&driver, &transport, 0, (const uint8_t *)"early",
+                                                5U, 1, 1000U, &data_stream_id));
   WT_EXPECT_U64("as the NEXT bidirectional stream", 4U, data_stream_id);
   WT_EXPECT_OK("whose session is readable",
                wt_http3_driver_data_stream_session_id(&driver, data_stream_id, &named));
-  WT_EXPECT_U64("and is the request stream's ID, because the session IS its stream", request_stream_id,
-                named);
+  WT_EXPECT_U64("and is the request stream's ID, because the session IS its stream",
+                request_stream_id, named);
   /* The draft's prefix, 0x41 and the session ID, then the message: three bytes of prefix and five of payload.
    * Asserted as a length because the recording holds what the peer would receive. */
-  WT_EXPECT_U64("with the draft's prefix and the message on it", 8U, (uint64_t)fake.lengths[data_stream_id]);
+  WT_EXPECT_U64("with the draft's prefix and the message on it", 8U,
+                (uint64_t)fake.lengths[data_stream_id]);
   WT_EXPECT_U64("BEFORE the request stream has anything on it", 0U,
                 (uint64_t)fake.lengths[request_stream_id]);
 
   WT_EXPECT_OK("the CONNECT is sent when the caller is ready",
-               wt_http3_driver_send_session_request(&driver, &transport, request_stream_id, "example.com",
-                                                    "/chat", 0U, 1000U, &error));
+               wt_http3_driver_send_session_request(&driver, &transport, request_stream_id,
+                                                    "example.com", "/chat", 0U, 1000U, &error));
   WT_EXPECT_TRUE("which writes on the stream the first call opened",
                  fake.lengths[request_stream_id] > 0U);
   /* RFC 9114 section 7.2.1: a request's HEADERS frame, type 0x01. */
@@ -369,17 +377,20 @@ static void test_a_data_stream_this_endpoint_opened(void) {
    * so the wire form is `40 41` and the session ID follows it. Written here with the encoder rather than by hand,
    * because a hand-written expectation is what got this wrong the first time. */
   prefix_length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_BIDI, prefix, sizeof(prefix));
-  prefix_length += wt_quic_varint_encode(0U, prefix + prefix_length, sizeof(prefix) - prefix_length);
+  prefix_length +=
+      wt_quic_varint_encode(0U, prefix + prefix_length, sizeof(prefix) - prefix_length);
 
   WT_EXPECT_OK("a data stream opens and the message goes out",
-               wt_http3_driver_open_data_stream(&driver, &transport, 0, k_message, sizeof(k_message), 1,
-                                                1000U, &stream_id));
+               wt_http3_driver_open_data_stream(&driver, &transport, 0, k_message,
+                                                sizeof(k_message), 1, 1000U, &stream_id));
   WT_EXPECT_INT("as a bidirectional one", 1, fake.opened_bidirectional);
   WT_EXPECT_U64("on the stream the transport gave", fake.stream_id, stream_id);
-  WT_EXPECT_U64("carrying the prefix and then the message", (uint64_t)(prefix_length + sizeof(k_message)),
-                (uint64_t)fake.sent_length);
-  WT_EXPECT_BYTES("whose first bytes are the signal value and the session", prefix, fake.sent, prefix_length);
-  WT_EXPECT_BYTES("and whose rest is the message", k_message, fake.sent + prefix_length, sizeof(k_message));
+  WT_EXPECT_U64("carrying the prefix and then the message",
+                (uint64_t)(prefix_length + sizeof(k_message)), (uint64_t)fake.sent_length);
+  WT_EXPECT_BYTES("whose first bytes are the signal value and the session", prefix, fake.sent,
+                  prefix_length);
+  WT_EXPECT_BYTES("and whose rest is the message", k_message, fake.sent + prefix_length,
+                  sizeof(k_message));
   WT_EXPECT_INT("and the message finishes the stream", 1, fake.sent_fin);
   WT_EXPECT_INT("and the stream is remembered as this endpoint's", 1,
                 wt_http3_driver_is_data_stream(&driver, stream_id));
@@ -393,8 +404,9 @@ static void test_a_data_stream_this_endpoint_opened(void) {
   frame.as.stream.data = k_message;
   frame.as.stream.length = sizeof(k_message);
   frame.as.stream.fin = 1;
-  WT_EXPECT_OK("the answer is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_OK(
+      "the answer is routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
   WT_EXPECT_U64("straight to the session sink", 1U, (uint64_t)sink_log.calls);
   WT_EXPECT_U64("for the stream it arrived on", stream_id, sink_log.stream_id);
   WT_EXPECT_BYTES("as the payload, unchanged", k_message, sink_log.bytes, sizeof(k_message));
@@ -404,7 +416,8 @@ static void test_a_data_stream_this_endpoint_opened(void) {
    * bytes there are an HTTP/3 request stream's and not this session's payload. */
   memset(&frame, 0, sizeof(frame));
   frame.kind = WT_QUIC_FRAME_KIND_STREAM;
-  frame.as.stream.id = 4U; /* client-initiated and bidirectional, and NOT one this endpoint opened */
+  frame.as.stream.id =
+      4U; /* client-initiated and bidirectional, and NOT one this endpoint opened */
   frame.as.stream.offset = 0U;
   frame.as.stream.has_length = 1;
   frame.as.stream.data = k_message;
@@ -422,7 +435,8 @@ static void test_a_data_stream_this_endpoint_opened(void) {
  * message itself, waiting for a length that never came, and a connection closed at FIN. The tree's own client puts
  * the prefix and the message in one frame, which is exactly why every test in it passed. */
 static void test_a_data_stream_the_peer_splits_across_frames(void) {
-  static const uint8_t k_prefix[] = {0x40U, 0x41U, 0x00U}; /* the bidirectional signal value and session 0 */
+  static const uint8_t k_prefix[] = {0x40U, 0x41U,
+                                     0x00U}; /* the bidirectional signal value and session 0 */
   static const uint8_t k_message[] = {'h', 'e', 'l', 'l', 'o'};
   wt_http3_endpoint_t endpoint;
   wt_http3_driver_t driver;
@@ -448,9 +462,11 @@ static void test_a_data_stream_the_peer_splits_across_frames(void) {
   frame.as.stream.data = k_prefix;
   frame.as.stream.length = sizeof(k_prefix);
   frame.as.stream.fin = 0;
-  WT_EXPECT_OK("the prefix frame is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
-  WT_EXPECT_U64("delivering nothing yet, because the prefix carries no payload", 0U, (uint64_t)sink_log.calls);
+  WT_EXPECT_OK(
+      "the prefix frame is routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_U64("delivering nothing yet, because the prefix carries no payload", 0U,
+                (uint64_t)sink_log.calls);
   WT_EXPECT_INT("but the stream is remembered as a data stream", 1,
                 wt_http3_driver_is_data_stream(&driver, 4U));
 
@@ -459,8 +475,9 @@ static void test_a_data_stream_the_peer_splits_across_frames(void) {
   frame.as.stream.data = k_message;
   frame.as.stream.length = sizeof(k_message);
   frame.as.stream.fin = 1;
-  WT_EXPECT_OK("the message frame is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_OK(
+      "the message frame is routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
   WT_EXPECT_U64("straight to the session sink", 1U, (uint64_t)sink_log.calls);
   WT_EXPECT_BYTES("as the payload, unchanged", k_message, sink_log.bytes, sizeof(k_message));
   WT_EXPECT_INT("with the peer's end of stream", 1, sink_log.fin);
@@ -472,7 +489,8 @@ static void test_a_data_stream_the_peer_splits_across_frames(void) {
  * right -- but the code the peer is told must be the HTTP/3 one, and only the layer that knows it can say it. The
  * driver records it, and the connection turns that into an application close. */
 static void test_a_frame_that_ends_at_fin_names_the_http3_error(void) {
-  static const uint8_t k_partial[] = {0x01U, 0x40U}; /* a HEADERS frame whose declared length never arrives */
+  static const uint8_t k_partial[] = {
+      0x01U, 0x40U}; /* a HEADERS frame whose declared length never arrives */
   wt_http3_endpoint_t endpoint;
   wt_http3_driver_t driver;
   data_stream_sink_t sink_log;
@@ -519,8 +537,9 @@ static void test_a_frame_that_ends_at_fin_names_the_http3_error(void) {
   frame.as.stream.data = k_partial;
   frame.as.stream.length = sizeof(k_partial);
   frame.as.stream.fin = 1;
-  WT_EXPECT_STATUS("a frame cut off by FIN is refused", WT_ERR_TRUNCATED,
-                   wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_STATUS(
+      "a frame cut off by FIN is refused", WT_ERR_TRUNCATED,
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
   WT_EXPECT_U64("and the refusal names H3_FRAME_ERROR", (uint64_t)WT_HTTP3_FRAME_ERROR,
                 (uint64_t)wt_http3_driver_last_error(&driver));
   /* And the connection the driver is BOUND to is TOLD, as an application refusal with the HTTP/3 code: RFC 9114
@@ -535,8 +554,9 @@ static void test_a_frame_that_ends_at_fin_names_the_http3_error(void) {
   /* A frame that is merely INCOMPLETE is not an error at all: more bytes are coming, and the driver waits. Its
    * last error stays clear, so a connection is never closed over a frame that has not ended. */
   frame.as.stream.fin = 0;
-  WT_EXPECT_OK("an incomplete frame is held rather than refused",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_OK(
+      "an incomplete frame is held rather than refused",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
   WT_EXPECT_U64("with no error to report", (uint64_t)WT_HTTP3_NO_ERROR,
                 (uint64_t)wt_http3_driver_last_error(&driver));
 }
@@ -586,8 +606,8 @@ static wt_status_t capsule_on_frame(void *context, uint64_t stream_id, uint64_t 
   return WT_OK;
 }
 
-static wt_status_t capsule_on_data(void *context, uint64_t stream_id, const uint8_t *data, size_t length,
-                                   int fin) {
+static wt_status_t capsule_on_data(void *context, uint64_t stream_id, const uint8_t *data,
+                                   size_t length, int fin) {
   capsule_sink_t *log = context;
 
   (void)stream_id;
@@ -610,15 +630,16 @@ static size_t append_framed_grant(uint8_t *buffer, size_t offset, size_t capacit
   WT_EXPECT_OK("the peer's MAX_DATA capsule encodes", wt_webtransport_max_data_write(&w, grant));
   *out_payload_length = wt_writer_offset(&w);
   WT_EXPECT_OK("and is put inside a DATA frame",
-               wt_http3_frame_wrap_data_in_place(buffer + offset, capacity - offset, *out_payload_length,
-                                                 &frame_length));
+               wt_http3_frame_wrap_data_in_place(buffer + offset, capacity - offset,
+                                                 *out_payload_length, &frame_length));
   /* The payload is the last thing in the frame, so this is where the header stopped. */
   *out_payload_offset = offset + frame_length - *out_payload_length;
   return offset + frame_length;
 }
 
 static void test_a_connect_streams_capsules_arrive_inside_data_frames(void) {
-  static const uint8_t k_headers[] = {0x01U, 0x04U, 's', 'e', 'c', 't'}; /* HEADERS, four bytes of section */
+  static const uint8_t k_headers[] = {0x01U, 0x04U, 's',
+                                      'e',   'c',   't'}; /* HEADERS, four bytes of section */
   uint8_t buffer[128];
   wt_http3_endpoint_t endpoint;
   wt_http3_driver_t driver;
@@ -652,26 +673,28 @@ static void test_a_connect_streams_capsules_arrive_inside_data_frames(void) {
   WT_EXPECT_OK("the endpoint advertises WebTransport",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
   WT_EXPECT_OK("a session starts",
-               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat", 0U, 1000U,
-                                             &request_stream_id, &error));
+               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat",
+                                             0U, 1000U, &request_stream_id, &error));
   /* `start_session` marks the CONNECT stream itself, because the response is the one HTTP/3 frame still to come
    * on it and a caller that had to remember would be a caller that forgets. */
   WT_EXPECT_INT("its CONNECT stream is marked with the response still to come", 0,
                 wt_http3_driver_is_capsule_stream(&driver, request_stream_id));
 
   memcpy(buffer, k_headers, sizeof(k_headers));
-  total = append_framed_grant(buffer, sizeof(k_headers), sizeof(buffer), 1024U, &capsule_offset, &capsule_length);
+  total = append_framed_grant(buffer, sizeof(k_headers), sizeof(buffer), 1024U, &capsule_offset,
+                              &capsule_length);
 
   WT_EXPECT_OK("the response and the capsule in ONE buffer are routed",
-               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, buffer, total, 0, 16384U, &sink,
-                                               &error));
+               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, buffer, total, 0, 16384U,
+                                               &sink, &error));
   WT_EXPECT_U64("the HEADERS frame is framed exactly as before", 1U, (uint64_t)log.frame_calls);
   WT_EXPECT_U64("as a HEADERS frame", 0x01U, log.frame_type);
   WT_EXPECT_BYTES("with the section it carried", k_headers + 2, log.frame_bytes, 4U);
   WT_EXPECT_INT("in one piece", 1, log.frame_last);
   /* The DATA frame is NOT reported as a frame: its payload is the session's byte stream, and a frame sink that saw
    * it as well would be a second reader of the same bytes. */
-  WT_EXPECT_U64("and the DATA frame is not a frame to the application", 1U, (uint64_t)log.frame_calls);
+  WT_EXPECT_U64("and the DATA frame is not a frame to the application", 1U,
+                (uint64_t)log.frame_calls);
   WT_EXPECT_U64("while its payload reaches the session", 1U, (uint64_t)log.data_calls);
   WT_EXPECT_U64("as the capsule", (uint64_t)capsule_length, (uint64_t)log.data_length);
   WT_EXPECT_BYTES("byte for byte", buffer + capsule_offset, log.data_bytes, capsule_length);
@@ -700,15 +723,16 @@ static void test_a_connect_streams_capsules_arrive_inside_data_frames(void) {
   log.data_calls = 0U;
   total = append_framed_grant(buffer, 0U, sizeof(buffer), 4096U, &capsule_offset, &capsule_length);
   WT_EXPECT_OK("a second DATA frame is routed",
-               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, buffer, total, 0, 16384U, &sink,
-                                               &error));
+               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, buffer, total, 0, 16384U,
+                                               &sink, &error));
   WT_EXPECT_U64("and delivered", 1U, (uint64_t)log.data_calls);
   WT_EXPECT_U64("as its own capsule", (uint64_t)capsule_length, (uint64_t)log.data_length);
   WT_EXPECT_BYTES("byte for byte", buffer + capsule_offset, log.data_bytes, capsule_length);
 
   /* And the stream's end is the session's event too, with no frame left in progress to call it truncated. */
   WT_EXPECT_OK("the CONNECT stream ends",
-               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, NULL, 0U, 1, 16384U, &sink, &error));
+               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, NULL, 0U, 1, 16384U,
+                                               &sink, &error));
   WT_EXPECT_U64("reported as the session's own end", 2U, (uint64_t)log.data_calls);
   WT_EXPECT_U64("with nothing in it", 0U, (uint64_t)log.data_length);
   WT_EXPECT_INT("and the peer's end of stream", 1, log.data_fin);
@@ -752,8 +776,8 @@ static void test_a_raw_capsule_is_ignored_rather_than_read(void) {
   WT_EXPECT_OK("the endpoint advertises WebTransport",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
   WT_EXPECT_OK("a session starts",
-               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat", 0U, 1000U,
-                                             &request_stream_id, &error));
+               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat",
+                                             0U, 1000U, &request_stream_id, &error));
 
   memcpy(buffer, k_headers, sizeof(k_headers));
   w = wt_writer_init(buffer + sizeof(k_headers), sizeof(buffer) - sizeof(k_headers));
@@ -761,8 +785,8 @@ static void test_a_raw_capsule_is_ignored_rather_than_read(void) {
   total = sizeof(k_headers) + wt_writer_offset(&w);
 
   WT_EXPECT_OK("the response and a RAW capsule in ONE buffer are routed",
-               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, buffer, total, 0, 16384U, &sink,
-                                               &error));
+               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, buffer, total, 0, 16384U,
+                                               &sink, &error));
   WT_EXPECT_U64("the HEADERS frame is framed", 1U, (uint64_t)log.frame_calls);
   /* Not one more frame, and no capsule: section 4.4 makes a KNOWN non-DATA frame on a CONNECT stream an error and
    * section 9 makes an UNKNOWN one nothing at all, and a capsule's type is unknown. */
@@ -777,7 +801,8 @@ static void test_a_raw_capsule_is_ignored_rather_than_read(void) {
 static void test_a_known_frame_other_than_data_is_refused_on_a_connect_stream(void) {
   static const uint8_t k_response[] = {0x01U, 0x04U, 's', 'e', 'c', 't'};
   static const uint8_t k_goaway[] = {0x07U, 0x01U, 0x04U}; /* GOAWAY, one byte of payload */
-  static const uint8_t k_unknown[] = {0x21U, 0x01U, 0x00U}; /* an exerciser type: reserved, and ignored */
+  static const uint8_t k_unknown[] = {0x21U, 0x01U,
+                                      0x00U}; /* an exerciser type: reserved, and ignored */
   wt_http3_endpoint_t endpoint;
   wt_http3_driver_t driver;
   wt_http3_settings_t settings;
@@ -807,13 +832,13 @@ static void test_a_known_frame_other_than_data_is_refused_on_a_connect_stream(vo
   WT_EXPECT_OK("the endpoint advertises WebTransport",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
   WT_EXPECT_OK("a session starts",
-               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat", 0U, 1000U,
-                                             &request_stream_id, &error));
+               wt_http3_driver_start_session(&driver, &transport, &settings, "example.com", "/chat",
+                                             0U, 1000U, &request_stream_id, &error));
 
   /* The response's HEADERS settles the mark, so everything after it is the capsule stream's. */
   WT_EXPECT_OK("the response is framed",
-               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, k_response, sizeof(k_response), 0,
-                                               16384U, &sink, &error));
+               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, k_response,
+                                               sizeof(k_response), 0, 16384U, &sink, &error));
   WT_EXPECT_INT("and the stream carries capsules from here", 1,
                 wt_http3_driver_is_capsule_stream(&driver, request_stream_id));
   log.frame_calls = 0U;
@@ -823,16 +848,16 @@ static void test_a_known_frame_other_than_data_is_refused_on_a_connect_stream(vo
    * 0x1f * N + 0x21 exists to exercise. It must also not be handed to the frame sink: on a capsule stream the DATA
    * payload is the session's and everything else is this layer's. */
   WT_EXPECT_OK("an unknown frame type is ignored",
-               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, k_unknown, sizeof(k_unknown), 0,
-                                               16384U, &sink, &error));
+               wt_http3_driver_on_stream_bytes(&driver, request_stream_id, k_unknown,
+                                               sizeof(k_unknown), 0, 16384U, &sink, &error));
   WT_EXPECT_U64("with no capsule for the session", 0U, (uint64_t)log.data_calls);
   WT_EXPECT_U64("and no frame reported", 0U, (uint64_t)log.frame_calls);
 
   /* And the refusing half, LAST: a refusal is the end of the connection the caller is reading from, so the frame
    * state it leaves behind is not something a later frame on the same stream should be measured through. */
   WT_EXPECT_STATUS("a GOAWAY on a CONNECT stream is refused", WT_ERR_PROTOCOL,
-                   wt_http3_driver_on_stream_bytes(&driver, request_stream_id, k_goaway, sizeof(k_goaway), 0,
-                                                   16384U, &sink, &error));
+                   wt_http3_driver_on_stream_bytes(&driver, request_stream_id, k_goaway,
+                                                   sizeof(k_goaway), 0, 16384U, &sink, &error));
   WT_EXPECT_U64("as H3_FRAME_UNEXPECTED", (uint64_t)WT_HTTP3_FRAME_UNEXPECTED, (uint64_t)error);
   WT_EXPECT_U64("and nothing reached the session", 0U, (uint64_t)log.data_calls);
   WT_EXPECT_U64("and nothing reached the frame sink either", 0U, (uint64_t)log.frame_calls);
@@ -866,7 +891,8 @@ static void test_a_server_marks_the_connect_stream_as_it_accepts_it(void) {
   log.mark_headers_pending = 0;
 
   memcpy(buffer, k_headers, sizeof(k_headers));
-  total = append_framed_grant(buffer, sizeof(k_headers), sizeof(buffer), 4096U, &capsule_offset, &capsule_length);
+  total = append_framed_grant(buffer, sizeof(k_headers), sizeof(buffer), 4096U, &capsule_offset,
+                              &capsule_length);
   first_total = total;
 
   frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_STREAM);
@@ -876,8 +902,9 @@ static void test_a_server_marks_the_connect_stream_as_it_accepts_it(void) {
   frame.as.stream.data = buffer;
   frame.as.stream.length = total;
   frame.as.stream.fin = 0;
-  WT_EXPECT_OK("the request and the capsule in one STREAM frame are routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_OK(
+      "the request and the capsule in one STREAM frame are routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
   WT_EXPECT_U64("the request's HEADERS is framed", 1U, (uint64_t)log.frame_calls);
   WT_EXPECT_U64("and the capsule reaches the session", 1U, (uint64_t)log.data_calls);
   WT_EXPECT_U64("whole", (uint64_t)capsule_length, (uint64_t)log.data_length);
@@ -893,8 +920,9 @@ static void test_a_server_marks_the_connect_stream_as_it_accepts_it(void) {
   frame.as.stream.data = buffer;
   frame.as.stream.length = total;
   frame.as.stream.fin = 0;
-  WT_EXPECT_OK("the second frame is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_OK(
+      "the second frame is routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
   WT_EXPECT_U64("with nothing framed at all", 0U, (uint64_t)log.frame_calls);
   WT_EXPECT_U64("and the capsule delivered", 1U, (uint64_t)log.data_calls);
   WT_EXPECT_BYTES("byte for byte", buffer + capsule_offset, log.data_bytes, capsule_length);
@@ -905,8 +933,9 @@ static void test_a_server_marks_the_connect_stream_as_it_accepts_it(void) {
   frame.as.stream.data = NULL;
   frame.as.stream.length = 0U;
   frame.as.stream.fin = 1;
-  WT_EXPECT_OK("the stream's end is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
+  WT_EXPECT_OK(
+      "the stream's end is routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 16384U));
   WT_EXPECT_U64("as the session's own end", 2U, (uint64_t)log.data_calls);
   WT_EXPECT_U64("with nothing in it", 0U, (uint64_t)log.data_length);
   WT_EXPECT_INT("and the peer's end of stream", 1, log.data_fin);
@@ -937,8 +966,8 @@ static void decode_recorded_request(const recording_t *recording, wt_http3_messa
   payload = wt_cursor_rest(&cursor, &available);
   WT_EXPECT_U64("that matches what follows it", (uint64_t)available, frame_length);
   WT_EXPECT_OK("and the field section decodes",
-               wt_http3_message_decode(out, WT_HTTP3_HEADER_REQUEST, payload, (size_t)frame_length, NULL, 0U, 0U,
-                                       scratch, sizeof(scratch), &decode_error));
+               wt_http3_message_decode(out, WT_HTTP3_HEADER_REQUEST, payload, (size_t)frame_length,
+                                       NULL, 0U, 0U, scratch, sizeof(scratch), &decode_error));
 }
 
 static void init_recorded_session(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoint,
@@ -954,8 +983,8 @@ static void init_recorded_session(wt_http3_driver_t *driver, wt_http3_endpoint_t
   wt_http3_driver_init(driver, endpoint);
 }
 
-static void start_recorded_session(wt_http3_driver_t *driver, wt_http3_driver_transport_t *transport,
-                                   recording_t *recording) {
+static void start_recorded_session(wt_http3_driver_t *driver,
+                                   wt_http3_driver_transport_t *transport, recording_t *recording) {
   wt_http3_settings_t settings;
   uint64_t request_stream_id = 0U;
   wt_http3_error_t error = WT_HTTP3_NO_ERROR;
@@ -964,8 +993,8 @@ static void start_recorded_session(wt_http3_driver_t *driver, wt_http3_driver_tr
   WT_EXPECT_OK("the endpoint advertises WebTransport",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
   WT_EXPECT_OK("a session starts",
-               wt_http3_driver_start_session(driver, transport, &settings, "example.com", "/chat", 0U, 1000U,
-                                             &request_stream_id, &error));
+               wt_http3_driver_start_session(driver, transport, &settings, "example.com", "/chat",
+                                             0U, 1000U, &request_stream_id, &error));
   WT_EXPECT_U64("four streams are opened", 4U, (uint64_t)recording->count);
 }
 
@@ -979,29 +1008,31 @@ static void test_the_upgrade_token_the_client_sends(void) {
   /* The default, with no setter call: this is what `wt_http3_driver_init` alone leaves in place, and the assert
    * on the field BEFORE the session starts is half the evidence -- the other half is the bytes below. */
   init_recorded_session(&driver, &endpoint, &transport, &recording);
-  WT_EXPECT_INT("a fresh driver holds the draft-16 selection", (int)WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16,
-                (int)driver.upgrade_token);
+  WT_EXPECT_INT("a fresh driver holds the draft-16 selection",
+                (int)WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16, (int)driver.upgrade_token);
   start_recorded_session(&driver, &transport, &recording);
   decode_recorded_request(&recording, &message);
   WT_EXPECT_U64("so the CONNECT is fifteen bytes of token", 15U, (uint64_t)message.protocol_length);
-  WT_EXPECT_BYTES("which is webtransport-h3", (const uint8_t *)"webtransport-h3",
-                  message.protocol, strlen("webtransport-h3"));
-  WT_EXPECT_TRUE("with the hyphen that the pre-draft token does not have", message.protocol[12] == '-');
+  WT_EXPECT_BYTES("which is webtransport-h3", (const uint8_t *)"webtransport-h3", message.protocol,
+                  strlen("webtransport-h3"));
+  WT_EXPECT_TRUE("with the hyphen that the pre-draft token does not have",
+                 message.protocol[12] == '-');
 
   /* The legacy selection: the token a peer that predates the rename accepts, which before F-02b could not be
    * sent at all. The LENGTH is asserted too, because "webtransport" is a prefix of "webtransport-h3" and a
    * twelve-byte comparison of the draft-16 token would pass a byte check while sending the wrong token. */
   init_recorded_session(&driver, &endpoint, &transport, &recording);
   wt_http3_driver_set_upgrade_token(&driver, WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY);
-  WT_EXPECT_INT("the setter records the legacy selection", (int)WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY,
-                (int)driver.upgrade_token);
+  WT_EXPECT_INT("the setter records the legacy selection",
+                (int)WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY, (int)driver.upgrade_token);
   start_recorded_session(&driver, &transport, &recording);
   decode_recorded_request(&recording, &message);
   WT_EXPECT_U64("so the CONNECT is twelve bytes of token", 12U, (uint64_t)message.protocol_length);
-  WT_EXPECT_BYTES("which is webtransport", (const uint8_t *)"webtransport",
-                  message.protocol, strlen("webtransport"));
+  WT_EXPECT_BYTES("which is webtransport", (const uint8_t *)"webtransport", message.protocol,
+                  strlen("webtransport"));
   WT_EXPECT_TRUE("and the two tokens are different strings",
-                 strcmp(WT_WEBTRANSPORT_PROTOCOL_TOKEN, WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY) != 0);
+                 strcmp(WT_WEBTRANSPORT_PROTOCOL_TOKEN, WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY) !=
+                     0);
 }
 
 int main(void) {

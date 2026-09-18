@@ -30,8 +30,8 @@
 #include <stdint.h>
 
 #include "webtransport/quic/close.h"
-#include "webtransport/quic/datagram.h"
 #include "webtransport/quic/congestion.h"
+#include "webtransport/quic/datagram.h"
 #include "webtransport/quic/error.h"
 #include "webtransport/quic/frame.h"
 #include "webtransport/quic/loss.h"
@@ -46,10 +46,7 @@
 extern "C" {
 #endif
 
-typedef enum wt_quic_role {
-  WT_QUIC_ROLE_CLIENT = 0,
-  WT_QUIC_ROLE_SERVER = 1
-} wt_quic_role_t;
+typedef enum wt_quic_role { WT_QUIC_ROLE_CLIENT = 0, WT_QUIC_ROLE_SERVER = 1 } wt_quic_role_t;
 
 /* The longest Retry token this endpoint will carry. RFC 9000 section 17.2.5 lets a server choose the token's
  * length, and section 8.1.4 suggests it is a small integrity-protected structure (quiche's is 44 bytes), so this
@@ -86,8 +83,8 @@ typedef enum wt_quic_space {
  * default RFC 9000 section 18.2 gives it, which for the flow control limits is zero -- a peer that
  * says nothing grants nothing -- and for max_udp_payload_size is 65527. */
 typedef struct wt_quic_peer_limits {
-  uint64_t max_idle_timeout;      /* microseconds; 0 when the peer did not limit it */
-  uint64_t max_udp_payload_size;  /* never below WT_QUIC_MIN_MAX_UDP_PAYLOAD_SIZE */
+  uint64_t max_idle_timeout;     /* microseconds; 0 when the peer did not limit it */
+  uint64_t max_udp_payload_size; /* never below WT_QUIC_MIN_MAX_UDP_PAYLOAD_SIZE */
   uint64_t initial_max_data;
   uint64_t initial_max_stream_data_bidi_local;
   uint64_t initial_max_stream_data_bidi_remote;
@@ -100,7 +97,7 @@ typedef struct wt_quic_peer_limits {
    * RESET_STREAM_AT frame: the extension is negotiated by that flag and by nothing else, so a sender that used the
    * frame without it would be relying on an extension the peer never advertised. */
   int reset_stream_at;
-  int set;                          /* whether a parameter list has been parsed at all */
+  int set; /* whether a parameter list has been parsed at all */
 } wt_quic_peer_limits_t;
 
 /* A connection ID the PEER issued, with the stateless reset token that goes with it (RFC 9000 section
@@ -534,8 +531,7 @@ wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
 /* Borrow `socket` and send to `peer`. A null `peer` is allowed only for a server that learns its
  * peer's address from the first packet, which is what RFC 9000 section 7.2's server does. */
 wt_status_t wt_quic_connection_attach(wt_quic_connection_t *connection,
-                                      const wt_udp_socket_t *socket,
-                                      const wt_udp_address_t *peer);
+                                      const wt_udp_socket_t *socket, const wt_udp_address_t *peer);
 
 /* Install one direction's keys for a space. The keys are copied and zeroed by
  * `wt_quic_connection_clear`. */
@@ -629,7 +625,8 @@ wt_status_t wt_quic_connection_stop_sending(wt_quic_connection_t *connection, ui
  * that cannot read it -- or when the stream cannot be reset by this endpoint; WT_ERR_INVALID_ARGUMENT when
  * `reliable_size` is past the end of the stream, which the receiver would have to reject. */
 wt_status_t wt_quic_connection_reset_stream_at(wt_quic_connection_t *connection, uint64_t stream_id,
-                                               uint64_t error_code, uint64_t reliable_size, uint64_t now);
+                                               uint64_t error_code, uint64_t reliable_size,
+                                               uint64_t now);
 
 wt_status_t wt_quic_connection_send_stream(wt_quic_connection_t *connection, uint64_t stream_id,
                                            uint64_t offset, const uint8_t *data, size_t length,
@@ -652,8 +649,8 @@ wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connect
                                                    const uint8_t reset_token[16], uint64_t now);
 
 /* The connection ID issued with this sequence number, or NULL. */
-const wt_quic_issued_connection_id_t *wt_quic_connection_issued_id(
-    const wt_quic_connection_t *connection, uint64_t sequence);
+const wt_quic_issued_connection_id_t *
+wt_quic_connection_issued_id(const wt_quic_connection_t *connection, uint64_t sequence);
 
 /* How many bytes this endpoint has SENT on a stream: the stream's send offset, which is what a reliable reset's
  * Reliable Size is bounded by.
@@ -725,7 +722,8 @@ wt_status_t wt_quic_connection_receive_datagram(wt_quic_connection_t *connection
  * Initial keys go when a Handshake packet is first received or sent, the Handshake keys when the
  * handshake is confirmed -- and this is exposed because a caller that ends a connection early has to be
  * able to do it too. Idempotent, and a space that never had keys is not an error. */
-wt_status_t wt_quic_connection_discard_keys(wt_quic_connection_t *connection, wt_quic_space_t space);
+wt_status_t wt_quic_connection_discard_keys(wt_quic_connection_t *connection,
+                                            wt_quic_space_t space);
 
 /* Install the frame and loss handlers. Both are optional; without the first, frames this layer does
  * not act on are ignored -- which is correct for a connection whose owner has nothing to do with them
@@ -771,7 +769,7 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
  * no timer is armed -- which is not the same as a zero delay: a connection with nothing in flight
  * waits for the application, indefinitely. */
 wt_status_t wt_quic_connection_next_timeout(wt_quic_connection_t *connection, uint64_t now,
-                                           uint64_t *out_micros);
+                                            uint64_t *out_micros);
 
 /* Do what the deadline was armed for: declare packets lost, send a probe, or end an idle or draining
  * period. */
@@ -781,8 +779,8 @@ wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint
  * to close is a frame, so this sends it and then waits out the draining period. A reason phrase is a
  * view and must outlive the call, which is why it is passed and not stored. */
 wt_status_t wt_quic_connection_close(wt_quic_connection_t *connection, uint64_t error_code,
-                                     uint64_t frame_type, const uint8_t *reason, size_t reason_length,
-                                     uint64_t now);
+                                     uint64_t frame_type, const uint8_t *reason,
+                                     size_t reason_length, uint64_t now);
 
 /* Whether the peer closed, so that nothing but PADDING and the close's own frames is processed. */
 int wt_quic_connection_is_closed(const wt_quic_connection_t *connection);
@@ -847,7 +845,8 @@ int wt_quic_connection_key_update_allowed(const wt_quic_connection_t *connection
  *
  * A caller uses this to migrate, or simply to stop being linkable by a connection ID it has used for a while
  * (section 9.5). */
-wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *connection, uint64_t now);
+wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *connection,
+                                                     uint64_t now);
 
 /* Start validating the path this connection is on (RFC 9000 section 8.2.1): a PATH_CHALLENGE with eight
  * unpredictable bytes goes out, the peer's PATH_RESPONSE with the SAME bytes proves the path works in both
@@ -906,7 +905,8 @@ size_t wt_quic_connection_peer_id_count(const wt_quic_connection_t *connection);
  * for AES-GCM, ChaCha20-Poly1305's confidentiality limit is above the packet number space itself and so is
  * effectively unlimited while its integrity limit is 2^36 (section 6.6 and appendix B.1). A caller that bounds
  * packet sizes may raise them, which appendix B permits; the connection enforces whatever they hold. */
-uint64_t wt_quic_connection_aead_encrypted(const wt_quic_connection_t *connection, wt_quic_space_t space);
+uint64_t wt_quic_connection_aead_encrypted(const wt_quic_connection_t *connection,
+                                           wt_quic_space_t space);
 uint64_t wt_quic_connection_aead_failed(const wt_quic_connection_t *connection);
 uint64_t wt_quic_connection_aead_confidentiality_limit(const wt_quic_connection_t *connection);
 uint64_t wt_quic_connection_aead_integrity_limit(const wt_quic_connection_t *connection);
@@ -924,8 +924,9 @@ uint64_t wt_quic_connection_key_update_errors(const wt_quic_connection_t *connec
 /* The Retry this connection accepted: its token and the Source Connection ID it named, for a caller that has to
  * derive keys from the latter or say what happened. WT_ERR_STATE when no Retry was accepted. The token is a view
  * into the connection, which owns it. */
-wt_status_t wt_quic_connection_retry(const wt_quic_connection_t *connection, const uint8_t **out_token,
-                                     size_t *out_token_length, const uint8_t **out_source_connection_id,
+wt_status_t wt_quic_connection_retry(const wt_quic_connection_t *connection,
+                                     const uint8_t **out_token, size_t *out_token_length,
+                                     const uint8_t **out_source_connection_id,
                                      size_t *out_source_connection_id_length);
 
 /* The status of the handler whose refusal closed this connection, or WT_OK when no handler refused -- a close

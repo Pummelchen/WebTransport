@@ -15,15 +15,13 @@ int main(void) {
   static const uint8_t be16[2] = {0x12U, 0x34U};
   static const uint8_t be24[3] = {0x12U, 0x34U, 0x56U};
   static const uint8_t be32[4] = {0x12U, 0x34U, 0x56U, 0x78U};
-  static const uint8_t be64[8] = {0x01U, 0x23U, 0x45U, 0x67U,
-                                  0x89U, 0xABU, 0xCDU, 0xEFU};
+  static const uint8_t be64[8] = {0x01U, 0x23U, 0x45U, 0x67U, 0x89U, 0xABU, 0xCDU, 0xEFU};
   uint8_t out[8];
 
   WT_EXPECT_U64("be16 loads big-endian", 0x1234U, wt_load_be16(be16));
   WT_EXPECT_U64("be24 loads big-endian", 0x123456U, wt_load_be24(be24));
   WT_EXPECT_U64("be32 loads big-endian", 0x12345678U, wt_load_be32(be32));
-  WT_EXPECT_U64("be64 loads big-endian", UINT64_C(0x0123456789ABCDEF),
-                wt_load_be64(be64));
+  WT_EXPECT_U64("be64 loads big-endian", UINT64_C(0x0123456789ABCDEF), wt_load_be64(be64));
 
   /* The high byte first, whatever this machine's byte order is. */
   memset(out, 0, sizeof(out));
@@ -48,13 +46,11 @@ int main(void) {
   wt_store_be32(out, 0U);
   WT_EXPECT_U64("be32 of zero", 0U, wt_load_be32(out));
   wt_store_be32(out, UINT32_MAX);
-  WT_EXPECT_BYTES("be32 of all ones", (const uint8_t *)"\xff\xff\xff\xff", out,
-                  4U);
+  WT_EXPECT_BYTES("be32 of all ones", (const uint8_t *)"\xff\xff\xff\xff", out, 4U);
   wt_store_be64(out, 0U);
   WT_EXPECT_U64("be64 of zero", 0U, wt_load_be64(out));
   wt_store_be64(out, UINT64_MAX);
-  WT_EXPECT_BYTES("be64 of all ones",
-                  (const uint8_t *)"\xff\xff\xff\xff\xff\xff\xff\xff", out, 8U);
+  WT_EXPECT_BYTES("be64 of all ones", (const uint8_t *)"\xff\xff\xff\xff\xff\xff\xff\xff", out, 8U);
 
   /* The widths the header documents, since a caller sizes a buffer from them. */
   WT_EXPECT_U64("WT_BE16_SIZE", 2U, WT_BE16_SIZE);

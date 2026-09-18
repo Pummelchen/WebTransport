@@ -115,8 +115,8 @@ static wt_status_t check_client_extensions(wt_tls_server_t *server,
   if (server->config.require_transport_parameters) {
     const uint8_t *parameters = NULL;
     size_t parameters_len = 0U;
-    extension = wt_tls_extensions_find(
-        &hello->extensions, WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS);
+    extension =
+        wt_tls_extensions_find(&hello->extensions, WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS);
     /* RFC 9001 section 8.2: their absence is a handshake failure, not a peer with none. */
     if (extension == NULL) return WT_ERR_TLS;
     status = wt_tls_transport_parameters(extension, &parameters, &parameters_len);
@@ -138,24 +138,23 @@ static wt_status_t server_derive_handshake(wt_tls_server_t *server,
   uint8_t transcript_hash[WT_TLS13_SECRET_LEN];
   wt_status_t status;
 
-  status = wt_tls_key_share_shared_secret(WT_TLS_GROUP_X25519, server->private_key,
-                                         share->key, share->key_len, ecdhe);
+  status = wt_tls_key_share_shared_secret(WT_TLS_GROUP_X25519, server->private_key, share->key,
+                                          share->key_len, ecdhe);
   if (status != WT_OK) return status;
   status = wt_tls13_early_secret(NULL, 0U, early_secret);
   if (status != WT_OK) {
     wt_secure_zero(ecdhe, sizeof(ecdhe));
     return status;
   }
-  status = wt_tls13_handshake_secret(early_secret, ecdhe, sizeof(ecdhe),
-                                     server->handshake_secret);
+  status = wt_tls13_handshake_secret(early_secret, ecdhe, sizeof(ecdhe), server->handshake_secret);
   wt_secure_zero(early_secret, sizeof(early_secret));
   wt_secure_zero(ecdhe, sizeof(ecdhe));
   if (status != WT_OK) return status;
   status = wt_tls13_transcript_hash(&server->transcript, transcript_hash);
   if (status != WT_OK) return status;
-  status = wt_tls13_handshake_traffic_secrets(
-      server->handshake_secret, transcript_hash, server->client_handshake_secret,
-      server->server_handshake_secret);
+  status = wt_tls13_handshake_traffic_secrets(server->handshake_secret, transcript_hash,
+                                              server->client_handshake_secret,
+                                              server->server_handshake_secret);
   wt_secure_zero(transcript_hash, sizeof(transcript_hash));
   if (status != WT_OK) return status;
   return wt_tls13_master_secret(server->handshake_secret, server->master_secret);
@@ -168,18 +167,17 @@ static wt_status_t server_derive_application(wt_tls_server_t *server) {
 
   status = wt_tls13_transcript_hash(&server->transcript, transcript_hash);
   if (status != WT_OK) return status;
-  status = wt_tls13_application_traffic_secrets(
-      server->master_secret, transcript_hash, server->client_application_secret,
-      server->server_application_secret);
+  status = wt_tls13_application_traffic_secrets(server->master_secret, transcript_hash,
+                                                server->client_application_secret,
+                                                server->server_application_secret);
   wt_secure_zero(transcript_hash, sizeof(transcript_hash));
   return status;
 }
 
 /* The EncryptedExtensions' extension list, built from the configuration. The caller supplies
  * the two data buffers the views point into, so nothing outlives the call. */
-static wt_status_t server_encrypted_extensions(
-    const wt_tls_server_t *server, uint8_t *alpn_buffer, size_t alpn_capacity,
-    wt_tls_extension_list_t *out) {
+static wt_status_t server_encrypted_extensions(const wt_tls_server_t *server, uint8_t *alpn_buffer,
+                                               size_t alpn_capacity, wt_tls_extension_list_t *out) {
   memset(out, 0, sizeof(*out));
   if (server->config.alpn != NULL) {
     size_t length = strlen(server->config.alpn);
@@ -206,9 +204,8 @@ static wt_status_t server_encrypted_extensions(
   return WT_OK;
 }
 
-static wt_status_t server_receive_client_hello(wt_tls_server_t *server,
-                                               const uint8_t *message, size_t len,
-                                               uint8_t *out, size_t out_capacity,
+static wt_status_t server_receive_client_hello(wt_tls_server_t *server, const uint8_t *message,
+                                               size_t len, uint8_t *out, size_t out_capacity,
                                                size_t *out_len) {
   wt_tls_client_hello_t hello;
   const wt_tls_extension_t *extension;
@@ -226,11 +223,10 @@ static wt_status_t server_receive_client_hello(wt_tls_server_t *server,
   if (!offers_cipher_suite(&hello)) return WT_ERR_TLS;
   /* RFC 8446 section 4.2.1: a TLS 1.3 client says 0x0303 in legacy_version and offers 1.3 in
    * supported_versions, so the extension is the only place the version is really negotiated. */
-  extension = wt_tls_extensions_find(&hello.extensions,
-                                     WT_TLS_EXTENSION_SUPPORTED_VERSIONS);
+  extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_SUPPORTED_VERSIONS);
   if (extension == NULL) return WT_ERR_TLS;
-  status = wt_tls_supported_versions_client(extension, versions,
-                                            WT_TLS_MAX_NAMED_GROUPS, &version_count);
+  status = wt_tls_supported_versions_client(extension, versions, WT_TLS_MAX_NAMED_GROUPS,
+                                            &version_count);
   if (status != WT_OK) return status;
   for (i = 0U; i < version_count; i++) {
     if (versions[i] == WT_TLS_VERSION_1_3) offers_13 = 1;
@@ -244,11 +240,11 @@ static wt_status_t server_receive_client_hello(wt_tls_server_t *server,
   /* Our own key pair: supplied by the caller, or generated for this handshake. */
   if (server->config.x25519_private != NULL) {
     memcpy(server->private_key, server->config.x25519_private, WT_TLS_X25519_KEY_LEN);
-    status = wt_tls_key_share_public_key(WT_TLS_GROUP_X25519, server->private_key,
-                                         server->public_key);
+    status =
+        wt_tls_key_share_public_key(WT_TLS_GROUP_X25519, server->private_key, server->public_key);
   } else {
-    status = wt_tls_key_share_generate(WT_TLS_GROUP_X25519, server->private_key,
-                                       server->public_key);
+    status =
+        wt_tls_key_share_generate(WT_TLS_GROUP_X25519, server->private_key, server->public_key);
   }
   if (status != WT_OK) return status;
 
@@ -282,8 +278,8 @@ static wt_status_t server_receive_client_hello(wt_tls_server_t *server,
   return WT_OK;
 }
 
-static wt_status_t server_receive_finished(wt_tls_server_t *server,
-                                           const uint8_t *message, size_t len) {
+static wt_status_t server_receive_finished(wt_tls_server_t *server, const uint8_t *message,
+                                           size_t len) {
   uint8_t verify_data[WT_TLS13_FINISHED_LEN];
   uint8_t through_server_finished[WT_TLS13_SECRET_LEN];
   wt_status_t status;
@@ -294,9 +290,8 @@ static wt_status_t server_receive_finished(wt_tls_server_t *server,
    * the transcript holds now: the flight has been absorbed and this message has not. */
   status = wt_tls13_transcript_hash(&server->transcript, through_server_finished);
   if (status != WT_OK) return status;
-  status = wt_tls13_finished_check(server->client_handshake_secret,
-                                   through_server_finished, verify_data,
-                                   sizeof(verify_data));
+  status = wt_tls13_finished_check(server->client_handshake_secret, through_server_finished,
+                                   verify_data, sizeof(verify_data));
   wt_secure_zero(through_server_finished, sizeof(through_server_finished));
   if (status != WT_OK) return status;
   /* The application secrets come from the transcript through the server's Finished, which is
@@ -309,8 +304,7 @@ static wt_status_t server_receive_finished(wt_tls_server_t *server,
   return WT_OK;
 }
 
-wt_status_t wt_tls_server_begin(wt_tls_server_t *server,
-                                const wt_tls_server_config_t *config) {
+wt_status_t wt_tls_server_begin(wt_tls_server_t *server, const wt_tls_server_config_t *config) {
   wt_status_t status;
 
   if (server == NULL || config == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -345,8 +339,8 @@ wt_status_t wt_tls_server_begin(wt_tls_server_t *server,
   return WT_OK;
 }
 
-wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out,
-                                 size_t out_capacity, size_t *out_len) {
+wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out, size_t out_capacity,
+                                 size_t *out_len) {
   const wt_tls_server_identity_t *identity;
   wt_tls_extension_list_t encrypted;
   /* A ProtocolNameList for one name: two bytes of list length, one of name length, the name. */
@@ -376,14 +370,12 @@ wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out,
 
   /* EncryptedExtensions. Absorbed as soon as it is written, because the CertificateVerify's
    * signature is over the transcript that includes it. */
-  status = server_encrypted_extensions(server, alpn_buffer, sizeof(alpn_buffer),
-                                       &encrypted);
+  status = server_encrypted_extensions(server, alpn_buffer, sizeof(alpn_buffer), &encrypted);
   if (status != WT_OK) return status;
   status = wt_tls_encrypted_extensions_encode(&encrypted, &w);
   if (status != WT_OK) return status;
   mark = 0U;
-  status = wt_tls13_transcript_append(&server->transcript, out,
-                                      wt_writer_offset(&w) - mark);
+  status = wt_tls13_transcript_append(&server->transcript, out, wt_writer_offset(&w) - mark);
   if (status != WT_OK) return status;
 
   /* Certificate. */
@@ -399,8 +391,8 @@ wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out,
     mark = wt_writer_offset(&w);
     status = wt_tls_certificate_encode(&certificate, &w);
     if (status != WT_OK) return status;
-    status = wt_tls13_transcript_append(&server->transcript, out + mark,
-                                        wt_writer_offset(&w) - mark);
+    status =
+        wt_tls13_transcript_append(&server->transcript, out + mark, wt_writer_offset(&w) - mark);
     if (status != WT_OK) return status;
   }
 
@@ -411,8 +403,8 @@ wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out,
   wt_secure_zero(transcript_hash, sizeof(transcript_hash));
   if (status != WT_OK) return status;
   status = wt_tls_signature_sign(identity->private_key, identity->private_key_len,
-                                 identity->signature_scheme, content, sizeof(content),
-                                 signature, sizeof(signature), &signature_len);
+                                 identity->signature_scheme, content, sizeof(content), signature,
+                                 sizeof(signature), &signature_len);
   wt_secure_zero(content, sizeof(content));
   if (status != WT_OK) return status;
   {
@@ -425,15 +417,14 @@ wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out,
   }
   wt_secure_zero(signature, sizeof(signature));
   if (status != WT_OK) return status;
-  status = wt_tls13_transcript_append(&server->transcript, out + mark,
-                                      wt_writer_offset(&w) - mark);
+  status = wt_tls13_transcript_append(&server->transcript, out + mark, wt_writer_offset(&w) - mark);
   if (status != WT_OK) return status;
 
   /* Finished: over the transcript through the CertificateVerify this flight just wrote. */
   status = wt_tls13_transcript_hash(&server->transcript, transcript_hash);
   if (status != WT_OK) return status;
-  status = wt_tls13_finished_verify_data(server->server_handshake_secret, transcript_hash,
-                                         verify_data);
+  status =
+      wt_tls13_finished_verify_data(server->server_handshake_secret, transcript_hash, verify_data);
   wt_secure_zero(transcript_hash, sizeof(transcript_hash));
   if (status != WT_OK) return status;
   status = wt_tls_finished_build(verify_data, finished, sizeof(finished), &finished_len);
@@ -449,9 +440,8 @@ wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out,
   return WT_OK;
 }
 
-wt_status_t wt_tls_server_receive(wt_tls_server_t *server, const uint8_t *message,
-                                  size_t len, uint8_t *out, size_t out_capacity,
-                                  size_t *out_len) {
+wt_status_t wt_tls_server_receive(wt_tls_server_t *server, const uint8_t *message, size_t len,
+                                  uint8_t *out, size_t out_capacity, size_t *out_len) {
   wt_tls_handshake_header_t header;
   wt_cursor_t cursor;
   wt_status_t status;
@@ -472,8 +462,7 @@ wt_status_t wt_tls_server_receive(wt_tls_server_t *server, const uint8_t *messag
       if (header.type != WT_TLS_HANDSHAKE_CLIENT_HELLO) {
         return server_fail(server, WT_ERR_STATE);
       }
-      status = server_receive_client_hello(server, message, len, out, out_capacity,
-                                           out_len);
+      status = server_receive_client_hello(server, message, len, out, out_capacity, out_len);
       break;
     case WT_TLS_SERVER_WAIT_CLIENT_FINISHED:
       if (header.type != WT_TLS_HANDSHAKE_FINISHED) {
@@ -510,9 +499,9 @@ wt_status_t wt_tls_server_handshake_secrets(const wt_tls_server_t *server,
   return WT_OK;
 }
 
-wt_status_t wt_tls_server_application_secrets(
-    const wt_tls_server_t *server, uint8_t read_out[WT_TLS13_SECRET_LEN],
-    uint8_t write_out[WT_TLS13_SECRET_LEN]) {
+wt_status_t wt_tls_server_application_secrets(const wt_tls_server_t *server,
+                                              uint8_t read_out[WT_TLS13_SECRET_LEN],
+                                              uint8_t write_out[WT_TLS13_SECRET_LEN]) {
   if (server == NULL || read_out == NULL || write_out == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
@@ -528,8 +517,7 @@ const uint8_t *wt_tls_server_alpn(const wt_tls_server_t *server, size_t *out_len
   return server->negotiated_alpn;
 }
 
-const uint8_t *wt_tls_server_transport_parameters(const wt_tls_server_t *server,
-                                                  size_t *out_len) {
+const uint8_t *wt_tls_server_transport_parameters(const wt_tls_server_t *server, size_t *out_len) {
   if (server == NULL || out_len == NULL) return NULL;
   *out_len = server->peer_transport_parameters_len;
   return server->peer_transport_parameters;

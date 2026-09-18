@@ -17,7 +17,8 @@ static uint64_t held_sequence_above(const wt_quic_connection_t *connection, uint
   for (i = 0U; i < WT_QUIC_PEER_CONNECTION_IDS_MAX; i++) {
     if (!connection->peer_ids[i].in_use) continue;
     if (connection->peer_ids[i].sequence <= floor) continue;
-    if (best == 0U || connection->peer_ids[i].sequence < best) best = connection->peer_ids[i].sequence;
+    if (best == 0U || connection->peer_ids[i].sequence < best)
+      best = connection->peer_ids[i].sequence;
   }
   return best;
 }
@@ -50,7 +51,8 @@ wt_cli_result_t wt_scenario_connection_ids_run(int ipv6, char *detail, size_t de
   /* The spares cross. The pair is already handshaken, so this needs only the rounds in which the sessions have
    * 1-RTT keys and can put a NEW_CONNECTION_ID on the wire. */
   for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {
-    if (pair.client.connection.peer_id_count > 0U && pair.server.connection.peer_id_count > 0U) break;
+    if (pair.client.connection.peer_id_count > 0U && pair.server.connection.peer_id_count > 0U)
+      break;
     scenario_pump_once(&pair);
   }
   if (pair.client.connection.peer_id_count == 0U || pair.server.connection.peer_id_count == 0U) {
@@ -67,7 +69,8 @@ wt_cli_result_t wt_scenario_connection_ids_run(int ipv6, char *detail, size_t de
 
   /* The retire: the client gives up the ID the server issued, which RFC 9000 section 5.1.2 makes a REQUEST for
    * another one. Through the connection's own call, because the frame and the forgetting are one act. */
-  if (wt_quic_connection_retire_peer_connection_id(&pair.client.connection, retired, pair.now) != WT_OK) {
+  if (wt_quic_connection_retire_peer_connection_id(&pair.client.connection, retired, pair.now) !=
+      WT_OK) {
     scenario_detail_set(detail, detail_size, "the client could not retire the spare");
     scenario_pair_close(&pair);
     return WT_CLI_RESULT_FAILED;
@@ -88,13 +91,15 @@ wt_cli_result_t wt_scenario_connection_ids_run(int ipv6, char *detail, size_t de
   if (wt_quic_connection_is_closed(&pair.client.connection) != 0 ||
       wt_quic_connection_is_closed(&pair.server.connection) != 0 ||
       pair.client.connection.peer_closed != 0 || pair.server.connection.peer_closed != 0) {
-    scenario_detail_set(detail, detail_size, "a connection closed over the retire and its replacement");
+    scenario_detail_set(detail, detail_size,
+                        "a connection closed over the retire and its replacement");
     scenario_pair_close(&pair);
     return WT_CLI_RESULT_FAILED;
   }
 
   (void)snprintf(detail, detail_size,
-                 "the client retired sequence %llu, the server replaced it with %llu, and both sides stayed up",
+                 "the client retired sequence %llu, the server replaced it with %llu, and both "
+                 "sides stayed up",
                  (unsigned long long)retired, (unsigned long long)replacement);
   scenario_pair_close(&pair);
   return WT_CLI_RESULT_PASSED;

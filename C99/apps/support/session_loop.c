@@ -39,7 +39,9 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
                                        size_t length, int fin);
 static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t length);
 
-const char *wt_loop_status_name(wt_status_t status) { return wt_status_name(status); }
+const char *wt_loop_status_name(wt_status_t status) {
+  return wt_status_name(status);
+}
 
 void init_side(loop_side_t *side, wt_http3_role_t role) {
   memset(side, 0, sizeof(*side));
@@ -82,7 +84,8 @@ static wt_status_t side_on_frame_payload(void *context, uint64_t stream_id, uint
       if (log != NULL) {
         size_t index;
         fprintf(log, "frame stream=%llu type=%llu length=%llu last=%d bytes=",
-                (unsigned long long)stream_id, (unsigned long long)type, (unsigned long long)length, last);
+                (unsigned long long)stream_id, (unsigned long long)type, (unsigned long long)length,
+                last);
         for (index = 0U; index < length && index < 64U; index++) {
           fprintf(log, "%02x", payload[index]);
         }
@@ -125,8 +128,8 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
   if (stream_id == side->request_stream_id) {
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
 
-    status = wt_capsule_stream_on_bytes(&side->capsules, data, length, fin, wt_capsule_stream_apply_flow,
-                                        &side->capsules, &error);
+    status = wt_capsule_stream_on_bytes(&side->capsules, data, length, fin,
+                                        wt_capsule_stream_apply_flow, &side->capsules, &error);
     /* A close capsule in either direction, or the CONNECT stream ending, is the session's end: section 6's reset
      * of its streams follows here, and it is idempotent, so every path below can reach it. */
     end_session_streams_if_closed(side);
@@ -134,8 +137,9 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
       /* A refusal the peer has to be told about, in whichever error space it belongs to. The status is still
        * returned, because a hint is not a close: the QUIC layer closes when the handler that refused says so. */
       side->capsule_error = (uint64_t)error;
-      if (wt_capsule_stream_refuse(&side->capsules, side->transport, side->request_stream_id, side->connection,
-                                   side->now_for_close, error) == WT_CAPSULE_REFUSAL_SESSION) {
+      if (wt_capsule_stream_refuse(&side->capsules, side->transport, side->request_stream_id,
+                                   side->connection, side->now_for_close,
+                                   error) == WT_CAPSULE_REFUSAL_SESSION) {
         /* The session is closed and the peer has been told in the capsule itself: the connection stays up, so this
          * failure must NOT reach the transport (section 5.1, WT-165). */
         return WT_OK;
@@ -152,9 +156,9 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
   if (side->session_known == 0) {
     uint64_t named = 0U;
     if (wt_http3_driver_data_stream_session_id(&side->driver, stream_id, &named) == WT_OK &&
-        wt_webtransport_buffered_park_stream(&side->buffered, stream_id, named,
-                                             wt_quic_stream_id_is_bidirectional(stream_id) == 0 ? 1 : 0,
-                                             data, length) == WT_OK) {
+        wt_webtransport_buffered_park_stream(
+            &side->buffered, stream_id, named,
+            wt_quic_stream_id_is_bidirectional(stream_id) == 0 ? 1 : 0, data, length) == WT_OK) {
       return WT_OK;
     }
     if (side->connection != NULL) {
@@ -193,7 +197,8 @@ static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t l
    * parsed the framing -- because the library's own session object checks it and `docs/PUBLIC-API.md` states the
    * rule: "a stream or datagram naming another session is refused with HTTP/3's identifier error, never delivered
    * to the wrong session and never dropped silently" (WT-179). */
-  if (wt_webtransport_datagram_parse(data, length, &quarter, &payload, &payload_length, &error) != WT_OK) {
+  if (wt_webtransport_datagram_parse(data, length, &quarter, &payload, &payload_length, &error) !=
+      WT_OK) {
     return WT_OK;
   }
 
@@ -279,14 +284,14 @@ wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_fr
  * never has to change, so a client that kept sending to its own ID looked exactly like one that had adopted the
  * server's (WT-151). */
 uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *source,
-                                 size_t source_length, const uint8_t *original_destination,
-                                 size_t original_length, int retried,
-                                 const uint8_t *retry_source, size_t retry_source_length) {
+                          size_t source_length, const uint8_t *original_destination,
+                          size_t original_length, int retried, const uint8_t *retry_source,
+                          size_t retry_source_length) {
   wt_quic_transport_parameters_t params;
   wt_writer_t w = wt_writer_init(out, capacity);
-  if (wt_quic_transport_parameters_build(&params, is_server, source, source_length, original_destination,
-                                         original_length, retried, retry_source,
-                                         retry_source_length) != WT_OK) {
+  if (wt_quic_transport_parameters_build(&params, is_server, source, source_length,
+                                         original_destination, original_length, retried,
+                                         retry_source, retry_source_length) != WT_OK) {
     return 0U;
   }
   if (wt_quic_transport_parameters_encode(&w, &params) != WT_OK) return 0U;
@@ -294,7 +299,7 @@ uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const ui
 }
 
 void connection_config(wt_quic_connection_config_t *config, wt_quic_role_t role,
-                              const uint8_t *connection_id, size_t connection_id_length) {
+                       const uint8_t *connection_id, size_t connection_id_length) {
   memset(config, 0, sizeof(*config));
   config->role = role;
   config->version = WT_QUIC_VERSION_1;
@@ -395,7 +400,8 @@ void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->has_initial_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_INITIAL];
   out->has_handshake_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE];
   out->has_application_keys = loop->session.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION];
-  out->handshake_state = wt_quic_handshake_state_name(wt_quic_handshake_state(&loop->session.handshake));
+  out->handshake_state =
+      wt_quic_handshake_state_name(wt_quic_handshake_state(&loop->session.handshake));
   out->resends = loop->resends;
   out->probes = (unsigned)(loop->session.connection.probes_sent[WT_QUIC_SPACE_INITIAL] +
                            loop->session.connection.probes_sent[WT_QUIC_SPACE_HANDSHAKE] +
@@ -407,12 +413,16 @@ void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
   out->ack_largest_initial = loop->session.connection.ack_largest[WT_QUIC_SPACE_INITIAL];
   out->ack_largest_handshake = loop->session.connection.ack_largest[WT_QUIC_SPACE_HANDSHAKE];
   out->ack_largest_application = loop->session.connection.ack_largest[WT_QUIC_SPACE_APPLICATION];
-  out->sent_initial = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_INITIAL];
-  out->sent_handshake = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_HANDSHAKE];
-  out->sent_application = (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_APPLICATION];
+  out->sent_initial =
+      (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_INITIAL];
+  out->sent_handshake =
+      (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_HANDSHAKE];
+  out->sent_application =
+      (unsigned)loop->session.connection.packets_sent_by_space[WT_QUIC_SPACE_APPLICATION];
   out->acked_initial = (unsigned)loop->session.connection.packets_acked[WT_QUIC_SPACE_INITIAL];
   out->acked_handshake = (unsigned)loop->session.connection.packets_acked[WT_QUIC_SPACE_HANDSHAKE];
-  out->acked_application = (unsigned)loop->session.connection.packets_acked[WT_QUIC_SPACE_APPLICATION];
+  out->acked_application =
+      (unsigned)loop->session.connection.packets_acked[WT_QUIC_SPACE_APPLICATION];
   out->in_flight = (unsigned)wt_quic_loss_count(&loop->session.connection.loss);
   {
     const wt_tls13_transcript_t *transcript = NULL;
@@ -423,7 +433,8 @@ void record_oracle(const loop_t *loop, wt_loop_result_t *out) {
       transcript = &loop->session.handshake.server.transcript;
     }
     out->transcript_types_length = 0U;
-    for (index = 0U; index < (size_t)transcript->messages && index < sizeof(out->transcript_types); index++) {
+    for (index = 0U; index < (size_t)transcript->messages && index < sizeof(out->transcript_types);
+         index++) {
       out->transcript_types[index] = transcript->types[index];
       out->transcript_types_length = index + 1U;
     }
@@ -458,7 +469,7 @@ void pump_once(loop_t *loop) {
  * bytes on the same stream are payload, and an endpoint that re-read them as a prefix refuses its own answer. A
  * datagram carries the quarter stream ID and then the bytes, because a datagram IS the unit. */
 wt_status_t send_message(loop_t *loop, const wt_http3_driver_transport_t *transport,
-                                const wt_loop_config_t *config) {
+                         const wt_loop_config_t *config) {
   uint8_t framed[512];
   wt_writer_t w = wt_writer_init(framed, sizeof(framed));
   size_t message_length = config->message != NULL ? strlen(config->message) : 0U;
@@ -470,7 +481,7 @@ wt_status_t send_message(loop_t *loop, const wt_http3_driver_transport_t *transp
     }
     return transport->send_datagram(transport->context, framed, wt_writer_offset(&w));
   }
-  return wt_http3_driver_open_data_stream(&loop->side.driver, transport, 0, (const uint8_t *)config->message,
-                                          message_length, 1, loop->now, NULL);
+  return wt_http3_driver_open_data_stream(&loop->side.driver, transport, 0,
+                                          (const uint8_t *)config->message, message_length, 1,
+                                          loop->now, NULL);
 }
-

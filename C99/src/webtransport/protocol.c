@@ -8,7 +8,8 @@
 
 int wt_webtransport_protocol_token_valid(const uint8_t *token, size_t length) {
   size_t index;
-  if (token == NULL || length == 0U || length > (size_t)WT_WEBTRANSPORT_PROTOCOL_TOKEN_MAX) return 0;
+  if (token == NULL || length == 0U || length > (size_t)WT_WEBTRANSPORT_PROTOCOL_TOKEN_MAX)
+    return 0;
   for (index = 0U; index < length; index++) {
     uint8_t byte = token[index];
     /* Visible ASCII minus the three bytes the Structured Fields grammar gives meaning to: a quote would end
@@ -24,12 +25,14 @@ wt_status_t wt_webtransport_protocol_validate(const wt_webtransport_protocol_lis
   if (list == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (list->count > (size_t)WT_WEBTRANSPORT_PROTOCOL_MAX) return WT_ERR_LIMIT;
   for (index = 0U; index < list->count; index++) {
-    if (wt_webtransport_protocol_token_valid(list->tokens[index].bytes, list->tokens[index].length) == 0) {
+    if (wt_webtransport_protocol_token_valid(list->tokens[index].bytes,
+                                             list->tokens[index].length) == 0) {
       return WT_ERR_PROTOCOL;
     }
     for (other = 0U; other < index; other++) {
       if (list->tokens[other].length == list->tokens[index].length &&
-          memcmp(list->tokens[other].bytes, list->tokens[index].bytes, list->tokens[index].length) == 0) {
+          memcmp(list->tokens[other].bytes, list->tokens[index].bytes,
+                 list->tokens[index].length) == 0) {
         return WT_ERR_PROTOCOL;
       }
     }
@@ -43,14 +46,16 @@ wt_status_t wt_webtransport_protocol_encode_item(wt_writer_t *w,
   /* An invalid token is REFUSED rather than escaped into a valid-looking one: it could not have come from a
    * configuration that means anything, and escaping it would write a field whose value is not the token the
    * caller passed. */
-  if (wt_webtransport_protocol_token_valid(token->bytes, token->length) == 0) return WT_ERR_PROTOCOL;
+  if (wt_webtransport_protocol_token_valid(token->bytes, token->length) == 0)
+    return WT_ERR_PROTOCOL;
   wt_writer_u8(w, (uint8_t)'"');
   wt_writer_bytes(w, token->bytes, token->length);
   wt_writer_u8(w, (uint8_t)'"');
   return wt_writer_ok(w) != 0 ? WT_OK : WT_ERR_LIMIT;
 }
 
-wt_status_t wt_webtransport_protocol_encode_list(wt_writer_t *w, const wt_webtransport_protocol_list_t *list) {
+wt_status_t wt_webtransport_protocol_encode_list(wt_writer_t *w,
+                                                 const wt_webtransport_protocol_list_t *list) {
   size_t index;
   wt_status_t status;
   if (w == NULL || list == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -71,7 +76,8 @@ wt_status_t wt_webtransport_protocol_decode_item(const uint8_t *value, size_t le
   out->length = 0U;
   if (value == NULL) return length == 0U ? WT_ERR_PROTOCOL : WT_ERR_INVALID_ARGUMENT;
   /* A Structured Fields string, and nothing else: no bare token, no number, no parameters. */
-  if (length < 2U || value[0] != (uint8_t)'"' || value[length - 1U] != (uint8_t)'"') return WT_ERR_PROTOCOL;
+  if (length < 2U || value[0] != (uint8_t)'"' || value[length - 1U] != (uint8_t)'"')
+    return WT_ERR_PROTOCOL;
   if (length - 2U > (size_t)WT_WEBTRANSPORT_PROTOCOL_TOKEN_MAX) return WT_ERR_LIMIT;
   /* A backslash would be an escape, and an escaped byte could only ever decode to something this file
    * refuses as a token (`"` or `\`), so the escape is malformed rather than decoded into a buffer. */
@@ -94,7 +100,8 @@ wt_status_t wt_webtransport_protocol_decode_list(const uint8_t *value, size_t le
     size_t start;
     size_t end;
     /* Optional whitespace before an item: SP or HTAB, which is what RFC 8941 allows around a comma. */
-    while (position < length && (value[position] == (uint8_t)' ' || value[position] == (uint8_t)'\t')) {
+    while (position < length &&
+           (value[position] == (uint8_t)' ' || value[position] == (uint8_t)'\t')) {
       position++;
     }
     if (position >= length) return WT_ERR_PROTOCOL;
@@ -118,7 +125,8 @@ wt_status_t wt_webtransport_protocol_decode_list(const uint8_t *value, size_t le
     }
     out->count++;
     position = end + 1U;
-    while (position < length && (value[position] == (uint8_t)' ' || value[position] == (uint8_t)'\t')) {
+    while (position < length &&
+           (value[position] == (uint8_t)' ' || value[position] == (uint8_t)'\t')) {
       position++;
     }
     if (position >= length) break;

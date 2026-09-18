@@ -3,8 +3,7 @@
 #include "connection_internal.h"
 
 wt_status_t ensure_peer_stream(wt_quic_connection_t *connection, uint64_t stream_id,
-                                      uint64_t frame_type, uint64_t now,
-                                      wt_quic_stream_t **out_stream) {
+                               uint64_t frame_type, uint64_t now, wt_quic_stream_t **out_stream) {
   wt_quic_stream_t *stream = wt_quic_stream_table_find(&connection->streams, stream_id);
   int bidirectional;
   uint64_t granted;
@@ -182,7 +181,8 @@ wt_status_t wt_quic_connection_stream_send_offset(const wt_quic_connection_t *co
   return WT_OK;
 }
 wt_status_t wt_quic_connection_reset_stream_at(wt_quic_connection_t *connection, uint64_t stream_id,
-                                               uint64_t error_code, uint64_t reliable_size, uint64_t now) {
+                                               uint64_t error_code, uint64_t reliable_size,
+                                               uint64_t now) {
   wt_quic_stream_t *stream;
   wt_quic_frame_t frame;
   int sent = 0;
@@ -291,8 +291,8 @@ wt_status_t wt_quic_connection_open_stream(wt_quic_connection_t *connection, int
   /* The number comes from the count of what this endpoint has already opened in that class, so it is
    * never reused and never chosen by the caller (RFC 9000 section 2.1). */
   index = wt_quic_stream_table_opened_by_us(&connection->streams, bidirectional);
-  stream_id = wt_quic_stream_id_make(connection->config.role == WT_QUIC_ROLE_CLIENT, bidirectional,
-                                     index);
+  stream_id =
+      wt_quic_stream_id_make(connection->config.role == WT_QUIC_ROLE_CLIENT, bidirectional, index);
   limit = bidirectional ? connection->peer_limits.initial_max_streams_bidi
                         : connection->peer_limits.initial_max_streams_uni;
   status = wt_quic_stream_table_open(&connection->streams, stream_id, 1, limit);

@@ -149,10 +149,8 @@ wt_status_t wt_quic_packet_open(uint8_t *packet, size_t total_len, size_t pn_len
  *
  * Nothing of the plaintext survives a failed tag: the buffer holds the unmasked header and zeroed
  * ciphertext, never unauthenticated frames (see wt_quic_unprotect_frames). */
-wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length,
-                                const wt_quic_packet_keys_t *keys,
-                                uint64_t largest_received,
-                                size_t local_connection_id_len,
+wt_status_t wt_quic_packet_read(uint8_t *packet, size_t length, const wt_quic_packet_keys_t *keys,
+                                uint64_t largest_received, size_t local_connection_id_len,
                                 wt_quic_received_packet_t *out);
 
 #ifdef __cplusplus

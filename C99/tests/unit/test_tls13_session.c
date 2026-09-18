@@ -55,29 +55,24 @@ static void test_rfc8448_handshake(void) {
   memset(&client, 0, sizeof(client));
 
   /* Before anything: no secrets, and the state says so. */
-  WT_EXPECT_STATUS("no application secrets before the handshake",
-                   WT_ERR_STATE,
-                   wt_tls_client_application_secrets(&client, read_secret,
-                                                     write_secret));
+  WT_EXPECT_STATUS("no application secrets before the handshake", WT_ERR_STATE,
+                   wt_tls_client_application_secrets(&client, read_secret, write_secret));
   WT_EXPECT_STATUS("and no handshake secrets either", WT_ERR_STATE,
-                   wt_tls_client_handshake_secrets(&client, read_secret,
-                                                   write_secret));
+                   wt_tls_client_handshake_secrets(&client, read_secret, write_secret));
 
-  WT_EXPECT_OK("the handshake starts from the RFC's ClientHello",
-               wt_tls_client_begin(&client, &config, WT_RFC8448_CLIENT_HELLO,
-                                   WT_RFC8448_CLIENT_HELLO_LEN));
+  WT_EXPECT_OK(
+      "the handshake starts from the RFC's ClientHello",
+      wt_tls_client_begin(&client, &config, WT_RFC8448_CLIENT_HELLO, WT_RFC8448_CLIENT_HELLO_LEN));
   WT_EXPECT_U64("and waits for the ServerHello", (uint64_t)WT_TLS_CLIENT_WAIT_SERVER_HELLO,
                 (uint64_t)wt_tls_client_state(&client));
   WT_EXPECT_STATUS("with still no handshake secrets", WT_ERR_STATE,
-                   wt_tls_client_handshake_secrets(&client, read_secret,
-                                                   write_secret));
+                   wt_tls_client_handshake_secrets(&client, read_secret, write_secret));
 
   /* The ServerHello. Its key share is the RFC's server public key, so the shared secret the
    * machine derives is the RFC's ECDHE value and the traffic secrets are the RFC's. */
   WT_EXPECT_OK("the ServerHello is accepted",
-               wt_tls_client_receive(&client, WT_RFC8448_SERVER_HELLO,
-                                     WT_RFC8448_SERVER_HELLO_LEN, finished,
-                                     sizeof(finished), &finished_len));
+               wt_tls_client_receive(&client, WT_RFC8448_SERVER_HELLO, WT_RFC8448_SERVER_HELLO_LEN,
+                                     finished, sizeof(finished), &finished_len));
   WT_EXPECT_U64("nothing is sent in reply", 0U, (uint64_t)finished_len);
   WT_EXPECT_U64("and it waits for EncryptedExtensions",
                 (uint64_t)WT_TLS_CLIENT_WAIT_ENCRYPTED_EXTENSIONS,
@@ -85,51 +80,43 @@ static void test_rfc8448_handshake(void) {
   WT_EXPECT_OK("the handshake secrets are available",
                wt_tls_client_handshake_secrets(&client, read_secret, write_secret));
   WT_EXPECT_BYTES("the read secret is the RFC's server handshake secret",
-                  WT_RFC8448_SERVER_HANDSHAKE_SECRET, read_secret,
-                  WT_TLS13_SECRET_LEN);
+                  WT_RFC8448_SERVER_HANDSHAKE_SECRET, read_secret, WT_TLS13_SECRET_LEN);
   WT_EXPECT_BYTES("and the write secret is the RFC's client handshake secret",
-                  WT_RFC8448_CLIENT_HANDSHAKE_SECRET, write_secret,
-                  WT_TLS13_SECRET_LEN);
+                  WT_RFC8448_CLIENT_HANDSHAKE_SECRET, write_secret, WT_TLS13_SECRET_LEN);
   WT_EXPECT_STATUS("the application secrets are still unavailable", WT_ERR_STATE,
-                   wt_tls_client_application_secrets(&client, read_secret,
-                                                     write_secret));
+                   wt_tls_client_application_secrets(&client, read_secret, write_secret));
 
   WT_EXPECT_OK("EncryptedExtensions are accepted",
                wt_tls_client_receive(&client, WT_RFC8448_ENCRYPTED_EXTENSIONS,
                                      WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN, finished,
                                      sizeof(finished), &finished_len));
-  WT_EXPECT_U64("and it waits for the Certificate",
-                (uint64_t)WT_TLS_CLIENT_WAIT_CERTIFICATE,
+  WT_EXPECT_U64("and it waits for the Certificate", (uint64_t)WT_TLS_CLIENT_WAIT_CERTIFICATE,
                 (uint64_t)wt_tls_client_state(&client));
 
   /* The certificate is self-signed and expired, and the development policy accepts it on a
    * loopback name; a policy that refuses it is tested below. */
   WT_EXPECT_OK("the Certificate is accepted",
-               wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE,
-                                     WT_RFC8448_CERTIFICATE_LEN, finished,
-                                     sizeof(finished), &finished_len));
+               wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE, WT_RFC8448_CERTIFICATE_LEN,
+                                     finished, sizeof(finished), &finished_len));
   WT_EXPECT_U64("and it waits for CertificateVerify",
                 (uint64_t)WT_TLS_CLIENT_WAIT_CERTIFICATE_VERIFY,
                 (uint64_t)wt_tls_client_state(&client));
 
   WT_EXPECT_OK("the CertificateVerify is accepted",
                wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE_VERIFY,
-                                     WT_RFC8448_CERTIFICATE_VERIFY_LEN, finished,
-                                     sizeof(finished), &finished_len));
-  WT_EXPECT_U64("and it waits for the server's Finished",
-                (uint64_t)WT_TLS_CLIENT_WAIT_FINISHED,
+                                     WT_RFC8448_CERTIFICATE_VERIFY_LEN, finished, sizeof(finished),
+                                     &finished_len));
+  WT_EXPECT_U64("and it waits for the server's Finished", (uint64_t)WT_TLS_CLIENT_WAIT_FINISHED,
                 (uint64_t)wt_tls_client_state(&client));
   WT_EXPECT_STATUS("the application secrets are still unavailable", WT_ERR_STATE,
-                   wt_tls_client_application_secrets(&client, read_secret,
-                                                     write_secret));
+                   wt_tls_client_application_secrets(&client, read_secret, write_secret));
 
   /* The server's Finished. The reply is the client's Finished, and the RFC prints it. */
   WT_EXPECT_OK("the server's Finished is accepted",
                wt_tls_client_receive(&client, WT_RFC8448_SERVER_FINISHED_MESSAGE,
                                      WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN, finished,
                                      sizeof(finished), &finished_len));
-  WT_EXPECT_U64("and the handshake is complete",
-                (uint64_t)WT_TLS_CLIENT_CONNECTED,
+  WT_EXPECT_U64("and the handshake is complete", (uint64_t)WT_TLS_CLIENT_CONNECTED,
                 (uint64_t)wt_tls_client_state(&client));
   WT_EXPECT_U64("with a Finished to send", 36U, (uint64_t)finished_len);
   WT_EXPECT_BYTES("which is the RFC's client Finished", WT_RFC8448_CLIENT_FINISHED_MESSAGE,
@@ -139,11 +126,9 @@ static void test_rfc8448_handshake(void) {
   WT_EXPECT_OK("the application secrets are available",
                wt_tls_client_application_secrets(&client, read_secret, write_secret));
   WT_EXPECT_BYTES("the read secret is the RFC's server application secret",
-                  WT_RFC8448_SERVER_APPLICATION_SECRET, read_secret,
-                  WT_TLS13_SECRET_LEN);
+                  WT_RFC8448_SERVER_APPLICATION_SECRET, read_secret, WT_TLS13_SECRET_LEN);
   WT_EXPECT_BYTES("and the write secret is the RFC's client application secret",
-                  WT_RFC8448_CLIENT_APPLICATION_SECRET, write_secret,
-                  WT_TLS13_SECRET_LEN);
+                  WT_RFC8448_CLIENT_APPLICATION_SECRET, write_secret, WT_TLS13_SECRET_LEN);
 
   /* RFC 8446 section 4.6: a NewSessionTicket arrives AFTER the handshake and is accepted and ignored, not
    * refused. It is the message every real server sends, and refusing it is not a security property but a defect a
@@ -168,13 +153,12 @@ static void test_rfc8448_handshake(void) {
   /* A message after the handshake is a state error rather than a second handshake. */
   WT_EXPECT_STATUS("another message is refused", WT_ERR_STATE,
                    wt_tls_client_receive(&client, WT_RFC8448_SERVER_FINISHED_MESSAGE,
-                                         WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN,
-                                         finished, sizeof(finished), &finished_len));
+                                         WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN, finished,
+                                         sizeof(finished), &finished_len));
   WT_EXPECT_U64("and the machine has failed", (uint64_t)WT_TLS_CLIENT_FAILED,
                 (uint64_t)wt_tls_client_state(&client));
   WT_EXPECT_STATUS("so the secrets are gone", WT_ERR_STATE,
-                   wt_tls_client_application_secrets(&client, read_secret,
-                                                     write_secret));
+                   wt_tls_client_application_secrets(&client, read_secret, write_secret));
   wt_tls_client_clear(&client);
 }
 
@@ -202,22 +186,20 @@ static void test_gates(void) {
                                      WT_RFC8448_CLIENT_HELLO_LEN));
     WT_EXPECT_OK("the ServerHello is accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_SERVER_HELLO,
-                                       WT_RFC8448_SERVER_HELLO_LEN, finished,
-                                       sizeof(finished), &finished_len));
+                                       WT_RFC8448_SERVER_HELLO_LEN, finished, sizeof(finished),
+                                       &finished_len));
     WT_EXPECT_OK("EncryptedExtensions are accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_ENCRYPTED_EXTENSIONS,
                                        WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN, finished,
                                        sizeof(finished), &finished_len));
     WT_EXPECT_STATUS("a certificate that is not pinned is refused", WT_ERR_TRUST,
                      wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE,
-                                           WT_RFC8448_CERTIFICATE_LEN, finished,
-                                           sizeof(finished), &finished_len));
-    WT_EXPECT_U64("and the handshake has failed",
-                  (uint64_t)WT_TLS_CLIENT_FAILED,
+                                           WT_RFC8448_CERTIFICATE_LEN, finished, sizeof(finished),
+                                           &finished_len));
+    WT_EXPECT_U64("and the handshake has failed", (uint64_t)WT_TLS_CLIENT_FAILED,
                   (uint64_t)wt_tls_client_state(&client));
     WT_EXPECT_STATUS("with no application secrets", WT_ERR_STATE,
-                     wt_tls_client_application_secrets(&client, read_secret,
-                                                       write_secret));
+                     wt_tls_client_application_secrets(&client, read_secret, write_secret));
     wt_tls_client_clear(&client);
     (void)alpn_h3;
   }
@@ -234,12 +216,12 @@ static void test_gates(void) {
                                      WT_RFC8448_CLIENT_HELLO_LEN));
     WT_EXPECT_OK("the ServerHello is accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_SERVER_HELLO,
-                                       WT_RFC8448_SERVER_HELLO_LEN, finished,
-                                       sizeof(finished), &finished_len));
+                                       WT_RFC8448_SERVER_HELLO_LEN, finished, sizeof(finished),
+                                       &finished_len));
     WT_EXPECT_STATUS("a server that answers no protocol is refused", WT_ERR_TLS,
                      wt_tls_client_receive(&client, WT_RFC8448_ENCRYPTED_EXTENSIONS,
-                                           WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN,
-                                           finished, sizeof(finished), &finished_len));
+                                           WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN, finished,
+                                           sizeof(finished), &finished_len));
     wt_tls_client_clear(&client);
   }
 
@@ -253,12 +235,12 @@ static void test_gates(void) {
                                      WT_RFC8448_CLIENT_HELLO_LEN));
     WT_EXPECT_OK("the ServerHello is accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_SERVER_HELLO,
-                                       WT_RFC8448_SERVER_HELLO_LEN, finished,
-                                       sizeof(finished), &finished_len));
+                                       WT_RFC8448_SERVER_HELLO_LEN, finished, sizeof(finished),
+                                       &finished_len));
     WT_EXPECT_STATUS("a server that sends none is refused", WT_ERR_TLS,
                      wt_tls_client_receive(&client, WT_RFC8448_ENCRYPTED_EXTENSIONS,
-                                           WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN,
-                                           finished, sizeof(finished), &finished_len));
+                                           WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN, finished,
+                                           sizeof(finished), &finished_len));
     wt_tls_client_clear(&client);
   }
 
@@ -271,8 +253,8 @@ static void test_gates(void) {
                                      WT_RFC8448_CLIENT_HELLO_LEN));
     WT_EXPECT_STATUS("a Certificate before the ServerHello is refused", WT_ERR_STATE,
                      wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE,
-                                           WT_RFC8448_CERTIFICATE_LEN, finished,
-                                           sizeof(finished), &finished_len));
+                                           WT_RFC8448_CERTIFICATE_LEN, finished, sizeof(finished),
+                                           &finished_len));
     wt_tls_client_clear(&client);
   }
 
@@ -286,29 +268,26 @@ static void test_gates(void) {
                                      WT_RFC8448_CLIENT_HELLO_LEN));
     WT_EXPECT_OK("the ServerHello is accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_SERVER_HELLO,
-                                       WT_RFC8448_SERVER_HELLO_LEN, finished,
-                                       sizeof(finished), &finished_len));
+                                       WT_RFC8448_SERVER_HELLO_LEN, finished, sizeof(finished),
+                                       &finished_len));
     WT_EXPECT_OK("EncryptedExtensions are accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_ENCRYPTED_EXTENSIONS,
                                        WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN, finished,
                                        sizeof(finished), &finished_len));
     WT_EXPECT_OK("the Certificate is accepted",
-                 wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE,
-                                       WT_RFC8448_CERTIFICATE_LEN, finished,
-                                       sizeof(finished), &finished_len));
+                 wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE, WT_RFC8448_CERTIFICATE_LEN,
+                                       finished, sizeof(finished), &finished_len));
     WT_EXPECT_OK("the CertificateVerify is accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE_VERIFY,
                                        WT_RFC8448_CERTIFICATE_VERIFY_LEN, finished,
                                        sizeof(finished), &finished_len));
     memcpy(damaged, WT_RFC8448_SERVER_FINISHED_MESSAGE, sizeof(damaged));
     damaged[WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN - 1U] ^= 0x01U;
-    WT_EXPECT_STATUS("a Finished that does not verify is refused",
-                     WT_ERR_AUTHENTICATION,
+    WT_EXPECT_STATUS("a Finished that does not verify is refused", WT_ERR_AUTHENTICATION,
                      wt_tls_client_receive(&client, damaged, sizeof(damaged), finished,
                                            sizeof(finished), &finished_len));
     WT_EXPECT_STATUS("and no application secrets appear", WT_ERR_STATE,
-                     wt_tls_client_application_secrets(&client, read_secret,
-                                                       write_secret));
+                     wt_tls_client_application_secrets(&client, read_secret, write_secret));
     wt_tls_client_clear(&client);
   }
 
@@ -321,20 +300,18 @@ static void test_gates(void) {
                                      WT_RFC8448_CLIENT_HELLO_LEN));
     WT_EXPECT_OK("the ServerHello is accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_SERVER_HELLO,
-                                       WT_RFC8448_SERVER_HELLO_LEN, finished,
-                                       sizeof(finished), &finished_len));
+                                       WT_RFC8448_SERVER_HELLO_LEN, finished, sizeof(finished),
+                                       &finished_len));
     WT_EXPECT_OK("EncryptedExtensions are accepted",
                  wt_tls_client_receive(&client, WT_RFC8448_ENCRYPTED_EXTENSIONS,
                                        WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN, finished,
                                        sizeof(finished), &finished_len));
     WT_EXPECT_OK("the Certificate is accepted",
-                 wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE,
-                                       WT_RFC8448_CERTIFICATE_LEN, finished,
-                                       sizeof(finished), &finished_len));
+                 wt_tls_client_receive(&client, WT_RFC8448_CERTIFICATE, WT_RFC8448_CERTIFICATE_LEN,
+                                       finished, sizeof(finished), &finished_len));
     memcpy(damaged, WT_RFC8448_CERTIFICATE_VERIFY, sizeof(damaged));
     damaged[WT_RFC8448_CERTIFICATE_VERIFY_LEN - 1U] ^= 0x01U;
-    WT_EXPECT_STATUS("a CertificateVerify that does not verify is refused",
-                     WT_ERR_AUTHENTICATION,
+    WT_EXPECT_STATUS("a CertificateVerify that does not verify is refused", WT_ERR_AUTHENTICATION,
                      wt_tls_client_receive(&client, damaged, sizeof(damaged), finished,
                                            sizeof(finished), &finished_len));
     wt_tls_client_clear(&client);
@@ -368,8 +345,7 @@ static void test_built_client_hello(void) {
 
   memset(&client, 0, sizeof(client));
   WT_EXPECT_OK("the ClientHello builds",
-               wt_tls_client_begin_built(&client, &config, hello, sizeof(hello),
-                                         &hello_len));
+               wt_tls_client_begin_built(&client, &config, hello, sizeof(hello), &hello_len));
   WT_EXPECT_U64("and waits for the ServerHello", (uint64_t)WT_TLS_CLIENT_WAIT_SERVER_HELLO,
                 (uint64_t)wt_tls_client_state(&client));
   WT_EXPECT_TRUE("with bytes in it", hello_len > 0U);
@@ -381,31 +357,23 @@ static void test_built_client_hello(void) {
   WT_EXPECT_U64("one ciphersuite", (uint64_t)WT_TLS_CIPHER_AES_128_GCM_SHA256,
                 (uint64_t)parsed.cipher_suites[0]);
   WT_EXPECT_TRUE("with a server_name",
-                 wt_tls_extensions_contains(&parsed.extensions,
-                                            WT_TLS_EXTENSION_SERVER_NAME));
+                 wt_tls_extensions_contains(&parsed.extensions, WT_TLS_EXTENSION_SERVER_NAME));
   WT_EXPECT_TRUE("a key share",
-                 wt_tls_extensions_contains(&parsed.extensions,
-                                            WT_TLS_EXTENSION_KEY_SHARE));
-  WT_EXPECT_TRUE("ALPN",
-                 wt_tls_extensions_contains(&parsed.extensions,
-                                            WT_TLS_EXTENSION_ALPN));
-  WT_EXPECT_TRUE("and our transport parameters",
-                 wt_tls_extensions_contains(
-                     &parsed.extensions,
-                     WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS));
+                 wt_tls_extensions_contains(&parsed.extensions, WT_TLS_EXTENSION_KEY_SHARE));
+  WT_EXPECT_TRUE("ALPN", wt_tls_extensions_contains(&parsed.extensions, WT_TLS_EXTENSION_ALPN));
+  WT_EXPECT_TRUE(
+      "and our transport parameters",
+      wt_tls_extensions_contains(&parsed.extensions, WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS));
   /* Exactly one group is offered, because a group offered without a key share invites a
    * HelloRetryRequest this implementation refuses. */
-  extension = wt_tls_extensions_find(&parsed.extensions,
-                                     WT_TLS_EXTENSION_SUPPORTED_GROUPS);
+  extension = wt_tls_extensions_find(&parsed.extensions, WT_TLS_EXTENSION_SUPPORTED_GROUPS);
   {
     uint16_t groups[WT_TLS_MAX_NAMED_GROUPS];
     size_t count = 0U;
     WT_EXPECT_OK("the groups read",
-                 wt_tls_u16_list_parse(extension, groups, WT_TLS_MAX_NAMED_GROUPS,
-                                       &count));
+                 wt_tls_u16_list_parse(extension, groups, WT_TLS_MAX_NAMED_GROUPS, &count));
     WT_EXPECT_U64("one group", 1U, (uint64_t)count);
-    WT_EXPECT_U64("and it is x25519", (uint64_t)WT_TLS_GROUP_X25519,
-                  (uint64_t)groups[0]);
+    WT_EXPECT_U64("and it is x25519", (uint64_t)WT_TLS_GROUP_X25519, (uint64_t)groups[0]);
   }
 
   /* Two calls with the same configuration offer different key shares, because the machine
@@ -419,20 +387,17 @@ static void test_built_client_hello(void) {
     wt_tls_key_share_t second_share;
 
     memset(&other, 0, sizeof(other));
-    WT_EXPECT_OK("a second ClientHello builds",
-                 wt_tls_client_begin_built(&other, &config, other_hello,
-                                           sizeof(other_hello), &other_len));
-    WT_EXPECT_OK("and parses", wt_tls_client_hello_parse(other_hello, other_len,
-                                                         &other_parsed));
+    WT_EXPECT_OK(
+        "a second ClientHello builds",
+        wt_tls_client_begin_built(&other, &config, other_hello, sizeof(other_hello), &other_len));
+    WT_EXPECT_OK("and parses", wt_tls_client_hello_parse(other_hello, other_len, &other_parsed));
     WT_EXPECT_OK("the first key share reads",
                  wt_tls_key_share_client(
-                     wt_tls_extensions_find(&parsed.extensions,
-                                            WT_TLS_EXTENSION_KEY_SHARE),
+                     wt_tls_extensions_find(&parsed.extensions, WT_TLS_EXTENSION_KEY_SHARE),
                      &first_share, 1U, &hello_len));
     WT_EXPECT_OK("and the second",
                  wt_tls_key_share_client(
-                     wt_tls_extensions_find(&other_parsed.extensions,
-                                            WT_TLS_EXTENSION_KEY_SHARE),
+                     wt_tls_extensions_find(&other_parsed.extensions, WT_TLS_EXTENSION_KEY_SHARE),
                      &second_share, 1U, &other_len));
     WT_EXPECT_INT("the two key shares differ", 0,
                   memcmp(first_share.key, second_share.key, 32U) == 0 ? 1 : 0);
@@ -449,19 +414,16 @@ static void test_built_client_hello(void) {
     WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
                      wt_tls_client_begin_built(&client, &config, NULL, 64U, &out_len));
     WT_EXPECT_STATUS("a NULL config is refused", WT_ERR_INVALID_ARGUMENT,
-                     wt_tls_client_begin_built(&client, NULL, hello, sizeof(hello),
-                                               &out_len));
+                     wt_tls_client_begin_built(&client, NULL, hello, sizeof(hello), &out_len));
     WT_EXPECT_STATUS("a buffer too small is refused", WT_ERR_LIMIT,
                      wt_tls_client_begin_built(&client, &config, hello, 4U, &out_len));
     /* A failed begin holds nothing, so the next attempt is allowed without a clear; and a
      * machine that is mid-handshake may also start over, because beginning again releases
      * what the abandoned handshake held rather than leaking it. */
     WT_EXPECT_OK("and the machine can be used again",
-                 wt_tls_client_begin_built(&client, &config, hello, sizeof(hello),
-                                           &out_len));
+                 wt_tls_client_begin_built(&client, &config, hello, sizeof(hello), &out_len));
     WT_EXPECT_OK("and may start over mid-handshake",
-                 wt_tls_client_begin_built(&client, &config, hello, sizeof(hello),
-                                           &out_len));
+                 wt_tls_client_begin_built(&client, &config, hello, sizeof(hello), &out_len));
     wt_tls_client_clear(&client);
     {
       wt_tls_client_config_t bad = config;
@@ -469,8 +431,7 @@ static void test_built_client_hello(void) {
       bad.session_id = too_long;
       bad.session_id_len = 64U;
       WT_EXPECT_STATUS("a session id that is too long is refused", WT_ERR_LIMIT,
-                       wt_tls_client_begin_built(&client, &bad, hello, sizeof(hello),
-                                                 &out_len));
+                       wt_tls_client_begin_built(&client, &bad, hello, sizeof(hello), &out_len));
       wt_tls_client_clear(&client);
     }
   }

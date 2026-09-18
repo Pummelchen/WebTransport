@@ -39,10 +39,9 @@
  * A preprocessor concatenation, so it is usable as a WT_EXPECT_STR `want`. */
 #define WT_TEST_STRINGIFY_INNER(x) #x
 #define WT_TEST_STRINGIFY(x) WT_TEST_STRINGIFY_INNER(x)
-#define WT_TEST_VERSION_STRING                    \
-  WT_TEST_STRINGIFY(WT_VERSION_MAJOR) "."         \
-  WT_TEST_STRINGIFY(WT_VERSION_MINOR) "."         \
-  WT_TEST_STRINGIFY(WT_VERSION_PATCH)
+#define WT_TEST_VERSION_STRING                                                                     \
+  WT_TEST_STRINGIFY(WT_VERSION_MAJOR)                                                              \
+  "." WT_TEST_STRINGIFY(WT_VERSION_MINOR) "." WT_TEST_STRINGIFY(WT_VERSION_PATCH)
 
 /* Shared rather than file-local so a test may be built from more than one translation
  * unit: a `static` tally would leave each file counting into its own copy, and
@@ -68,8 +67,7 @@ static inline void wt_test_expect_int(const char *label, long want, long got) {
   printf("FAIL %s: want %ld, got %ld\n", label, want, got);
 }
 
-static inline void wt_test_expect_str(const char *label, const char *want,
-                               const char *got) {
+static inline void wt_test_expect_str(const char *label, const char *want, const char *got) {
   wt_test_checks++;
   if (want == NULL || got == NULL) {
     if (want == got) return;
@@ -90,8 +88,8 @@ static inline void wt_test_expect_true(const char *label, int condition) {
   printf("FAIL %s: expected true\n", label);
 }
 
-static inline void wt_test_expect_bytes(const char *label, const uint8_t *want,
-                                 const uint8_t *got, size_t len) {
+static inline void wt_test_expect_bytes(const char *label, const uint8_t *want, const uint8_t *got,
+                                        size_t len) {
   size_t i;
   wt_test_checks++;
   if (want == NULL || got == NULL) {
@@ -103,9 +101,11 @@ static inline void wt_test_expect_bytes(const char *label, const uint8_t *want,
   if (memcmp(want, got, len) == 0) return;
   wt_test_failures++;
   printf("FAIL %s\n     want ", label);
-  for (i = 0; i < len; i++) printf("%02x", want[i]);
+  for (i = 0; i < len; i++)
+    printf("%02x", want[i]);
   printf("\n     got  ");
-  for (i = 0; i < len; i++) printf("%02x", got[i]);
+  for (i = 0; i < len; i++)
+    printf("%02x", got[i]);
   printf("\n");
 }
 
@@ -119,38 +119,33 @@ static inline void wt_test_expect_ok(const char *label, wt_status_t status) {
   printf("FAIL %s: expected ok, got %s\n", label, wt_status_name(status));
 }
 
-static inline void wt_test_expect_status(const char *label, wt_status_t want,
-                                         wt_status_t got) {
+static inline void wt_test_expect_status(const char *label, wt_status_t want, wt_status_t got) {
   wt_test_checks++;
   if (want == got) return;
   wt_test_failures++;
-  printf("FAIL %s: want %s, got %s\n", label, wt_status_name(want),
-         wt_status_name(got));
+  printf("FAIL %s: want %s, got %s\n", label, wt_status_name(want), wt_status_name(got));
 }
 
 #define WT_EXPECT_U64(label, want, got) wt_test_expect_u64(label, want, got)
 #define WT_EXPECT_INT(label, want, got) wt_test_expect_int(label, want, got)
 #define WT_EXPECT_STR(label, want, got) wt_test_expect_str(label, want, got)
 #define WT_EXPECT_TRUE(label, cond) wt_test_expect_true(label, cond)
-#define WT_EXPECT_BYTES(label, want, got, len) \
-  wt_test_expect_bytes(label, want, got, len)
+#define WT_EXPECT_BYTES(label, want, got, len) wt_test_expect_bytes(label, want, got, len)
 #define WT_EXPECT_OK(label, status) wt_test_expect_ok(label, status)
-#define WT_EXPECT_STATUS(label, want, got) \
-  wt_test_expect_status(label, want, got)
+#define WT_EXPECT_STATUS(label, want, got) wt_test_expect_status(label, want, got)
 
-#define WT_TEST_MAIN_END(name)                                              \
-  do {                                                                      \
-    if (wt_test_checks == 0) {                                              \
-      printf("%s: NO CHECKS RAN (0 checks)\n", name);                       \
-      return 1;                                                             \
-    }                                                                       \
-    if (wt_test_failures != 0) {                                            \
-      printf("%s: %d of %d checks FAILED\n", name, wt_test_failures,        \
-             wt_test_checks);                                               \
-      return 1;                                                             \
-    }                                                                       \
-    printf("%s: all %d checks passed\n", name, wt_test_checks);             \
-    return 0;                                                               \
+#define WT_TEST_MAIN_END(name)                                                                     \
+  do {                                                                                             \
+    if (wt_test_checks == 0) {                                                                     \
+      printf("%s: NO CHECKS RAN (0 checks)\n", name);                                              \
+      return 1;                                                                                    \
+    }                                                                                              \
+    if (wt_test_failures != 0) {                                                                   \
+      printf("%s: %d of %d checks FAILED\n", name, wt_test_failures, wt_test_checks);              \
+      return 1;                                                                                    \
+    }                                                                                              \
+    printf("%s: all %d checks passed\n", name, wt_test_checks);                                    \
+    return 0;                                                                                      \
   } while (0)
 
 #endif /* WT_TEST_H */

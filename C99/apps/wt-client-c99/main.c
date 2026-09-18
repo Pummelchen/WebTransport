@@ -16,8 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "webtransport/cli/endpoint.h"
 #include "session_loop.h"
+#include "webtransport/cli/endpoint.h"
 
 #include "webtransport/cli/options.h"
 #include "webtransport/version.h"
@@ -38,8 +38,8 @@ static const char *wt_client_transcript_types(const wt_loop_result_t *result) {
 static int wt_usage(const char *program) {
   printf("usage: %s [options]\n", program);
   printf("\n");
-  printf("WebTransport over HTTP/3, C99 implementation %s (%s).\n",
-         wt_version_string(), wt_protocol_draft());
+  printf("WebTransport over HTTP/3, C99 implementation %s (%s).\n", wt_version_string(),
+         wt_protocol_draft());
   printf("\n");
   printf("It connects to a peer, establishes a WebTransport session and exchanges\n");
   printf("the message named by --exchange over the transport named by --transport.\n");
@@ -153,8 +153,9 @@ int main(int argc, char **argv) {
      * validating trust mode is in use, so `--authority` names it explicitly and lets the transport address stay
      * numeric while the identity is the name the certificate actually carries. Without it the origin, then
      * "localhost", is the historical default. */
-    loop.authority =
-        options.authority != NULL ? options.authority : (options.origin != NULL ? options.origin : "localhost");
+    loop.authority = options.authority != NULL
+                         ? options.authority
+                         : (options.origin != NULL ? options.origin : "localhost");
     loop.path = "/";
     loop.timeout_ms = options.timeout_ms;
     loop.datagram = options.exchange == WT_CLI_EXCHANGE_DATAGRAM;
@@ -171,54 +172,55 @@ int main(int argc, char **argv) {
 
     status = wt_loop_run_client(&loop, &result);
     if (options.json != 0) {
-      printf("{\"role\":\"client\",\"status\":\"%s\",\"established\":%s,\"connectAccepted\":%s,"
-             "\"responseStatus\":%u,\"responseOutcome\":%u,\"h3Error\":%llu,"
-             "\"receivedBytes\":%llu,\"receivedDatagram\":%s,\"earlyStream\":%s,"
-             "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u,\"packetsSeen\":%u,"
-             "\"lastReceive\":\"%s\",\"closeCodeSet\":%s,\"closeCode\":%llu,"
-             "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
-             "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,"
-             "\"closeCause\":\"%s\",\"closeSent\":%s,\"closeCauseFrame\":%llu,"
-             "\"packetsDiscarded\":%llu,\"keys\":{\"initial\":%s,\"handshake\":%s,"
-             "\"application\":%s},\"handshakeState\":\"%s\",\"resends\":%u,\"probes\":%u,"
-             "\"probesWithData\":%u,\"requestStreamId\":%llu,"
-             "\"streamsOpened\":{\"bidi\":%u,\"uni\":%u},"
-             "\"sent\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},"
-             "\"acked\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},\"inFlight\":%u,"
-             "\"transcriptTypes\":\"%s\","
-             "\"peerMaxDataSet\":%s,\"peerMaxData\":%llu,\"peerDrained\":%s,"
-             "\"peerSessionClosed\":%s,\"peerSessionCloseCode\":%u,"
-             "\"capsulesRefused\":%u,\"capsuleError\":%llu,"
-             "\"acks\":{\"initial\":[%u,%llu],\"handshake\":[%u,%llu],\"application\":[%u,%llu]}}\n",
-             wt_loop_status_name(status), result.established != 0 ? "true" : "false",
-             result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
-             result.response_outcome, (unsigned long long)result.h3_error,
-             (unsigned long long)result.received_bytes, result.received_datagram != 0 ? "true" : "false",
-             result.early_stream_sent != 0 ? "true" : "false",
-             wt_status_name(result.first_receive_error), result.receive_errors, result.packets_seen,
-             wt_status_name(result.last_receive), result.close_code_set != 0 ? "true" : "false",
-             (unsigned long long)result.close_code, (unsigned long long)result.close_frame_type,
-             result.peer_closed != 0 ? "true" : "false", (unsigned long long)result.peer_error_code,
-             result.close_kind, (unsigned long long)result.close_sent_error_code,
-             (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
-             result.close_was_sent != 0 ? "true" : "false",
-             (unsigned long long)result.close_cause_frame,
-             (unsigned long long)result.packets_discarded, result.has_initial_keys != 0 ? "true" : "false",
-             result.has_handshake_keys != 0 ? "true" : "false",
-             result.has_application_keys != 0 ? "true" : "false",
-             result.handshake_state != NULL ? result.handshake_state : "unknown", result.resends,
-             result.probes, result.probes_with_data,
-             (unsigned long long)result.request_stream_id, result.streams_opened_bidi,
-             result.streams_opened_uni, result.sent_initial, result.sent_handshake,
-             result.sent_application, result.acked_initial, result.acked_handshake,
-             result.acked_application, result.in_flight, wt_client_transcript_types(&result),
-             result.peer_max_data_set != 0 ? "true" : "false",
-             (unsigned long long)result.peer_max_data, result.peer_drained != 0 ? "true" : "false",
-             result.peer_close_code_set != 0 ? "true" : "false", result.peer_close_code,
-             result.capsules_refused, (unsigned long long)result.capsule_error,
-             result.acks_initial,
-             result.ack_largest_initial, result.acks_handshake, result.ack_largest_handshake,
-             result.acks_application, result.ack_largest_application);
+      printf(
+          "{\"role\":\"client\",\"status\":\"%s\",\"established\":%s,\"connectAccepted\":%s,"
+          "\"responseStatus\":%u,\"responseOutcome\":%u,\"h3Error\":%llu,"
+          "\"receivedBytes\":%llu,\"receivedDatagram\":%s,\"earlyStream\":%s,"
+          "\"firstReceiveError\":\"%s\",\"receiveErrors\":%u,\"packetsSeen\":%u,"
+          "\"lastReceive\":\"%s\",\"closeCodeSet\":%s,\"closeCode\":%llu,"
+          "\"closeFrameType\":%llu,\"peerClosed\":%s,\"peerErrorCode\":%llu,"
+          "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,"
+          "\"closeCause\":\"%s\",\"closeSent\":%s,\"closeCauseFrame\":%llu,"
+          "\"packetsDiscarded\":%llu,\"keys\":{\"initial\":%s,\"handshake\":%s,"
+          "\"application\":%s},\"handshakeState\":\"%s\",\"resends\":%u,\"probes\":%u,"
+          "\"probesWithData\":%u,\"requestStreamId\":%llu,"
+          "\"streamsOpened\":{\"bidi\":%u,\"uni\":%u},"
+          "\"sent\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},"
+          "\"acked\":{\"initial\":%u,\"handshake\":%u,\"application\":%u},\"inFlight\":%u,"
+          "\"transcriptTypes\":\"%s\","
+          "\"peerMaxDataSet\":%s,\"peerMaxData\":%llu,\"peerDrained\":%s,"
+          "\"peerSessionClosed\":%s,\"peerSessionCloseCode\":%u,"
+          "\"capsulesRefused\":%u,\"capsuleError\":%llu,"
+          "\"acks\":{\"initial\":[%u,%llu],\"handshake\":[%u,%llu],\"application\":[%u,%llu]}}\n",
+          wt_loop_status_name(status), result.established != 0 ? "true" : "false",
+          result.connect_accepted != 0 ? "true" : "false", (unsigned)result.status,
+          result.response_outcome, (unsigned long long)result.h3_error,
+          (unsigned long long)result.received_bytes,
+          result.received_datagram != 0 ? "true" : "false",
+          result.early_stream_sent != 0 ? "true" : "false",
+          wt_status_name(result.first_receive_error), result.receive_errors, result.packets_seen,
+          wt_status_name(result.last_receive), result.close_code_set != 0 ? "true" : "false",
+          (unsigned long long)result.close_code, (unsigned long long)result.close_frame_type,
+          result.peer_closed != 0 ? "true" : "false", (unsigned long long)result.peer_error_code,
+          result.close_kind, (unsigned long long)result.close_sent_error_code,
+          (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
+          result.close_was_sent != 0 ? "true" : "false",
+          (unsigned long long)result.close_cause_frame,
+          (unsigned long long)result.packets_discarded,
+          result.has_initial_keys != 0 ? "true" : "false",
+          result.has_handshake_keys != 0 ? "true" : "false",
+          result.has_application_keys != 0 ? "true" : "false",
+          result.handshake_state != NULL ? result.handshake_state : "unknown", result.resends,
+          result.probes, result.probes_with_data, (unsigned long long)result.request_stream_id,
+          result.streams_opened_bidi, result.streams_opened_uni, result.sent_initial,
+          result.sent_handshake, result.sent_application, result.acked_initial,
+          result.acked_handshake, result.acked_application, result.in_flight,
+          wt_client_transcript_types(&result), result.peer_max_data_set != 0 ? "true" : "false",
+          (unsigned long long)result.peer_max_data, result.peer_drained != 0 ? "true" : "false",
+          result.peer_close_code_set != 0 ? "true" : "false", result.peer_close_code,
+          result.capsules_refused, (unsigned long long)result.capsule_error, result.acks_initial,
+          result.ack_largest_initial, result.acks_handshake, result.ack_largest_handshake,
+          result.acks_application, result.ack_largest_application);
     } else {
       printf("client: %s, response %u (outcome %u), received %llu byte(s)%s\n",
              wt_loop_status_name(status), (unsigned)result.status, result.response_outcome,
@@ -227,27 +229,32 @@ int main(int argc, char **argv) {
       /* The HTTP/3 error when the RESPONSE itself was refused: no status can express it, because the refusal
        * happens before any status exists (WT-155). */
       if (result.response_outcome == (unsigned)WT_LOOP_RESPONSE_REFUSED) {
-        printf("client: the response was refused by the HTTP/3 layer with error %llu\n", result.h3_error);
+        printf("client: the response was refused by the HTTP/3 layer with error %llu\n",
+               result.h3_error);
       }
       /* The status above is the TOOL's ("timeout"); this is the layer's, and it is the difference between "the
        * peer never answered" and "the peer answered with something this endpoint refused". */
       if (result.receive_errors > 0U) {
-        printf("client: the runtime recorded %u receive error(s), the first being %s\n", result.receive_errors,
-               wt_status_name(result.first_receive_error));
+        printf("client: the runtime recorded %u receive error(s), the first being %s\n",
+               result.receive_errors, wt_status_name(result.first_receive_error));
       }
       if (status != WT_OK) {
-        printf("client: the connection saw %u packet(s) and discarded %llu; its last receive said %s\n",
+        printf("client: the connection saw %u packet(s) and discarded %llu; its last receive said "
+               "%s\n",
                result.packets_seen, (unsigned long long)result.packets_discarded,
                wt_status_name(result.last_receive));
         printf("client: keys in -- initial %s, handshake %s, application %s; handshake state %s\n",
-               result.has_initial_keys != 0 ? "yes" : "no", result.has_handshake_keys != 0 ? "yes" : "no",
+               result.has_initial_keys != 0 ? "yes" : "no",
+               result.has_handshake_keys != 0 ? "yes" : "no",
                result.has_application_keys != 0 ? "yes" : "no",
                result.handshake_state != NULL ? result.handshake_state : "unknown");
         if (result.resends > 0U) {
-          printf("client: answered %u lost-frame report(s) by resending the request\n", result.resends);
+          printf("client: answered %u lost-frame report(s) by resending the request\n",
+                 result.resends);
         }
         if (result.peer_closed != 0) {
-          printf("client: the peer closed with code 0x%llx\n", (unsigned long long)result.peer_error_code);
+          printf("client: the peer closed with code 0x%llx\n",
+                 (unsigned long long)result.peer_error_code);
         }
       }
       /* What the peer said on the CONNECT stream, which a transport-level report cannot show: a session close
@@ -260,18 +267,21 @@ int main(int argc, char **argv) {
         printf("client: the peer sent a drain, so no new streams\n");
       }
       if (result.peer_close_code_set != 0) {
-        printf("client: the peer closed the SESSION with application code 0x%x\n", result.peer_close_code);
+        printf("client: the peer closed the SESSION with application code 0x%x\n",
+               result.peer_close_code);
       }
       /* Printed whatever the status is, and THAT is the point: this endpoint's own close is a fact about the run,
        * and a tool that stayed silent about it printed "ok" for a session it had ended itself (WT-144). The code
        * comes from the connection's CLOSE STATE rather than from `closeCode` above, which is the hint a refusing
        * handler leaves and the connection clears before the close is even sent. */
       if (result.close_kind != 0U) {
-        printf("client: THIS endpoint closed the connection with code 0x%llx, blaming frame type %llu\n",
+        printf("client: THIS endpoint closed the connection with code 0x%llx, blaming frame type "
+               "%llu\n",
                (unsigned long long)result.close_sent_error_code,
                (unsigned long long)result.close_sent_frame_type);
         if (result.close_cause != WT_OK) {
-          printf("client: after a frame handler refused with %s\n", wt_status_name(result.close_cause));
+          printf("client: after a frame handler refused with %s\n",
+                 wt_status_name(result.close_cause));
         }
       }
     }

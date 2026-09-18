@@ -140,8 +140,8 @@ wt_writer_t wt_http3_frame_data_writer(uint8_t *buffer, size_t capacity);
  * frames, so a capsule's type and length written straight to the stream are not a capsule at all: they are the
  * header of an unknown frame type, which RFC 9114 section 9 requires the peer to ignore. The capsule is dropped in
  * silence rather than refused, which is what let a raw sender look interoperable (WT-249). */
-wt_status_t wt_http3_frame_wrap_data_in_place(uint8_t *buffer, size_t capacity, size_t payload_length,
-                                              size_t *out_length);
+wt_status_t wt_http3_frame_wrap_data_in_place(uint8_t *buffer, size_t capacity,
+                                              size_t payload_length, size_t *out_length);
 
 /* Read one frame from a cursor, advancing it past the frame. `out->payload`
  * points into the cursor's buffer and lives as long as it does. `out_error` is
@@ -151,9 +151,8 @@ wt_status_t wt_http3_frame_decode(wt_cursor_t *c, wt_http3_frame_t *out,
 
 /* Read one frame from the front of `data`, reporting how many bytes it used, so
  * a caller holding a complete frame's bytes can hand back the rest. */
-wt_status_t wt_http3_frame_decode_prefix(const uint8_t *data, size_t length,
-                                         wt_http3_frame_t *out, size_t *out_consumed,
-                                         wt_http3_error_t *out_error);
+wt_status_t wt_http3_frame_decode_prefix(const uint8_t *data, size_t length, wt_http3_frame_t *out,
+                                         size_t *out_consumed, wt_http3_error_t *out_error);
 
 /* Read a stream's type prefix (section 6.2.1), leaving the cursor after it. A
  * truncated varint is H3_STREAM_CREATION_ERROR, because the stream's type has to

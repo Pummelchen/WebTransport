@@ -73,8 +73,7 @@ int wt_tls_trust_host_is_loopback(const char *host_name) {
 }
 
 /* The leaf of a parsed chain, or NULL. */
-static X509 *parse_first(const wt_tls_certificate_t *certificate,
-                         STACK_OF(X509) * rest) {
+static X509 *parse_first(const wt_tls_certificate_t *certificate, STACK_OF(X509) * rest) {
   size_t i;
   X509 *leaf = NULL;
 
@@ -99,8 +98,7 @@ static X509 *parse_first(const wt_tls_certificate_t *certificate,
 }
 
 /* The leaf's SubjectPublicKeyInfo, in DER. */
-static wt_status_t leaf_spki(X509 *leaf, uint8_t *out, size_t capacity,
-                             size_t *out_len) {
+static wt_status_t leaf_spki(X509 *leaf, uint8_t *out, size_t capacity, size_t *out_len) {
   unsigned char *cursor = out;
   int measured;
   int written;
@@ -128,16 +126,14 @@ static wt_status_t certificate_fingerprint(const uint8_t *der, size_t len,
 
 wt_status_t wt_tls_trust_verify(const wt_tls_trust_policy_t *policy,
                                 const wt_tls_certificate_t *certificate,
-                                uint8_t spki_out[WT_TLS_SPKI_MAX],
-                                size_t *spki_len) {
+                                uint8_t spki_out[WT_TLS_SPKI_MAX], size_t *spki_len) {
   STACK_OF(X509) *rest = NULL;
   X509 *leaf = NULL;
   X509_STORE *store = NULL;
   X509_STORE_CTX *ctx = NULL;
   wt_status_t status = WT_ERR_TRUST;
 
-  if (policy == NULL || certificate == NULL || spki_out == NULL ||
-      spki_len == NULL) {
+  if (policy == NULL || certificate == NULL || spki_out == NULL || spki_len == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
   *spki_len = 0U;
@@ -149,13 +145,12 @@ wt_status_t wt_tls_trust_verify(const wt_tls_trust_policy_t *policy,
     size_t i;
     int matched = 0;
 
-    if (policy->fingerprint_count == 0U ||
-        policy->fingerprint_count > WT_TLS_PINNED_MAX) {
+    if (policy->fingerprint_count == 0U || policy->fingerprint_count > WT_TLS_PINNED_MAX) {
       return WT_ERR_INVALID_ARGUMENT;
     }
     if (certificate->count == 0U) return WT_ERR_TRUST;
-    status = certificate_fingerprint(certificate->entries[0].der,
-                                     certificate->entries[0].der_len, fingerprint);
+    status = certificate_fingerprint(certificate->entries[0].der, certificate->entries[0].der_len,
+                                     fingerprint);
     if (status != WT_OK) return status;
     /* Every pin is compared, in constant time, and the loop does not stop at the first
      * match: how many fingerprints a policy holds is a deployment fact, and a comparison
@@ -290,9 +285,9 @@ done:
   return status;
 }
 
-wt_status_t wt_tls_certificate_verify_content(
-    int from_server, const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS_CERTIFICATE_VERIFY_CONTENT_LEN]) {
+wt_status_t wt_tls_certificate_verify_content(int from_server,
+                                              const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                              uint8_t out[WT_TLS_CERTIFICATE_VERIFY_CONTENT_LEN]) {
   static const char server_context[] = "TLS 1.3, server CertificateVerify";
   static const char client_context[] = "TLS 1.3, client CertificateVerify";
   const char *context = from_server ? server_context : client_context;
@@ -308,10 +303,9 @@ wt_status_t wt_tls_certificate_verify_content(
   return WT_OK;
 }
 
-wt_status_t wt_tls_signature_verify(const uint8_t *spki, size_t spki_len,
-                                    uint16_t scheme, const uint8_t *content,
-                                    size_t content_len, const uint8_t *signature,
-                                    size_t signature_len) {
+wt_status_t wt_tls_signature_verify(const uint8_t *spki, size_t spki_len, uint16_t scheme,
+                                    const uint8_t *content, size_t content_len,
+                                    const uint8_t *signature, size_t signature_len) {
   const unsigned char *cursor;
   EVP_PKEY *key = NULL;
   EVP_MD_CTX *ctx = NULL;
@@ -389,9 +383,8 @@ done:
 }
 
 wt_status_t wt_tls_signature_sign(const uint8_t *private_key, size_t private_key_len,
-                                  uint16_t scheme, const uint8_t *content,
-                                  size_t content_len, uint8_t *signature_out,
-                                  size_t capacity, size_t *signature_len) {
+                                  uint16_t scheme, const uint8_t *content, size_t content_len,
+                                  uint8_t *signature_out, size_t capacity, size_t *signature_len) {
   const unsigned char *cursor;
   EVP_PKEY *key = NULL;
   EVP_MD_CTX *ctx = NULL;
@@ -401,8 +394,7 @@ wt_status_t wt_tls_signature_sign(const uint8_t *private_key, size_t private_key
   size_t needed = 0U;
   int ok;
 
-  if (private_key == NULL || content == NULL || signature_out == NULL ||
-      signature_len == NULL) {
+  if (private_key == NULL || content == NULL || signature_out == NULL || signature_len == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
   *signature_len = 0U;

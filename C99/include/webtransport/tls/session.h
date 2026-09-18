@@ -134,17 +134,13 @@ typedef struct wt_tls_client {
  * and starts a new one -- a caller that abandons a handshake should not have to remember to
  * release it first, and a struct whose bytes are indeterminate cannot be asked whether it is
  * live. It is a fresh start either way, never a continuation. */
-wt_status_t wt_tls_client_begin(wt_tls_client_t *client,
-                                const wt_tls_client_config_t *config,
-                                const uint8_t *client_hello,
-                                size_t client_hello_len);
+wt_status_t wt_tls_client_begin(wt_tls_client_t *client, const wt_tls_client_config_t *config,
+                                const uint8_t *client_hello, size_t client_hello_len);
 
 /* Build the ClientHello this implementation sends and start from it. Writes the message to
  * `out` and reports its length. */
-wt_status_t wt_tls_client_begin_built(wt_tls_client_t *client,
-                                      const wt_tls_client_config_t *config,
-                                      uint8_t *out, size_t out_capacity,
-                                      size_t *out_len);
+wt_status_t wt_tls_client_begin_built(wt_tls_client_t *client, const wt_tls_client_config_t *config,
+                                      uint8_t *out, size_t out_capacity, size_t *out_len);
 
 /* Consume one server handshake message. When the message is the server's Finished, the
  * client's own Finished is written to `out`, which is the only output this machine ever
@@ -158,9 +154,8 @@ wt_status_t wt_tls_client_begin_built(wt_tls_client_t *client,
  * CertificateVerify that does not verify, and WT_ERR_PROTOCOL for bytes that are not the
  * message they claim to be. A failure moves the machine to FAILED, and every later call
  * answers WT_ERR_STATE. */
-wt_status_t wt_tls_client_receive(wt_tls_client_t *client, const uint8_t *message,
-                                  size_t len, uint8_t *out, size_t out_capacity,
-                                  size_t *out_len);
+wt_status_t wt_tls_client_receive(wt_tls_client_t *client, const uint8_t *message, size_t len,
+                                  uint8_t *out, size_t out_capacity, size_t *out_len);
 
 wt_tls_client_state_t wt_tls_client_state(const wt_tls_client_t *client);
 
@@ -182,8 +177,7 @@ wt_status_t wt_tls_client_application_secrets(const wt_tls_client_t *client,
  * the message that carried them and are valid until the next `wt_tls_client_receive`; a
  * caller that keeps either copies it. */
 const uint8_t *wt_tls_client_alpn(const wt_tls_client_t *client, size_t *out_len);
-const uint8_t *wt_tls_client_transport_parameters(const wt_tls_client_t *client,
-                                                  size_t *out_len);
+const uint8_t *wt_tls_client_transport_parameters(const wt_tls_client_t *client, size_t *out_len);
 
 /* Release everything the handshake held. Called when a handshake ends, successfully or not,
  * so that secrets are not left in a reusable structure.
@@ -274,17 +268,15 @@ typedef struct wt_tls_server {
 } wt_tls_server_t;
 
 /* Start a handshake. Nothing is sent until a ClientHello arrives. */
-wt_status_t wt_tls_server_begin(wt_tls_server_t *server,
-                                const wt_tls_server_config_t *config);
+wt_status_t wt_tls_server_begin(wt_tls_server_t *server, const wt_tls_server_config_t *config);
 
 /* Consume a handshake message from the client. On the ClientHello it writes the ServerHello and
  * moves to the state where the rest of the flight can be fetched; on the client's Finished it
  * verifies it, derives the application secrets, and writes nothing.
  *
  * A machine that is already mid-handshake may be restarted, exactly as the client's may. */
-wt_status_t wt_tls_server_receive(wt_tls_server_t *server, const uint8_t *message,
-                                  size_t len, uint8_t *out, size_t out_capacity,
-                                  size_t *out_len);
+wt_status_t wt_tls_server_receive(wt_tls_server_t *server, const uint8_t *message, size_t len,
+                                  uint8_t *out, size_t out_capacity, size_t *out_len);
 
 /* The rest of the flight -- EncryptedExtensions, Certificate, CertificateVerify and Finished,
  * concatenated -- which the caller sends under handshake keys after the ServerHello. Valid once
@@ -292,8 +284,8 @@ wt_status_t wt_tls_server_receive(wt_tls_server_t *server, const uint8_t *messag
  * a second flight would not match the transcript the first one signed, and QUIC retransmits
  * CRYPTO data from its own send buffer rather than by asking TLS again. A second call is
  * WT_ERR_STATE. */
-wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out,
-                                 size_t out_capacity, size_t *out_len);
+wt_status_t wt_tls_server_flight(wt_tls_server_t *server, uint8_t *out, size_t out_capacity,
+                                 size_t *out_len);
 
 wt_tls_server_state_t wt_tls_server_state(const wt_tls_server_t *server);
 
@@ -310,8 +302,7 @@ wt_status_t wt_tls_server_application_secrets(const wt_tls_server_t *server,
                                               uint8_t write_out[WT_TLS13_SECRET_LEN]);
 
 const uint8_t *wt_tls_server_alpn(const wt_tls_server_t *server, size_t *out_len);
-const uint8_t *wt_tls_server_transport_parameters(const wt_tls_server_t *server,
-                                                  size_t *out_len);
+const uint8_t *wt_tls_server_transport_parameters(const wt_tls_server_t *server, size_t *out_len);
 void wt_tls_server_clear(wt_tls_server_t *server);
 
 #ifdef __cplusplus

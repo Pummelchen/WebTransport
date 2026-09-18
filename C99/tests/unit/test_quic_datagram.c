@@ -25,8 +25,7 @@ static void test_max_payload(void) {
   /* A packet with no room for a payload. */
   WT_EXPECT_U64("no payload when the packet is all overhead", 0U,
                 wt_quic_datagram_max_payload(1000U, 20U, 20U));
-  WT_EXPECT_U64("nor when it is smaller", 0U,
-                wt_quic_datagram_max_payload(1000U, 19U, 20U));
+  WT_EXPECT_U64("nor when it is smaller", 0U, wt_quic_datagram_max_payload(1000U, 19U, 20U));
 
   /* The packet's bound binds when the frame limit is generous: 1200 - 30 is the payload, and the
    * frame's overhead is inside it. */
@@ -40,11 +39,9 @@ static void test_max_payload(void) {
                 wt_quic_datagram_max_payload(1300U, 65535U, 30U));
   /* One byte less of limit cannot carry the same payload, and the length field there is still two
    * bytes wide. */
-  WT_EXPECT_U64("one byte less of limit", 1296U,
-                wt_quic_datagram_max_payload(1299U, 65535U, 30U));
+  WT_EXPECT_U64("one byte less of limit", 1296U, wt_quic_datagram_max_payload(1299U, 65535U, 30U));
   /* A limit small enough that the length field is one byte wide: 1 + 1 + 62 = 64. */
-  WT_EXPECT_U64("a one-byte length field", 62U,
-                wt_quic_datagram_max_payload(64U, 65535U, 30U));
+  WT_EXPECT_U64("a one-byte length field", 62U, wt_quic_datagram_max_payload(64U, 65535U, 30U));
   /* A limit that cannot hold even an empty datagram. */
   WT_EXPECT_U64("nothing fits under a tiny limit", 0U,
                 wt_quic_datagram_max_payload(1U, 65535U, 30U));
@@ -62,11 +59,9 @@ static void test_queue(void) {
   uint8_t message[4];
 
   wt_quic_datagram_queue_init(&queue);
-  WT_EXPECT_U64("a fresh queue is empty", 0U,
-                (uint64_t)wt_quic_datagram_queue_count(&queue));
+  WT_EXPECT_U64("a fresh queue is empty", 0U, (uint64_t)wt_quic_datagram_queue_count(&queue));
   WT_EXPECT_STATUS("and popping one says so", WT_ERR_AGAIN,
-                   wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length,
-                                              &received_at));
+                   wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length, &received_at));
   WT_EXPECT_U64("nothing received", 0U, wt_quic_datagram_queue_received(&queue));
   WT_EXPECT_U64("nothing discarded", 0U, wt_quic_datagram_queue_discarded(&queue));
 
@@ -76,31 +71,26 @@ static void test_queue(void) {
     static const uint8_t second[] = {4U, 5U};
     static const uint8_t third[] = {6U};
     WT_EXPECT_OK("the first arrives",
-                 wt_quic_datagram_queue_push(&queue, first, sizeof(first), 100U,
-                                             &discarded));
+                 wt_quic_datagram_queue_push(&queue, first, sizeof(first), 100U, &discarded));
     WT_EXPECT_INT("and is not discarded", 0, discarded);
     WT_EXPECT_OK("the second arrives",
-                 wt_quic_datagram_queue_push(&queue, second, sizeof(second), 200U,
-                                             &discarded));
+                 wt_quic_datagram_queue_push(&queue, second, sizeof(second), 200U, &discarded));
     WT_EXPECT_OK("the third arrives",
-                 wt_quic_datagram_queue_push(&queue, third, sizeof(third), 300U,
-                                             &discarded));
+                 wt_quic_datagram_queue_push(&queue, third, sizeof(third), 300U, &discarded));
     WT_EXPECT_U64("three are queued", 3U, (uint64_t)wt_quic_datagram_queue_count(&queue));
-    WT_EXPECT_OK("the first comes out", wt_quic_datagram_queue_pop(&queue, out,
-                                                                   sizeof(out), &out_length,
-                                                                   &received_at));
+    WT_EXPECT_OK("the first comes out",
+                 wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length, &received_at));
     WT_EXPECT_U64("with its length", 3U, (uint64_t)out_length);
     WT_EXPECT_BYTES("its bytes", first, out, 3U);
     WT_EXPECT_U64("and its arrival time", 100U, received_at);
-    WT_EXPECT_OK("then the second", wt_quic_datagram_queue_pop(&queue, out, sizeof(out),
-                                                                &out_length, &received_at));
+    WT_EXPECT_OK("then the second",
+                 wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length, &received_at));
     WT_EXPECT_BYTES("which is the second", second, out, 2U);
     WT_EXPECT_U64("two arrived", 3U, wt_quic_datagram_queue_received(&queue));
-    WT_EXPECT_OK("and the third", wt_quic_datagram_queue_pop(&queue, out, sizeof(out),
-                                                              &out_length, &received_at));
+    WT_EXPECT_OK("and the third",
+                 wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length, &received_at));
     WT_EXPECT_BYTES("which is the third", third, out, 1U);
-    WT_EXPECT_U64("leaving the queue empty", 0U,
-                  (uint64_t)wt_quic_datagram_queue_count(&queue));
+    WT_EXPECT_U64("leaving the queue empty", 0U, (uint64_t)wt_quic_datagram_queue_count(&queue));
   }
 
   /* The ring wraps: pushing and popping more than the queue's depth keeps working, and the order is
@@ -116,14 +106,12 @@ static void test_queue(void) {
       uint8_t second = (uint8_t)(2U * i + 1U);
       WT_EXPECT_OK("a datagram arrives",
                    wt_quic_datagram_queue_push(&queue, &first, 1U, i, &discarded));
-      WT_EXPECT_OK("and another",
-                   wt_quic_datagram_queue_push(&queue, &second, 1U, i, &discarded));
-      WT_EXPECT_OK("the first is taken", wt_quic_datagram_queue_pop(&queue, out, sizeof(out),
-                                                                    &out_length,
-                                                                    &received_at));
+      WT_EXPECT_OK("and another", wt_quic_datagram_queue_push(&queue, &second, 1U, i, &discarded));
+      WT_EXPECT_OK("the first is taken",
+                   wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length, &received_at));
       if (out_length != 1U || out[0] != first) all_in_order = 0;
-      WT_EXPECT_OK("then the second", wt_quic_datagram_queue_pop(&queue, out, sizeof(out),
-                                                                 &out_length, &received_at));
+      WT_EXPECT_OK("then the second",
+                   wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length, &received_at));
       if (out_length != 1U || out[0] != second) all_in_order = 0;
     }
     WT_EXPECT_INT("the ring returns them in order", 1, all_in_order);
@@ -143,8 +131,8 @@ static void test_queue(void) {
     WT_EXPECT_U64("which is now full", (uint64_t)WT_QUIC_DATAGRAM_QUEUE_MAX,
                   (uint64_t)wt_quic_datagram_queue_count(&full));
     message[0] = 99U;
-    WT_EXPECT_OK("one more arrives", wt_quic_datagram_queue_push(&full, message, 1U, 50U,
-                                                                 &discarded_here));
+    WT_EXPECT_OK("one more arrives",
+                 wt_quic_datagram_queue_push(&full, message, 1U, 50U, &discarded_here));
     WT_EXPECT_INT("and is discarded rather than queued", 1, discarded_here);
     WT_EXPECT_U64("so the queue is still full", (uint64_t)WT_QUIC_DATAGRAM_QUEUE_MAX,
                   (uint64_t)wt_quic_datagram_queue_count(&full));
@@ -152,17 +140,15 @@ static void test_queue(void) {
     WT_EXPECT_U64("and all of them received", (uint64_t)WT_QUIC_DATAGRAM_QUEUE_MAX + 1U,
                   wt_quic_datagram_queue_received(&full));
     /* The oldest is still the first one, and the discarded one is not in the queue. */
-    WT_EXPECT_OK("the oldest comes out", wt_quic_datagram_queue_pop(&full, out, sizeof(out),
-                                                                    &out_length,
-                                                                    &received_at));
+    WT_EXPECT_OK("the oldest comes out",
+                 wt_quic_datagram_queue_pop(&full, out, sizeof(out), &out_length, &received_at));
     WT_EXPECT_U64("which is the first", 1U, (uint64_t)out[0]);
     {
       size_t remaining = wt_quic_datagram_queue_count(&full);
       int found_discarded = 0;
       while (remaining > 0U) {
-        WT_EXPECT_OK("the next comes out", wt_quic_datagram_queue_pop(&full, out,
-                                                                      sizeof(out), &out_length,
-                                                                      &received_at));
+        WT_EXPECT_OK("the next comes out", wt_quic_datagram_queue_pop(&full, out, sizeof(out),
+                                                                      &out_length, &received_at));
         if (out_length == 1U && out[0] == 99U) found_discarded = 1;
         remaining--;
       }
@@ -177,12 +163,11 @@ static void test_queue(void) {
     wt_quic_datagram_queue_init(&queue);
     memset(large, 0x5a, sizeof(large));
     WT_EXPECT_STATUS("an oversized datagram is refused", WT_ERR_LIMIT,
-                     wt_quic_datagram_queue_push(&queue, large, sizeof(large), 0U,
-                                                 &discarded));
+                     wt_quic_datagram_queue_push(&queue, large, sizeof(large), 0U, &discarded));
     WT_EXPECT_OK("an empty one is accepted",
                  wt_quic_datagram_queue_push(&queue, NULL, 0U, 0U, &discarded));
-    WT_EXPECT_OK("and popped", wt_quic_datagram_queue_pop(&queue, out, sizeof(out),
-                                                          &out_length, &received_at));
+    WT_EXPECT_OK("and popped",
+                 wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length, &received_at));
     WT_EXPECT_U64("with no bytes", 0U, (uint64_t)out_length);
     WT_EXPECT_STATUS("a NULL queue is refused", WT_ERR_INVALID_ARGUMENT,
                      wt_quic_datagram_queue_push(NULL, message, 1U, 0U, &discarded));
@@ -198,15 +183,12 @@ static void test_queue(void) {
     message[2] = 9U;
     WT_EXPECT_OK("a three-byte datagram is queued",
                  wt_quic_datagram_queue_push(&queue, message, 3U, 0U, &discarded));
-    WT_EXPECT_STATUS("popping it into two bytes is refused", WT_ERR_LIMIT,
-                     wt_quic_datagram_queue_pop(&queue, small, sizeof(small), &small_length,
-                                                &received_at));
-    WT_EXPECT_U64("and it is still queued", 1U,
-                  (uint64_t)wt_quic_datagram_queue_count(&queue));
-    WT_EXPECT_OK("so a larger buffer takes it", wt_quic_datagram_queue_pop(&queue, out,
-                                                                           sizeof(out),
-                                                                           &out_length,
-                                                                           &received_at));
+    WT_EXPECT_STATUS(
+        "popping it into two bytes is refused", WT_ERR_LIMIT,
+        wt_quic_datagram_queue_pop(&queue, small, sizeof(small), &small_length, &received_at));
+    WT_EXPECT_U64("and it is still queued", 1U, (uint64_t)wt_quic_datagram_queue_count(&queue));
+    WT_EXPECT_OK("so a larger buffer takes it",
+                 wt_quic_datagram_queue_pop(&queue, out, sizeof(out), &out_length, &received_at));
     WT_EXPECT_U64("with its bytes", 3U, (uint64_t)out_length);
   }
 }

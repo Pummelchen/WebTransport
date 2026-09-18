@@ -13,8 +13,8 @@
 
 #include "webtransport/crypto/crypto.h"
 #include "webtransport/quic/frame.h"
-#include "webtransport/quic/packet_number.h"
 #include "webtransport/quic/packet_io.h"
+#include "webtransport/quic/packet_number.h"
 #include "webtransport/quic/transport_parameters.h"
 #include "webtransport/writer.h"
 
@@ -44,8 +44,7 @@ uint64_t max_ack_delay_for(const wt_quic_connection_t *connection, wt_quic_space
 uint64_t ack_delay_for(const wt_quic_connection_t *connection, wt_quic_space_t space);
 uint64_t pto_of(const wt_quic_connection_t *connection);
 void free_frame(wt_quic_connection_t *connection, uint64_t tag);
-int probe_time(const wt_quic_connection_t *connection, wt_quic_space_t space,
-               uint64_t *out_time);
+int probe_time(const wt_quic_connection_t *connection, wt_quic_space_t space, uint64_t *out_time);
 uint64_t tag_for_control(wt_quic_connection_t *connection, size_t slot);
 void on_lost(void *context, const wt_quic_sent_packet_t *packet);
 int control_frame_is_retained(wt_quic_frame_type_t kind);
@@ -53,26 +52,24 @@ wt_status_t send_control_frame(wt_quic_connection_t *connection, wt_quic_space_t
                                const wt_quic_frame_t *frame, int ack_eliciting, int *out_sent,
                                uint64_t now);
 wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
-                           const wt_quic_frame_t *frame, int ack_eliciting,
-                           int has_descriptor, int is_crypto, uint64_t stream_id,
-                           uint64_t offset, size_t length, int *out_sent, uint64_t now);
+                           const wt_quic_frame_t *frame, int ack_eliciting, int has_descriptor,
+                           int is_crypto, uint64_t stream_id, uint64_t offset, size_t length,
+                           int *out_sent, uint64_t now);
 wt_status_t send_encoded_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
                                const uint8_t *payload, size_t payload_length, int ack_eliciting,
                                uint64_t tag, int *out_sent, uint64_t now);
-wt_status_t close_with(wt_quic_connection_t *connection, uint64_t error_code,
-                       uint64_t frame_type, uint64_t now);
+wt_status_t close_with(wt_quic_connection_t *connection, uint64_t error_code, uint64_t frame_type,
+                       uint64_t now);
 wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t space,
                        const wt_quic_frame_t *frame, uint64_t now);
 wt_status_t ensure_peer_stream(wt_quic_connection_t *connection, uint64_t stream_id,
-                               uint64_t frame_type, uint64_t now,
-                               wt_quic_stream_t **out_stream);
-wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
-                                     const wt_quic_frame_t *frame, uint64_t now);
+                               uint64_t frame_type, uint64_t now, wt_quic_stream_t **out_stream);
+wt_status_t handle_new_connection_id(wt_quic_connection_t *connection, const wt_quic_frame_t *frame,
+                                     uint64_t now);
 wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_visit_t *visit,
                                const wt_quic_frame_t *frame);
 wt_status_t handle_retire_connection_id(wt_quic_connection_t *connection,
-                                        const wt_quic_frame_t *frame,
-                                        wt_quic_visit_t *visit);
+                                        const wt_quic_frame_t *frame, wt_quic_visit_t *visit);
 wt_status_t flush_path_challenge(wt_quic_connection_t *connection, uint64_t now);
 wt_status_t path_validation_on_timeout(wt_quic_connection_t *connection, uint64_t now);
 int local_connection_id_sequence(const wt_quic_connection_t *connection, const uint8_t *id,

@@ -94,7 +94,8 @@ int wt_http3_setting_is_exerciser(uint64_t identifier);
  * reserved HTTP/2 identifier, an ENABLE_CONNECT_PROTOCOL above one (RFC 9220
  * section 3), an identifier already present -- so the encoder cannot produce a
  * frame this module would refuse to read -- and a full table (WT_ERR_LIMIT). */
-wt_status_t wt_http3_settings_set(wt_http3_settings_t *settings, uint64_t identifier, uint64_t value);
+wt_status_t wt_http3_settings_set(wt_http3_settings_t *settings, uint64_t identifier,
+                                  uint64_t value);
 
 /* The value of a setting, or 0 with `*out_present` clear. */
 uint64_t wt_http3_settings_get(const wt_http3_settings_t *settings, uint64_t identifier,
@@ -104,8 +105,8 @@ uint64_t wt_http3_settings_get(const wt_http3_settings_t *settings, uint64_t ide
  * a caller cannot inherit values from a previous parse. Sets `out_error` to
  * H3_SETTINGS_ERROR for a malformed or reserved setting, and to
  * H3_EXCESSIVE_LOAD when the table is full. */
-wt_status_t wt_http3_settings_parse(const uint8_t *payload, size_t length,
-                                    wt_http3_settings_t *out, wt_http3_error_t *out_error);
+wt_status_t wt_http3_settings_parse(const uint8_t *payload, size_t length, wt_http3_settings_t *out,
+                                    wt_http3_error_t *out_error);
 
 /* Encode a SETTINGS frame's payload in ascending identifier order, so the same
  * set always produces the same bytes. */

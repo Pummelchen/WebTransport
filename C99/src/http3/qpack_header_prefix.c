@@ -21,8 +21,7 @@ wt_status_t wt_qpack_header_prefix_encode(wt_writer_t *w, uint64_t required_inse
 
   /* Section 4.5.1: the count is sent modulo twice the table's size in entries, plus
    * one, so a value the decoder can place inside the window it knows about. */
-  encoded = required_insert_count == 0U ? 0U
-                                        : (required_insert_count % full_range) + 1U;
+  encoded = required_insert_count == 0U ? 0U : (required_insert_count % full_range) + 1U;
 
   /* The Base is a signed delta from the required count: section 4.5.1's figure puts
    * the S bit in the MOST significant bit of the byte, with the seven-bit-prefix

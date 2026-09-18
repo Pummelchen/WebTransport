@@ -31,8 +31,10 @@
 #include "webtransport/webtransport/session_request.h"
 #include "webtransport/writer.h"
 
-static void capsules_add(wt_cli_report_t *report, const char *name, int passed, const char *detail) {
-  (void)wt_cli_report_add(report, name, passed != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+static void capsules_add(wt_cli_report_t *report, const char *name, int passed,
+                         const char *detail) {
+  (void)wt_cli_report_add(report, name, passed != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                          detail);
 }
 
 /* Bring a session up on the pair: CONNECT, decision, response, both sessions established, and both streams marked
@@ -86,7 +88,8 @@ static int capsules_open_session(scenario_pair_t *pair, int advertise_flow, char
     return 0;
   }
   if (wt_http3_endpoint_on_request_headers(&pair->server_side.endpoint, request_stream_id,
-                                           pair->server_side.section, pair->server_side.section_length, scratch,
+                                           pair->server_side.section,
+                                           pair->server_side.section_length, scratch,
                                            sizeof(scratch), &decoded, &h3_error) != WT_OK) {
     scenario_detail_set(detail, detail_size, "the CONNECT did not decode");
     return 0;
@@ -101,12 +104,13 @@ static int capsules_open_session(scenario_pair_t *pair, int advertise_flow, char
   }
   /* The server accepts: the request's HEADERS has been read, so its capsules begin here -- and the session is
    * established by the response that follows. */
-  if (wt_http3_driver_mark_capsule_stream(&pair->server_side.driver, request_stream_id, 0) != WT_OK) {
+  if (wt_http3_driver_mark_capsule_stream(&pair->server_side.driver, request_stream_id, 0) !=
+      WT_OK) {
     scenario_detail_set(detail, detail_size, "the CONNECT stream could not be marked for capsules");
     return 0;
   }
-  if (wt_http3_driver_send_response(&pair->server_side.driver, &pair->server_transport, request_stream_id, 200U,
-                                    0U, 0, pair->now) != WT_OK) {
+  if (wt_http3_driver_send_response(&pair->server_side.driver, &pair->server_transport,
+                                    request_stream_id, 200U, 0U, 0, pair->now) != WT_OK) {
     scenario_detail_set(detail, detail_size, "the response could not be sent");
     return 0;
   }
@@ -131,15 +135,17 @@ static int capsules_open_session(scenario_pair_t *pair, int advertise_flow, char
  * into. One capsule per send, so a refusal is one frame on the wire. */
 static wt_status_t capsules_send(scenario_pair_t *pair, int from_client, uint8_t *framed,
                                  size_t payload_length) {
-  const wt_http3_driver_transport_t *transport = from_client ? &pair->client_transport : &pair->server_transport;
-  uint64_t stream_id = from_client ? pair->client_side.request_stream_id : pair->server_side.request_stream_id;
+  const wt_http3_driver_transport_t *transport =
+      from_client ? &pair->client_transport : &pair->server_transport;
+  uint64_t stream_id =
+      from_client ? pair->client_side.request_stream_id : pair->server_side.request_stream_id;
   /* The capacity the caller's own writer had, which is what proves the payload is inside the buffer: the payload
    * was written at the reservation, so the reservation plus the payload is a bound the buffer meets by
    * construction. */
   size_t frame_length = 0U;
 
-  if (wt_http3_frame_wrap_data_in_place(framed, WT_HTTP3_FRAME_DATA_HEADER_MAX + payload_length, payload_length,
-                                        &frame_length) != WT_OK) {
+  if (wt_http3_frame_wrap_data_in_place(framed, WT_HTTP3_FRAME_DATA_HEADER_MAX + payload_length,
+                                        payload_length, &frame_length) != WT_OK) {
     return WT_ERR_LIMIT;
   }
   return transport->send_stream(transport->context, stream_id, framed, frame_length, 0, pair->now);
@@ -208,20 +214,22 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
     {
       const wt_quic_close_state_t *state = wt_quic_connection_close_state(&pair.server.connection);
       int passed = pair.server_side.capsules.refused > 0 &&
-                   pair.server_side.capsule_error == (uint64_t)WT_HTTP3_EXCESSIVE_LOAD && state != NULL &&
-                   state->kind == WT_QUIC_CLOSE_APPLICATION &&
+                   pair.server_side.capsule_error == (uint64_t)WT_HTTP3_EXCESSIVE_LOAD &&
+                   state != NULL && state->kind == WT_QUIC_CLOSE_APPLICATION &&
                    state->error_code == (uint64_t)WT_HTTP3_EXCESSIVE_LOAD &&
                    pair.client.connection.peer_closed != 0 &&
                    pair.client.connection.peer_close_kind == WT_QUIC_CLOSE_APPLICATION &&
                    pair.client.connection.peer_error_code == (uint64_t)WT_HTTP3_EXCESSIVE_LOAD;
-      (void)snprintf(detail, sizeof(detail),
-                     passed != 0 ? "a capsule declaring 2000 bytes closed the connection as an application close "
-                                   "with H3_EXCESSIVE_LOAD, and the peer read that code"
-                                 : "the bound was not named (refused=%u, code=0x%llx, close=%d/0x%llx, peer=%d)",
-                     pair.server_side.capsules.refused,
-                     (unsigned long long)pair.server_side.capsule_error, state != NULL ? (int)state->kind : -1,
-                     state != NULL ? (unsigned long long)state->error_code : 0ULL,
-                     (int)pair.client.connection.peer_closed);
+      (void)snprintf(
+          detail, sizeof(detail),
+          passed != 0
+              ? "a capsule declaring 2000 bytes closed the connection as an application close "
+                "with H3_EXCESSIVE_LOAD, and the peer read that code"
+              : "the bound was not named (refused=%u, code=0x%llx, close=%d/0x%llx, peer=%d)",
+          pair.server_side.capsules.refused, (unsigned long long)pair.server_side.capsule_error,
+          state != NULL ? (int)state->kind : -1,
+          state != NULL ? (unsigned long long)state->error_code : 0ULL,
+          (int)pair.client.connection.peer_closed);
       capsules_add(report, k_bound, passed, detail);
     }
   }
@@ -254,7 +262,8 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
           capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
         sent = 0;
       }
-      for (round = 0U; round < 40U; round++) scenario_pump_once(&pair);
+      for (round = 0U; round < 40U; round++)
+        scenario_pump_once(&pair);
     }
     for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {
       if (pair.client_side.capsules.session.close_received != 0) break;
@@ -267,15 +276,17 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
                        (uint32_t)WT_WEBTRANSPORT_FLOW_CONTROL_ERROR &&
                    wt_quic_connection_is_closed(&pair.client.connection) == 0 &&
                    wt_quic_connection_is_closed(&pair.server.connection) == 0;
-      (void)snprintf(detail, sizeof(detail),
-                     passed != 0 ? "a repeated grant closed the SESSION with the draft's flow-control code "
-                                   "(0x45d4487) and left both connections up"
-                                 : "the session was not closed as the draft says (received=%d, codeSet=%d, code=0x%x, "
-                                   "clientClosed=%d)",
-                     (int)pair.client_side.capsules.session.close_received,
-                     (int)pair.client_side.capsules.session.close_error_set,
-                     pair.client_side.capsules.session.close_error_code,
-                     (int)wt_quic_connection_is_closed(&pair.client.connection));
+      (void)snprintf(
+          detail, sizeof(detail),
+          passed != 0
+              ? "a repeated grant closed the SESSION with the draft's flow-control code "
+                "(0x45d4487) and left both connections up"
+              : "the session was not closed as the draft says (received=%d, codeSet=%d, code=0x%x, "
+                "clientClosed=%d)",
+          (int)pair.client_side.capsules.session.close_received,
+          (int)pair.client_side.capsules.session.close_error_set,
+          pair.client_side.capsules.session.close_error_code,
+          (int)wt_quic_connection_is_closed(&pair.client.connection));
       capsules_add(report, k_flow, passed, detail);
     }
   }
@@ -334,14 +345,15 @@ static void capsules_run_unnegotiated(wt_cli_report_t *report) {
                  pair.server_side.capsules.session.state != WT_WEBTRANSPORT_SESSION_CLOSED &&
                  wt_quic_connection_is_closed(&pair.server.connection) == 0 &&
                  wt_quic_connection_is_closed(&pair.client.connection) == 0;
-    (void)snprintf(detail, sizeof(detail),
-                   passed != 0 ? "the MAX_DATA capsule was ignored because flow control was not negotiated on "
-                                 "both sides, and the peer's account stayed empty"
-                               : "the unnegotiated grant was not ignored (walked=%u, set=%d, refused=%u, "
-                                 "closed=%d)",
-                   pair.server_side.capsules.walked, pair.server_side.capsules.peer_limits.max_data_set,
-                   pair.server_side.capsules.refused,
-                   (int)(pair.server_side.capsules.session.state == WT_WEBTRANSPORT_SESSION_CLOSED));
+    (void)snprintf(
+        detail, sizeof(detail),
+        passed != 0 ? "the MAX_DATA capsule was ignored because flow control was not negotiated on "
+                      "both sides, and the peer's account stayed empty"
+                    : "the unnegotiated grant was not ignored (walked=%u, set=%d, refused=%u, "
+                      "closed=%d)",
+        pair.server_side.capsules.walked, pair.server_side.capsules.peer_limits.max_data_set,
+        pair.server_side.capsules.refused,
+        (int)(pair.server_side.capsules.session.state == WT_WEBTRANSPORT_SESSION_CLOSED));
     capsules_add(report, k_ignored, passed, detail);
   }
   scenario_pair_close(&pair);
@@ -395,30 +407,32 @@ static void capsules_run_the_largest_capsule(wt_cli_report_t *report) {
     scenario_pump_once(&pair);
   }
   {
-    int passed = pair.server_side.capsules.session.close_received != 0 &&
-                 pair.server_side.capsules.session.close_error_set != 0 &&
-                 pair.server_side.capsules.session.close_error_code == 0x42U &&
-                 pair.server_side.capsules.session.state == WT_WEBTRANSPORT_SESSION_CLOSED &&
-                 pair.server_side.capsules.refused == 0U &&
-                 pair.server_side.capsules.refused_session_code_set == 0 &&
-                 /* No refusal was recorded at all: zero is what the side starts with, and every refusal writes its
+    int passed =
+        pair.server_side.capsules.session.close_received != 0 &&
+        pair.server_side.capsules.session.close_error_set != 0 &&
+        pair.server_side.capsules.session.close_error_code == 0x42U &&
+        pair.server_side.capsules.session.state == WT_WEBTRANSPORT_SESSION_CLOSED &&
+        pair.server_side.capsules.refused == 0U &&
+        pair.server_side.capsules.refused_session_code_set == 0 &&
+        /* No refusal was recorded at all: zero is what the side starts with, and every refusal writes its
                   * code here (the capsule-refusal scenarios assert the value a refusal DOES leave). */
-                 pair.server_side.capsule_error == 0U &&
-                 wt_quic_connection_is_closed(&pair.server.connection) == 0 &&
-                 wt_quic_connection_is_closed(&pair.client.connection) == 0;
-    (void)snprintf(detail, sizeof(detail),
-                   passed != 0 ? "a close capsule carrying the draft's maximum 1024-byte reason was applied and "
-                                 "ended the session, with both connections still up"
-                               : "the largest legal capsule was not accepted (received=%d, codeSet=%d, code=0x%x, "
-                                 "refused=%u, refusalCode=0x%llx, serverClosed=%d, clientClosed=%d, state=%d)",
-                   (int)pair.server_side.capsules.session.close_received,
-                   (int)pair.server_side.capsules.session.close_error_set,
-                   pair.server_side.capsules.session.close_error_code,
-                   pair.server_side.capsules.refused,
-                   (unsigned long long)pair.server_side.capsule_error,
-                   (int)wt_quic_connection_is_closed(&pair.server.connection),
-                   (int)wt_quic_connection_is_closed(&pair.client.connection),
-                   (int)pair.server_side.capsules.session.state);
+        pair.server_side.capsule_error == 0U &&
+        wt_quic_connection_is_closed(&pair.server.connection) == 0 &&
+        wt_quic_connection_is_closed(&pair.client.connection) == 0;
+    (void)snprintf(
+        detail, sizeof(detail),
+        passed != 0
+            ? "a close capsule carrying the draft's maximum 1024-byte reason was applied and "
+              "ended the session, with both connections still up"
+            : "the largest legal capsule was not accepted (received=%d, codeSet=%d, code=0x%x, "
+              "refused=%u, refusalCode=0x%llx, serverClosed=%d, clientClosed=%d, state=%d)",
+        (int)pair.server_side.capsules.session.close_received,
+        (int)pair.server_side.capsules.session.close_error_set,
+        pair.server_side.capsules.session.close_error_code, pair.server_side.capsules.refused,
+        (unsigned long long)pair.server_side.capsule_error,
+        (int)wt_quic_connection_is_closed(&pair.server.connection),
+        (int)wt_quic_connection_is_closed(&pair.client.connection),
+        (int)pair.server_side.capsules.session.state);
     capsules_add(report, k_largest, passed, detail);
   }
   scenario_pair_close(&pair);
@@ -476,23 +490,25 @@ static void capsules_run_a_coalesced_delivery(wt_cli_report_t *report) {
     scenario_pump_once(&pair);
   }
   {
-    int passed = pair.server_side.capsules.peer_limits.max_data_set != 0 &&
-                 pair.server_side.capsules.peer_limits.max_data == 1000U + (uint64_t)(k_grants - 1) &&
-                 pair.server_side.capsules.refused == 0U &&
-                 pair.server_side.capsules.refused_session_code_set == 0 &&
-                 pair.server_side.capsules.session.state != WT_WEBTRANSPORT_SESSION_CLOSED &&
-                 wt_quic_connection_is_closed(&pair.server.connection) == 0 &&
-                 wt_quic_connection_is_closed(&pair.client.connection) == 0;
-    (void)snprintf(detail, sizeof(detail),
-                   passed != 0 ? "all 160 grants in one DATA frame were applied, past the walker's buffer, with "
-                                 "nothing refused"
-                               : "the coalesced delivery was not walked (set=%d, limit=%llu, wanted=%llu, "
-                                 "refused=%u, state=%d)",
-                   pair.server_side.capsules.peer_limits.max_data_set,
-                   (unsigned long long)pair.server_side.capsules.peer_limits.max_data,
-                   (unsigned long long)(1000U + (uint64_t)(k_grants - 1)),
-                   pair.server_side.capsules.refused,
-                   (int)pair.server_side.capsules.session.state);
+    int passed =
+        pair.server_side.capsules.peer_limits.max_data_set != 0 &&
+        pair.server_side.capsules.peer_limits.max_data == 1000U + (uint64_t)(k_grants - 1) &&
+        pair.server_side.capsules.refused == 0U &&
+        pair.server_side.capsules.refused_session_code_set == 0 &&
+        pair.server_side.capsules.session.state != WT_WEBTRANSPORT_SESSION_CLOSED &&
+        wt_quic_connection_is_closed(&pair.server.connection) == 0 &&
+        wt_quic_connection_is_closed(&pair.client.connection) == 0;
+    (void)snprintf(
+        detail, sizeof(detail),
+        passed != 0
+            ? "all 160 grants in one DATA frame were applied, past the walker's buffer, with "
+              "nothing refused"
+            : "the coalesced delivery was not walked (set=%d, limit=%llu, wanted=%llu, "
+              "refused=%u, state=%d)",
+        pair.server_side.capsules.peer_limits.max_data_set,
+        (unsigned long long)pair.server_side.capsules.peer_limits.max_data,
+        (unsigned long long)(1000U + (uint64_t)(k_grants - 1)), pair.server_side.capsules.refused,
+        (int)pair.server_side.capsules.session.state);
     capsules_add(report, k_many, passed, detail);
   }
   scenario_pair_close(&pair);
@@ -545,13 +561,15 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
     int passed = pair.server_side.capsules.peer_limits.max_data_set != 0 &&
                  pair.server_side.capsules.peer_limits.max_data == 65536U &&
                  pair.server_side.capsules.walked > 0U;
-    (void)snprintf(detail, sizeof(detail),
-                   passed != 0 ? "the peer's MAX_DATA capsule reached the session and moved the limit it enforces "
-                                 "to 65536"
-                               : "the grant did not reach the session (set=%d, value=%llu, capsules=%u)",
-                   pair.server_side.capsules.peer_limits.max_data_set,
-                   (unsigned long long)pair.server_side.capsules.peer_limits.max_data,
-                   pair.server_side.capsules.walked);
+    (void)snprintf(
+        detail, sizeof(detail),
+        passed != 0
+            ? "the peer's MAX_DATA capsule reached the session and moved the limit it enforces "
+              "to 65536"
+            : "the grant did not reach the session (set=%d, value=%llu, capsules=%u)",
+        pair.server_side.capsules.peer_limits.max_data_set,
+        (unsigned long long)pair.server_side.capsules.peer_limits.max_data,
+        pair.server_side.capsules.walked);
     capsules_add(report, k_grant, passed, detail);
   }
 
@@ -569,12 +587,15 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
     scenario_pump_once(&pair);
   }
   {
-    int drained = pair.client_side.capsules.session.drain_received != 0 &&
-                  wt_webtransport_session_allows_new_streams(&pair.client_side.capsules.session) == 0;
+    int drained =
+        pair.client_side.capsules.session.drain_received != 0 &&
+        wt_webtransport_session_allows_new_streams(&pair.client_side.capsules.session) == 0;
     w = wt_http3_frame_data_writer(framed, sizeof(framed));
-    if (!drained || wt_webtransport_close_session_write(&w, 0x42U, (const uint8_t *)"bye", 3U) != WT_OK ||
+    if (!drained ||
+        wt_webtransport_close_session_write(&w, 0x42U, (const uint8_t *)"bye", 3U) != WT_OK ||
         capsules_send(&pair, 0, framed, wt_writer_offset(&w)) != WT_OK) {
-      capsules_add(report, k_ends, 0, "the drain did not stop new streams, or the close could not be sent");
+      capsules_add(report, k_ends, 0,
+                   "the drain did not stop new streams, or the close could not be sent");
       scenario_pair_close(&pair);
       return;
     }
@@ -588,15 +609,17 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
                  pair.client_side.capsules.session.close_error_set != 0 &&
                  pair.client_side.capsules.session.close_error_code == 0x42U &&
                  pair.client_side.capsules.session.state == WT_WEBTRANSPORT_SESSION_CLOSED;
-    (void)snprintf(detail, sizeof(detail),
-                   passed != 0 ? "the drain stopped new streams and the close ended the session with the peer's "
-                                 "application code 0x42"
-                               : "the session did not end as the capsules said (received=%d, codeSet=%d, "
-                                 "code=0x%x, state=%d)",
-                   pair.client_side.capsules.session.close_received,
-                   pair.client_side.capsules.session.close_error_set,
-                   pair.client_side.capsules.session.close_error_code,
-                   (int)pair.client_side.capsules.session.state);
+    (void)snprintf(
+        detail, sizeof(detail),
+        passed != 0
+            ? "the drain stopped new streams and the close ended the session with the peer's "
+              "application code 0x42"
+            : "the session did not end as the capsules said (received=%d, codeSet=%d, "
+              "code=0x%x, state=%d)",
+        pair.client_side.capsules.session.close_received,
+        pair.client_side.capsules.session.close_error_set,
+        pair.client_side.capsules.session.close_error_code,
+        (int)pair.client_side.capsules.session.state);
     capsules_add(report, k_ends, passed, detail);
   }
   scenario_pair_close(&pair);

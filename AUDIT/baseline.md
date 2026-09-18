@@ -10,7 +10,7 @@ numbered, justified task.
 | Build | `swift build` — success, **0 warnings** (`.treatAllWarnings(as: .error)` in both manifests) | `C99/scripts/build-and-test.sh` — success, **0 warnings**, 0 errors (`-Werror` + the `WTCompilerWarnings.cmake` set) |
 | Tests | `swift test` — **400 passed, 0 failed, 0 skipped**, exit 0 | `ctest` — **97 passed, 0 failed**, exit 0 (`100% tests passed out of 97`) |
 | Coverage | **90.74% lines** (12051 lines, 1116 missed), union of the 7 test bundles, `Tests/` and `.build/` excluded | **91.64% lines** (15677 lines, 1310 missed) of the library dylib, `tests/` and `third_party/` excluded — measured by `C99/scripts/measure-coverage.sh` (added for AUD-0009) |
-| Formatter | `swift format lint --strict` — clean | `clang-format` is installed but **the tree is not formatted with it and no `.clang-format` is committed** → finding (AUD-0010) |
+| Formatter | `swift format lint --strict` — clean | `.clang-format` is committed at the repository root and `C99/scripts/check-format.sh` is green over 314 sources (AUD-0010 closed); the reformat touched 261 files and the suite, cppcheck and the static analyzer all stayed clean |
 | Linter | `swiftlint` config committed; 556 findings at baseline, 69 left and all structural → AUD-0006 | `cppcheck` (repo script) — clean; `scan-build` — clean (both re-run in Phase B) |
 | Type checker | Swift 6 language mode (tools-version default), complete concurrency — proven in `tool-coverage.md` | `-std=c99 -pedantic-errors` equivalent (`-Wpedantic -Werror`) — proven in `tool-coverage.md` |
 | Dependency CVEs | `trivy fs --config .trivy.yaml .` — **clean** (exit 0) | same scan covers the tree; the system OpenSSL is not vendored and cannot be inventoried (recorded in `SECURITY.md`) |
@@ -64,8 +64,15 @@ DOCKER_CONFIG=/tmp/audit-docker-empty trivy fs --config .trivy.yaml .   # clean
    and nothing runs it; `ruff` has no config, so the rules the Python standard names
    (B, E722, S101, PT) are not enabled. Both are findings, not baseline zeroes — a
    baseline of "0 findings" from a linter that is not running is not a baseline.
-3. **The tree is not `clang-format`-clean and has no `.clang-format`.** The C standard in
-   the prompt names a formatter per language. Finding, fixed in Phase B.
+3. **The tree was not `clang-format`-clean and had no `.clang-format`** (AUD-0010, closed).
+   A config now describes the style the tree already had — 2-space indents, column limit 100,
+   indented case labels, the one-line `if (x == NULL) return ...;` guard idiom — so the
+   reformat was a normalisation rather than a restyle. It changed 261 of 314 tracked sources,
+   and the evidence that it was safe is that the tree rebuilt with 0 warnings under `-Werror`
+   with the hardening flags, 97/97 tests passed, and cppcheck and the Clang Static Analyzer
+   both stayed clean. Generated RFC vectors and vendored third_party are excluded from the
+   formatter and both remain guarded elsewhere: the vectors byte-for-byte by
+   `check-vectors.sh`, which is why they are not restyled.
 
 ## Regression yardstick
 

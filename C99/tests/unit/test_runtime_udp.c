@@ -63,8 +63,7 @@ static void test_addresses(void) {
   WT_EXPECT_OK("an IPv6 address parses", wt_udp_address_parse("::1", 80U, &address));
   WT_EXPECT_U64("as IPv6", (uint64_t)WT_UDP_IPV6, (uint64_t)address.family);
   WT_EXPECT_BYTES("as fifteen zero bytes and a one", k_loopback6, address.bytes, 16U);
-  WT_EXPECT_OK("and so does its long form",
-               wt_udp_address_parse("0:0:0:0:0:0:0:1", 80U, &other));
+  WT_EXPECT_OK("and so does its long form", wt_udp_address_parse("0:0:0:0:0:0:0:1", 80U, &other));
   WT_EXPECT_INT("which is the same address", 1, wt_udp_address_equal(&address, &other));
 
   /* The scope id is part of a link-local address, and it is carried rather than dropped. */
@@ -87,8 +86,8 @@ static void test_addresses(void) {
   /* Malformed text. */
   WT_EXPECT_STATUS("an empty address is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_udp_address_parse("", 1U, &address));
-  WT_EXPECT_STATUS("a name is refused, because there is no resolver here",
-                   WT_ERR_INVALID_ARGUMENT, wt_udp_address_parse("localhost", 1U, &address));
+  WT_EXPECT_STATUS("a name is refused, because there is no resolver here", WT_ERR_INVALID_ARGUMENT,
+                   wt_udp_address_parse("localhost", 1U, &address));
   WT_EXPECT_STATUS("a truncated IPv4 address is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_udp_address_parse("127.0.0", 1U, &address));
   WT_EXPECT_STATUS("an out-of-range octet is refused", WT_ERR_INVALID_ARGUMENT,
@@ -124,8 +123,8 @@ static void test_addresses(void) {
   WT_EXPECT_OK("an address formats", wt_udp_address_parse("192.0.2.7", 53U, &address));
   WT_EXPECT_U64("to its text", 12U, (uint64_t)wt_udp_address_format(&address, text, sizeof(text)));
   WT_EXPECT_STR("which is the address and the port", "192.0.2.7:53", text);
-  WT_EXPECT_U64("and the length is reported even into a buffer too small",
-                12U, (uint64_t)wt_udp_address_format(&address, text, 4U));
+  WT_EXPECT_U64("and the length is reported even into a buffer too small", 12U,
+                (uint64_t)wt_udp_address_format(&address, text, 4U));
   WT_EXPECT_U64("where the text is cut", 3U, (uint64_t)strlen(text));
   WT_EXPECT_OK("an IPv6 address formats with brackets",
                wt_udp_address_parse("2001:db8::1", 443U, &address));
@@ -184,8 +183,7 @@ static void test_round_trip(wt_udp_family_t family) {
   WT_EXPECT_OK("and the socket becomes readable", wt_udp_wait(&receiver, 2000000U));
 
   memset(&from, 0, sizeof(from));
-  WT_EXPECT_OK("it is received",
-               wt_udp_receive(&receiver, buffer, sizeof(buffer), &length, &from));
+  WT_EXPECT_OK("it is received", wt_udp_receive(&receiver, buffer, sizeof(buffer), &length, &from));
   WT_EXPECT_U64("whole", (uint64_t)sizeof(message), (uint64_t)length);
   WT_EXPECT_BYTES("with the bytes that were sent", message, buffer, sizeof(message));
   WT_EXPECT_INT("from the address it was sent from", 1,
@@ -197,15 +195,12 @@ static void test_round_trip(wt_udp_family_t family) {
   WT_EXPECT_OK("and the socket becomes readable", wt_udp_wait(&receiver, 2000000U));
   length = 99U;
   memset(&from, 0, sizeof(from));
-  WT_EXPECT_OK("it is received",
-               wt_udp_receive(&receiver, buffer, sizeof(buffer), &length, &from));
+  WT_EXPECT_OK("it is received", wt_udp_receive(&receiver, buffer, sizeof(buffer), &length, &from));
   WT_EXPECT_U64("as an empty datagram", 0U, (uint64_t)length);
 
   /* Datagrams do not merge: two sends are two receives, in order on loopback. */
-  WT_EXPECT_OK("two datagrams are sent",
-               wt_udp_send(&sender, &receiver_address, message, 2U));
-  WT_EXPECT_OK("one after the other",
-               wt_udp_send(&sender, &receiver_address, message + 2U, 3U));
+  WT_EXPECT_OK("two datagrams are sent", wt_udp_send(&sender, &receiver_address, message, 2U));
+  WT_EXPECT_OK("one after the other", wt_udp_send(&sender, &receiver_address, message + 2U, 3U));
   WT_EXPECT_OK("the first is waiting", wt_udp_wait(&receiver, 2000000U));
   WT_EXPECT_OK("and read", wt_udp_receive(&receiver, buffer, sizeof(buffer), &length, &from));
   WT_EXPECT_U64("as two bytes", 2U, (uint64_t)length);
@@ -240,18 +235,22 @@ static void test_peek(wt_udp_family_t family) {
   size_t available = 0U;
   size_t i;
 
-  for (i = 0U; i < sizeof(large); i++) large[i] = (uint8_t)(i & 0xffU);
-  for (i = 0U; i < sizeof(small); i++) small[i] = (uint8_t)(0x80U + i);
+  for (i = 0U; i < sizeof(large); i++)
+    large[i] = (uint8_t)(i & 0xffU);
+  for (i = 0U; i < sizeof(small); i++)
+    small[i] = (uint8_t)(0x80U + i);
 
   open_pair(family, &receiver, &sender, &receiver_address, &sender_address);
 
   /* A datagram that FITS: both lengths are its size, and it is still there afterwards. */
-  WT_EXPECT_OK("a datagram that fits is sent", wt_udp_send(&sender, &receiver_address, small, sizeof(small)));
+  WT_EXPECT_OK("a datagram that fits is sent",
+               wt_udp_send(&sender, &receiver_address, small, sizeof(small)));
   WT_EXPECT_OK("and the socket becomes readable", wt_udp_wait(&receiver, 2000000U));
   length = 99U;
   available = 99U;
   memset(&from, 0, sizeof(from));
-  WT_EXPECT_OK("a peek looks at it", wt_udp_peek(&receiver, buffer, sizeof(buffer), &length, &available, &from));
+  WT_EXPECT_OK("a peek looks at it",
+               wt_udp_peek(&receiver, buffer, sizeof(buffer), &length, &available, &from));
   WT_EXPECT_U64("reporting its length", (uint64_t)sizeof(small), (uint64_t)length);
   WT_EXPECT_U64("and all of it available", (uint64_t)sizeof(small), (uint64_t)available);
   WT_EXPECT_BYTES("with its bytes", small, buffer, sizeof(small));
@@ -300,7 +299,8 @@ static void test_truncation(wt_udp_family_t family) {
   size_t length = 0U;
   size_t i;
 
-  for (i = 0U; i < sizeof(large); i++) large[i] = (uint8_t)(i & 0xffU);
+  for (i = 0U; i < sizeof(large); i++)
+    large[i] = (uint8_t)(i & 0xffU);
 
   open_pair(family, &receiver, &sender, &receiver_address, &sender_address);
   WT_EXPECT_OK("a datagram larger than the buffer is sent",

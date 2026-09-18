@@ -70,8 +70,8 @@ wt_status_t wt_quic_close_transport(wt_quic_close_state_t *state, uint64_t error
 
 /* Close at the application's request. */
 wt_status_t wt_quic_close_application(wt_quic_close_state_t *state, uint64_t error_code,
-                                      const uint8_t *reason, size_t reason_length,
-                                      uint64_t now, uint64_t pto);
+                                      const uint8_t *reason, size_t reason_length, uint64_t now,
+                                      uint64_t pto);
 
 int wt_quic_close_is_closed(const wt_quic_close_state_t *state);
 wt_quic_close_kind_t wt_quic_close_kind(const wt_quic_close_state_t *state);

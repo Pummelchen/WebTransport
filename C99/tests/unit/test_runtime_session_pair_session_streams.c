@@ -48,15 +48,16 @@ void test_a_terminated_session_resets_its_streams(void) {
   WT_EXPECT_OK("the client advertises WebTransport",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
   WT_EXPECT_OK("the client starts a session",
-               wt_http3_driver_start_session(&client.driver, &client_transport, &settings, "example.com",
-                                             "/chat", 0U, pair.now, &request_stream_id, &h3_error));
+               wt_http3_driver_start_session(&client.driver, &client_transport, &settings,
+                                             "example.com", "/chat", 0U, pair.now,
+                                             &request_stream_id, &h3_error));
   client.request_stream_id = request_stream_id;
   server.request_stream_id = request_stream_id;
   rounds = pump_pair(&pair, 400U, connect_arrived);
   WT_EXPECT_TRUE("the CONNECT arrives", rounds < 400U);
   WT_EXPECT_OK("and the server answers it",
-               wt_http3_driver_send_response(&server.driver, &server_transport, request_stream_id, 200U, 0U,
-                                             0, pair.now));
+               wt_http3_driver_send_response(&server.driver, &server_transport, request_stream_id,
+                                             200U, 0U, 0, pair.now));
   {
     unsigned round;
     for (round = 0U; round < 400U && client.section_complete == 0; round++) {
@@ -67,7 +68,8 @@ void test_a_terminated_session_resets_its_streams(void) {
       pair.now += 1000U;
     }
   }
-  WT_EXPECT_TRUE("the response arrives, so the session is established", client.section_complete != 0);
+  WT_EXPECT_TRUE("the response arrives, so the session is established",
+                 client.section_complete != 0);
 
   /* A WebTransport data stream, opened THROUGH the driver: that is what remembers it, with the prefix this
    * endpoint wrote (which is what section 4.4's Reliable Size commits to). */
@@ -80,7 +82,8 @@ void test_a_terminated_session_resets_its_streams(void) {
                                                 &finished_stream));
   WT_EXPECT_OK("and one it leaves open",
                wt_http3_driver_open_data_stream(&client.driver, &client_transport, 0,
-                                                (const uint8_t *)"message", 7U, 0, pair.now, &stream_id));
+                                                (const uint8_t *)"message", 7U, 0, pair.now,
+                                                &stream_id));
   {
     unsigned round;
     for (round = 0U; round < 400U && server.stream_bytes < 11U; round++) {
@@ -94,7 +97,8 @@ void test_a_terminated_session_resets_its_streams(void) {
   WT_EXPECT_U64("both messages arrive on the peer", 11U, (uint64_t)server.stream_bytes);
   WT_EXPECT_INT("which classified the finished stream as WebTransport's", 1,
                 wt_http3_driver_is_data_stream(&server.driver, finished_stream));
-  WT_EXPECT_INT("and the open one too", 1, wt_http3_driver_is_data_stream(&server.driver, stream_id));
+  WT_EXPECT_INT("and the open one too", 1,
+                wt_http3_driver_is_data_stream(&server.driver, stream_id));
 
   /* The connection still has the stream, and the driver can read what a reset would commit to: both are what
    * section 6's reset needs, and asserting them here is what tells "the reset was refused" apart from "the stream
@@ -103,8 +107,9 @@ void test_a_terminated_session_resets_its_streams(void) {
     uint64_t offset = 0U;
     WT_EXPECT_TRUE("the connection still holds the data stream",
                    wt_quic_connection_stream(&pair.client.connection, stream_id) != NULL);
-    WT_EXPECT_OK("and its send offset is readable",
-                 wt_quic_connection_stream_send_offset(&pair.client.connection, stream_id, &offset));
+    WT_EXPECT_OK(
+        "and its send offset is readable",
+        wt_quic_connection_stream_send_offset(&pair.client.connection, stream_id, &offset));
     WT_EXPECT_TRUE("with the prefix on it", offset > 0U);
   }
 
@@ -117,10 +122,11 @@ void test_a_terminated_session_resets_its_streams(void) {
   /* Section 6's two MUST NOTs. */
   WT_EXPECT_STATUS("a new data stream after the end is refused", WT_ERR_STATE,
                    wt_http3_driver_open_data_stream(&client.driver, &client_transport, 0,
-                                                    (const uint8_t *)"more", 4U, 1, pair.now, NULL));
-  WT_EXPECT_STATUS("and so is a datagram", WT_ERR_STATE,
-                   wt_http3_driver_send_datagram(&client.driver, &client_transport,
-                                                 (const uint8_t *)"x", 1U));
+                                                    (const uint8_t *)"more", 4U, 1, pair.now,
+                                                    NULL));
+  WT_EXPECT_STATUS(
+      "and so is a datagram", WT_ERR_STATE,
+      wt_http3_driver_send_datagram(&client.driver, &client_transport, (const uint8_t *)"x", 1U));
 
   /* And the peer SEES it: a reset carrying the draft's own code. */
   {

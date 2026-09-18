@@ -94,9 +94,8 @@ extern WT_QUIC_DATA const uint8_t wt_quic_initial_salt_v1[20];
  * `dcid` is the destination connection ID of the client's first Initial packet,
  * which is what binds the keys to the connection: two connections with different
  * IDs have different Initial keys. */
-wt_status_t wt_quic_initial_secret(const uint8_t *salt, size_t salt_len,
-                                   const uint8_t *dcid, size_t dcid_len,
-                                   uint8_t out[WT_SHA256_LEN]);
+wt_status_t wt_quic_initial_secret(const uint8_t *salt, size_t salt_len, const uint8_t *dcid,
+                                   size_t dcid_len, uint8_t out[WT_SHA256_LEN]);
 
 /* The Initial packet keys for one direction. `from_server` selects the "server
  * in" label over "client in"; RFC 9001 section 5.2 derives both from the same
@@ -106,9 +105,8 @@ wt_status_t wt_quic_initial_packet_keys(const uint8_t initial_secret[WT_SHA256_L
                                         wt_quic_packet_keys_t *out);
 
 /* The packet keys a traffic secret produces (RFC 9001 section 5.1). */
-wt_status_t wt_quic_packet_keys_from_secret(
-    const uint8_t secret[WT_SHA256_LEN], wt_aead_t aead,
-    wt_quic_packet_keys_t *out);
+wt_status_t wt_quic_packet_keys_from_secret(const uint8_t secret[WT_SHA256_LEN], wt_aead_t aead,
+                                            wt_quic_packet_keys_t *out);
 
 /* The next set, for a key update (RFC 9001 section 6):
  *
@@ -133,8 +131,7 @@ wt_status_t wt_quic_packet_keys_update(const wt_quic_packet_keys_t *current,
  * first four bytes of the IV are left alone, which is what makes the construction
  * a per-packet nonce rather than a new IV, and a caller that XORed at the front
  * would reuse a nonce across a whole packet number space. */
-wt_status_t wt_quic_packet_nonce(const uint8_t iv[WT_AEAD_IV_LEN],
-                                 uint64_t packet_number,
+wt_status_t wt_quic_packet_nonce(const uint8_t iv[WT_AEAD_IV_LEN], uint64_t packet_number,
                                  uint8_t out[WT_AEAD_IV_LEN]);
 
 /* The offset of the header protection sample, RFC 9001 section 5.4.2: four bytes
@@ -149,20 +146,16 @@ wt_status_t wt_quic_packet_nonce(const uint8_t iv[WT_AEAD_IV_LEN],
  * RETIRE_CONNECTION_ID at two bytes -- can be sent on its own. */
 #define WT_QUIC_HP_SAMPLE_OFFSET 4U
 #define WT_QUIC_HP_SAMPLE_LENGTH 16U
-wt_status_t wt_quic_header_protection_sample(size_t pn_offset,
-                                             const uint8_t *packet,
-                                             size_t packet_len,
-                                             uint8_t sample[16]);
+wt_status_t wt_quic_header_protection_sample(size_t pn_offset, const uint8_t *packet,
+                                             size_t packet_len, uint8_t sample[16]);
 
 /* The five-byte header protection mask for an AEAD and its header protection
  * key. AES-128-GCM encrypts the sample and takes its first five bytes;
  * ChaCha20-Poly1305 takes the first five bytes of the ChaCha20 keystream over
  * five zero bytes with a counter taken from the sample's first four bytes. The
  * two are not variations of one another, which is why this dispatches. */
-wt_status_t wt_quic_header_protection_mask(wt_aead_t aead, const uint8_t *hp,
-                                           size_t hp_len,
-                                           const uint8_t sample[16],
-                                           uint8_t out[5]);
+wt_status_t wt_quic_header_protection_mask(wt_aead_t aead, const uint8_t *hp, size_t hp_len,
+                                           const uint8_t sample[16], uint8_t out[5]);
 
 /* Apply header protection in place: mask the low four bits of the first byte and
  * the whole packet number field. `pn_offset` is where the packet number starts,
@@ -173,18 +166,16 @@ wt_status_t wt_quic_header_protection_mask(wt_aead_t aead, const uint8_t *hp,
  * the mask depends on the payload, which the first application does not change,
  * so a second application would XOR the mask again and produce a header no peer
  * can read. This is a protect, not a toggle. */
-wt_status_t wt_quic_protect_header(wt_aead_t aead, const uint8_t *hp,
-                                   size_t hp_len, uint8_t *packet,
-                                   size_t packet_len, size_t pn_offset,
+wt_status_t wt_quic_protect_header(wt_aead_t aead, const uint8_t *hp, size_t hp_len,
+                                   uint8_t *packet, size_t packet_len, size_t pn_offset,
                                    size_t pn_len);
 
 /* Remove header protection in place, reporting the packet number length that the
  * unmasked first byte revealed. The caller reconstructs the full packet number
  * from those bytes and the largest it has seen (RFC 9000 appendix A.3), and then
  * decrypts the payload -- in that order, because the nonce needs the number. */
-wt_status_t wt_quic_unprotect_header(wt_aead_t aead, const uint8_t *hp,
-                                     size_t hp_len, uint8_t *packet,
-                                     size_t packet_len, size_t pn_offset,
+wt_status_t wt_quic_unprotect_header(wt_aead_t aead, const uint8_t *hp, size_t hp_len,
+                                     uint8_t *packet, size_t packet_len, size_t pn_offset,
                                      size_t *out_pn_len);
 
 /* Encrypt `frames_len` bytes of `frames` into `out`, which must have room for
@@ -194,11 +185,10 @@ wt_status_t wt_quic_unprotect_header(wt_aead_t aead, const uint8_t *hp,
  * The tag is written after the ciphertext, which is where a QUIC packet carries
  * it. A caller assembling a packet writes the header, calls this to append the
  * protected payload, and then calls wt_quic_protect_header. */
-wt_status_t wt_quic_protect_frames(const wt_quic_packet_keys_t *keys,
-                                   uint64_t packet_number, const uint8_t *aad,
-                                   size_t aad_len, const uint8_t *frames,
-                                   size_t frames_len, uint8_t *out,
-                                   size_t out_capacity, size_t *out_len);
+wt_status_t wt_quic_protect_frames(const wt_quic_packet_keys_t *keys, uint64_t packet_number,
+                                   const uint8_t *aad, size_t aad_len, const uint8_t *frames,
+                                   size_t frames_len, uint8_t *out, size_t out_capacity,
+                                   size_t *out_len);
 
 /* Decrypt in place: `packet` holds the ciphertext and `len` bytes of it,
  * excluding the tag, which is passed separately because the caller has already
@@ -214,11 +204,9 @@ wt_status_t wt_quic_protect_frames(const wt_quic_packet_keys_t *keys,
  * that violate the protocol: a tag that does not verify means the packet was not produced
  * by the holder of the key -- forged or corrupted in transit -- and the caller decides
  * whether that is a discarded datagram or a closed connection (RFC 9001 section 5.3). */
-wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys,
-                                     uint64_t packet_number, const uint8_t *aad,
-                                     size_t aad_len, uint8_t *packet,
-                                     size_t len,
-                                     const uint8_t tag[WT_AEAD_TAG_LEN]);
+wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys, uint64_t packet_number,
+                                     const uint8_t *aad, size_t aad_len, uint8_t *packet,
+                                     size_t len, const uint8_t tag[WT_AEAD_TAG_LEN]);
 
 /* RFC 9001 section 5.8's Retry integrity tag: AES-128-GCM with an empty plaintext over
  *

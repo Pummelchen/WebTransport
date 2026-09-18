@@ -9,8 +9,8 @@
 
 /* RFC 9002 section 5.3 / 6.2.1's constants, named so the arithmetic below reads as the document
  * does. */
-#define WT_QUIC_TIMER_GRANULARITY 1000U      /* 1 ms, in microseconds */
-#define WT_QUIC_INITIAL_RTT 333000U          /* 333 ms, in microseconds */
+#define WT_QUIC_TIMER_GRANULARITY 1000U /* 1 ms, in microseconds */
+#define WT_QUIC_INITIAL_RTT 333000U     /* 333 ms, in microseconds */
 
 void wt_quic_ack_state_init(wt_quic_ack_state_t *state) {
   if (state == NULL) return;
@@ -21,8 +21,7 @@ int wt_quic_ack_contains(const wt_quic_ack_state_t *state, uint64_t packet_numbe
   size_t i;
   if (state == NULL) return 0;
   for (i = 0U; i < state->count; i++) {
-    if (packet_number >= state->ranges[i].smallest &&
-        packet_number <= state->ranges[i].largest) {
+    if (packet_number >= state->ranges[i].smallest && packet_number <= state->ranges[i].largest) {
       return 1;
     }
   }
@@ -66,8 +65,7 @@ wt_status_t wt_quic_ack_record(wt_quic_ack_state_t *state, uint64_t packet_numbe
    * one, and an ACK frame built from that would tell a peer about a gap that does not exist. */
   {
     int joins_above = (at > 0U && state->ranges[at - 1U].smallest == packet_number + 1U);
-    int joins_below = (at < state->count &&
-                       state->ranges[at].largest == packet_number - 1U);
+    int joins_below = (at < state->count && state->ranges[at].largest == packet_number - 1U);
 
     if (joins_above && joins_below) {
       state->ranges[at - 1U].smallest = state->ranges[at].smallest;
@@ -105,8 +103,8 @@ wt_status_t wt_quic_ack_record(wt_quic_ack_state_t *state, uint64_t packet_numbe
 }
 
 wt_status_t wt_quic_ack_build(const wt_quic_ack_state_t *state, uint64_t delay,
-                              uint8_t *range_bytes, size_t range_capacity,
-                              size_t *range_len, wt_quic_frame_t *out) {
+                              uint8_t *range_bytes, size_t range_capacity, size_t *range_len,
+                              wt_quic_frame_t *out) {
   wt_writer_t w;
   size_t i;
   uint64_t previous_smallest;
@@ -191,9 +189,8 @@ void wt_quic_rtt_init(wt_quic_rtt_t *rtt) {
   memset(rtt, 0, sizeof(*rtt));
 }
 
-wt_status_t wt_quic_rtt_update(wt_quic_rtt_t *rtt, uint64_t latest_rtt,
-                               uint64_t ack_delay, uint64_t max_ack_delay,
-                               int handshake_confirmed) {
+wt_status_t wt_quic_rtt_update(wt_quic_rtt_t *rtt, uint64_t latest_rtt, uint64_t ack_delay,
+                               uint64_t max_ack_delay, int handshake_confirmed) {
   uint64_t adjusted;
 
   if (rtt == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -215,8 +212,8 @@ wt_status_t wt_quic_rtt_update(wt_quic_rtt_t *rtt, uint64_t latest_rtt,
     rtt->rttvar = adjusted / 2U;
     rtt->has_sample = 1;
   } else {
-    uint64_t difference = (rtt->smoothed > adjusted) ? rtt->smoothed - adjusted
-                                                     : adjusted - rtt->smoothed;
+    uint64_t difference =
+        (rtt->smoothed > adjusted) ? rtt->smoothed - adjusted : adjusted - rtt->smoothed;
     /* rttvar = 3/4 * rttvar + 1/4 * |smoothed_rtt - adjusted_rtt|, then
      * smoothed_rtt = 7/8 * smoothed_rtt + 1/8 * adjusted_rtt. The order matters: the variation is
      * computed from the previous smoothed value, as section 5.3 writes it. */

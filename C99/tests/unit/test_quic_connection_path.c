@@ -38,8 +38,10 @@ void test_a_frame_that_is_not_a_challenge_is_not_handled_as_one(void) {
 
   open_pair(WT_UDP_IPV4, &pair);
   arm_path_pair(&pair, 0x31U);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x31U + i);
-  WT_EXPECT_OK("the sender's keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x31U + i);
+  WT_EXPECT_OK("the sender's keys",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
 
   /* The limit is what the union holds where a pointer would be read. 0x2e is the address the real crash read
    * from, so this uses it rather than a round number. */
@@ -61,7 +63,7 @@ void test_a_path_challenge_is_echoed_immediately(void) {
   connection_pair_t pair;
   wt_quic_frame_t challenge = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PATH_CHALLENGE);
   static const uint8_t k_payload[WT_QUIC_PATH_CHALLENGE_LENGTH] = {0xa0U, 0xa1U, 0xa2U, 0xa3U,
-                                                                  0xa4U, 0xa5U, 0xa6U, 0xa7U};
+                                                                   0xa4U, 0xa5U, 0xa6U, 0xa7U};
   wt_quic_packet_keys_t keys;
   uint8_t secret[WT_SHA256_LEN];
   uint64_t now = 112000000U;
@@ -70,17 +72,21 @@ void test_a_path_challenge_is_echoed_immediately(void) {
 
   open_pair(WT_UDP_IPV4, &pair);
   arm_path_pair(&pair, 0x21U);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x21U + i);
-  WT_EXPECT_OK("the sender's keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x21U + i);
+  WT_EXPECT_OK("the sender's keys",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
 
   /* The peer challenges the path this connection is on. */
   challenge.as.path_challenge.data = k_payload;
   send_frame_from_side(&pair, 1, &challenge, &keys, 0U, k_dcid, sizeof(k_dcid));
   receive_on(&pair.client, &pair.client_socket, now);
 
-  WT_EXPECT_U64("the challenge reached the handler", 1U,
-                (uint64_t)witness_frames_of(&pair.client_witness, WT_QUIC_FRAME_KIND_PATH_CHALLENGE));
-  WT_EXPECT_U64("and one response went out", 1U, wt_quic_connection_path_responses_sent(&pair.client));
+  WT_EXPECT_U64(
+      "the challenge reached the handler", 1U,
+      (uint64_t)witness_frames_of(&pair.client_witness, WT_QUIC_FRAME_KIND_PATH_CHALLENGE));
+  WT_EXPECT_U64("and one response went out", 1U,
+                wt_quic_connection_path_responses_sent(&pair.client));
 
   /* And the echo is on the wire WITHOUT a flush between the challenge and this read -- which is section 8.2.2's
    * "MUST NOT delay" as a measurement rather than a claim. The peer here is the test's own server connection, so
@@ -109,20 +115,25 @@ void test_a_path_is_validated_by_its_own_response(void) {
 
   open_pair(WT_UDP_IPV4, &pair);
   arm_path_pair(&pair, 0x31U);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x31U + i);
-  WT_EXPECT_OK("the sender's keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x31U + i);
+  WT_EXPECT_OK("the sender's keys",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
 
   WT_EXPECT_OK("a validation starts", wt_quic_connection_validate_path(&pair.client, now));
-  WT_EXPECT_INT("which the connection reports as running", 1, wt_quic_connection_path_validating(&pair.client));
-  WT_EXPECT_U64("with one challenge on the wire", 1U, wt_quic_connection_path_challenges_sent(&pair.client));
+  WT_EXPECT_INT("which the connection reports as running", 1,
+                wt_quic_connection_path_validating(&pair.client));
+  WT_EXPECT_U64("with one challenge on the wire", 1U,
+                wt_quic_connection_path_challenges_sent(&pair.client));
   WT_EXPECT_INT("and nothing validated yet", 0, wt_quic_connection_path_validated(&pair.client));
 
   /* The challenge went out inside the call, so it is on the server socket already -- and the peer here is a real
    * connection, which ECHOES it (section 8.2.2). That echo is the response, so no packet is hand-built for the
    * success case: the flow is the protocol's own. */
   receive_on(&pair.server, &pair.server_socket, now);
-  WT_EXPECT_U64("the peer was challenged", 1U,
-                (uint64_t)witness_frames_of(&pair.server_witness, WT_QUIC_FRAME_KIND_PATH_CHALLENGE));
+  WT_EXPECT_U64(
+      "the peer was challenged", 1U,
+      (uint64_t)witness_frames_of(&pair.server_witness, WT_QUIC_FRAME_KIND_PATH_CHALLENGE));
   now += 1000U;
   receive_on(&pair.client, &pair.client_socket, now);
   WT_EXPECT_INT("its echo validates the path", 1, wt_quic_connection_path_validated(&pair.client));
@@ -141,7 +152,8 @@ void test_a_path_is_validated_by_its_own_response(void) {
   send_frame_from_side(&pair, 1, &response, &keys, 1U, k_dcid, sizeof(k_dcid));
   now += 1000U;
   receive_on(&pair.client, &pair.client_socket, now);
-  WT_EXPECT_U64("a stranger's response matches nothing", matched_before, pair.client.path_responses_matched);
+  WT_EXPECT_U64("a stranger's response matches nothing", matched_before,
+                pair.client.path_responses_matched);
   WT_EXPECT_INT("so the second validation is still running", 1,
                 wt_quic_connection_path_validating(&pair.client));
 
@@ -186,8 +198,9 @@ void test_a_path_that_does_not_answer_is_given_up_on(void) {
       if (wt_udp_wait(&pair.server_socket, 20000U) != WT_OK) break;
       receive_on(&pair.server, &pair.server_socket, now);
     }
-    WT_EXPECT_U64("the peer has seen every challenge so far", (uint64_t)(attempt + 1U),
-                  (uint64_t)witness_frames_of(&pair.server_witness, WT_QUIC_FRAME_KIND_PATH_CHALLENGE));
+    WT_EXPECT_U64(
+        "the peer has seen every challenge so far", (uint64_t)(attempt + 1U),
+        (uint64_t)witness_frames_of(&pair.server_witness, WT_QUIC_FRAME_KIND_PATH_CHALLENGE));
     sent = witness_frame(&pair.server_witness, WT_QUIC_FRAME_KIND_PATH_CHALLENGE, attempt);
     WT_EXPECT_TRUE("with the newest one among them", sent != NULL);
     if (sent == NULL) continue;
@@ -203,10 +216,11 @@ void test_a_path_that_does_not_answer_is_given_up_on(void) {
                 wt_quic_connection_path_validating(&pair.client));
   WT_EXPECT_U64("and the failure is counted for the caller", 1U,
                 wt_quic_connection_path_validation_failures(&pair.client));
-  WT_EXPECT_U64("after exactly the attempts the bound allows", (uint64_t)WT_QUIC_PATH_VALIDATION_ATTEMPTS,
+  WT_EXPECT_U64("after exactly the attempts the bound allows",
+                (uint64_t)WT_QUIC_PATH_VALIDATION_ATTEMPTS,
                 wt_quic_connection_path_challenges_sent(&pair.client));
-  WT_EXPECT_INT("with the path never validated", 0, wt_quic_connection_path_validated(&pair.client));
+  WT_EXPECT_INT("with the path never validated", 0,
+                wt_quic_connection_path_validated(&pair.client));
 
   close_pair(&pair);
 }
-

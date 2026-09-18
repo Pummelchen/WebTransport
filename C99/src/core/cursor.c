@@ -34,7 +34,9 @@ int wt_cursor_at_end(const wt_cursor_t *c) {
   return c->offset == c->len;
 }
 
-int wt_cursor_failed(const wt_cursor_t *c) { return (c == NULL) ? 1 : c->failed; }
+int wt_cursor_failed(const wt_cursor_t *c) {
+  return (c == NULL) ? 1 : c->failed;
+}
 
 static const uint8_t *wt_cursor_take(wt_cursor_t *c, size_t n) {
   const uint8_t *result;

@@ -41,13 +41,11 @@ extern "C" {
  * `largest_acknowledged` is the largest packet number the peer has acknowledged;
  * a sender with nothing acknowledged yet passes 0 and a packet number of 1 or
  * more. */
-size_t wt_quic_packet_number_size(uint64_t packet_number,
-                                  uint64_t largest_acknowledged);
+size_t wt_quic_packet_number_size(uint64_t packet_number, uint64_t largest_acknowledged);
 
 /* Encode the low `byte_count` bytes, big-endian, into `out`. Returns the number
  * of bytes written, or 0 on a bad argument or `byte_count` outside 1..4. */
-size_t wt_quic_packet_number_encode(uint64_t packet_number, size_t byte_count,
-                                    uint8_t out[4]);
+size_t wt_quic_packet_number_encode(uint64_t packet_number, size_t byte_count, uint8_t out[4]);
 
 /* Reconstruct a full packet number from its truncated form. `truncated` holds
  * the low `byte_count` bytes as an integer; `largest_received` is the largest

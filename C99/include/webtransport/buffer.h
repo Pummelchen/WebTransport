@@ -82,8 +82,8 @@ wt_cursor_t wt_buf_cursor(const wt_buf_t *b);
 /* A copy of `len` bytes owned by the caller, allocated through `alloc`. Used
  * where a value must outlive the buffer it came from -- see the plan's rule that
  * no ownership transfers unless the name says so; the name here does. */
-uint8_t *wt_buf_copy_out(const wt_buf_t *b, size_t offset, size_t len,
-                         const wt_allocator_t *alloc, wt_status_t *out_status);
+uint8_t *wt_buf_copy_out(const wt_buf_t *b, size_t offset, size_t len, const wt_allocator_t *alloc,
+                         wt_status_t *out_status);
 
 /* The bound `wt_buf_reserve` refuses to grow past. 64 MiB is far above anything
  * a single stream, datagram or table in this protocol needs -- the largest is a

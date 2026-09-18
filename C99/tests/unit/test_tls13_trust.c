@@ -67,16 +67,15 @@ static int certificate_from_der(const uint8_t *der, size_t der_len, uint8_t *mes
   memset(&params, 0, sizeof(params));
   params.entries = &entry;
   params.count = 1U;
-  if (wt_tls_certificate_build(&params, message, message_capacity, message_len) !=
-      WT_OK) {
+  if (wt_tls_certificate_build(&params, message, message_capacity, message_len) != WT_OK) {
     return 0;
   }
   return wt_tls_certificate_parse(message, *message_len, out) == WT_OK;
 }
 
 /* The RFC 8448 certificate, as a parsed Certificate message. */
-static int rfc8448_certificate(uint8_t *message, size_t message_capacity,
-                               size_t *message_len, wt_tls_certificate_t *out) {
+static int rfc8448_certificate(uint8_t *message, size_t message_capacity, size_t *message_len,
+                               wt_tls_certificate_t *out) {
   /* The DER is the one entry inside the message the RFC prints: four bytes of header, one
    * of request context length, three of list length, and the entry's own three-byte length
    * before the certificate. */
@@ -93,10 +92,8 @@ static void test_content_construction(void) {
   int all_spaces = 1;
 
   memset(hash, 0x5a, sizeof(hash));
-  WT_EXPECT_OK("the server content builds",
-               wt_tls_certificate_verify_content(1, hash, server));
-  WT_EXPECT_OK("the client content builds",
-               wt_tls_certificate_verify_content(0, hash, client));
+  WT_EXPECT_OK("the server content builds", wt_tls_certificate_verify_content(1, hash, server));
+  WT_EXPECT_OK("the client content builds", wt_tls_certificate_verify_content(0, hash, client));
 
   /* Sixty-four spaces, then the context string, then a zero byte, then the hash. */
   for (i = 0U; i < 64U; i++) {
@@ -104,14 +101,11 @@ static void test_content_construction(void) {
   }
   WT_EXPECT_TRUE("sixty-four spaces come first", all_spaces);
   WT_EXPECT_BYTES("then the server context string",
-                  (const uint8_t *)"TLS 1.3, server CertificateVerify", server + 64U,
-                  33U);
+                  (const uint8_t *)"TLS 1.3, server CertificateVerify", server + 64U, 33U);
   WT_EXPECT_U64("then a zero byte", 0U, (uint64_t)server[64U + 33U]);
-  WT_EXPECT_BYTES("then the transcript hash", hash, server + 64U + 34U,
-                  WT_TLS13_SECRET_LEN);
+  WT_EXPECT_BYTES("then the transcript hash", hash, server + 64U + 34U, WT_TLS13_SECRET_LEN);
   WT_EXPECT_BYTES("and the client string differs",
-                  (const uint8_t *)"TLS 1.3, client CertificateVerify", client + 64U,
-                  33U);
+                  (const uint8_t *)"TLS 1.3, client CertificateVerify", client + 64U, 33U);
   WT_EXPECT_INT("so the two contents differ", 0,
                 memcmp(server, client, sizeof(server)) == 0 ? 1 : 0);
 
@@ -134,8 +128,7 @@ static void test_rfc8448_certificate_verify(void) {
   size_t spki_len = 0U;
 
   WT_EXPECT_TRUE("the RFC's certificate is available",
-                 rfc8448_certificate(message, sizeof(message), &message_len,
-                                     &certificate));
+                 rfc8448_certificate(message, sizeof(message), &message_len, &certificate));
 
   /* The certificate is accepted by the development policy on a loopback name, which is the
    * policy that needs no trust anchor: what is under test here is the key extraction and
@@ -155,17 +148,15 @@ static void test_rfc8448_certificate_verify(void) {
   WT_EXPECT_OK("and takes the ClientHello",
                wt_tls13_transcript_append(&transcript, WT_RFC8448_CLIENT_HELLO,
                                           WT_RFC8448_CLIENT_HELLO_LEN));
-  WT_EXPECT_OK("the ServerHello",
-               wt_tls13_transcript_append(&transcript, WT_RFC8448_SERVER_HELLO,
-                                          WT_RFC8448_SERVER_HELLO_LEN));
+  WT_EXPECT_OK("the ServerHello", wt_tls13_transcript_append(&transcript, WT_RFC8448_SERVER_HELLO,
+                                                             WT_RFC8448_SERVER_HELLO_LEN));
   WT_EXPECT_OK("the EncryptedExtensions",
                wt_tls13_transcript_append(&transcript, WT_RFC8448_ENCRYPTED_EXTENSIONS,
                                           WT_RFC8448_ENCRYPTED_EXTENSIONS_LEN));
-  WT_EXPECT_OK("and the Certificate",
-               wt_tls13_transcript_append(&transcript, WT_RFC8448_CERTIFICATE,
-                                          WT_RFC8448_CERTIFICATE_LEN));
-  WT_EXPECT_OK("the hash through the Certificate",
-               wt_tls13_transcript_hash(&transcript, hash));
+  WT_EXPECT_OK(
+      "and the Certificate",
+      wt_tls13_transcript_append(&transcript, WT_RFC8448_CERTIFICATE, WT_RFC8448_CERTIFICATE_LEN));
+  WT_EXPECT_OK("the hash through the Certificate", wt_tls13_transcript_hash(&transcript, hash));
   wt_tls13_transcript_clear(&transcript);
 
   WT_EXPECT_OK("the content the server signed",
@@ -173,15 +164,12 @@ static void test_rfc8448_certificate_verify(void) {
 
   WT_EXPECT_OK("the RFC's CertificateVerify parses",
                wt_tls_certificate_verify_parse(WT_RFC8448_CERTIFICATE_VERIFY,
-                                               WT_RFC8448_CERTIFICATE_VERIFY_LEN,
-                                               &verify));
-  WT_EXPECT_U64("with its scheme",
-                (uint64_t)WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256,
+                                               WT_RFC8448_CERTIFICATE_VERIFY_LEN, &verify));
+  WT_EXPECT_U64("with its scheme", (uint64_t)WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256,
                 (uint64_t)verify.scheme);
   WT_EXPECT_OK("and the signature verifies",
-               wt_tls_signature_verify(spki, spki_len, verify.scheme, content,
-                                       sizeof(content), verify.signature,
-                                       verify.signature_len));
+               wt_tls_signature_verify(spki, spki_len, verify.scheme, content, sizeof(content),
+                                       verify.signature, verify.signature_len));
 
   /* One bit of the signature changed, and one bit of the content changed, are both
    * refusals: the check is over both. */
@@ -194,36 +182,30 @@ static void test_rfc8448_certificate_verify(void) {
     for (i = 0U; i < 8U; i++) {
       memcpy(damaged, verify.signature, verify.signature_len);
       damaged[i * 16U] ^= 0x01U;
-      if (wt_tls_signature_verify(spki, spki_len, verify.scheme, content,
-                                  sizeof(content), damaged,
+      if (wt_tls_signature_verify(spki, spki_len, verify.scheme, content, sizeof(content), damaged,
                                   verify.signature_len) != WT_ERR_AUTHENTICATION) {
         all_rejected = 0;
       }
     }
-    WT_EXPECT_TRUE("a changed signature is refused at every position tried",
-                   all_rejected);
+    WT_EXPECT_TRUE("a changed signature is refused at every position tried", all_rejected);
 
     memcpy(other_content, content, sizeof(other_content));
     other_content[WT_TLS_CERTIFICATE_VERIFY_CONTENT_LEN - 1U] ^= 0x01U;
     WT_EXPECT_STATUS("a changed transcript hash is refused", WT_ERR_AUTHENTICATION,
-                     wt_tls_signature_verify(spki, spki_len, verify.scheme,
-                                             other_content, sizeof(other_content),
-                                             verify.signature,
+                     wt_tls_signature_verify(spki, spki_len, verify.scheme, other_content,
+                                             sizeof(other_content), verify.signature,
                                              verify.signature_len));
     other_content[64U] = 'X'; /* the context string, not the hash */
     WT_EXPECT_STATUS("a changed context string is refused", WT_ERR_AUTHENTICATION,
-                     wt_tls_signature_verify(spki, spki_len, verify.scheme,
-                                             other_content, sizeof(other_content),
-                                             verify.signature,
+                     wt_tls_signature_verify(spki, spki_len, verify.scheme, other_content,
+                                             sizeof(other_content), verify.signature,
                                              verify.signature_len));
   }
 
   /* The scheme decides the hash, so a scheme that does not match the signature is a
    * refusal rather than a verification against a different digest. */
-  WT_EXPECT_STATUS("another RSA-PSS digest does not verify it",
-                   WT_ERR_AUTHENTICATION,
-                   wt_tls_signature_verify(spki, spki_len,
-                                           WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA512,
+  WT_EXPECT_STATUS("another RSA-PSS digest does not verify it", WT_ERR_AUTHENTICATION,
+                   wt_tls_signature_verify(spki, spki_len, WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA512,
                                            content, sizeof(content), verify.signature,
                                            verify.signature_len));
   /* Namely WT_ERR_PROTOCOL rather than WT_ERR_AUTHENTICATION, and that is the stronger answer: the RSA key this
@@ -232,32 +214,26 @@ static void test_rfc8448_certificate_verify(void) {
    * what the code returned while it was verifying the signature with PKCS#1 v1.5 -- an algorithm section 4.2.3
    * forbids for CertificateVerify -- and calling that a failed verification is how the defect hid. */
   WT_EXPECT_STATUS("and neither does an ECDSA scheme", WT_ERR_PROTOCOL,
-                   wt_tls_signature_verify(spki, spki_len,
-                                           WT_TLS_SIGNATURE_ECDSA_SECP256R1_SHA256,
+                   wt_tls_signature_verify(spki, spki_len, WT_TLS_SIGNATURE_ECDSA_SECP256R1_SHA256,
                                            content, sizeof(content), verify.signature,
                                            verify.signature_len));
 
   /* A truncated signature, an unknown scheme, and a key that is not a key. */
   WT_EXPECT_STATUS("a truncated signature is refused", WT_ERR_AUTHENTICATION,
-                   wt_tls_signature_verify(spki, spki_len, verify.scheme, content,
-                                           sizeof(content), verify.signature,
-                                           verify.signature_len - 1U));
+                   wt_tls_signature_verify(spki, spki_len, verify.scheme, content, sizeof(content),
+                                           verify.signature, verify.signature_len - 1U));
   WT_EXPECT_STATUS("an unknown scheme is refused", WT_ERR_UNSUPPORTED,
-                   wt_tls_signature_verify(spki, spki_len, 0x9999U, content,
-                                           sizeof(content), verify.signature,
-                                           verify.signature_len));
+                   wt_tls_signature_verify(spki, spki_len, 0x9999U, content, sizeof(content),
+                                           verify.signature, verify.signature_len));
   WT_EXPECT_STATUS("a key that is not a key is refused", WT_ERR_PROTOCOL,
-                   wt_tls_signature_verify(spki, 1U, verify.scheme, content,
-                                           sizeof(content), verify.signature,
-                                           verify.signature_len));
+                   wt_tls_signature_verify(spki, 1U, verify.scheme, content, sizeof(content),
+                                           verify.signature, verify.signature_len));
   WT_EXPECT_STATUS("a NULL signature is refused", WT_ERR_INVALID_ARGUMENT,
-                   wt_tls_signature_verify(spki, spki_len, verify.scheme, content,
-                                           sizeof(content), NULL,
-                                           verify.signature_len));
+                   wt_tls_signature_verify(spki, spki_len, verify.scheme, content, sizeof(content),
+                                           NULL, verify.signature_len));
 
   WT_EXPECT_INT("rsa_pss_rsae_sha256 is supported", 1,
-                wt_tls_signature_scheme_supported(
-                    WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256));
+                wt_tls_signature_scheme_supported(WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256));
   WT_EXPECT_INT("ed25519 is supported", 1,
                 wt_tls_signature_scheme_supported(WT_TLS_SIGNATURE_ED25519));
   WT_EXPECT_INT("rsa_pkcs1_sha256 is not one this offers", 0,
@@ -279,14 +255,12 @@ static void test_pinned_certificate(void) {
   wt_tls_trust_policy_t policy;
 
   WT_EXPECT_TRUE("the RFC's certificate is available",
-                 rfc8448_certificate(message, sizeof(message), &message_len,
-                                     &certificate));
+                 rfc8448_certificate(message, sizeof(message), &message_len, &certificate));
   other_len = read_fixture("leaf.der", other, sizeof(other));
   WT_EXPECT_TRUE("the fixture leaf is available", other_len > 0U);
   WT_EXPECT_TRUE("and parses",
-                 certificate_from_der(other, other_len, other_message,
-                                      sizeof(other_message), &other_message_len,
-                                      &other_certificate));
+                 certificate_from_der(other, other_len, other_message, sizeof(other_message),
+                                      &other_message_len, &other_certificate));
 
   /* The pin is the SHA-256 of the leaf's DER, which is what the Swift policy pins. */
   WT_EXPECT_OK("the fingerprint computes",
@@ -318,8 +292,7 @@ static void test_pinned_certificate(void) {
   {
     wt_tls_trust_policy_t empty = policy;
     empty.fingerprint_count = 0U;
-    WT_EXPECT_STATUS("a policy with no fingerprints is a caller error",
-                     WT_ERR_INVALID_ARGUMENT,
+    WT_EXPECT_STATUS("a policy with no fingerprints is a caller error", WT_ERR_INVALID_ARGUMENT,
                      wt_tls_trust_verify(&empty, &certificate, spki, &spki_len));
   }
 
@@ -341,8 +314,7 @@ static void test_development_policy(void) {
   wt_tls_trust_policy_t policy;
 
   WT_EXPECT_TRUE("the RFC's certificate is available",
-                 rfc8448_certificate(message, sizeof(message), &message_len,
-                                     &certificate));
+                 rfc8448_certificate(message, sizeof(message), &message_len, &certificate));
 
   memset(&policy, 0, sizeof(policy));
   policy.mode = WT_TLS_TRUST_LOCAL_DEVELOPMENT;
@@ -350,11 +322,9 @@ static void test_development_policy(void) {
   WT_EXPECT_OK("localhost is accepted",
                wt_tls_trust_verify(&policy, &certificate, spki, &spki_len));
   policy.host_name = "127.0.0.1";
-  WT_EXPECT_OK("and so is 127.0.0.1",
-               wt_tls_trust_verify(&policy, &certificate, spki, &spki_len));
+  WT_EXPECT_OK("and so is 127.0.0.1", wt_tls_trust_verify(&policy, &certificate, spki, &spki_len));
   policy.host_name = "::1";
-  WT_EXPECT_OK("and ::1",
-               wt_tls_trust_verify(&policy, &certificate, spki, &spki_len));
+  WT_EXPECT_OK("and ::1", wt_tls_trust_verify(&policy, &certificate, spki, &spki_len));
 
   /* THE RESTRICTION IS THE POINT OF THE MODE. A development bypass that accepted any name
    * would be one nobody should be able to configure by accident. */
@@ -401,9 +371,8 @@ static void test_chain_validation(void) {
   policy.host_name = "example.com";
 
   /* A chain that validates: the leaf's issuer is in the bundle and the name matches. */
-  WT_EXPECT_TRUE("the leaf parses",
-                 certificate_from_der(leaf, leaf_len, message, sizeof(message),
-                                      &message_len, &certificate));
+  WT_EXPECT_TRUE("the leaf parses", certificate_from_der(leaf, leaf_len, message, sizeof(message),
+                                                         &message_len, &certificate));
   WT_EXPECT_OK("a valid chain is accepted",
                wt_tls_trust_verify(&policy, &certificate, spki, &spki_len));
   WT_EXPECT_TRUE("and gives a public key", spki_len > 0U);
@@ -411,8 +380,8 @@ static void test_chain_validation(void) {
   /* The name is part of validation, not a second step: this leaf is signed by the trusted
    * CA and names another host. */
   WT_EXPECT_TRUE("the other-host leaf parses",
-                 certificate_from_der(other_host, other_host_len, message,
-                                      sizeof(message), &message_len, &certificate));
+                 certificate_from_der(other_host, other_host_len, message, sizeof(message),
+                                      &message_len, &certificate));
   WT_EXPECT_STATUS("a leaf for another name is refused", WT_ERR_TRUST,
                    wt_tls_trust_verify(&policy, &certificate, spki, &spki_len));
   policy.host_name = "other.example";
@@ -422,8 +391,8 @@ static void test_chain_validation(void) {
 
   /* An issuer the bundle does not contain. */
   WT_EXPECT_TRUE("the unknown-CA leaf parses",
-                 certificate_from_der(unknown_ca, unknown_ca_len, message,
-                                      sizeof(message), &message_len, &certificate));
+                 certificate_from_der(unknown_ca, unknown_ca_len, message, sizeof(message),
+                                      &message_len, &certificate));
   WT_EXPECT_STATUS("a chain with an unknown issuer is refused", WT_ERR_TRUST,
                    wt_tls_trust_verify(&policy, &certificate, spki, &spki_len));
 
@@ -434,9 +403,9 @@ static void test_chain_validation(void) {
     uint8_t rfc_message[512];
     wt_tls_certificate_t rfc_certificate;
     size_t rfc_len = 0U;
-    WT_EXPECT_TRUE("the RFC's certificate is available",
-                   rfc8448_certificate(rfc_message, sizeof(rfc_message), &rfc_len,
-                                       &rfc_certificate));
+    WT_EXPECT_TRUE(
+        "the RFC's certificate is available",
+        rfc8448_certificate(rfc_message, sizeof(rfc_message), &rfc_len, &rfc_certificate));
     policy.ca_bundle = WT_RFC8448_CERTIFICATE + 11U;
     policy.ca_bundle_len = 432U; /* DER, which is not PEM: the bundle is refused */
     WT_EXPECT_STATUS("a bundle that is not PEM is refused", WT_ERR_TRUST,
@@ -452,9 +421,9 @@ static void test_chain_validation(void) {
     wt_tls_trust_policy_t empty = policy;
     empty.ca_bundle = NULL;
     empty.ca_bundle_len = 0U;
-    WT_EXPECT_TRUE("the leaf parses again",
-                   certificate_from_der(leaf, leaf_len, message, sizeof(message),
-                                        &message_len, &certificate));
+    WT_EXPECT_TRUE(
+        "the leaf parses again",
+        certificate_from_der(leaf, leaf_len, message, sizeof(message), &message_len, &certificate));
     WT_EXPECT_STATUS("an empty store refuses", WT_ERR_TRUST,
                      wt_tls_trust_verify(&empty, &certificate, spki, &spki_len));
   }

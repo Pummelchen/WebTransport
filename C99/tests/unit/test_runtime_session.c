@@ -15,8 +15,7 @@
 
 #include "webtransport/runtime/session.h"
 
-static const uint8_t k_connection_id[8] = {0x81U, 0x82U, 0x83U, 0x84U,
-                                           0x85U, 0x86U, 0x87U, 0x88U};
+static const uint8_t k_connection_id[8] = {0x81U, 0x82U, 0x83U, 0x84U, 0x85U, 0x86U, 0x87U, 0x88U};
 
 static void make_config(wt_quic_connection_config_t *config, wt_quic_role_t role) {
   memset(config, 0, sizeof(*config));
@@ -42,7 +41,8 @@ static void test_starting_an_endpoint_arms_it(void) {
 
   {
     wt_udp_address_t local;
-    WT_EXPECT_OK("a loopback address parses", wt_udp_address_parse_host_port("127.0.0.1:0", &local));
+    WT_EXPECT_OK("a loopback address parses",
+                 wt_udp_address_parse_host_port("127.0.0.1:0", &local));
     WT_EXPECT_OK("a socket opens", wt_udp_socket_open(&socket, WT_UDP_IPV4));
     WT_EXPECT_OK("and binds", wt_udp_bind(&socket, &local));
     WT_EXPECT_TRUE("on a port the system chose", socket.port != 0U);
@@ -61,9 +61,9 @@ static void test_starting_an_endpoint_arms_it(void) {
   WT_EXPECT_STATUS("a NULL socket is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_runtime_session_start_client(&session, NULL, &peer, k_connection_id,
                                                    sizeof(k_connection_id), &config, &tls, 0U));
-  WT_EXPECT_STATUS("and a NULL connection ID", WT_ERR_INVALID_ARGUMENT,
-                   wt_runtime_session_start_client(&session, &socket, &peer, NULL, 0U, &config, &tls,
-                                                   0U));
+  WT_EXPECT_STATUS(
+      "and a NULL connection ID", WT_ERR_INVALID_ARGUMENT,
+      wt_runtime_session_start_client(&session, &socket, &peer, NULL, 0U, &config, &tls, 0U));
 
   memset(&session, 0, sizeof(session));
   WT_EXPECT_OK("a client session starts",
@@ -90,7 +90,8 @@ static void test_starting_an_endpoint_arms_it(void) {
   }
 
   wt_runtime_session_clear(&session);
-  WT_EXPECT_INT("clearing a session leaves it unstarted", 0, wt_runtime_session_established(&session));
+  WT_EXPECT_INT("clearing a session leaves it unstarted", 0,
+                wt_runtime_session_established(&session));
   /* Twice, because an error path that clears and then unwinds would otherwise double free. */
   wt_runtime_session_clear(&session);
   wt_runtime_session_clear(NULL);

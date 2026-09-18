@@ -18,9 +18,9 @@
 #include <string.h>
 
 #include "webtransport/quic/stream.h"
+#include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
-#include "webtransport/quic/varint.h"
 
 #include "driver_internal.h"
 
@@ -44,8 +44,8 @@ void wt_http3_driver_init(wt_http3_driver_t *driver, wt_http3_endpoint_t *endpoi
  * THIS endpoint wrote on that stream (0 for one the peer opened), kept for the reset section 4.4 requires.
  * `session_id` is the session the prefix named, or `session_id_set` 0 when there is none to name (WT-180). */
 wt_status_t remember_data_stream(wt_http3_driver_t *driver, uint64_t stream_id,
-                                        uint64_t our_prefix_length, uint64_t session_id,
-                                        int session_id_set) {
+                                 uint64_t our_prefix_length, uint64_t session_id,
+                                 int session_id_set) {
   if (driver->data_stream_count >= WT_HTTP3_DRIVER_DATA_STREAMS_MAX) return WT_ERR_LIMIT;
   driver->data_streams[driver->data_stream_count].stream_id = stream_id;
   driver->data_streams[driver->data_stream_count].prefix_length = our_prefix_length;
@@ -61,7 +61,8 @@ void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_
   driver->session_id_set = 1;
 }
 
-void wt_http3_driver_set_upgrade_token(wt_http3_driver_t *driver, wt_webtransport_upgrade_token_t token) {
+void wt_http3_driver_set_upgrade_token(wt_http3_driver_t *driver,
+                                       wt_webtransport_upgrade_token_t token) {
   if (driver == NULL) return;
   driver->upgrade_token = token;
 }
@@ -104,10 +105,10 @@ wt_status_t wt_http3_driver_start_control(wt_http3_driver_t *driver,
 wt_status_t wt_http3_driver_start_qpack_stream(wt_http3_driver_t *driver, int encoder,
                                                wt_writer_t *w) {
   if (driver == NULL || driver->endpoint == NULL || w == NULL) return WT_ERR_INVALID_ARGUMENT;
-  return wt_http3_endpoint_write_prefix(
-      driver->endpoint,
-      encoder != 0 ? WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER : WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER,
-      w);
+  return wt_http3_endpoint_write_prefix(driver->endpoint,
+                                        encoder != 0 ? WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER
+                                                     : WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER,
+                                        w);
 }
 
 wt_http3_driver_pending_t *find_pending(wt_http3_driver_t *driver, uint64_t stream_id) {
@@ -128,7 +129,6 @@ void forget_pending(wt_http3_driver_t *driver, uint64_t stream_id) {
     }
   }
 }
-
 
 /* Whether THIS endpoint has a SEND half on `stream_id`, so that a RESET_STREAM is a frame the stream machine
  * can apply: every bidirectional stream, and a unidirectional one this endpoint opened. A peer's unidirectional
@@ -176,7 +176,8 @@ wt_status_t wt_http3_driver_end_session_streams(wt_http3_driver_t *driver, uint6
      * capped by the bytes actually sent. A stream the peer opened has no prefix of ours (0), and one this endpoint
      * wrote a prefix on has sent at least those bytes. */
     reliable_size = driver->data_streams[index].prefix_length;
-    if (wt_quic_connection_stream_send_offset(driver->connection, stream_id, &send_offset) == WT_OK &&
+    if (wt_quic_connection_stream_send_offset(driver->connection, stream_id, &send_offset) ==
+            WT_OK &&
         reliable_size > send_offset) {
       reliable_size = send_offset;
     }
@@ -199,8 +200,8 @@ wt_status_t wt_http3_driver_end_session_streams(wt_http3_driver_t *driver, uint6
     status = (skip_reset != 0 || has_send_half(driver->connection, stream_id) == 0)
                  ? WT_OK
                  : wt_quic_connection_reset_stream_at(driver->connection, stream_id,
-                                                      WT_WEBTRANSPORT_ERROR_SESSION_GONE, reliable_size,
-                                                      now);
+                                                      WT_WEBTRANSPORT_ERROR_SESSION_GONE,
+                                                      reliable_size, now);
     if (status == WT_OK) {
       if (skip_reset == 0) ended++;
     } else if (first_refusal == WT_OK) {
@@ -245,8 +246,8 @@ int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t str
   return 0;
 }
 
-wt_status_t wt_http3_driver_data_stream_session_id(const wt_http3_driver_t *driver, uint64_t stream_id,
-                                                   uint64_t *out_session_id) {
+wt_status_t wt_http3_driver_data_stream_session_id(const wt_http3_driver_t *driver,
+                                                   uint64_t stream_id, uint64_t *out_session_id) {
   size_t index;
 
   if (driver == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -314,12 +315,14 @@ wt_status_t wt_http3_driver_reject_data_stream(wt_http3_driver_t *driver, uint64
 
 /* The marked CONNECT stream `stream_id`, or NULL. One function looks a stream up, so the mark and the question
  * cannot disagree about what "settled" means. */
-static wt_http3_driver_capsule_stream_t *find_capsule_stream(wt_http3_driver_t *driver, uint64_t stream_id) {
+static wt_http3_driver_capsule_stream_t *find_capsule_stream(wt_http3_driver_t *driver,
+                                                             uint64_t stream_id) {
   size_t index;
 
   if (driver == NULL) return NULL;
   for (index = 0U; index < driver->capsule_stream_count; index++) {
-    if (driver->capsule_streams[index].stream_id == stream_id) return &driver->capsule_streams[index];
+    if (driver->capsule_streams[index].stream_id == stream_id)
+      return &driver->capsule_streams[index];
   }
   return NULL;
 }
@@ -338,7 +341,8 @@ wt_status_t wt_http3_driver_mark_capsule_stream(wt_http3_driver_t *driver, uint6
   }
   if (driver->capsule_stream_count >= WT_HTTP3_DRIVER_CAPSULE_STREAMS_MAX) return WT_ERR_LIMIT;
   driver->capsule_streams[driver->capsule_stream_count].stream_id = stream_id;
-  driver->capsule_streams[driver->capsule_stream_count].headers_pending = headers_pending != 0 ? 1 : 0;
+  driver->capsule_streams[driver->capsule_stream_count].headers_pending =
+      headers_pending != 0 ? 1 : 0;
   driver->capsule_stream_count++;
   return WT_OK;
 }

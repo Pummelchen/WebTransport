@@ -6,8 +6,10 @@
 
 const char *wt_cli_family_name(wt_udp_family_t family) {
   switch (family) {
-    case WT_UDP_IPV4: return "ipv4";
-    case WT_UDP_IPV6: return "ipv6";
+    case WT_UDP_IPV4:
+      return "ipv4";
+    case WT_UDP_IPV6:
+      return "ipv6";
   }
   return "unknown";
 }
@@ -56,7 +58,8 @@ void wt_cli_endpoint_close(wt_cli_endpoint_t *endpoint) {
   endpoint->socket.fd = WT_UDP_INVALID_FD;
 }
 
-void wt_cli_endpoint_write_json(const wt_cli_endpoint_t *endpoint, const char *address, FILE *stream) {
+void wt_cli_endpoint_write_json(const wt_cli_endpoint_t *endpoint, const char *address,
+                                FILE *stream) {
   if (stream == NULL) return;
   fputs("{\"family\":", stream);
   if (endpoint == NULL) {

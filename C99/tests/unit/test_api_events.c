@@ -67,7 +67,9 @@ static void on_datagram(void *context, const uint8_t *data, size_t length) {
   note(r, "datagram");
 }
 
-static void on_drain(void *context) { note((recorder_t *)context, "drain"); }
+static void on_drain(void *context) {
+  note((recorder_t *)context, "drain");
+}
 static void on_close(void *context, uint32_t error_code) {
   recorder_t *r = context;
   r->last_code = error_code;
@@ -159,8 +161,8 @@ static void test_streams(void) {
   WT_EXPECT_OK("and another", wt_session_on_stream_opened(session, 20U, 1, 4U));
   WT_EXPECT_STATUS("a third is refused", WT_ERR_LIMIT,
                    wt_session_on_stream_opened(session, 24U, 1, 4U));
-  WT_EXPECT_U64("as excessive load rather than a malformed stream", (uint64_t)WT_HTTP3_EXCESSIVE_LOAD,
-                (uint64_t)wt_session_last_error(session).code);
+  WT_EXPECT_U64("as excessive load rather than a malformed stream",
+                (uint64_t)WT_HTTP3_EXCESSIVE_LOAD, (uint64_t)wt_session_last_error(session).code);
   WT_EXPECT_U64("with the table unchanged", 2U, (uint64_t)wt_session_stream_count(session));
 
   wt_session_destroy(session, NULL);
@@ -182,9 +184,9 @@ static void test_datagrams_and_capsules(void) {
    * of the caller's buffer for the duration of the callback only. */
   {
     wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
-    WT_EXPECT_OK("a datagram writes", wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"hi", 2U));
-    WT_EXPECT_OK("and is delivered",
-                 wt_session_on_datagram(session, bytes, wt_writer_offset(&w)));
+    WT_EXPECT_OK("a datagram writes",
+                 wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"hi", 2U));
+    WT_EXPECT_OK("and is delivered", wt_session_on_datagram(session, bytes, wt_writer_offset(&w)));
     WT_EXPECT_STR("as one report", "datagram", recorder.events[0]);
     WT_EXPECT_U64("with the payload's length", 2U, (uint64_t)recorder.last_length);
     WT_EXPECT_BYTES("and its bytes", (const uint8_t *)"hi", recorder.last_payload, 2U);
@@ -248,7 +250,8 @@ static void test_datagrams_and_capsules(void) {
   {
     size_t before = recorder.count;
     wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
-    WT_EXPECT_OK("a datagram writes", wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"ok", 2U));
+    WT_EXPECT_OK("a datagram writes",
+                 wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"ok", 2U));
     WT_EXPECT_OK("and is accepted", wt_session_on_datagram(session, bytes, wt_writer_offset(&w)));
     WT_EXPECT_U64("with nothing reported", (uint64_t)before, (uint64_t)recorder.count);
   }
@@ -290,7 +293,8 @@ static void test_a_terminated_session_delivers_nothing(void) {
     WT_EXPECT_STATUS("as is data on an open stream", WT_ERR_STATE,
                      wt_session_on_stream_data(session, 8U, bytes, 1U, 0));
     w = wt_writer_init(bytes, sizeof(bytes));
-    WT_EXPECT_OK("a datagram writes", wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"hi", 2U));
+    WT_EXPECT_OK("a datagram writes",
+                 wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"hi", 2U));
     WT_EXPECT_STATUS("and is refused too", WT_ERR_STATE,
                      wt_session_on_datagram(session, bytes, wt_writer_offset(&w)));
     WT_EXPECT_U64("with no callback run", (uint64_t)before, (uint64_t)recorder.count);

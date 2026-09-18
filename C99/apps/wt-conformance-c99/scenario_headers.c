@@ -11,7 +11,8 @@
 #include "webtransport/writer.h"
 
 static void add(wt_cli_report_t *report, const char *name, int ok, const char *detail) {
-  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                          detail);
 }
 
 /* One literal-literal field line, so the two round trips below differ in exactly one flag. */
@@ -98,8 +99,8 @@ void wt_scenario_headers_run(wt_cli_report_t *report) {
                                                wt_writer_offset(&w), NULL, 0U, 0U, scratch,
                                                sizeof(scratch), &error) == WT_OK;
 
-    add(report, "headers-response-round-trip", decoded && read_back.has_status == 1 &&
-                                                   read_back.status == 200U,
+    add(report, "headers-response-round-trip",
+        decoded && read_back.has_status == 1 && read_back.status == 200U,
         "a 200 response keeps its status through the field section");
   }
 
@@ -144,7 +145,8 @@ void wt_scenario_headers_run(wt_cli_report_t *report) {
             read_back.value_length == sizeof(value) - 1U &&
             memcmp(read_back.value, value, sizeof(value) - 1U) == 0 &&
             read_back.bytes_consumed == wt_writer_offset(&w) && wt_cursor_at_end(&c) != 0,
-        "a literal name and value are written and read back with the whole representation consumed");
+        "a literal name and value are written and read back with the whole representation "
+        "consumed");
   }
 
   /* The same line Huffman-coded. The H bits are part of the representation, so a decoder that reported them
@@ -173,7 +175,8 @@ void wt_scenario_headers_run(wt_cli_report_t *report) {
     literal_line(&line, name, sizeof(name) - 1U, value, sizeof(value) - 1U, 0);
     encoded = wt_qpack_field_line_encode(&w_plain, &line) == WT_OK;
     literal_line(&line, name, sizeof(name) - 1U, value, sizeof(value) - 1U, 1);
-    encoded = encoded && wt_qpack_field_line_encode_coded(&w_coded, &line, scratch, sizeof(scratch)) == WT_OK;
+    encoded = encoded &&
+              wt_qpack_field_line_encode_coded(&w_coded, &line, scratch, sizeof(scratch)) == WT_OK;
     smaller = encoded && wt_writer_offset(&w_coded) < wt_writer_offset(&w_plain);
 
     /* The field-line decoder REPORTS the H bits and hands back the coded bytes: inflating them is the Huffman
@@ -182,21 +185,22 @@ void wt_scenario_headers_run(wt_cli_report_t *report) {
      * one layer does two layers' work. */
     c = wt_cursor_init(coded, wt_writer_offset(&w_coded));
     memset(&read_back, 0, sizeof(read_back));
-    round_trip = encoded && wt_qpack_field_line_decode(&c, &read_back) == WT_OK &&
-                 read_back.kind == WT_QPACK_FIELD_LITERAL_LITERAL_NAME && read_back.name_huffman == 1 &&
-                 read_back.value_huffman == 1 &&
-                 read_back.bytes_consumed == wt_writer_offset(&w_coded) && wt_cursor_at_end(&c) != 0 &&
-                 wt_qpack_huffman_decode(read_back.name, read_back.name_length, scratch, sizeof(scratch),
-                                         &name_length) == WT_OK &&
-                 name_length == sizeof(name) - 1U && memcmp(scratch, name, sizeof(name) - 1U) == 0 &&
-                 wt_qpack_huffman_decode(read_back.value, read_back.value_length, scratch, sizeof(scratch),
-                                         &value_length) == WT_OK &&
-                 value_length == sizeof(value) - 1U && memcmp(scratch, value, sizeof(value) - 1U) == 0;
+    round_trip =
+        encoded && wt_qpack_field_line_decode(&c, &read_back) == WT_OK &&
+        read_back.kind == WT_QPACK_FIELD_LITERAL_LITERAL_NAME && read_back.name_huffman == 1 &&
+        read_back.value_huffman == 1 && read_back.bytes_consumed == wt_writer_offset(&w_coded) &&
+        wt_cursor_at_end(&c) != 0 &&
+        wt_qpack_huffman_decode(read_back.name, read_back.name_length, scratch, sizeof(scratch),
+                                &name_length) == WT_OK &&
+        name_length == sizeof(name) - 1U && memcmp(scratch, name, sizeof(name) - 1U) == 0 &&
+        wt_qpack_huffman_decode(read_back.value, read_back.value_length, scratch, sizeof(scratch),
+                                &value_length) == WT_OK &&
+        value_length == sizeof(value) - 1U && memcmp(scratch, value, sizeof(value) - 1U) == 0;
 
     /* And the primitive on its own, so a failure says which of the two layers is wrong. */
     round_trip = round_trip &&
-                 wt_qpack_huffman_encode(value, sizeof(value) - 1U, decoded_bytes, sizeof(decoded_bytes),
-                                         &coded_length) == WT_OK &&
+                 wt_qpack_huffman_encode(value, sizeof(value) - 1U, decoded_bytes,
+                                         sizeof(decoded_bytes), &coded_length) == WT_OK &&
                  wt_qpack_huffman_decode(decoded_bytes, coded_length, scratch, sizeof(scratch),
                                          &decoded_length) == WT_OK &&
                  decoded_length == sizeof(value) - 1U &&

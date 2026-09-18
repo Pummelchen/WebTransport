@@ -30,9 +30,11 @@ void wt_capsule_stream_set_flow_advertised(wt_capsule_stream_t *stream,
 }
 
 wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, const uint8_t *payload,
-                                               size_t length, int last, wt_http3_error_t *out_error) {
+                                               size_t length, int last,
+                                               wt_http3_error_t *out_error) {
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
-  if (stream == NULL) return WT_OK; /* no account kept: the capsule is dropped, which section 2 allows */
+  if (stream == NULL)
+    return WT_OK; /* no account kept: the capsule is dropped, which section 2 allows */
   if (payload == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
   if (length > sizeof(stream->peer_settings) - stream->peer_settings_length) {
     /* The control machine's own bound, so a validated payload cannot reach it; a caller that delivered more
@@ -48,7 +50,8 @@ wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, cons
     wt_status_t status;
 
     wt_http3_settings_init(&parsed);
-    status = wt_http3_settings_parse(stream->peer_settings, stream->peer_settings_length, &parsed, out_error);
+    status = wt_http3_settings_parse(stream->peer_settings, stream->peer_settings_length, &parsed,
+                                     out_error);
     stream->peer_settings_length = 0U;
     if (status != WT_OK) {
       /* The control machine already validated this payload, so this is unreachable; answering 0 rather than a
@@ -69,7 +72,8 @@ wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_ca
   wt_status_t status;
 
   if (capsule == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (stream == NULL) return WT_OK; /* no account kept: the capsule is dropped, which section 2 allows */
+  if (stream == NULL)
+    return WT_OK; /* no account kept: the capsule is dropped, which section 2 allows */
   /* Section 5.1: the session's flow control applies only when BOTH endpoints advertised one of the three
    * initial limits, and an endpoint that did not negotiate it MUST IGNORE -- not refuse -- a flow-control
    * capsule. This is the same rule `src/api/session.c` applies to its `flow_enabled` flag. */
@@ -87,7 +91,8 @@ wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_ca
     return WT_OK;
   }
   if (capsule->type == WT_CAPSULE_MAX_STREAMS_BIDI || capsule->type == WT_CAPSULE_MAX_STREAMS_UNI ||
-      capsule->type == WT_CAPSULE_STREAMS_BLOCKED_BIDI || capsule->type == WT_CAPSULE_STREAMS_BLOCKED_UNI) {
+      capsule->type == WT_CAPSULE_STREAMS_BLOCKED_BIDI ||
+      capsule->type == WT_CAPSULE_STREAMS_BLOCKED_UNI) {
     int blocked = capsule->type == WT_CAPSULE_STREAMS_BLOCKED_BIDI ||
                   capsule->type == WT_CAPSULE_STREAMS_BLOCKED_UNI;
 
@@ -110,8 +115,8 @@ wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_ca
       return WT_OK;
     }
     if (wt_webtransport_flow_on_max_streams(&stream->peer_limits,
-                                            capsule->type == WT_CAPSULE_MAX_STREAMS_BIDI ? 1 : 0, maximum,
-                                            &flow_error) != WT_OK) {
+                                            capsule->type == WT_CAPSULE_MAX_STREAMS_BIDI ? 1 : 0,
+                                            maximum, &flow_error) != WT_OK) {
       stream->refused_session_code = flow_error;
       stream->refused_session_code_set = 1;
       return WT_ERR_PROTOCOL;
@@ -121,9 +126,9 @@ wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_ca
   return WT_OK;
 }
 
-wt_status_t wt_capsule_stream_on_bytes(wt_capsule_stream_t *stream, const uint8_t *data, size_t length, int fin,
-                                       wt_capsule_stream_fn observe, void *context,
-                                       wt_http3_error_t *out_error) {
+wt_status_t wt_capsule_stream_on_bytes(wt_capsule_stream_t *stream, const uint8_t *data,
+                                       size_t length, int fin, wt_capsule_stream_fn observe,
+                                       void *context, wt_http3_error_t *out_error) {
   size_t taken = 0U;
 
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
@@ -159,8 +164,8 @@ wt_status_t wt_capsule_stream_on_bytes(wt_capsule_stream_t *stream, const uint8_
 
     progressed = (taken < length);
     cursor = wt_cursor_init(stream->bytes, stream->length);
-    status = wt_webtransport_session_on_capsule_bytes(&stream->session, &cursor, sizeof(stream->bytes), observe,
-                                                      context, &error);
+    status = wt_webtransport_session_on_capsule_bytes(
+        &stream->session, &cursor, sizeof(stream->bytes), observe, context, &error);
     if (out_error != NULL) *out_error = error;
     if (status == WT_ERR_TRUNCATED) {
       const uint8_t *rest = NULL;
@@ -197,9 +202,9 @@ wt_status_t wt_capsule_stream_on_bytes(wt_capsule_stream_t *stream, const uint8_
 }
 
 wt_capsule_refusal_t wt_capsule_stream_refuse(wt_capsule_stream_t *stream,
-                                              const wt_http3_driver_transport_t *transport, uint64_t stream_id,
-                                              wt_quic_connection_t *connection, uint64_t now,
-                                              wt_http3_error_t error) {
+                                              const wt_http3_driver_transport_t *transport,
+                                              uint64_t stream_id, wt_quic_connection_t *connection,
+                                              uint64_t now, wt_http3_error_t error) {
   if (stream == NULL) return WT_CAPSULE_REFUSAL_NONE;
   if (stream->refused_session_code_set != 0) {
     /* The reservation is in the buffer ahead of the capsule, and the frame header is written into it once the
@@ -212,11 +217,12 @@ wt_capsule_refusal_t wt_capsule_stream_refuse(wt_capsule_stream_t *stream,
 
     /* The session's own error code, in the capsule that says so. The connection is NOT closed: section 5.1 makes
      * this the session's end, and a peer that ended a session has not broken the transport. */
-    if (wt_webtransport_session_write_close(&stream->session, &w,
-                                            (uint32_t)stream->refused_session_code, NULL, 0U) != WT_OK) {
+    if (wt_webtransport_session_write_close(
+            &stream->session, &w, (uint32_t)stream->refused_session_code, NULL, 0U) != WT_OK) {
       return WT_CAPSULE_REFUSAL_NONE;
     }
-    if (wt_http3_frame_wrap_data_in_place(framed, sizeof(framed), wt_writer_offset(&w), &frame_length) != WT_OK) {
+    if (wt_http3_frame_wrap_data_in_place(framed, sizeof(framed), wt_writer_offset(&w),
+                                          &frame_length) != WT_OK) {
       return WT_CAPSULE_REFUSAL_NONE;
     }
     if (transport != NULL && transport->send_stream != NULL) {

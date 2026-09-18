@@ -54,8 +54,7 @@ static void test_round_trip_is_ordered(void) {
    * misreading.) */
   WT_EXPECT_OK("and an unknown setting is included",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_UNKNOWN, 0U));
-  WT_EXPECT_OK("the payload encodes",
-               wt_http3_settings_encode_payload(&w, &settings));
+  WT_EXPECT_OK("the payload encodes", wt_http3_settings_encode_payload(&w, &settings));
 
   /* The wire bytes, by hand: 0x01 then 0x06 then 0x08 then 0x22 in ascending
    * identifier order, whatever order they were set in, with 4096 and 16384 in
@@ -94,13 +93,13 @@ static void test_round_trip_is_ordered(void) {
     static const uint8_t reserved_payload[2] = {0x02U, 0x00U};
     wt_http3_settings_t reserved_settings;
     wt_http3_error_t reserved_error = WT_HTTP3_NO_ERROR;
-    WT_EXPECT_STATUS("a reserved identifier is refused when set",
-                     WT_ERR_INVALID_ARGUMENT,
+    WT_EXPECT_STATUS("a reserved identifier is refused when set", WT_ERR_INVALID_ARGUMENT,
                      wt_http3_settings_set(&settings, 0x02U, 0U));
     WT_EXPECT_STATUS("and refused when parsed", WT_ERR_PROTOCOL,
-                     wt_http3_settings_parse(reserved_payload, sizeof(reserved_payload), &reserved_settings,
-                                             &reserved_error));
-    WT_EXPECT_U64("with the settings error code", WT_HTTP3_SETTINGS_ERROR, (uint64_t)reserved_error);
+                     wt_http3_settings_parse(reserved_payload, sizeof(reserved_payload),
+                                             &reserved_settings, &reserved_error));
+    WT_EXPECT_U64("with the settings error code", WT_HTTP3_SETTINGS_ERROR,
+                  (uint64_t)reserved_error);
   }
   WT_EXPECT_U64("a setting that was never sent is absent",
                 wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_H3_DATAGRAM, &present), 0U);
@@ -215,16 +214,17 @@ static void test_set_refusals(void) {
   wt_http3_settings_init(&settings);
   WT_EXPECT_STATUS("a reserved identifier cannot be set", WT_ERR_INVALID_ARGUMENT,
                    wt_http3_settings_set(&settings, 0x02U, 1U));
-  WT_EXPECT_STATUS("a value outside the varint range cannot be", WT_ERR_INVALID_ARGUMENT,
-                   wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM,
-                                         WT_QUIC_VARINT_MAX + 1U));
+  WT_EXPECT_STATUS(
+      "a value outside the varint range cannot be", WT_ERR_INVALID_ARGUMENT,
+      wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, WT_QUIC_VARINT_MAX + 1U));
   WT_EXPECT_STATUS("a connect protocol value above one cannot be", WT_ERR_INVALID_ARGUMENT,
                    wt_http3_settings_set(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 2U));
   /* RFC 9297 section 2.1.1's rule for the datagram setting, at the SETTER as well: the encoder must not be able
    * to write a value its own parser refuses, which is what the setter's other range checks are for. */
   WT_EXPECT_STATUS("a datagram value above one cannot be either", WT_ERR_INVALID_ARGUMENT,
                    wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 2U));
-  WT_EXPECT_OK("a datagram value of zero can", wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 0U));
+  WT_EXPECT_OK("a datagram value of zero can",
+               wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 0U));
   WT_EXPECT_STATUS("and the same identifier twice is still refused", WT_ERR_STATE,
                    wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
   wt_http3_settings_init(&settings);
@@ -236,8 +236,7 @@ static void test_set_refusals(void) {
   /* A set with nothing in it encodes nothing, which is a legal SETTINGS frame and
    * how an endpoint with no preferences answers. */
   wt_http3_settings_init(&other);
-  WT_EXPECT_OK("an empty set encodes",
-               wt_http3_settings_encode_payload(&w, &other));
+  WT_EXPECT_OK("an empty set encodes", wt_http3_settings_encode_payload(&w, &other));
   WT_EXPECT_U64("as no bytes", 0U, (uint64_t)wt_writer_offset(&w));
 
   /* And the table bound is the API's too, not only the parser's. */
@@ -265,15 +264,14 @@ static void test_exercisers_are_ignored(void) {
   WT_EXPECT_OK("an exerciser identifier parses",
                wt_http3_settings_parse(exerciser, sizeof(exerciser), &settings, &error));
   WT_EXPECT_INT("without an error code", (int)WT_HTTP3_NO_ERROR, (int)error);
-  WT_EXPECT_U64("and is NOT stored",
-                wt_http3_settings_get(&settings, 0x21U, &present), 0U);
+  WT_EXPECT_U64("and is NOT stored", wt_http3_settings_get(&settings, 0x21U, &present), 0U);
   WT_EXPECT_INT("so a later ask finds nothing", 0, present);
 
   /* Several of them, around a real setting: the real one survives, the exercisers leave no trace. */
   WT_EXPECT_OK("a payload with exercisers around a real setting parses",
                wt_http3_settings_parse(mixed, sizeof(mixed), &settings, &error));
-  WT_EXPECT_U64("the real setting is stored",
-                wt_http3_settings_get(&settings, 0x06U, &present), 0U);
+  WT_EXPECT_U64("the real setting is stored", wt_http3_settings_get(&settings, 0x06U, &present),
+                0U);
   WT_EXPECT_INT("and is present", 1, present);
   WT_EXPECT_U64("while a real unknown setting still is", 3U,
                 wt_http3_settings_get(&settings, 0x22U, &present));
@@ -286,9 +284,9 @@ static void test_exercisers_are_ignored(void) {
                wt_http3_settings_set(&settings, 0x21U, 0x1234U));
 
   /* The other family: forbidden to send and a connection error on receipt. */
-  WT_EXPECT_STATUS("a reserved HTTP/2 identifier is still refused", WT_ERR_PROTOCOL,
-                   wt_http3_settings_parse(http2_reserved, sizeof(http2_reserved), &settings,
-                                           &error));
+  WT_EXPECT_STATUS(
+      "a reserved HTTP/2 identifier is still refused", WT_ERR_PROTOCOL,
+      wt_http3_settings_parse(http2_reserved, sizeof(http2_reserved), &settings, &error));
   WT_EXPECT_U64("with H3_SETTINGS_ERROR", (uint64_t)WT_HTTP3_SETTINGS_ERROR, (uint64_t)error);
   WT_EXPECT_STATUS("and cannot be set", WT_ERR_INVALID_ARGUMENT,
                    wt_http3_settings_set(&settings, 0x02U, 1U));

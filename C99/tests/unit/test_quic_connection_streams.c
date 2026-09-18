@@ -16,18 +16,17 @@ void test_open_stream(void) {
                    wt_quic_connection_open_stream(&pair.client, 1, &id));
 
   wt_quic_transport_parameters_init(&params);
-  WT_EXPECT_OK("a grant of two streams each way",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI,
-                                                        2U));
-  WT_EXPECT_OK("and one unidirectional",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI,
-                                                        1U));
+  WT_EXPECT_OK(
+      "a grant of two streams each way",
+      wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
+  WT_EXPECT_OK("and one unidirectional", wt_quic_transport_parameters_add_integer(
+                                             &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 1U));
   WT_EXPECT_OK("with stream data",
                wt_quic_transport_parameters_add_integer(
                    &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, 4096U));
   WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
-  WT_EXPECT_OK("and is parsed",
-               wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+  WT_EXPECT_OK("and is parsed", wt_quic_connection_set_peer_parameters(&pair.client, payload,
+                                                                       wt_writer_offset(&pw)));
 
   WT_EXPECT_OK("the first bidirectional stream opens",
                wt_quic_connection_open_stream(&pair.client, 1, &id));
@@ -37,7 +36,8 @@ void test_open_stream(void) {
   WT_EXPECT_STATUS("and the third is beyond the peer's grant", WT_ERR_LIMIT,
                    wt_quic_connection_open_stream(&pair.client, 1, &id));
 
-  WT_EXPECT_OK("a unidirectional stream opens", wt_quic_connection_open_stream(&pair.client, 0, &id));
+  WT_EXPECT_OK("a unidirectional stream opens",
+               wt_quic_connection_open_stream(&pair.client, 0, &id));
   WT_EXPECT_U64("numbered two, its class's first", 2U, id);
   WT_EXPECT_STATUS("with only the one granted", WT_ERR_LIMIT,
                    wt_quic_connection_open_stream(&pair.client, 0, &id));
@@ -67,7 +67,8 @@ void test_peer_opens_stream(void) {
   size_t i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x40U + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x40U + i);
   WT_EXPECT_OK("application keys derive",
                wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("the client sends with them",
@@ -109,8 +110,7 @@ void test_peer_opens_stream(void) {
                 wt_quic_connection_is_closed(&pair.server));
   WT_EXPECT_U64("with a stream limit error", (uint64_t)WT_QUIC_STREAM_LIMIT_ERROR,
                 pair.server.close.error_code);
-  WT_EXPECT_U64("naming the STREAM frame", WT_QUIC_FRAME_STREAM_BASE,
-                pair.server.close.frame_type);
+  WT_EXPECT_U64("naming the STREAM frame", WT_QUIC_FRAME_STREAM_BASE, pair.server.close.frame_type);
 
   close_pair(&pair);
 
@@ -152,7 +152,8 @@ void test_reset_and_stop(void) {
   size_t i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x60U + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x60U + i);
   WT_EXPECT_OK("application keys derive",
                wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("the client sends with them",
@@ -219,14 +220,18 @@ void test_limit_extension(void) {
   size_t i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x80U + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x80U + i);
   WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
-  WT_EXPECT_OK("client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
-  WT_EXPECT_OK("server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("client writes",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("server reads",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
   WT_EXPECT_OK("client reads the server's grants too",
                wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
   /* The server must be able to SEND a grant as well as read the data that makes it necessary. */
-  WT_EXPECT_OK("server writes", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("server writes",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
   WT_EXPECT_OK("two streams granted",
                wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
   WT_EXPECT_OK("and exactly four bytes of connection room",
@@ -259,8 +264,10 @@ void test_limit_extension(void) {
     build.payload = payload;
     build.payload_len = len;
     build.keys = &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION];
-    WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
-    WT_EXPECT_OK("and is sent", wt_udp_send(&pair.client_socket, &pair.server_address, datagram, datagram_len));
+    WT_EXPECT_OK("the packet builds",
+                 wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+    WT_EXPECT_OK("and is sent",
+                 wt_udp_send(&pair.client_socket, &pair.server_address, datagram, datagram_len));
   }
   now += 1000U;
   receive_on(&pair.server, &pair.server_socket, now);
@@ -289,11 +296,15 @@ void test_reset_stream_send(void) {
   size_t i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0xa0U + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0xa0U + i);
   WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
-  WT_EXPECT_OK("client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
-  WT_EXPECT_OK("and reads", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
-  WT_EXPECT_OK("server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("client writes",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("and reads",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("server reads",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
 
   /* The peer's grant, then one of this endpoint's own bidirectional streams. */
   {
@@ -301,12 +312,11 @@ void test_reset_stream_send(void) {
     wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
     wt_quic_transport_parameters_t params;
     wt_quic_transport_parameters_init(&params);
-    WT_EXPECT_OK("a grant of two",
-                 wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI,
-                                                          2U));
+    WT_EXPECT_OK("a grant of two", wt_quic_transport_parameters_add_integer(
+                                       &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
     WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
-    WT_EXPECT_OK("and is parsed",
-                 wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+    WT_EXPECT_OK("and is parsed", wt_quic_connection_set_peer_parameters(&pair.client, payload,
+                                                                         wt_writer_offset(&pw)));
   }
   WT_EXPECT_OK("a stream opens", wt_quic_connection_open_stream(&pair.client, 1, &id));
   {
@@ -344,19 +354,25 @@ void test_stream_retransmit_descriptor(void) {
     wt_quic_packet_keys_t keys;
     uint8_t secret[WT_SHA256_LEN];
     size_t bit;
-    for (bit = 0U; bit < sizeof(secret); bit++) secret[bit] = (uint8_t)(0xc0U + bit);
-    WT_EXPECT_OK("application keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
-    WT_EXPECT_OK("client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
-    WT_EXPECT_OK("client reads", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
-    WT_EXPECT_OK("server writes", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
-    WT_EXPECT_OK("server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+    for (bit = 0U; bit < sizeof(secret); bit++)
+      secret[bit] = (uint8_t)(0xc0U + bit);
+    WT_EXPECT_OK("application keys",
+                 wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+    WT_EXPECT_OK("client writes",
+                 wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+    WT_EXPECT_OK("client reads",
+                 wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+    WT_EXPECT_OK("server writes",
+                 wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+    WT_EXPECT_OK("server reads",
+                 wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
   }
   wt_quic_transport_parameters_init(&params);
-  WT_EXPECT_OK("a stream grant",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 4U));
+  WT_EXPECT_OK("a stream grant", wt_quic_transport_parameters_add_integer(
+                                     &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 4U));
   WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
-  WT_EXPECT_OK("and is parsed by the client",
-               wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+  WT_EXPECT_OK("and is parsed by the client", wt_quic_connection_set_peer_parameters(
+                                                  &pair.client, payload, wt_writer_offset(&pw)));
   WT_EXPECT_OK("the client sends stream data",
                wt_quic_connection_open_stream(&pair.client, 1, &stream_id));
   WT_EXPECT_U64("and the first client-initiated stream is number 0", 0U, stream_id);
@@ -367,8 +383,8 @@ void test_stream_retransmit_descriptor(void) {
   for (i = 0U; i < 4U; i++) {
     uint8_t data[2] = {(uint8_t)i, (uint8_t)(0xf0U + i)};
     WT_EXPECT_OK("a stream payload is sent",
-                 wt_quic_connection_send_stream(&pair.client, stream_id, i * 2U, data, sizeof(data), 0,
-                                                now));
+                 wt_quic_connection_send_stream(&pair.client, stream_id, i * 2U, data, sizeof(data),
+                                                0, now));
     now += 100U;
   }
   WT_EXPECT_U64("four packets are in flight", 4U, (uint64_t)wt_quic_loss_count(&pair.client.loss));
@@ -429,18 +445,22 @@ void test_stop_sending_send(void) {
   size_t i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0xd0U + i);
-  WT_EXPECT_OK("application keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
-  WT_EXPECT_OK("client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
-  WT_EXPECT_OK("client reads", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0xd0U + i);
+  WT_EXPECT_OK("application keys",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("client writes",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("client reads",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
   wt_quic_transport_parameters_init(&params);
-  WT_EXPECT_OK("a grant of two",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
-  WT_EXPECT_OK("and of one unidirectional",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 1U));
+  WT_EXPECT_OK("a grant of two", wt_quic_transport_parameters_add_integer(
+                                     &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
+  WT_EXPECT_OK("and of one unidirectional", wt_quic_transport_parameters_add_integer(
+                                                &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 1U));
   WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
-  WT_EXPECT_OK("and is parsed",
-               wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+  WT_EXPECT_OK("and is parsed", wt_quic_connection_set_peer_parameters(&pair.client, payload,
+                                                                       wt_writer_offset(&pw)));
   WT_EXPECT_OK("a stream opens", wt_quic_connection_open_stream(&pair.client, 1, &id));
   {
     wt_quic_stream_t *stream = wt_quic_connection_stream(&pair.client, id);
@@ -462,7 +482,8 @@ void test_stop_sending_send(void) {
    * it is asserted on the wire by `test_an_early_stream_is_parked_and_rejected_over_the_bound`. */
   {
     uint64_t uni = 0U;
-    WT_EXPECT_OK("a unidirectional stream opens", wt_quic_connection_open_stream(&pair.client, 0, &uni));
+    WT_EXPECT_OK("a unidirectional stream opens",
+                 wt_quic_connection_open_stream(&pair.client, 0, &uni));
     WT_EXPECT_STATUS("asking to stop a stream this endpoint cannot receive on is a state error",
                      WT_ERR_STATE, wt_quic_connection_stop_sending(&pair.client, uni, 0x0cU, now));
   }
@@ -486,48 +507,55 @@ void test_the_reliable_stream_reset_is_sent_and_applied(void) {
   size_t i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0xb0U + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0xb0U + i);
   WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
-  WT_EXPECT_OK("the client writes", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
-  WT_EXPECT_OK("and the server reads", wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("the client writes",
+               wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("and the server reads",
+               wt_quic_connection_set_keys(&pair.server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
   WT_EXPECT_OK("the server grants two streams",
                wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
   {
     wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
     wt_quic_transport_parameters_t params;
     wt_quic_transport_parameters_init(&params);
-    WT_EXPECT_OK("a grant", wt_quic_transport_parameters_add_integer(&params,
-                                                                    WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
+    WT_EXPECT_OK("a grant", wt_quic_transport_parameters_add_integer(
+                                &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
     /* The stream-data credit a real peer grants, without which the four bytes this test sends would be refused
      * before the reset is reached. */
     WT_EXPECT_OK("and credit", wt_quic_transport_parameters_add_integer(
                                    &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, 1024U));
     WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
-    WT_EXPECT_OK("without the extension, it is not advertised",
-                 wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+    WT_EXPECT_OK(
+        "without the extension, it is not advertised",
+        wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
   }
   WT_EXPECT_OK("a stream opens", wt_quic_connection_open_stream(&pair.client, 1, &id));
   /* The GATE: a frame the peer never said it could read is not sent, and the caller is told why. */
-  WT_EXPECT_STATUS("and the frame cannot be sent to a peer that did not advertise the extension", WT_ERR_STATE,
+  WT_EXPECT_STATUS("and the frame cannot be sent to a peer that did not advertise the extension",
+                   WT_ERR_STATE,
                    wt_quic_connection_reset_stream_at(&pair.client, id, 0x0bU, 0U, now));
 
   {
     wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
     wt_quic_transport_parameters_t params;
     wt_quic_transport_parameters_init(&params);
-    WT_EXPECT_OK("a grant", wt_quic_transport_parameters_add_integer(&params,
-                                                                    WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
+    WT_EXPECT_OK("a grant", wt_quic_transport_parameters_add_integer(
+                                &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 2U));
     WT_EXPECT_OK("and credit", wt_quic_transport_parameters_add_integer(
                                    &params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, 1024U));
-    WT_EXPECT_OK("and the extension, with the empty value that makes it a flag",
-                 wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
+    WT_EXPECT_OK(
+        "and the extension, with the empty value that makes it a flag",
+        wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
     WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
-    WT_EXPECT_OK("and is parsed",
-                 wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+    WT_EXPECT_OK("and is parsed", wt_quic_connection_set_peer_parameters(&pair.client, payload,
+                                                                         wt_writer_offset(&pw)));
     WT_EXPECT_INT("with the extension advertised now", 1, pair.client.peer_limits.reset_stream_at);
   }
-  WT_EXPECT_OK("four bytes are sent", wt_quic_connection_send_stream(&pair.client, id, 0U,
-                                                                    (const uint8_t *)"abcd", 4U, 0, now));
+  WT_EXPECT_OK(
+      "four bytes are sent",
+      wt_quic_connection_send_stream(&pair.client, id, 0U, (const uint8_t *)"abcd", 4U, 0, now));
   /* Recording the send is the CALLER's, exactly as the HTTP/3 transport adapter does it: the connection writes
    * the frame and leaves the stream's offsets to whoever asked for it, so a caller that skipped this would send
    * at offset zero for ever. */
@@ -549,14 +577,15 @@ void test_the_reliable_stream_reset_is_sent_and_applied(void) {
     /* PEEKED first, so that the server's own receive still finds the datagram: the frame the sender BUILT and the
      * frame the peer APPLIES are two claims, and the send path owns the first. */
     WT_EXPECT_OK("a datagram is queued for the server", wt_udp_wait(&pair.server_socket, 2000000U));
-    WT_EXPECT_OK("and can be looked at", wt_udp_peek(&pair.server_socket, datagram, sizeof(datagram), &length,
-                                                    &available, &from));
+    WT_EXPECT_OK("and can be looked at", wt_udp_peek(&pair.server_socket, datagram,
+                                                     sizeof(datagram), &length, &available, &from));
     WT_EXPECT_OK("whose packet opens with the connection's keys",
-                 wt_quic_packet_read(datagram, length, &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U,
+                 wt_quic_packet_read(datagram, length,
+                                     &pair.server.keys_in[WT_QUIC_SPACE_APPLICATION], 0U,
                                      pair.server.local_connection_id_length, &packet));
     WT_EXPECT_OK("and whose frames decode",
-                 wt_quic_frames_decode(packet.payload, packet.payload_len, record_reset_at, &witness,
-                                       &frame_error));
+                 wt_quic_frames_decode(packet.payload, packet.payload_len, record_reset_at,
+                                       &witness, &frame_error));
     WT_EXPECT_U64("the first frame is the STREAM frame", (uint64_t)WT_QUIC_FRAME_KIND_STREAM,
                   witness.last_kind);
     (void)available;
@@ -588,8 +617,9 @@ void test_the_reliable_stream_reset_rules(void) {
 
     open_pair(WT_UDP_IPV4, &pair);
     install_application_keys(&pair, 0xc0U);
-    WT_EXPECT_OK("the server grants two streams",
-                 wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
+    WT_EXPECT_OK(
+        "the server grants two streams",
+        wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
     frame = wt_quic_frame_make(k_kind);
     frame.as.reset_stream_at.id = 0U;
     frame.as.reset_stream_at.application_error_code = 0x0bU;
@@ -601,7 +631,8 @@ void test_the_reliable_stream_reset_rules(void) {
     {
       wt_quic_stream_t *stream = wt_quic_connection_stream(&pair.server, 0U);
       WT_EXPECT_TRUE("the stream exists", stream != NULL);
-      if (stream != NULL) WT_EXPECT_U64("with the committed offset", 6U, stream->peer_reliable_size);
+      if (stream != NULL)
+        WT_EXPECT_U64("with the committed offset", 6U, stream->peer_reliable_size);
     }
 
     frame.as.reset_stream_at.reliable_size = 8U;
@@ -623,7 +654,8 @@ void test_the_reliable_stream_reset_rules(void) {
       if (stream != NULL) {
         WT_EXPECT_U64("and one that lowers it is applied", 4U, stream->peer_reliable_size);
       }
-      WT_EXPECT_INT("without closing the connection", 0, wt_quic_connection_is_closed(&pair.server));
+      WT_EXPECT_INT("without closing the connection", 0,
+                    wt_quic_connection_is_closed(&pair.server));
     }
     close_pair(&pair);
   }
@@ -635,8 +667,9 @@ void test_the_reliable_stream_reset_rules(void) {
 
     open_pair(WT_UDP_IPV4, &pair);
     install_application_keys(&pair, 0xc0U);
-    WT_EXPECT_OK("the server grants two streams",
-                 wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
+    WT_EXPECT_OK(
+        "the server grants two streams",
+        wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
     /* Written by HAND: the encoder refuses to produce a frame its own decoder must reject, which is right, so a
      * malformed one can only be tested from the outside -- type 0x24, id 0, error 0x0b, final size 6, reliable
      * size 7. */
@@ -660,8 +693,9 @@ void test_the_reliable_stream_reset_rules(void) {
 
     open_pair(WT_UDP_IPV4, &pair);
     install_application_keys(&pair, 0xc0U);
-    WT_EXPECT_OK("the server grants two streams",
-                 wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
+    WT_EXPECT_OK(
+        "the server grants two streams",
+        wt_quic_connection_set_max_streams(&pair.server, WT_QUIC_STREAM_BIDIRECTIONAL, 2U));
     {
       static const uint8_t k_first[] = {0x24U, 0x00U, 0x0bU, 0x0aU, 0x06U};
       send_raw_payload_to(&pair, k_first, sizeof(k_first),
@@ -684,4 +718,3 @@ void test_the_reliable_stream_reset_rules(void) {
     close_pair(&pair);
   }
 }
-

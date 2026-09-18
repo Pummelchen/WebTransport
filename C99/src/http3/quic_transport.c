@@ -7,7 +7,7 @@
 #include "webtransport/quic/stream.h"
 
 static wt_status_t quic_open_stream(void *context, int bidirectional, uint64_t *out_stream_id,
-                                   uint64_t now) {
+                                    uint64_t now) {
   (void)now;
   /* The connection's own limits decide whether a stream may be opened, and they are the
    * peer's SETTINGS: refusing here is not this layer's business. */
@@ -16,7 +16,7 @@ static wt_status_t quic_open_stream(void *context, int bidirectional, uint64_t *
 }
 
 static wt_status_t quic_send_stream(void *context, uint64_t stream_id, const uint8_t *data,
-                                   size_t length, int fin, uint64_t now) {
+                                    size_t length, int fin, uint64_t now) {
   wt_quic_connection_t *connection = context;
   wt_quic_stream_t *stream = wt_quic_connection_stream(connection, stream_id);
   uint64_t offset;
@@ -30,8 +30,8 @@ static wt_status_t quic_send_stream(void *context, uint64_t stream_id, const uin
    * would be a second opinion about a number the connection already owns. */
   offset = stream->send_offset;
   {
-    wt_status_t status = wt_quic_connection_send_stream(connection, stream_id, offset, data, length,
-                                                        fin, now);
+    wt_status_t status =
+        wt_quic_connection_send_stream(connection, stream_id, offset, data, length, fin, now);
     if (status != WT_OK) return status;
   }
 

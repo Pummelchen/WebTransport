@@ -45,4 +45,6 @@ const char *wt_status_name(wt_status_t status) {
   }
 }
 
-int wt_status_is_error(wt_status_t status) { return status != WT_OK; }
+int wt_status_is_error(wt_status_t status) {
+  return status != WT_OK;
+}

@@ -79,7 +79,8 @@ static void test_create_and_destroy(void) {
                 (int)wt_session_state(session));
 
   WT_EXPECT_OK("the session is established", wt_session_established(session));
-  WT_EXPECT_INT("which its state shows", (int)WT_SESSION_ESTABLISHED, (int)wt_session_state(session));
+  WT_EXPECT_INT("which its state shows", (int)WT_SESSION_ESTABLISHED,
+                (int)wt_session_state(session));
   status = wt_session_established(session);
   WT_EXPECT_STATUS("and establishing twice is refused", WT_ERR_STATE, status);
   WT_EXPECT_U64("with the error recorded", (uint64_t)WT_ERR_STATE,
@@ -141,9 +142,8 @@ static void test_capsules_and_the_sanitized_error(void) {
    * promise -- a number, never a peer's text, even though the peer sent text. */
   {
     wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
-    WT_EXPECT_OK("a close writes",
-                 wt_webtransport_close_session_write(&w, 0x01020304U, (const uint8_t *)"peer text",
-                                                     9U));
+    WT_EXPECT_OK("a close writes", wt_webtransport_close_session_write(
+                                       &w, 0x01020304U, (const uint8_t *)"peer text", 9U));
     WT_EXPECT_OK("and is applied", wt_session_on_capsule(session, bytes, wt_writer_offset(&w)));
     WT_EXPECT_INT("closing the session", (int)WT_SESSION_CLOSED, (int)wt_session_state(session));
     error = wt_session_last_error(session);
@@ -188,8 +188,9 @@ static void test_the_entry_point_refuses_what_the_walker_refuses(void) {
   /* The drain's encoding is the type 0x78ae and a one-byte length 1 followed by a value. */
   {
     static const uint8_t k_drain_with_a_value[] = {0x80U, 0x00U, 0x78U, 0xaeU, 0x01U, 0x2aU};
-    WT_EXPECT_STATUS("a drain carrying a value is refused", WT_ERR_PROTOCOL,
-                     wt_session_on_capsule(session, k_drain_with_a_value, sizeof(k_drain_with_a_value)));
+    WT_EXPECT_STATUS(
+        "a drain carrying a value is refused", WT_ERR_PROTOCOL,
+        wt_session_on_capsule(session, k_drain_with_a_value, sizeof(k_drain_with_a_value)));
     error = wt_session_last_error(session);
     WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, error.code);
     WT_EXPECT_INT("leaving the session where it was", (int)WT_SESSION_ESTABLISHED,
@@ -242,7 +243,8 @@ static void test_the_capsule_bound(void) {
     oversized[0] = 0x01U;
     oversized[1] = 0x40U;
     oversized[2] = 0x3fU;
-    for (i = 3U; i < sizeof(oversized); i++) oversized[i] = 0x00U;
+    for (i = 3U; i < sizeof(oversized); i++)
+      oversized[i] = 0x00U;
     WT_EXPECT_STATUS("one over the bound is refused", WT_ERR_LIMIT,
                      wt_session_on_capsule(session, oversized, sizeof(oversized)));
     error = wt_session_last_error(session);
@@ -282,21 +284,23 @@ static void test_the_written_capsules_are_framed_for_the_connect_stream(void) {
     wt_webtransport_capsule_t capsule;
     wt_cursor_t capsule_cursor;
 
-    WT_EXPECT_OK("the write is one HTTP/3 frame", wt_http3_frame_decode(&cursor, &frame, &h3_error));
+    WT_EXPECT_OK("the write is one HTTP/3 frame",
+                 wt_http3_frame_decode(&cursor, &frame, &h3_error));
     WT_EXPECT_U64("of type DATA", WT_HTTP3_FRAME_DATA, frame.type);
     WT_EXPECT_TRUE("with the whole write accounted for", wt_cursor_at_end(&cursor) != 0);
     capsule_cursor = wt_cursor_init(frame.payload, frame.length);
     memset(&capsule, 0, sizeof(capsule));
-    WT_EXPECT_OK("whose payload is a capsule",
-                 wt_webtransport_capsule_decode(&capsule_cursor, frame.length, &capsule, &h3_error));
+    WT_EXPECT_OK(
+        "whose payload is a capsule",
+        wt_webtransport_capsule_decode(&capsule_cursor, frame.length, &capsule, &h3_error));
     WT_EXPECT_U64("of type DRAIN_SESSION", WT_CAPSULE_DRAIN_SESSION, capsule.type);
     WT_EXPECT_U64("with no value", 0U, (uint64_t)capsule.value_length);
   }
 
   /* A close, whose capsule is longer than the DATA header's one-byte length form: the frame header grows and the
    * payload still sits directly behind it. */
-  WT_EXPECT_OK("a close is written",
-               wt_session_write_close(session, 0x01020304U, "framed payload", wire, sizeof(wire), &length));
+  WT_EXPECT_OK("a close is written", wt_session_write_close(session, 0x01020304U, "framed payload",
+                                                            wire, sizeof(wire), &length));
   {
     wt_cursor_t cursor = wt_cursor_init(wire, length);
     wt_http3_frame_t frame;
@@ -306,16 +310,19 @@ static void test_the_written_capsules_are_framed_for_the_connect_stream(void) {
     const uint8_t *reason = NULL;
     size_t reason_length = 0U;
 
-    WT_EXPECT_OK("the close is one HTTP/3 frame", wt_http3_frame_decode(&cursor, &frame, &h3_error));
+    WT_EXPECT_OK("the close is one HTTP/3 frame",
+                 wt_http3_frame_decode(&cursor, &frame, &h3_error));
     WT_EXPECT_U64("of type DATA", WT_HTTP3_FRAME_DATA, frame.type);
     capsule_cursor = wt_cursor_init(frame.payload, frame.length);
     memset(&capsule, 0, sizeof(capsule));
-    WT_EXPECT_OK("whose payload is the close capsule",
-                 wt_webtransport_capsule_decode(&capsule_cursor, frame.length, &capsule, &h3_error));
+    WT_EXPECT_OK(
+        "whose payload is the close capsule",
+        wt_webtransport_capsule_decode(&capsule_cursor, frame.length, &capsule, &h3_error));
     WT_EXPECT_OK("which parses", wt_webtransport_close_session_parse(&capsule, &code, &reason,
-                                                                    &reason_length, &h3_error));
+                                                                     &reason_length, &h3_error));
     WT_EXPECT_U64("with the caller's code", 0x01020304U, (uint64_t)code);
-    WT_EXPECT_U64("and the caller's reason", (uint64_t)strlen("framed payload"), (uint64_t)reason_length);
+    WT_EXPECT_U64("and the caller's reason", (uint64_t)strlen("framed payload"),
+                  (uint64_t)reason_length);
     WT_EXPECT_BYTES("byte for byte", (const uint8_t *)"framed payload", reason, reason_length);
   }
 
@@ -335,7 +342,8 @@ static void test_the_written_capsules_are_framed_for_the_connect_stream(void) {
                      wt_session_write_drain(bounded, tiny, sizeof(tiny), &tiny_length));
     WT_EXPECT_U64("with nothing written", 0U, (uint64_t)tiny_length);
     error = wt_session_last_error(bounded);
-    WT_EXPECT_U64("and the refusal is the session's own", (uint64_t)WT_ERR_LIMIT, (uint64_t)error.status);
+    WT_EXPECT_U64("and the refusal is the session's own", (uint64_t)WT_ERR_LIMIT,
+                  (uint64_t)error.status);
     /* The state moved only if the bytes did: a caller whose buffer was too small has a session it can still
      * drain into a bigger one, rather than one that says it is draining and has told nobody. */
     WT_EXPECT_INT("and the state did not move with it", (int)WT_SESSION_ESTABLISHED,

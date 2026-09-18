@@ -27,21 +27,18 @@ static void test_insert_and_lookup(void) {
   WT_EXPECT_U64("an empty table has no entries", 0U, (uint64_t)table.count);
   WT_EXPECT_U64("and no insertions", 0U, table.insert_count);
 
-  WT_EXPECT_OK("an entry inserts",
-               wt_qpack_dynamic_insert(&table, (const uint8_t *)"x-a", 3U, (const uint8_t *)"one",
-                                       3U, &index));
+  WT_EXPECT_OK("an entry inserts", wt_qpack_dynamic_insert(&table, (const uint8_t *)"x-a", 3U,
+                                                           (const uint8_t *)"one", 3U, &index));
   WT_EXPECT_U64("at absolute index zero", 0U, index);
-  WT_EXPECT_OK("and another",
-               wt_qpack_dynamic_insert(&table, (const uint8_t *)"x-b", 3U, (const uint8_t *)"two",
-                                       3U, &index));
+  WT_EXPECT_OK("and another", wt_qpack_dynamic_insert(&table, (const uint8_t *)"x-b", 3U,
+                                                      (const uint8_t *)"two", 3U, &index));
   WT_EXPECT_U64("at absolute index one", 1U, index);
   WT_EXPECT_U64("which the table counts", 2U, table.insert_count);
   WT_EXPECT_U64("and sizes by the section's rule", (uint64_t)(2U * entry_size(3U, 3U)),
                 (uint64_t)table.size);
 
-  WT_EXPECT_OK("the first entry reads back", wt_qpack_dynamic_entry(&table, 0U, &name,
-                                                                    &name_length, &value,
-                                                                    &value_length));
+  WT_EXPECT_OK("the first entry reads back",
+               wt_qpack_dynamic_entry(&table, 0U, &name, &name_length, &value, &value_length));
   WT_EXPECT_BYTES("with its name", (const uint8_t *)"x-a", name, 3U);
   WT_EXPECT_BYTES("and its value", (const uint8_t *)"one", value, 3U);
   WT_EXPECT_U64("of the right lengths", 3U, (uint64_t)value_length);
@@ -55,8 +52,8 @@ static void test_insert_and_lookup(void) {
   WT_EXPECT_OK("an entry with no name and no value inserts",
                wt_qpack_dynamic_insert(&table, NULL, 0U, NULL, 0U, &index));
   WT_EXPECT_U64("at the next absolute index", 2U, index);
-  WT_EXPECT_OK("and it reads back", wt_qpack_dynamic_entry(&table, 2U, &name, &name_length, &value,
-                                                           &value_length));
+  WT_EXPECT_OK("and it reads back",
+               wt_qpack_dynamic_entry(&table, 2U, &name, &name_length, &value, &value_length));
   WT_EXPECT_U64("with no name bytes", 0U, (uint64_t)name_length);
   WT_EXPECT_U64("and no value bytes", 0U, (uint64_t)value_length);
 }
@@ -85,12 +82,11 @@ static void test_eviction_keeps_indices(void) {
   WT_EXPECT_U64("one of them evicted", 1U, table.dropped);
   WT_EXPECT_STATUS("the evicted index is gone", WT_ERR_CLOSED,
                    wt_qpack_dynamic_entry(&table, 0U, &name, &name_length, &value, &value_length));
-  WT_EXPECT_OK("but the second entry still answers to one", wt_qpack_dynamic_entry(
-                                                                    &table, 1U, &name, &name_length,
-                                                                    &value, &value_length));
+  WT_EXPECT_OK("but the second entry still answers to one",
+               wt_qpack_dynamic_entry(&table, 1U, &name, &name_length, &value, &value_length));
   WT_EXPECT_BYTES("with its own bytes", (const uint8_t *)"a-2", name, 3U);
-  WT_EXPECT_OK("and the third is there", wt_qpack_dynamic_entry(&table, 2U, &name, &name_length,
-                                                                &value, &value_length));
+  WT_EXPECT_OK("and the third is there",
+               wt_qpack_dynamic_entry(&table, 2U, &name, &name_length, &value, &value_length));
   WT_EXPECT_BYTES("with its bytes too", (const uint8_t *)"v-3", value, 3U);
 }
 
@@ -100,9 +96,9 @@ static void test_capacity_and_limits(void) {
 
   /* Zero capacity is legal and means the peer may not use a dynamic table. */
   wt_qpack_dynamic_init(&table, 0U);
-  WT_EXPECT_STATUS("no entry fits a zero-capacity table", WT_ERR_LIMIT,
-                   wt_qpack_dynamic_insert(&table, (const uint8_t *)"a", 1U, (const uint8_t *)"b",
-                                           1U, &index));
+  WT_EXPECT_STATUS(
+      "no entry fits a zero-capacity table", WT_ERR_LIMIT,
+      wt_qpack_dynamic_insert(&table, (const uint8_t *)"a", 1U, (const uint8_t *)"b", 1U, &index));
 
   /* An entry larger than the capacity is refused rather than stored partially. */
   wt_qpack_dynamic_init(&table, entry_size(3U, 3U) - 1U);
@@ -158,14 +154,14 @@ static void test_a_duplicate_of_a_live_entry_copies_that_entry(void) {
   WT_EXPECT_OK("the first entry inserts",
                wt_qpack_dynamic_insert(&table, (const uint8_t *)"aaaaaaaa", 8U,
                                        (const uint8_t *)"1111", 4U, &index));
-  WT_EXPECT_OK("and a second",
-               wt_qpack_dynamic_insert(&table, (const uint8_t *)"bbbbbbbb", 8U,
-                                       (const uint8_t *)"2222", 4U, &index));
+  WT_EXPECT_OK("and a second", wt_qpack_dynamic_insert(&table, (const uint8_t *)"bbbbbbbb", 8U,
+                                                       (const uint8_t *)"2222", 4U, &index));
 
   /* The views are taken BEFORE the insert, exactly as the encoder-stream decoder takes them: they point into the
    * table's arena. */
   WT_EXPECT_OK("the first entry is readable",
-               wt_qpack_dynamic_entry(&table, 0U, &name, &name_length, &value, &value_length) != WT_OK);
+               wt_qpack_dynamic_entry(&table, 0U, &name, &name_length, &value, &value_length) !=
+                   WT_OK);
   WT_EXPECT_U64("with its name length", 8U, (uint64_t)name_length);
   WT_EXPECT_OK("and duplicating it from its own bytes",
                wt_qpack_dynamic_insert(&table, name, name_length, value, value_length, &index));

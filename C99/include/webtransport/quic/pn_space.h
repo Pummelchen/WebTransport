@@ -86,8 +86,8 @@ int wt_quic_ack_contains(const wt_quic_ack_state_t *state, uint64_t packet_numbe
  * are left for the caller to fill in, because `ranges` must point at `range_bytes`, which is the
  * caller's buffer. */
 wt_status_t wt_quic_ack_build(const wt_quic_ack_state_t *state, uint64_t delay,
-                              uint8_t *range_bytes, size_t range_capacity,
-                              size_t *range_len, wt_quic_frame_t *out);
+                              uint8_t *range_bytes, size_t range_capacity, size_t *range_len,
+                              wt_quic_frame_t *out);
 
 /* Record that an ACK frame has been sent, which clears the debt. */
 void wt_quic_ack_sent(wt_quic_ack_state_t *state);
@@ -108,7 +108,7 @@ uint64_t wt_quic_ack_received_count(const wt_quic_ack_state_t *state);
 /* ------------------------------------------------------------ round trip time */
 
 typedef struct wt_quic_rtt {
-  uint64_t latest;  /* the most recent sample, microseconds */
+  uint64_t latest;   /* the most recent sample, microseconds */
   uint64_t smoothed; /* RFC 9002 section 5.3's smoothed_rtt */
   uint64_t rttvar;   /* ... and its variation */
   uint64_t min_rtt;  /* the smallest sample seen, which never rises */
@@ -124,15 +124,13 @@ void wt_quic_rtt_init(wt_quic_rtt_t *rtt);
  * The first sample sets smoothed_rtt and sets rttvar to half of it, which is what section 5.3
  * says and what an estimator that started at zero would get wrong: a connection would begin with
  * a round trip time of zero and a probe timeout to match. */
-wt_status_t wt_quic_rtt_update(wt_quic_rtt_t *rtt, uint64_t latest_rtt,
-                               uint64_t ack_delay, uint64_t max_ack_delay,
-                               int handshake_confirmed);
+wt_status_t wt_quic_rtt_update(wt_quic_rtt_t *rtt, uint64_t latest_rtt, uint64_t ack_delay,
+                               uint64_t max_ack_delay, int handshake_confirmed);
 
 /* The probe timeout (RFC 9002 section 6.2.1): smoothed_rtt + max(4 * rttvar, 1ms) + max_ack_delay,
  * with the exponential backoff the caller applies itself because that is per-connection state.
  * Meaningless before the first sample, which is why it refuses. */
-wt_status_t wt_quic_rtt_pto(const wt_quic_rtt_t *rtt, uint64_t max_ack_delay,
-                            uint64_t *out_micros);
+wt_status_t wt_quic_rtt_pto(const wt_quic_rtt_t *rtt, uint64_t max_ack_delay, uint64_t *out_micros);
 
 /* ------------------------------------------------------------- the space itself */
 

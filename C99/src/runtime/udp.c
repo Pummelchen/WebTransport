@@ -91,7 +91,8 @@ wt_status_t wt_udp_socket_open(wt_udp_socket_t *out, wt_udp_family_t family) {
   /* The socket LIFETIME is the platform's first: on Windows this is where Winsock starts, and the matching
    * release is in `wt_udp_close`, which is the only other end of a socket's life. Every failure below
    * releases it, so a failed open does not leave the process holding the library. */
-  if (wt_udp_platform_acquire() != 0) return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
+  if (wt_udp_platform_acquire() != 0)
+    return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
 
   fd = socket(domain, SOCK_DGRAM, 0);
   if (fd == WT_UDP_INVALID_HANDLE) {
@@ -142,7 +143,8 @@ wt_status_t wt_udp_bind(wt_udp_socket_t *socket, const wt_udp_address_t *address
   }
   status = wt_udp_platform_address_to_storage(address, &storage, &storage_len);
   if (status != WT_OK) return status;
-  if (bind((wt_udp_handle_t)socket->fd, (const struct sockaddr *)(const void *)&storage, storage_len) < 0) {
+  if (bind((wt_udp_handle_t)socket->fd, (const struct sockaddr *)(const void *)&storage,
+           storage_len) < 0) {
     return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   }
   socket->port = address->port;
@@ -174,7 +176,8 @@ wt_status_t wt_udp_local_port(const wt_udp_socket_t *socket, uint16_t *out_port)
   if (socket == NULL || out_port == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (socket->fd == WT_UDP_INVALID_FD) return WT_ERR_STATE;
   memset(&storage, 0, sizeof(storage));
-  if (getsockname((wt_udp_handle_t)socket->fd, (struct sockaddr *)(void *)&storage, &storage_len) < 0) {
+  if (getsockname((wt_udp_handle_t)socket->fd, (struct sockaddr *)(void *)&storage, &storage_len) <
+      0) {
     return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   }
   /* The port is read through the same conversion a received datagram uses, so "which family is this" has one
@@ -182,8 +185,8 @@ wt_status_t wt_udp_local_port(const wt_udp_socket_t *socket, uint16_t *out_port)
    * it was when the code read `ss_family` itself. */
   {
     wt_udp_address_t bound;
-    wt_status_t status = wt_udp_platform_address_from_storage((const struct sockaddr *)(const void *)&storage,
-                                                              storage_len, &bound);
+    wt_status_t status = wt_udp_platform_address_from_storage(
+        (const struct sockaddr *)(const void *)&storage, storage_len, &bound);
     if (status != WT_OK) return status;
     *out_port = bound.port;
   }
@@ -223,8 +226,8 @@ wt_status_t wt_udp_send(const wt_udp_socket_t *socket, const wt_udp_address_t *t
   status = wt_udp_platform_address_to_storage(to, &storage, &storage_len);
   if (status != WT_OK) return status;
   if (wt_udp_platform_send_message((wt_udp_handle_t)socket->fd,
-                                   (const struct sockaddr *)(const void *)&storage, (int)storage_len, data,
-                                   length, &written) != 0) {
+                                   (const struct sockaddr *)(const void *)&storage,
+                                   (int)storage_len, data, length, &written) != 0) {
     return wt_udp_platform_status_of_error(wt_udp_platform_last_error());
   }
   /* A datagram is sent whole or not at all, so a short count is not a partial send: it is a platform
@@ -470,10 +473,12 @@ size_t wt_udp_address_format(const wt_udp_address_t *address, char *out, size_t 
   if (capacity != 0U && out != NULL) out[0] = '\0';
 
   if (address->family == WT_UDP_IPV4) {
-    if (wt_udp_platform_format_address(AF_INET, address->bytes, host, sizeof(host)) == 0U) return 0U;
+    if (wt_udp_platform_format_address(AF_INET, address->bytes, host, sizeof(host)) == 0U)
+      return 0U;
     written = snprintf(text, sizeof(text), "%s:%u", host, (unsigned int)address->port);
   } else if (address->family == WT_UDP_IPV6) {
-    if (wt_udp_platform_format_address(AF_INET6, address->bytes, host, sizeof(host)) == 0U) return 0U;
+    if (wt_udp_platform_format_address(AF_INET6, address->bytes, host, sizeof(host)) == 0U)
+      return 0U;
     if (address->scope_id != 0U) {
       written = snprintf(text, sizeof(text), "[%s%%%u]:%u", host, (unsigned int)address->scope_id,
                          (unsigned int)address->port);

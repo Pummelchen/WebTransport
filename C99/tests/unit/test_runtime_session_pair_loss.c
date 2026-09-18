@@ -88,7 +88,8 @@ void test_a_lost_packet_is_retransmitted(void) {
     if (saw_drop != 0 && connect_arrived(&pair) != 0) break;
   }
 
-  WT_EXPECT_TRUE("the handshake completes through the relay", wt_runtime_session_established(&pair.client) != 0);
+  WT_EXPECT_TRUE("the handshake completes through the relay",
+                 wt_runtime_session_established(&pair.client) != 0);
   WT_EXPECT_TRUE("the CONNECT was sent and one packet was dropped", saw_drop != 0);
   /* THE ASSERTION THIS TEST WANTS TO MAKE, and cannot yet: the exchange should complete because the client
    * retransmits. It does not, and that is the defect the interop peer has been showing all along -- the CONNECT
@@ -114,9 +115,11 @@ void test_a_lost_packet_is_retransmitted(void) {
    * or RETRANSMIT unacknowledged data, so the probe path is where the fix goes (WT-135). */
   WT_EXPECT_TRUE("the dropped CONNECT is still outstanding",
                  pair.client.connection.loss.ack_eliciting_in_flight >= 1U);
-  WT_EXPECT_TRUE("the loss list remembers the packets it sent", pair.client.connection.loss.count > 0U);
-  WT_EXPECT_TRUE("and the application space has no RTT sample, so there is no loss time to reach (WT-135)",
-                 pair.client.connection.spaces[WT_QUIC_SPACE_APPLICATION].rtt.has_sample == 0);
+  WT_EXPECT_TRUE("the loss list remembers the packets it sent",
+                 pair.client.connection.loss.count > 0U);
+  WT_EXPECT_TRUE(
+      "and the application space has no RTT sample, so there is no loss time to reach (WT-135)",
+      pair.client.connection.spaces[WT_QUIC_SPACE_APPLICATION].rtt.has_sample == 0);
   WT_EXPECT_U64("no packet is declared lost in the initial space", 0U,
                 (uint64_t)pair.client.connection.packets_declared_lost[WT_QUIC_SPACE_INITIAL]);
   WT_EXPECT_U64("nor the handshake space", 0U,
@@ -125,7 +128,8 @@ void test_a_lost_packet_is_retransmitted(void) {
                  pair.client.connection.packets_declared_lost[WT_QUIC_SPACE_APPLICATION] == 0U);
   WT_EXPECT_U64("and nothing was lost with a missing descriptor", 0U,
                 (uint64_t)pair.client.connection.lost_without_descriptor);
-  WT_EXPECT_TRUE("the lost stream frame is NOT reported yet: the application space never armed its probe (WT-135)",
+  WT_EXPECT_TRUE("the lost stream frame is NOT reported yet: the application space never armed its "
+                 "probe (WT-135)",
                  lost.non_crypto == 0U);
   WT_EXPECT_TRUE("the exchange did NOT complete, because nothing resends it yet (WT-135)",
                  connect_arrived(&pair) == 0);

@@ -44,8 +44,7 @@ void test_round_trip(wt_udp_family_t family) {
 
   now += 1000U;
   receive_on(&pair.client, &pair.client_socket, now);
-  WT_EXPECT_U64("with nothing left in flight", 0U,
-                (uint64_t)wt_quic_loss_count(&pair.client.loss));
+  WT_EXPECT_U64("with nothing left in flight", 0U, (uint64_t)wt_quic_loss_count(&pair.client.loss));
   WT_EXPECT_U64("and no bytes in flight", 0U, wt_quic_loss_bytes_in_flight(&pair.client.loss));
   /* The round trip sample is the difference between the two `now` values the test chose: 3000us. */
   WT_EXPECT_U64("the round trip is measured", 3000U,
@@ -120,8 +119,7 @@ void test_packet_threshold_loss(void) {
                                                 payload, sizeof(payload), now));
     now += 100U;
   }
-  WT_EXPECT_U64("four packets are in flight", 4U,
-                (uint64_t)wt_quic_loss_count(&pair.client.loss));
+  WT_EXPECT_U64("four packets are in flight", 4U, (uint64_t)wt_quic_loss_count(&pair.client.loss));
 
   /* An acknowledgement of packet number 3 and nothing else, built here and protected with the keys
    * the client can read: what the server would have sent if only the last of the four had arrived. */
@@ -243,9 +241,9 @@ void test_close_paths(void) {
   now += 1000U;
   WT_EXPECT_INT("the client is not closed", 0, wt_quic_connection_is_closed(&pair.client));
 
-  WT_EXPECT_OK("it closes with an error", wt_quic_connection_close(&pair.client, 0x0aU,
-                                                                   WT_QUIC_FRAME_STREAM_BASE, NULL,
-                                                                   0U, now));
+  WT_EXPECT_OK(
+      "it closes with an error",
+      wt_quic_connection_close(&pair.client, 0x0aU, WT_QUIC_FRAME_STREAM_BASE, NULL, 0U, now));
   WT_EXPECT_INT("and is closed", 1, wt_quic_connection_is_closed(&pair.client));
   WT_EXPECT_U64("with the transport kind", (uint64_t)WT_QUIC_CLOSE_TRANSPORT,
                 (uint64_t)wt_quic_close_kind(&pair.client.close));
@@ -303,13 +301,13 @@ void test_close_paths(void) {
       wt_quic_transport_parameters_t params;
       wt_writer_t pw = wt_writer_init(payload, sizeof(payload));
       wt_quic_transport_parameters_init(&params);
-      WT_EXPECT_OK("a peer limit to be contradicted",
-                   wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_DATA,
-                                                            50000U));
+      WT_EXPECT_OK(
+          "a peer limit to be contradicted",
+          wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_INITIAL_MAX_DATA, 50000U));
       WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&pw, &params));
-      WT_EXPECT_OK("and is parsed by the server",
-                   wt_quic_connection_set_peer_parameters(&pair.server, payload,
-                                                          wt_writer_offset(&pw)));
+      WT_EXPECT_OK(
+          "and is parsed by the server",
+          wt_quic_connection_set_peer_parameters(&pair.server, payload, wt_writer_offset(&pw)));
     }
     granted = wt_quic_connection_peer_limits(&pair.server)->initial_max_data;
     WT_EXPECT_U64("the server knows what the peer granted", 50000U, granted);
@@ -446,7 +444,8 @@ void test_garbage(wt_udp_family_t family) {
   uint64_t received_before;
 
   open_pair(family, &pair);
-  for (i = 0U; i < sizeof(garbage); i++) garbage[i] = (uint8_t)(0x40U + i);
+  for (i = 0U; i < sizeof(garbage); i++)
+    garbage[i] = (uint8_t)(0x40U + i);
 
   WT_EXPECT_OK("a stranger opens a socket", wt_udp_socket_open(&stranger, family));
   WT_EXPECT_OK("and binds loopback", wt_udp_bind_loopback(&stranger, 0U, &port));
@@ -534,7 +533,8 @@ void test_handshake_done_role(void) {
   size_t i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x20U + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x20U + i);
   WT_EXPECT_OK("application keys derive",
                wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("the client sends with them",
@@ -552,7 +552,8 @@ void test_handshake_done_role(void) {
     wt_quic_frame_t done = wt_quic_frame_make(WT_QUIC_FRAME_KIND_HANDSHAKE_DONE);
     WT_EXPECT_OK("a HANDSHAKE_DONE encodes", wt_quic_frame_encode(&w, &done));
   }
-  while (wt_writer_offset(&w) < 4U) wt_writer_u8(&w, 0U);
+  while (wt_writer_offset(&w) < 4U)
+    wt_writer_u8(&w, 0U);
   payload_len = wt_writer_offset(&w);
 
   memset(&build, 0, sizeof(build));
@@ -625,7 +626,8 @@ void test_frame_permission(void) {
     stream.as.stream.data = data;
     WT_EXPECT_OK("a STREAM frame encodes", wt_quic_frame_encode(&w, &stream));
   }
-  while (wt_writer_offset(&w) < 3U) wt_writer_u8(&w, 0U);
+  while (wt_writer_offset(&w) < 3U)
+    wt_writer_u8(&w, 0U);
   payload_len = wt_writer_offset(&w);
 
   memset(&build, 0, sizeof(build));
@@ -661,8 +663,7 @@ void test_frame_permission(void) {
   WT_EXPECT_INT("the server refuses it", 1, wt_quic_connection_is_closed(&pair.server));
   WT_EXPECT_U64("with a protocol violation", (uint64_t)WT_QUIC_PROTOCOL_VIOLATION,
                 pair.server.close.error_code);
-  WT_EXPECT_U64("naming the STREAM frame", WT_QUIC_FRAME_STREAM_BASE,
-                pair.server.close.frame_type);
+  WT_EXPECT_U64("naming the STREAM frame", WT_QUIC_FRAME_STREAM_BASE, pair.server.close.frame_type);
 
   close_pair(&pair);
 }
@@ -683,7 +684,8 @@ void test_client_initial_datagram_is_padded(void) {
   receive_on(&pair.server, &pair.server_socket, now);
   WT_EXPECT_U64("and the server reads it", 1U, pair.server.packets_received);
   WT_EXPECT_U64("processing it rather than discarding it", 0U, pair.server.packets_discarded);
-  WT_EXPECT_TRUE("with its packet number recorded", pair.server.spaces[WT_QUIC_SPACE_INITIAL].received.has_largest != 0);
+  WT_EXPECT_TRUE("with its packet number recorded",
+                 pair.server.spaces[WT_QUIC_SPACE_INITIAL].received.has_largest != 0);
   close_pair(&pair);
 }
 
@@ -704,7 +706,8 @@ void test_short_initial_datagram_is_discarded(void) {
   WT_EXPECT_U64("and is discarded", 1U, pair.server.packets_discarded);
   WT_EXPECT_TRUE("without a packet number being recorded",
                  pair.server.spaces[WT_QUIC_SPACE_INITIAL].received.has_largest == 0);
-  WT_EXPECT_INT("and without closing the connection", 0, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_INT("and without closing the connection", 0,
+                wt_quic_connection_is_closed(&pair.server));
   close_pair(&pair);
 }
 
@@ -725,8 +728,10 @@ void test_a_refusal_leaves_a_readable_close(wt_udp_family_t family) {
   open_pair(family, &pair);
   wt_quic_connection_set_handlers(&pair.server, refuse_frame, &refused, record_lost,
                                   &pair.server_witness);
-  WT_EXPECT_INT("a fresh connection has no close to report", 0, wt_quic_connection_is_closed(&pair.server));
-  WT_EXPECT_U64("and no cause", (uint64_t)WT_OK, (uint64_t)wt_quic_connection_close_cause(&pair.server));
+  WT_EXPECT_INT("a fresh connection has no close to report", 0,
+                wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_U64("and no cause", (uint64_t)WT_OK,
+                (uint64_t)wt_quic_connection_close_cause(&pair.server));
   WT_EXPECT_U64("and no close state", (uint64_t)WT_QUIC_CLOSE_NONE,
                 (uint64_t)wt_quic_connection_close_state(&pair.server)->kind);
 
@@ -748,7 +753,8 @@ void test_a_refusal_leaves_a_readable_close(wt_udp_family_t family) {
   WT_EXPECT_U64("naming INTERNAL_ERROR", (uint64_t)WT_QUIC_INTERNAL_ERROR, close_state->error_code);
   WT_EXPECT_U64("and no frame type", 0U, close_state->frame_type);
   /* The hint is cleared, which is WHY the state above has to exist. */
-  WT_EXPECT_INT("while the hint the handler could have left is cleared", 0, pair.server.close_code_set);
+  WT_EXPECT_INT("while the hint the handler could have left is cleared", 0,
+                pair.server.close_code_set);
   /* The peer's own close is a different question and is still unanswered. */
   WT_EXPECT_INT("and nothing is recorded about the peer closing", 0, pair.server.peer_closed);
 
@@ -796,7 +802,8 @@ void test_crypto_is_permitted_in_the_application_space(void) {
   size_t i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x50U + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x50U + i);
   WT_EXPECT_OK("application keys derive",
                wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("the client sends with them",
@@ -833,7 +840,8 @@ void test_an_http3_refusal_is_an_application_close(wt_udp_family_t family) {
   size_t i;
 
   open_pair(family, &pair);
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(0x70U + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(0x70U + i);
   WT_EXPECT_OK("application keys derive",
                wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("the client sends with them",
@@ -863,9 +871,12 @@ void test_an_http3_refusal_is_an_application_close(wt_udp_family_t family) {
     memset(&close_frame, 0, sizeof(close_frame));
     WT_EXPECT_OK("the close encodes", wt_quic_close_frame(&pair.server.close, &close_frame));
     WT_EXPECT_U64("as a CONNECTION_CLOSE of the application form",
-                  (uint64_t)WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION, (uint64_t)close_frame.kind);
-    WT_EXPECT_U64("whose code is the HTTP/3 one", 0x107U, close_frame.as.connection_close.error_code);
-    WT_EXPECT_INT("and which has no frame-type field", 0, close_frame.as.connection_close.has_frame_type);
+                  (uint64_t)WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION,
+                  (uint64_t)close_frame.kind);
+    WT_EXPECT_U64("whose code is the HTTP/3 one", 0x107U,
+                  close_frame.as.connection_close.error_code);
+    WT_EXPECT_INT("and which has no frame-type field", 0,
+                  close_frame.as.connection_close.has_frame_type);
   }
   WT_EXPECT_OK("the server flushes its close", wt_quic_connection_flush(&pair.server, now));
   WT_EXPECT_INT("which was sent", 1, wt_quic_connection_close_was_sent(&pair.server));
@@ -879,8 +890,7 @@ void test_an_http3_refusal_is_an_application_close(wt_udp_family_t family) {
  * own suites, so this gives it the same treatment (F-repo-ops-08). WT_QUIC_SPACE_COUNT
  * is not a space and an out-of-range value must not be named as one. */
 void test_quic_space_names(void) {
-  WT_EXPECT_STR("the Initial space is named", "initial",
-                wt_quic_space_name(WT_QUIC_SPACE_INITIAL));
+  WT_EXPECT_STR("the Initial space is named", "initial", wt_quic_space_name(WT_QUIC_SPACE_INITIAL));
   WT_EXPECT_STR("the Handshake space is named", "handshake",
                 wt_quic_space_name(WT_QUIC_SPACE_HANDSHAKE));
   WT_EXPECT_STR("the Application space is named", "application",
@@ -890,4 +900,3 @@ void test_quic_space_names(void) {
   WT_EXPECT_STR("and neither is an out-of-range value", "unknown",
                 wt_quic_space_name((wt_quic_space_t)99));
 }
-

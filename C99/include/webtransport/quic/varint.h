@@ -64,8 +64,7 @@ wt_status_t wt_quic_varint_decode(wt_cursor_t *c, uint64_t *out);
  * encoded on the minimum number of bytes to be a PROTOCOL_VIOLATION, and the
  * only way to tell is to compare the size the encoding took against the size the
  * value needs. */
-wt_status_t wt_quic_varint_decode_sized(wt_cursor_t *c, uint64_t *out,
-                                        size_t *out_size);
+wt_status_t wt_quic_varint_decode_sized(wt_cursor_t *c, uint64_t *out, size_t *out_size);
 
 /* Whether a value decoded from `size` bytes was written on the minimum number of
  * bytes. False for a value that could have been shorter, which is the check

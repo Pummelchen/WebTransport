@@ -35,7 +35,8 @@ void test_a_session_survives_being_cleared_twice_and_can_start_again(void) {
   arm_pair(&pair);
   rounds = pump_pair(&pair, 400U, both_established);
   WT_EXPECT_TRUE("the handshake completes", rounds < 400U);
-  WT_EXPECT_INT("with application keys on the client", 1, wt_runtime_session_keys_ready(&pair.client));
+  WT_EXPECT_INT("with application keys on the client", 1,
+                wt_runtime_session_keys_ready(&pair.client));
 
   /* Twice, on a live session: the second call is the one a signal handler and a deployment script both reach. */
   wt_runtime_session_clear(&pair.client);
@@ -54,10 +55,12 @@ void test_a_session_survives_being_cleared_twice_and_can_start_again(void) {
   {
     uint8_t stale[WT_UDP_MAX_DATAGRAM];
     size_t stale_length = 0U;
-    while (wt_udp_receive(&pair.client_socket, stale, sizeof(stale), &stale_length, NULL) == WT_OK) {
+    while (wt_udp_receive(&pair.client_socket, stale, sizeof(stale), &stale_length, NULL) ==
+           WT_OK) {
       /* discarded */
     }
-    while (wt_udp_receive(&pair.server_socket, stale, sizeof(stale), &stale_length, NULL) == WT_OK) {
+    while (wt_udp_receive(&pair.server_socket, stale, sizeof(stale), &stale_length, NULL) ==
+           WT_OK) {
       /* discarded */
     }
   }
@@ -65,13 +68,13 @@ void test_a_session_survives_being_cleared_twice_and_can_start_again(void) {
   memset(&pair.server, 0, sizeof(pair.server));
   pair.now += 1000U;
   WT_EXPECT_OK("the client starts again on the same struct",
-               wt_runtime_session_start_client(&pair.client, &pair.client_socket, &pair.server_address,
-                                               k_connection_id, sizeof(k_connection_id),
-                                               &pair.client_connection, &pair.client_tls, pair.now));
+               wt_runtime_session_start_client(
+                   &pair.client, &pair.client_socket, &pair.server_address, k_connection_id,
+                   sizeof(k_connection_id), &pair.client_connection, &pair.client_tls, pair.now));
   WT_EXPECT_OK("and so does the server",
-               wt_runtime_session_start_server(&pair.server, &pair.server_socket, &pair.client_address,
-                                               k_connection_id, sizeof(k_connection_id),
-                                               &pair.server_connection, &pair.server_tls, pair.now));
+               wt_runtime_session_start_server(
+                   &pair.server, &pair.server_socket, &pair.client_address, k_connection_id,
+                   sizeof(k_connection_id), &pair.server_connection, &pair.server_tls, pair.now));
   rounds = pump_pair(&pair, 400U, both_established);
   WT_EXPECT_TRUE("and a second handshake completes on them", rounds < 400U);
   WT_EXPECT_INT("with keys again", 1, wt_runtime_session_keys_ready(&pair.client));
@@ -94,7 +97,8 @@ void test_cancelling_a_handshake_is_safe(void) {
                 wt_runtime_session_established(&pair.client));
   wt_runtime_session_clear(&pair.client);
   wt_runtime_session_clear(&pair.server);
-  WT_EXPECT_INT("the cancelled client is not established", 0, wt_runtime_session_established(&pair.client));
+  WT_EXPECT_INT("the cancelled client is not established", 0,
+                wt_runtime_session_established(&pair.client));
   WT_EXPECT_INT("and holds no keys", 0, wt_runtime_session_keys_ready(&pair.client));
   /* The protocol contract: clearing releases the SESSION, it does not close the connection or tell the peer.
    * A caller that wants the peer told closes first -- and this assertion is what keeps the difference honest. */

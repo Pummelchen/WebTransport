@@ -7,8 +7,7 @@
 #include "webtransport/quic/varint.h"
 
 uint64_t wt_quic_datagram_max_payload(uint64_t peer_max_datagram_frame_size,
-                                      uint64_t max_packet_size,
-                                      uint64_t packet_overhead) {
+                                      uint64_t max_packet_size, uint64_t packet_overhead) {
   uint64_t by_packet;
   uint64_t by_frame;
   uint64_t length;
@@ -41,9 +40,8 @@ void wt_quic_datagram_queue_init(wt_quic_datagram_queue_t *queue) {
   memset(queue, 0, sizeof(*queue));
 }
 
-wt_status_t wt_quic_datagram_queue_push(wt_quic_datagram_queue_t *queue,
-                                        const uint8_t *data, size_t length,
-                                        uint64_t received_at, int *out_discarded) {
+wt_status_t wt_quic_datagram_queue_push(wt_quic_datagram_queue_t *queue, const uint8_t *data,
+                                        size_t length, uint64_t received_at, int *out_discarded) {
   size_t index;
 
   if (out_discarded != NULL) *out_discarded = 0;

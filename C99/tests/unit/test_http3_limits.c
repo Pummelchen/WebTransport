@@ -39,14 +39,15 @@ static void test_the_peer_stream_table_is_a_concurrency_bound(void) {
 
   for (index = 0U; index < (uint64_t)WT_HTTP3_ENDPOINT_STREAMS_MAX; index++) {
     WT_EXPECT_OK("a peer stream fits",
-                 wt_http3_endpoint_on_uni_stream(&endpoint, 4U + index * 4U, bytes, length, NULL, &kind,
-                                                 &error));
+                 wt_http3_endpoint_on_uni_stream(&endpoint, 4U + index * 4U, bytes, length, NULL,
+                                                 &kind, &error));
   }
   WT_EXPECT_U64("the table is full", (uint64_t)WT_HTTP3_ENDPOINT_STREAMS_MAX,
                 (uint64_t)wt_http3_endpoint_stream_count(&endpoint));
 
-  WT_EXPECT_STATUS("one more is refused", WT_ERR_LIMIT,
-                   wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length, NULL, &kind, &error));
+  WT_EXPECT_STATUS(
+      "one more is refused", WT_ERR_LIMIT,
+      wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length, NULL, &kind, &error));
   WT_EXPECT_U64("with no error code, because the bound is ours", (uint64_t)WT_HTTP3_NO_ERROR,
                 (uint64_t)error);
   WT_EXPECT_U64("and the refused stream consumed no slot", (uint64_t)WT_HTTP3_ENDPOINT_STREAMS_MAX,
@@ -56,8 +57,8 @@ static void test_the_peer_stream_table_is_a_concurrency_bound(void) {
   WT_EXPECT_OK("a stream ends", wt_http3_endpoint_on_uni_stream_end(&endpoint, 4U, &error));
   WT_EXPECT_U64("freeing its slot", (uint64_t)(WT_HTTP3_ENDPOINT_STREAMS_MAX - 1U),
                 (uint64_t)wt_http3_endpoint_stream_count(&endpoint));
-  WT_EXPECT_OK("so another fits", wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length, NULL,
-                                                                  &kind, &error));
+  WT_EXPECT_OK("so another fits", wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length,
+                                                                  NULL, &kind, &error));
 }
 
 static void test_the_request_table_is_a_concurrency_bound(void) {
@@ -68,7 +69,8 @@ static void test_the_request_table_is_a_concurrency_bound(void) {
 
   wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_CLIENT);
   for (index = 0U; index < (uint64_t)WT_HTTP3_ENDPOINT_REQUESTS_MAX; index++) {
-    WT_EXPECT_OK("a request stream opens", wt_http3_endpoint_open_request(&endpoint, index * 4U, &error));
+    WT_EXPECT_OK("a request stream opens",
+                 wt_http3_endpoint_open_request(&endpoint, index * 4U, &error));
   }
   WT_EXPECT_STATUS("one more is refused", WT_ERR_LIMIT,
                    wt_http3_endpoint_open_request(&endpoint, 4096U, &error));
@@ -79,7 +81,8 @@ static void test_the_request_table_is_a_concurrency_bound(void) {
                    wt_http3_endpoint_open_request(&endpoint, 0U, &error));
   WT_EXPECT_OK("closing one by reset", wt_http3_endpoint_on_request_reset(&endpoint, 0U));
   WT_EXPECT_OK("frees its slot", wt_http3_endpoint_open_request(&endpoint, 4096U, &error));
-  WT_EXPECT_OK("and its state is readable", wt_http3_endpoint_request_state(&endpoint, 4096U, &state));
+  WT_EXPECT_OK("and its state is readable",
+               wt_http3_endpoint_request_state(&endpoint, 4096U, &state));
 }
 
 static void test_the_driver_tables_are_bounded(void) {
@@ -98,14 +101,14 @@ static void test_the_driver_tables_are_bounded(void) {
   half[0] = 0xc0U; /* the first byte of a four-byte varint: nothing is complete yet */
   for (index = 0U; index < (uint64_t)WT_HTTP3_DRIVER_PENDING_MAX; index++) {
     WT_EXPECT_OK("a stream waits for the rest of its prefix",
-                 wt_http3_driver_on_uni_stream_data(&driver, 4U + index * 4U, 0U, half, 1U, &kind, NULL,
-                                                    NULL, NULL, &error));
+                 wt_http3_driver_on_uni_stream_data(&driver, 4U + index * 4U, 0U, half, 1U, &kind,
+                                                    NULL, NULL, NULL, &error));
   }
   WT_EXPECT_U64("the pending table is full", (uint64_t)WT_HTTP3_DRIVER_PENDING_MAX,
                 (uint64_t)wt_http3_driver_pending_count(&driver));
   WT_EXPECT_STATUS("one more waiting stream is refused", WT_ERR_LIMIT,
-                   wt_http3_driver_on_uni_stream_data(&driver, 4096U, 0U, half, 1U, &kind, NULL, NULL,
-                                                      NULL, &error));
+                   wt_http3_driver_on_uni_stream_data(&driver, 4096U, 0U, half, 1U, &kind, NULL,
+                                                      NULL, NULL, &error));
   WT_EXPECT_U64("with no error code", (uint64_t)WT_HTTP3_NO_ERROR, (uint64_t)error);
   WT_EXPECT_OK("a waiting stream may end", wt_http3_driver_on_uni_stream_end(&driver, 4U, &error));
   WT_EXPECT_U64("freeing its slot", (uint64_t)(WT_HTTP3_DRIVER_PENDING_MAX - 1U),
@@ -121,12 +124,12 @@ static void test_the_driver_tables_are_bounded(void) {
     wt_http3_driver_init(&frames, &frames_endpoint);
     for (index = 0U; index < (uint64_t)WT_HTTP3_DRIVER_FRAMES_MAX; index++) {
       WT_EXPECT_OK("a stream is part way through a frame",
-                   wt_http3_driver_on_stream_bytes(&frames, index * 4U, header, sizeof(header), 0, 1024U,
-                                                   &sink, &error));
+                   wt_http3_driver_on_stream_bytes(&frames, index * 4U, header, sizeof(header), 0,
+                                                   1024U, &sink, &error));
     }
     WT_EXPECT_STATUS("one more is refused", WT_ERR_LIMIT,
-                     wt_http3_driver_on_stream_bytes(&frames, 4096U, header, sizeof(header), 0, 1024U,
-                                                     &sink, &error));
+                     wt_http3_driver_on_stream_bytes(&frames, 4096U, header, sizeof(header), 0,
+                                                     1024U, &sink, &error));
   }
 }
 

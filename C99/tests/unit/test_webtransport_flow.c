@@ -36,8 +36,7 @@ static void test_round_trips(void) {
   WT_EXPECT_U64("to the limit", 100000U, first);
 
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("MAX_STREAM_DATA writes",
-               wt_webtransport_max_stream_data_write(&w, 4U, 2048U));
+  WT_EXPECT_OK("MAX_STREAM_DATA writes", wt_webtransport_max_stream_data_write(&w, 4U, 2048U));
   capsule = decode(bytes, wt_writer_offset(&w));
   WT_EXPECT_U64("as its type", WT_CAPSULE_MAX_STREAM_DATA, capsule.type);
   WT_EXPECT_OK("whose value parses",
@@ -47,8 +46,7 @@ static void test_round_trips(void) {
 
   /* The direction decides the type for the stream-count capsules. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a bidirectional MAX_STREAMS writes",
-               wt_webtransport_max_streams_write(&w, 1, 8U));
+  WT_EXPECT_OK("a bidirectional MAX_STREAMS writes", wt_webtransport_max_streams_write(&w, 1, 8U));
   capsule = decode(bytes, wt_writer_offset(&w));
   WT_EXPECT_U64("as the bidirectional one", WT_CAPSULE_MAX_STREAMS_BIDI, capsule.type);
   WT_EXPECT_OK("parsing to its count", wt_webtransport_max_streams_parse(&capsule, &first, &error));
@@ -63,7 +61,8 @@ static void test_round_trips(void) {
   w = wt_writer_init(bytes, sizeof(bytes));
   WT_EXPECT_OK("DATA_BLOCKED writes", wt_webtransport_data_blocked_write(&w, 4096U));
   capsule = decode(bytes, wt_writer_offset(&w));
-  WT_EXPECT_OK("parsing to its limit", wt_webtransport_data_blocked_parse(&capsule, &first, &error));
+  WT_EXPECT_OK("parsing to its limit",
+               wt_webtransport_data_blocked_parse(&capsule, &first, &error));
   WT_EXPECT_U64("which is what was written", 4096U, first);
 
   w = wt_writer_init(bytes, sizeof(bytes));
@@ -78,8 +77,8 @@ static void test_round_trips(void) {
   w = wt_writer_init(bytes, sizeof(bytes));
   WT_EXPECT_OK("STREAMS_BLOCKED writes", wt_webtransport_streams_blocked_write(&w, 1, 12U));
   capsule = decode(bytes, wt_writer_offset(&w));
-  WT_EXPECT_OK("parsing to its count", wt_webtransport_streams_blocked_parse(&capsule, &first,
-                                                                             &error));
+  WT_EXPECT_OK("parsing to its count",
+               wt_webtransport_streams_blocked_parse(&capsule, &first, &error));
   WT_EXPECT_U64("which is what was written", 12U, first);
 }
 
@@ -153,12 +152,12 @@ static void test_limits_only_grow(void) {
 
   /* The stream ID space has a ceiling: a limit above it is not a limit. */
   WT_EXPECT_STATUS("a count above the draft's ceiling is refused", WT_ERR_PROTOCOL,
-                   wt_webtransport_flow_on_max_streams(&limits, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE + 1U,
-                                                       &error));
+                   wt_webtransport_flow_on_max_streams(
+                       &limits, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE + 1U, &error));
   WT_EXPECT_U64("with the flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
-  WT_EXPECT_OK("while the ceiling itself is a legal limit",
-               wt_webtransport_flow_on_max_streams(&limits, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE,
-                                                   &error));
+  WT_EXPECT_OK(
+      "while the ceiling itself is a legal limit",
+      wt_webtransport_flow_on_max_streams(&limits, 1, WT_WEBTRANSPORT_MAX_STREAMS_VALUE, &error));
 
   /* The other direction is independent. */
   WT_EXPECT_OK("the unidirectional count is separate",

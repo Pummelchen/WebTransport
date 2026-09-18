@@ -9,8 +9,8 @@
 #include "webtransport/http3/endpoint.h"
 #include "webtransport/http3/settings.h"
 #include "webtransport/webtransport/capsule.h"
-#include "webtransport/webtransport/session.h"
 #include "webtransport/webtransport/framing.h"
+#include "webtransport/webtransport/session.h"
 #include "webtransport/webtransport/session_request.h"
 
 /* A decoded request with the pseudo-headers a WebTransport CONNECT carries, so a scenario can vary ONE field. */
@@ -30,7 +30,8 @@ static void make_request(wt_http3_message_t *message) {
 }
 
 static void add(wt_cli_report_t *report, const char *name, int ok, const char *detail) {
-  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                          detail);
 }
 
 void wt_scenario_refusals_run(wt_cli_report_t *report) {
@@ -89,7 +90,8 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
                                        0xacU, 0x7cU, 0xf0U, 0x00U, 0x01U};
     wt_http3_settings_t settings;
     wt_http3_error_t settings_error = WT_HTTP3_NO_ERROR;
-    wt_status_t status = wt_http3_settings_parse(repeated, sizeof(repeated), &settings, &settings_error);
+    wt_status_t status =
+        wt_http3_settings_parse(repeated, sizeof(repeated), &settings, &settings_error);
     add(report, "settings-repeated-identifier",
         status == WT_ERR_PROTOCOL && settings_error == WT_HTTP3_SETTINGS_ERROR,
         "a repeated SETTINGS identifier is H3_SETTINGS_ERROR");
@@ -104,8 +106,8 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     static const uint8_t http2_reserved[] = {0x02U, 0x01U};
     wt_http3_settings_t settings;
     wt_http3_error_t settings_error = WT_HTTP3_NO_ERROR;
-    wt_status_t status = wt_http3_settings_parse(exerciser, sizeof(exerciser), &settings,
-                                                 &settings_error);
+    wt_status_t status =
+        wt_http3_settings_parse(exerciser, sizeof(exerciser), &settings, &settings_error);
     int present = 1;
     add(report, "settings-exerciser-identifier-ignored",
         status == WT_OK && settings_error == WT_HTTP3_NO_ERROR &&
@@ -113,8 +115,8 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
         "a SETTINGS exercise identifier (0x1f*N+0x21) is IGNORED, not stored and not an error");
 
     settings_error = WT_HTTP3_NO_ERROR;
-    status = wt_http3_settings_parse(http2_reserved, sizeof(http2_reserved), &settings,
-                                     &settings_error);
+    status =
+        wt_http3_settings_parse(http2_reserved, sizeof(http2_reserved), &settings, &settings_error);
     add(report, "settings-http2-identifier-refused",
         status == WT_ERR_PROTOCOL && settings_error == WT_HTTP3_SETTINGS_ERROR,
         "a SETTINGS identifier reserved from HTTP/2 (0x02..0x05) is H3_SETTINGS_ERROR");
@@ -136,11 +138,12 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     section[1] = 0x00U;
     section[2] = 0x80U;
     section[3] = 0x00U;
-    status = wt_http3_message_decode(&decoded, WT_HTTP3_HEADER_REQUEST, section, 4U, NULL, 0U, 0U, scratch,
-                                     sizeof(scratch), &qpack_error);
+    status = wt_http3_message_decode(&decoded, WT_HTTP3_HEADER_REQUEST, section, 4U, NULL, 0U, 0U,
+                                     scratch, sizeof(scratch), &qpack_error);
     add(report, "qpack-dynamic-reference-without-a-table",
         status == WT_ERR_PROTOCOL && qpack_error != WT_HTTP3_NO_ERROR,
-        "a section that needs a dynamic table this endpoint never advertised is refused, with a code");
+        "a section that needs a dynamic table this endpoint never advertised is refused, with a "
+        "code");
   }
 
   /* The session's own state machine: a drain stops new streams, and the FIRST close code is the one the session
@@ -180,7 +183,8 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     bytes[2] = 0x3fU;
     {
       size_t i;
-      for (i = 3U; i < sizeof(bytes); i++) bytes[i] = 0U;
+      for (i = 3U; i < sizeof(bytes); i++)
+        bytes[i] = 0U;
     }
     cursor = wt_cursor_init(bytes, sizeof(bytes));
     if (wt_webtransport_capsule_decode(&cursor, 32U, &capsule, &capsule_error) == WT_ERR_LIMIT &&
@@ -207,13 +211,15 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_UNI, bytes, sizeof(bytes));
     length += wt_quic_varint_encode(0U, bytes + length, sizeof(bytes) - length);
     for (index = 0U; index < (uint64_t)WT_HTTP3_ENDPOINT_STREAMS_MAX && status == WT_OK; index++) {
-      status = wt_http3_endpoint_on_uni_stream(&endpoint, 4U + index * 4U, bytes, length, NULL, &kind,
-                                               &stream_error);
+      status = wt_http3_endpoint_on_uni_stream(&endpoint, 4U + index * 4U, bytes, length, NULL,
+                                               &kind, &stream_error);
     }
-    status = wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length, NULL, &kind, &stream_error);
+    status = wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length, NULL, &kind,
+                                             &stream_error);
     add(report, "peer-stream-over-bound",
         status == WT_ERR_LIMIT && stream_error == WT_HTTP3_NO_ERROR,
-        "one peer stream past the bound is WT_ERR_LIMIT with no error code, because the bound is ours");
+        "one peer stream past the bound is WT_ERR_LIMIT with no error code, because the bound is "
+        "ours");
   }
 
   /* A datagram that does not hold its quarter stream ID is malformed rather than short: a datagram IS the unit. */
@@ -222,8 +228,8 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     const uint8_t *payload = NULL;
     size_t payload_length = 0U;
     wt_http3_error_t datagram_error = WT_HTTP3_NO_ERROR;
-    wt_status_t status = wt_webtransport_datagram_parse(NULL, 0U, &quarter, &payload, &payload_length,
-                                                        &datagram_error);
+    wt_status_t status = wt_webtransport_datagram_parse(NULL, 0U, &quarter, &payload,
+                                                        &payload_length, &datagram_error);
     add(report, "datagram-without-quarter-id",
         status == WT_ERR_PROTOCOL && datagram_error == WT_HTTP3_DATAGRAM_ERROR,
         "an empty datagram is malformed rather than incomplete, with H3_DATAGRAM_ERROR (0x33)");
@@ -247,10 +253,10 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_UNI, bytes, sizeof(bytes));
     length += wt_quic_varint_encode(0U, bytes + length, sizeof(bytes) - length);
     payload_length = 99U;
-    (void)wt_http3_driver_on_uni_stream_data(&driver, 4U, 0U, bytes, 1U, &kind, &payload, &payload_length,
-                                             &consumed, &stream_error);
-    (void)wt_http3_driver_on_uni_stream_data(&driver, 4U, 1U, bytes + 1, length - 1U, &kind, &payload,
+    (void)wt_http3_driver_on_uni_stream_data(&driver, 4U, 0U, bytes, 1U, &kind, &payload,
                                              &payload_length, &consumed, &stream_error);
+    (void)wt_http3_driver_on_uni_stream_data(&driver, 4U, 1U, bytes + 1, length - 1U, &kind,
+                                             &payload, &payload_length, &consumed, &stream_error);
     add(report, "prefix-split-across-frames",
         kind == WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT && payload_length == 0U,
         "half a prefix decides nothing, and the whole one classifies the stream");

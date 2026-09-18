@@ -20,8 +20,7 @@ static void expect_round_trip(uint64_t required, uint64_t base, uint64_t max_ent
 
   /* The decoder knows the insertions the encoder has made, which is what bounds
    * the wrapped value: here it knows exactly what was referenced. */
-  WT_EXPECT_OK("a prefix encodes",
-               wt_qpack_header_prefix_encode(&w, required, base, max_entries));
+  WT_EXPECT_OK("a prefix encodes", wt_qpack_header_prefix_encode(&w, required, base, max_entries));
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("and decodes",
                wt_qpack_header_prefix_decode(&c, max_entries, required, &prefix, &error));
@@ -66,14 +65,12 @@ static void test_errors(void) {
   /* A prefix whose encoded count cannot be a wrapped value: with MaxEntries of
    * one the full range is two, so an encoded count above two is not one. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("an impossible encoded count writes",
-               wt_qpack_integer_encode(&w, 8U, 0U, 5U));
+  WT_EXPECT_OK("an impossible encoded count writes", wt_qpack_integer_encode(&w, 8U, 0U, 5U));
   WT_EXPECT_OK("followed by a base", wt_qpack_integer_encode(&w, 7U, 0U, 0U));
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_STATUS("and decoding it is refused", WT_ERR_PROTOCOL,
                    wt_qpack_header_prefix_decode(&c, 1U, 4U, &prefix, &error));
-  WT_EXPECT_U64("as a decompression failure", WT_QPACK_ERROR_DECOMPRESSION_FAILED,
-                (uint64_t)error);
+  WT_EXPECT_U64("as a decompression failure", WT_QPACK_ERROR_DECOMPRESSION_FAILED, (uint64_t)error);
 
   /* A required count beyond what the decoder knows plus the window: the encoder
    * cannot have inserted that many. */
@@ -83,8 +80,7 @@ static void test_errors(void) {
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_STATUS("which the decoder refuses", WT_ERR_PROTOCOL,
                    wt_qpack_header_prefix_decode(&c, 8U, 0U, &prefix, &error));
-  WT_EXPECT_U64("as a decompression failure", WT_QPACK_ERROR_DECOMPRESSION_FAILED,
-                (uint64_t)error);
+  WT_EXPECT_U64("as a decompression failure", WT_QPACK_ERROR_DECOMPRESSION_FAILED, (uint64_t)error);
 
   /* A negative delta larger than the required count: Base = required - delta - 1
    * would go below zero, which no encoder can mean. */

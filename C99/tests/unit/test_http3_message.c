@@ -19,9 +19,9 @@ static void encode_section(uint8_t *buffer, size_t capacity, size_t *out_length,
 
   prefix.required_insert_count = 0U;
   prefix.base = 0U;
-  WT_EXPECT_OK("the section writes",
-               wt_qpack_field_section_encode(&w, &prefix, 0U, lines, line_count, scratch,
-                                             sizeof(scratch)));
+  WT_EXPECT_OK(
+      "the section writes",
+      wt_qpack_field_section_encode(&w, &prefix, 0U, lines, line_count, scratch, sizeof(scratch)));
   *out_length = wt_writer_offset(&w);
 }
 
@@ -86,8 +86,8 @@ static void test_a_response_and_its_status(void) {
   indexed(25U, &lines[0]);
   encode_section(section, sizeof(section), &length, lines, 1U);
   WT_EXPECT_OK("a response decodes",
-               wt_http3_message_decode(&message, WT_HTTP3_HEADER_RESPONSE, section, length, NULL, 0U,
-                                       0U, scratch, sizeof(scratch), &error));
+               wt_http3_message_decode(&message, WT_HTTP3_HEADER_RESPONSE, section, length, NULL,
+                                       0U, 0U, scratch, sizeof(scratch), &error));
   WT_EXPECT_INT("with a status", 1, message.has_status);
   WT_EXPECT_U64("of 200", 200U, message.status);
 
@@ -99,8 +99,8 @@ static void test_a_response_and_its_status(void) {
   lines[0].value_length = 3U;
   encode_section(section, sizeof(section), &length, lines, 1U);
   WT_EXPECT_OK("another response decodes",
-               wt_http3_message_decode(&message, WT_HTTP3_HEADER_RESPONSE, section, length, NULL, 0U,
-                                       0U, scratch, sizeof(scratch), &error));
+               wt_http3_message_decode(&message, WT_HTTP3_HEADER_RESPONSE, section, length, NULL,
+                                       0U, 0U, scratch, sizeof(scratch), &error));
   WT_EXPECT_U64("with its own status", 404U, message.status);
 
   /* A status that is not three digits, and one outside the range. */
@@ -154,9 +154,9 @@ static void test_empty_values_and_blocked(void) {
     prefix.required_insert_count = 2U;
     prefix.base = 2U;
     indexed(1U, &lines[0]);
-    WT_EXPECT_OK("a section needing insertions writes",
-                 wt_qpack_field_section_encode(&w, &prefix, 8U, lines, 1U, scratch,
-                                               sizeof(scratch)));
+    WT_EXPECT_OK(
+        "a section needing insertions writes",
+        wt_qpack_field_section_encode(&w, &prefix, 8U, lines, 1U, scratch, sizeof(scratch)));
     length = wt_writer_offset(&w);
   }
   wt_qpack_dynamic_init(&table, 256U);
@@ -205,8 +205,8 @@ static void test_the_encoder_bounds_the_status(void) {
     length = wt_writer_offset(&w);
     error = WT_HTTP3_NO_ERROR;
     WT_EXPECT_OK("and this library's own reader accepts it",
-                 wt_http3_message_decode(&message, WT_HTTP3_HEADER_RESPONSE, section, length, NULL, 0U,
-                                         0U, scratch, sizeof(scratch), &error));
+                 wt_http3_message_decode(&message, WT_HTTP3_HEADER_RESPONSE, section, length, NULL,
+                                         0U, 0U, scratch, sizeof(scratch), &error));
     WT_EXPECT_U64("with the status that was written", accepted[i], message.status);
   }
 }
@@ -235,8 +235,8 @@ static void test_an_extended_connect_requires_scheme_and_path(void) {
   }
   error = WT_HTTP3_NO_ERROR;
   WT_EXPECT_STATUS("an extended CONNECT with no :path is refused", WT_ERR_PROTOCOL,
-                   wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, section, length, NULL, 0U,
-                                           0U, scratch, sizeof(scratch), &error));
+                   wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, section, length, NULL,
+                                           0U, 0U, scratch, sizeof(scratch), &error));
   WT_EXPECT_U64("as a message error", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
 
   /* The same request with :protocol but no :scheme: refused by the non-empty check, which is the half that
@@ -250,8 +250,8 @@ static void test_an_extended_connect_requires_scheme_and_path(void) {
   }
   error = WT_HTTP3_NO_ERROR;
   WT_EXPECT_STATUS("an extended CONNECT with no :scheme is refused", WT_ERR_PROTOCOL,
-                   wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, section, length, NULL, 0U,
-                                           0U, scratch, sizeof(scratch), &error));
+                   wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, section, length, NULL,
+                                           0U, 0U, scratch, sizeof(scratch), &error));
   WT_EXPECT_U64("as a message error", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
 
   /* The complete extended CONNECT -- the WebTransport request -- still decodes, with all three values kept. */
@@ -332,23 +332,27 @@ static void test_a_regular_field_can_be_read_back(void) {
   value = (const uint8_t *)"unchanged";
   value_length = 99U;
   WT_EXPECT_STATUS("a field that is not there is absent, not an error", WT_ERR_STATE,
-                   wt_http3_message_field((const uint8_t *)"user-agent", 10U, section, length, NULL, 0U, 0U,
-                                          scratch, sizeof(scratch), &value, &value_length, &error));
+                   wt_http3_message_field((const uint8_t *)"user-agent", 10U, section, length, NULL,
+                                          0U, 0U, scratch, sizeof(scratch), &value, &value_length,
+                                          &error));
   WT_EXPECT_TRUE("and the outputs are cleared", value == NULL && value_length == 0U);
 
   /* The name is compared exactly: a longer or differently-spelled name is not the field, and HTTP/3 requires
    * lowercase names, so `Origin` is not one either. */
   WT_EXPECT_STATUS("a different name does not match", WT_ERR_STATE,
-                   wt_http3_message_field((const uint8_t *)"Origins", 7U, section, length, NULL, 0U, 0U,
-                                          scratch, sizeof(scratch), &value, &value_length, &error));
+                   wt_http3_message_field((const uint8_t *)"Origins", 7U, section, length, NULL, 0U,
+                                          0U, scratch, sizeof(scratch), &value, &value_length,
+                                          &error));
   WT_EXPECT_STATUS("and neither does the upper-cased one", WT_ERR_STATE,
-                   wt_http3_message_field((const uint8_t *)"Origin", 6U, section, length, NULL, 0U, 0U,
-                                          scratch, sizeof(scratch), &value, &value_length, &error));
+                   wt_http3_message_field((const uint8_t *)"Origin", 6U, section, length, NULL, 0U,
+                                          0U, scratch, sizeof(scratch), &value, &value_length,
+                                          &error));
 
   /* Missing outputs are refused like every other public entry point's. */
   WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
-                   wt_http3_message_field((const uint8_t *)"origin", 6U, section, length, NULL, 0U, 0U,
-                                          scratch, sizeof(scratch), NULL, &value_length, &error));
+                   wt_http3_message_field((const uint8_t *)"origin", 6U, section, length, NULL, 0U,
+                                          0U, scratch, sizeof(scratch), NULL, &value_length,
+                                          &error));
 }
 
 int main(void) {

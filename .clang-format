@@ -1,0 +1,35 @@
+# The C99 tree's formatting contract (AUD-0010).
+#
+# Before this file the C tree's style was hand-maintained and never machine-checked, so a
+# contributor had no way to know what "formatted" meant and no gate could say whether they
+# had achieved it. `C99/scripts/check-format.sh` runs this config over the tracked C sources
+# and fails on any difference.
+#
+# The settings are chosen to describe the style the tree already has rather than to replace
+# it, so the reformat this file accompanies is a normalisation and not a restyle:
+#
+#   IndentWidth 2            the tree is written with two-space indents
+#   ColumnLimit 100          the tree's hand wrapping sits just under 100, and 100 changes
+#                            fewer files than 120 while leaving every line at or below the
+#                            width the maintainers already chose
+#   IndentCaseLabels true    `case` labels are indented inside their `switch`, as in the tree
+#   AllowShortCaseLabelsOnASingleLine false
+#                            a case body stays on its own line; collapsing it would rewrite
+#                            every small accessor in the tree for no readability gain
+#   AllowShortIfStatementsOnASingleLine AllIfsAndElse
+#                            `if (out == NULL) return WT_ERR_INVALID_ARGUMENT;` is the tree's
+#                            established guard idiom and stays on one line
+#   AllowShortFunctionsOnASingleLine None
+#                            functions stay multi-line even when short, matching the tree
+#   ReflowComments false     comments are hand-wrapped to fit their subject; a reflow would
+#                            rewrite prose that is deliberately shaped
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 100
+IndentCaseLabels: true
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortFunctionsOnASingleLine: None
+ReflowComments: false

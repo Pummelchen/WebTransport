@@ -16,9 +16,9 @@
 #include "webtransport/http3/driver.h"
 #include "webtransport/http3/settings.h"
 #include "webtransport/quic/connection.h"
-#include "webtransport/webtransport/session_request.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
+#include "webtransport/webtransport/session_request.h"
 
 /* A sink that records what it was handed, so the test can assert the frame boundary rather
  * than trusting it. */
@@ -40,8 +40,8 @@ typedef struct session_log {
   uint64_t last_stream_id;
 } session_log_t;
 
-wt_status_t record_frame(void *context, uint64_t stream_id, uint64_t type,
-                         const uint8_t *payload, size_t length, int last);
+wt_status_t record_frame(void *context, uint64_t stream_id, uint64_t type, const uint8_t *payload,
+                         size_t length, int last);
 wt_status_t record_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
                                size_t length, int fin);
 wt_status_t record_datagram(void *context, const uint8_t *data, size_t length);

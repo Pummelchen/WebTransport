@@ -21,7 +21,8 @@ void test_a_handshake_completes_over_loopback(void) {
   /* DONE and CONFIRMED are separate states (WT-142). This pair reaches both -- the server sends the
    * HANDSHAKE_DONE that confirms the client -- and the accessor exists so a caller can tell which it has: a
    * client may speak once its handshake is DONE, and waiting for CONFIRMED is what stalled the interop run. */
-  WT_EXPECT_INT("the client's handshake is DONE", 1, wt_runtime_session_handshake_done(&pair.client));
+  WT_EXPECT_INT("the client's handshake is DONE", 1,
+                wt_runtime_session_handshake_done(&pair.client));
   WT_EXPECT_INT("and so is the server's", 1, wt_runtime_session_handshake_done(&pair.server));
   WT_EXPECT_INT("and the server's too", 1, wt_runtime_session_established(&pair.server));
   WT_EXPECT_INT("with application keys on the client", 1,
@@ -107,17 +108,17 @@ void test_a_connect_and_its_response_cross_the_connection(void) {
   /* Decoding and the draft-16 DECISION are two layers on purpose: HTTP/3 does not know what a WebTransport
    * request is, and that separation is what the whole phase has kept. */
   WT_EXPECT_OK("the section decodes off the wire",
-               wt_http3_endpoint_on_request_headers(&server.endpoint, request_stream_id, server.section,
-                                                    server.section_length, scratch, sizeof(scratch),
-                                                    &decoded, &h3_error));
+               wt_http3_endpoint_on_request_headers(&server.endpoint, request_stream_id,
+                                                    server.section, server.section_length, scratch,
+                                                    sizeof(scratch), &decoded, &h3_error));
   WT_EXPECT_BYTES("as the method that was sent", (const uint8_t *)"CONNECT", decoded.method,
                   decoded.method_length);
   WT_EXPECT_BYTES("the scheme", (const uint8_t *)"https", decoded.scheme, decoded.scheme_length);
   WT_EXPECT_BYTES("the authority", (const uint8_t *)"example.com", decoded.authority,
                   decoded.authority_length);
   WT_EXPECT_BYTES("the path", (const uint8_t *)"/chat", decoded.path, decoded.path_length);
-  WT_EXPECT_BYTES("and the protocol", (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN, decoded.protocol,
-                  decoded.protocol_length);
+  WT_EXPECT_BYTES("and the protocol", (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN,
+                  decoded.protocol, decoded.protocol_length);
   policy.authority = "example.com";
   policy.path = "/chat";
   policy.wt_enabled = 1;
@@ -134,8 +135,8 @@ void test_a_connect_and_its_response_cross_the_connection(void) {
   WT_EXPECT_TRUE("the server has the stream to answer on",
                  wt_quic_connection_stream(&pair.server.connection, request_stream_id) != NULL);
   WT_EXPECT_OK("the server answers the CONNECT",
-               wt_http3_driver_send_response(&server.driver, &server_transport, request_stream_id, 200U,
-                                             0U, 0, pair.now));
+               wt_http3_driver_send_response(&server.driver, &server_transport, request_stream_id,
+                                             200U, 0U, 0, pair.now));
   {
     unsigned round;
     for (round = 0U; round < 400U && client.section_complete == 0; round++) {
@@ -149,16 +150,15 @@ void test_a_connect_and_its_response_cross_the_connection(void) {
   WT_EXPECT_TRUE("the response arrives at the client", client.section_complete != 0);
   if (client.section_complete != 0) {
     WT_EXPECT_OK("and decodes as a response",
-                 wt_http3_endpoint_on_response_headers(&client.endpoint, request_stream_id,
-                                                       client.section, client.section_length, scratch,
-                                                       sizeof(scratch), &response_message, &h3_error));
+                 wt_http3_endpoint_on_response_headers(
+                     &client.endpoint, request_stream_id, client.section, client.section_length,
+                     scratch, sizeof(scratch), &response_message, &h3_error));
     WT_EXPECT_INT("carrying a status", 1, response_message.has_status);
     WT_EXPECT_U64("of 200", 200U, response_message.status);
     WT_EXPECT_STATUS("a second response on the same stream is refused", WT_ERR_STATE,
-                     wt_http3_endpoint_on_response_headers(&client.endpoint, request_stream_id,
-                                                           client.section, client.section_length,
-                                                           scratch, sizeof(scratch), &response_message,
-                                                           &h3_error));
+                     wt_http3_endpoint_on_response_headers(
+                         &client.endpoint, request_stream_id, client.section, client.section_length,
+                         scratch, sizeof(scratch), &response_message, &h3_error));
   }
 
   /* A MESSAGE ON A WEBTRANSPORT STREAM, which is what `--exchange stream` means: a unidirectional stream whose
@@ -205,12 +205,11 @@ void test_a_connect_and_its_response_cross_the_connection(void) {
     uint64_t quarter = 0U;
     wt_http3_error_t datagram_error = WT_HTTP3_NO_ERROR;
 
-    WT_EXPECT_OK("the datagram writes with its quarter stream ID",
-                 wt_webtransport_datagram_write(&w, request_stream_id / 4U,
-                                                (const uint8_t *)"ping", 4U));
-    WT_EXPECT_OK("and goes out",
-                 client_transport.send_datagram(client_transport.context, framed,
-                                                wt_writer_offset(&w)));
+    WT_EXPECT_OK(
+        "the datagram writes with its quarter stream ID",
+        wt_webtransport_datagram_write(&w, request_stream_id / 4U, (const uint8_t *)"ping", 4U));
+    WT_EXPECT_OK("and goes out", client_transport.send_datagram(client_transport.context, framed,
+                                                                wt_writer_offset(&w)));
     {
       unsigned round;
       for (round = 0U; round < 400U && server.datagrams == 0U; round++) {

@@ -91,8 +91,7 @@ uint8_t *wt_writer_reserve(wt_writer_t *w, size_t n);
 /* Overwrite `n` bytes at `offset`, which must be behind the write position.
  * Returns WT_ERR_INVALID_ARGUMENT for an offset or range that was not written
  * yet, and WT_ERR_LIMIT on a measuring writer, which has nowhere to write. */
-wt_status_t wt_writer_patch(wt_writer_t *w, size_t offset, const void *data,
-                            size_t n);
+wt_status_t wt_writer_patch(wt_writer_t *w, size_t offset, const void *data, size_t n);
 
 #ifdef __cplusplus
 }

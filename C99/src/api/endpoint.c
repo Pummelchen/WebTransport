@@ -8,8 +8,10 @@ const char *wt_endpoint_role_name(wt_endpoint_role_t role) {
   /* A switch with no default so that -Wswitch-enum makes a new role a compile error here
    * rather than a missing name at run time. */
   switch (role) {
-    case WT_ENDPOINT_ROLE_CLIENT: return "client";
-    case WT_ENDPOINT_ROLE_SERVER: return "server";
+    case WT_ENDPOINT_ROLE_CLIENT:
+      return "client";
+    case WT_ENDPOINT_ROLE_SERVER:
+      return "server";
   }
   return "unknown";
 }
@@ -38,7 +40,8 @@ static int trust_mode_is_known(wt_tls_trust_mode_t mode) {
     case WT_TLS_TRUST_SYSTEM:
     case WT_TLS_TRUST_STORE:
     case WT_TLS_TRUST_PINNED_CERTIFICATE:
-    case WT_TLS_TRUST_LOCAL_DEVELOPMENT: return 1;
+    case WT_TLS_TRUST_LOCAL_DEVELOPMENT:
+      return 1;
   }
   return 0;
 }

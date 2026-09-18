@@ -52,14 +52,15 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
    * routes here rather than framing (WT-164). A scenario that sends one asserts what this applied. */
   if (stream_id == side->request_stream_id) {
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
-    wt_status_t status = wt_capsule_stream_on_bytes(&side->capsules, data, length, fin,
-                                                    wt_capsule_stream_apply_flow, &side->capsules, &error);
+    wt_status_t status = wt_capsule_stream_on_bytes(
+        &side->capsules, data, length, fin, wt_capsule_stream_apply_flow, &side->capsules, &error);
     if (status != WT_OK) {
       /* A refused capsule is stated to the peer in its own error space: an HTTP/3 code to the connection, a
        * session code into a close capsule, which is what the scenario below asserts (WT-165). */
       side->capsule_error = (uint64_t)error;
-      if (wt_capsule_stream_refuse(&side->capsules, side->transport, side->request_stream_id, side->connection,
-                                   side->now, error) == WT_CAPSULE_REFUSAL_SESSION) {
+      if (wt_capsule_stream_refuse(&side->capsules, side->transport, side->request_stream_id,
+                                   side->connection, side->now,
+                                   error) == WT_CAPSULE_REFUSAL_SESSION) {
         /* The session is closed and the peer has been told in the capsule itself: the connection stays up, so this
          * failure must NOT reach the transport (section 5.1, WT-165). */
         return WT_OK;
@@ -84,7 +85,8 @@ static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t l
   return WT_OK;
 }
 
-static wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
+static wt_status_t side_on_frame(void *context, wt_quic_space_t space,
+                                 const wt_quic_frame_t *frame) {
   scenario_side_t *side = context;
   side->frames_seen++;
   return wt_http3_driver_on_quic_frame(&side->driver, space, frame, &side->sink, 16384U);
@@ -106,15 +108,16 @@ static void init_side(scenario_side_t *side, wt_http3_role_t role) {
  * that says which Source Connection ID these packets carry -- and only a third-party peer ever said so (WT-141).
  * The same lesson arrived again from the other side: a test that rolled its own list kept a defect the library had
  * already lost (WT-145, WT-162), which is why this helper exists and is not duplicated. */
-static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server, const uint8_t *source,
-                                 size_t source_length, const uint8_t *original_destination,
-                                 size_t original_length, int retried,
-                                 const uint8_t *retry_source, size_t retry_source_length) {
+static uint64_t build_parameters(uint8_t *out, size_t capacity, int is_server,
+                                 const uint8_t *source, size_t source_length,
+                                 const uint8_t *original_destination, size_t original_length,
+                                 int retried, const uint8_t *retry_source,
+                                 size_t retry_source_length) {
   wt_quic_transport_parameters_t params;
   wt_writer_t w = wt_writer_init(out, capacity);
-  if (wt_quic_transport_parameters_build(&params, is_server, source, source_length, original_destination,
-                                         original_length, retried, retry_source,
-                                         retry_source_length) != WT_OK) {
+  if (wt_quic_transport_parameters_build(&params, is_server, source, source_length,
+                                         original_destination, original_length, retried,
+                                         retry_source, retry_source_length) != WT_OK) {
     return 0U;
   }
   if (wt_quic_transport_parameters_encode(&w, &params) != WT_OK) return 0U;
@@ -156,7 +159,8 @@ void scenario_pair_close(scenario_pair_t *pair) {
   wt_udp_close(&pair->server_socket);
 }
 
-wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail, size_t detail_size) {
+wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail,
+                                   size_t detail_size) {
   uint8_t parameters[256];
   uint8_t server_parameters[256];
   uint64_t parameters_len;
@@ -180,9 +184,10 @@ wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail
    * 7.3). One buffer for both was the shape that made the omission invisible. */
   parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_client_connection_id,
                                     sizeof(k_client_connection_id), NULL, 0U, 0, NULL, 0U);
-  server_parameters_len = build_parameters(server_parameters, sizeof(server_parameters), 1,
-                                           k_server_connection_id, sizeof(k_server_connection_id),
-                                           k_client_connection_id, sizeof(k_client_connection_id), 0, NULL, 0U);
+  server_parameters_len =
+      build_parameters(server_parameters, sizeof(server_parameters), 1, k_server_connection_id,
+                       sizeof(k_server_connection_id), k_client_connection_id,
+                       sizeof(k_client_connection_id), 0, NULL, 0U);
   if (parameters_len == 0U) {
     scenario_detail_set(detail, detail_size, "the transport parameters did not encode");
     return WT_CLI_RESULT_FAILED;
@@ -324,8 +329,8 @@ wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail
    * leaves them out. */
   wt_http3_settings_init(&settings);
   if (wt_webtransport_settings_apply(&settings, 1) != WT_OK ||
-      wt_http3_driver_start_own_streams(&pair->server_side.driver, &pair->server_transport, &settings,
-                                        pair->now) != WT_OK) {
+      wt_http3_driver_start_own_streams(&pair->server_side.driver, &pair->server_transport,
+                                        &settings, pair->now) != WT_OK) {
     scenario_detail_set(detail, detail_size, "the server's own streams could not be started");
     scenario_pair_close(pair);
     return WT_CLI_RESULT_FAILED;

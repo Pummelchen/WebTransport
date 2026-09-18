@@ -30,7 +30,8 @@ static int field_name_is_valid(const uint8_t *name, size_t length) {
   if (length == 0U) return 0;
   for (i = 0U; i < length; i++) {
     uint8_t c = name[i];
-    if ((c >= (uint8_t)'a' && c <= (uint8_t)'z') || (c >= (uint8_t)'0' && c <= (uint8_t)'9')) continue;
+    if ((c >= (uint8_t)'a' && c <= (uint8_t)'z') || (c >= (uint8_t)'0' && c <= (uint8_t)'9'))
+      continue;
     switch (c) {
       case '!':
       case '#':
@@ -70,7 +71,8 @@ static int field_value_is_valid(const uint8_t *value, size_t length) {
 }
 
 static int is_connection_specific(const uint8_t *name, size_t name_length) {
-  return equals(name, name_length, "connection") || equals(name, name_length, "transfer-encoding") ||
+  return equals(name, name_length, "connection") ||
+         equals(name, name_length, "transfer-encoding") ||
          equals(name, name_length, "keep-alive") || equals(name, name_length, "upgrade") ||
          equals(name, name_length, "proxy-connection");
 }

@@ -160,7 +160,8 @@ wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
 wt_status_t wt_runtime_session_start_server_retried(
     wt_runtime_session_t *session, const wt_udp_socket_t *socket, const wt_udp_address_t *peer,
     const uint8_t *initial_connection_id, size_t initial_connection_id_length,
-    const uint8_t *original_destination_connection_id, size_t original_destination_connection_id_length,
+    const uint8_t *original_destination_connection_id,
+    size_t original_destination_connection_id_length,
     const wt_quic_connection_config_t *connection_config, const wt_tls_server_config_t *tls_config,
     uint64_t now);
 
@@ -175,7 +176,8 @@ typedef void (*wt_runtime_lost_frame_fn)(void *context, const wt_quic_tx_frame_t
 /* Install that layer. The handshake is always told first, because CRYPTO frames are its business whatever else
  * is listening. */
 wt_status_t wt_runtime_session_set_lost_frame_handler(wt_runtime_session_t *session,
-                                                      wt_runtime_lost_frame_fn handler, void *context);
+                                                      wt_runtime_lost_frame_fn handler,
+                                                      void *context);
 
 /* Install a handler behind the handshake's, for the layer that owns frames it does not. */
 wt_status_t wt_runtime_session_set_frame_handler(wt_runtime_session_t *session,

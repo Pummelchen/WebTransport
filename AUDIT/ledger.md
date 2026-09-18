@@ -9,11 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 14 |
-| OPEN | 1 |
+| DONE | 15 |
 
-Non-terminal (open): 1
-Terminal: 16
+Non-terminal (open): 0
+Terminal: 17
 
 ## Tasks
 
@@ -28,7 +27,7 @@ Terminal: 16
 | AUD-0007 | S1 | A | both | DONE | Ruff has no config, so B, E722, S101 and PT are not enabled | AUDIT/environment.md |
 | AUD-0008 | S2 | A | P1 | BLOCKED | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | Package.swift:12-17 |
 | AUD-0009 | S2 | B | P2 | DONE | No C99 coverage measurement exists, so one baseline metric is missing | C99/scripts/measure-coverage.sh |
-| AUD-0010 | S3 | B | P2 | OPEN | No committed .clang-format and the tree is not clang-format clean | C99/ |
+| AUD-0010 | S3 | B | P2 | DONE | No committed .clang-format and the tree is not clang-format clean | C99/ |
 | AUD-0011 | S3 | C | both | DONE | Repository convention says audit ledgers are not kept in the tree; this audit mandates committing one | AUDIT/ledger.json |
 | AUD-0012 | S2 | A | P1 | DONE | SwiftLint inclusive_language conflicts with RFC 8446 terminology | .swiftlint.yml |
 | AUD-0013 | S1 | A | P1 | DONE | SwiftLint trailing_comma and swift-format rewrote each other, breaking a green gate | .swiftlint.yml |
@@ -133,13 +132,13 @@ Terminal: 16
 
 ### AUD-0010 — No committed .clang-format and the tree is not clang-format clean
 
-- severity: S3 | tier: B | project: P2 | status: OPEN | host: Mac14,3
+- severity: S3 | tier: B | project: P2 | status: DONE | host: Mac14,3
 - category: standards | discovered by: phase-a
 - where: C99/
 - evidence before: clang-format 23.1.1 is installed; git ls-files shows no .clang-format; the tree's style is hand-maintained and has never been machine-checked
-- fix: 
-- evidence after: 
-- commit: 
+- fix: Committed `.clang-format` at the repository root describing the style the tree already had (2-space indents, column limit 100, indented case labels, the one-line `if (x == NULL) return ...;` guard idiom, case bodies kept on their own lines, comments not reflowed), then applied it to the 314 tracked C sources the tree owns. Added `C99/scripts/check-format.sh` and a dedicated `format` CI job that installs the pinned `clang-format==23.1.1` from PyPI -- one version, not a matrix, because formatter output differs between releases.
+- evidence after: 261 of 314 sources reformatted (6331 insertions, 7284 deletions -- net shorter, from unwrapping). Safety evidence on the reformatted tree, all on the primary host: `C99/scripts/build-and-test.sh` -> 0 warnings and 0 errors under `-Werror` plus the hardening flag set, **97/97 tests passed**; `check-cppcheck.sh` clean; `check-static-analysis.sh` -> 106 sources analyzed, no findings; `check-portability.sh` clean (its grep-based inventory is identifier-based and unaffected by reflowing); generated `C99/tests/vectors/*.h` untouched, which `check-vectors.sh` byte-compares. `check-format.sh` reports all 314 sources match; shellcheck and `shfmt -i 2` clean.
+- commit: PENDING
 
 ### AUD-0011 — Repository convention says audit ledgers are not kept in the tree; this audit mandates committing one
 

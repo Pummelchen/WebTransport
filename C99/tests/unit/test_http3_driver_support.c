@@ -7,8 +7,8 @@
 
 #include "test_http3_driver_internal.h"
 
-wt_status_t record_frame(void *context, uint64_t stream_id, uint64_t type,
-                                const uint8_t *payload, size_t length, int last) {
+wt_status_t record_frame(void *context, uint64_t stream_id, uint64_t type, const uint8_t *payload,
+                         size_t length, int last) {
   frame_log_t *log = context;
   (void)stream_id;
   if (length > 0U && log->total_bytes == 0U) log->first_byte = payload[0];
@@ -22,7 +22,7 @@ wt_status_t record_frame(void *context, uint64_t stream_id, uint64_t type,
 }
 
 wt_status_t record_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
-                                      size_t length, int fin) {
+                               size_t length, int fin) {
   session_log_t *log = context;
   (void)data;
   (void)fin;

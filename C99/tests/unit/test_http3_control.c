@@ -25,9 +25,8 @@ static void test_settings_first(void) {
 
   WT_EXPECT_OK("the control stream opens", wt_http3_control_peer_opened(&control, &error));
   WT_EXPECT_INT("and is remembered as open", 1, control.opened);
-  WT_EXPECT_OK("SETTINGS is the first frame", wt_http3_control_on_frame(&control,
-                                                                       WT_HTTP3_FRAME_SETTINGS,
-                                                                       &error));
+  WT_EXPECT_OK("SETTINGS is the first frame",
+               wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS, &error));
   WT_EXPECT_INT("and is remembered", 1, control.settings_received);
 
   WT_EXPECT_STATUS("a second SETTINGS frame is unexpected", WT_ERR_PROTOCOL,
@@ -36,8 +35,8 @@ static void test_settings_first(void) {
 }
 
 static void test_first_frame_must_be_settings(void) {
-  static const uint64_t frames[] = {WT_HTTP3_FRAME_DATA, WT_HTTP3_FRAME_HEADERS,
-                                    WT_HTTP3_FRAME_GOAWAY, WT_HTTP3_FRAME_MAX_PUSH_ID,
+  static const uint64_t frames[] = {WT_HTTP3_FRAME_DATA,        WT_HTTP3_FRAME_HEADERS,
+                                    WT_HTTP3_FRAME_GOAWAY,      WT_HTTP3_FRAME_MAX_PUSH_ID,
                                     WT_HTTP3_FRAME_CANCEL_PUSH, WT_HTTP3_FRAME_PUSH_PROMISE};
   size_t i;
 
@@ -59,8 +58,10 @@ static void test_frames_after_settings(void) {
    * `0x1f * N + 0x21` on any stream where frames are allowed and that a receiver MUST NOT give them meaning.
    * `0x02` and `0x06` are the opposite family -- PRIORITY and PING, reserved from HTTP/2 -- and their receipt is
    * H3_FRAME_UNEXPECTED. This fixture had the two the wrong way round, which is what the audit found. */
-  static const uint64_t allowed[] = {WT_HTTP3_FRAME_CANCEL_PUSH, WT_HTTP3_FRAME_GOAWAY,
-                                     WT_HTTP3_FRAME_MAX_PUSH_ID, 0x2aU /* unknown extension */,
+  static const uint64_t allowed[] = {WT_HTTP3_FRAME_CANCEL_PUSH,
+                                     WT_HTTP3_FRAME_GOAWAY,
+                                     WT_HTTP3_FRAME_MAX_PUSH_ID,
+                                     0x2aU /* unknown extension */,
                                      0x21U /* exercise type: padding, to be ignored */,
                                      0x40U /* exercise type: 0x1f * 1 + 0x21 */};
   static const uint64_t refused[] = {WT_HTTP3_FRAME_DATA, WT_HTTP3_FRAME_HEADERS,
@@ -74,9 +75,10 @@ static void test_frames_after_settings(void) {
 
     wt_http3_control_init(&control);
     WT_EXPECT_OK("the stream opens", wt_http3_control_peer_opened(&control, &error));
-    WT_EXPECT_OK("SETTINGS arrives", wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS,
-                                                               &error));
-    WT_EXPECT_OK("and the frame is allowed", wt_http3_control_on_frame(&control, allowed[i], &error));
+    WT_EXPECT_OK("SETTINGS arrives",
+                 wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS, &error));
+    WT_EXPECT_OK("and the frame is allowed",
+                 wt_http3_control_on_frame(&control, allowed[i], &error));
   }
 
   for (i = 0U; i < sizeof(refused) / sizeof(refused[0]); i++) {
@@ -85,8 +87,8 @@ static void test_frames_after_settings(void) {
 
     wt_http3_control_init(&control);
     WT_EXPECT_OK("the stream opens", wt_http3_control_peer_opened(&control, &error));
-    WT_EXPECT_OK("SETTINGS arrives", wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS,
-                                                               &error));
+    WT_EXPECT_OK("SETTINGS arrives",
+                 wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS, &error));
     WT_EXPECT_STATUS("a frame that does not belong there is refused", WT_ERR_PROTOCOL,
                      wt_http3_control_on_frame(&control, refused[i], &error));
     WT_EXPECT_U64("as unexpected", WT_HTTP3_FRAME_UNEXPECTED, (uint64_t)error);
@@ -103,8 +105,8 @@ static void test_one_control_stream_and_closing(void) {
                    wt_http3_control_peer_opened(&control, &error));
   WT_EXPECT_U64("as a stream creation error", WT_HTTP3_STREAM_CREATION_ERROR, (uint64_t)error);
 
-  WT_EXPECT_OK("SETTINGS arrives", wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS,
-                                                             &error));
+  WT_EXPECT_OK("SETTINGS arrives",
+               wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS, &error));
   WT_EXPECT_STATUS("closing the control stream is refused", WT_ERR_PROTOCOL,
                    wt_http3_control_on_closed(&control, &error));
   WT_EXPECT_U64("as a closed critical stream", WT_HTTP3_CLOSED_CRITICAL_STREAM, (uint64_t)error);
@@ -138,7 +140,7 @@ static void test_the_settings_payload_is_validated(void) {
   wt_http3_control_stream_t control;
   wt_http3_error_t error = WT_HTTP3_NO_ERROR;
   static const uint8_t duplicate[] = {0x08U, 0x01U, 0x08U, 0x01U}; /* identifier 8 twice */
-  static const uint8_t reserved[] = {0x02U, 0x01U};               /* an HTTP/2 identifier */
+  static const uint8_t reserved[] = {0x02U, 0x01U};                /* an HTTP/2 identifier */
   static const uint8_t ok[] = {0x08U, 0x01U};
   uint8_t oversized[WT_HTTP3_CONTROL_SETTINGS_MAX + 1U];
 
@@ -155,8 +157,8 @@ static void test_the_settings_payload_is_validated(void) {
   WT_EXPECT_OK("SETTINGS arrives",
                wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS, &error));
   WT_EXPECT_OK("the first piece is held",
-               wt_http3_control_on_frame_payload(&control, WT_HTTP3_FRAME_SETTINGS, duplicate, 2U, 0,
-                                                 &error));
+               wt_http3_control_on_frame_payload(&control, WT_HTTP3_FRAME_SETTINGS, duplicate, 2U,
+                                                 0, &error));
   WT_EXPECT_STATUS("the duplicate in the second piece is refused", WT_ERR_PROTOCOL,
                    wt_http3_control_on_frame_payload(&control, WT_HTTP3_FRAME_SETTINGS,
                                                      duplicate + 2U, 2U, 1, &error));
@@ -179,8 +181,8 @@ static void test_the_settings_payload_is_validated(void) {
   WT_EXPECT_OK("SETTINGS arrives",
                wt_http3_control_on_frame(&control, WT_HTTP3_FRAME_SETTINGS, &error));
   WT_EXPECT_OK("a legal payload is accepted",
-               wt_http3_control_on_frame_payload(&control, WT_HTTP3_FRAME_SETTINGS, ok, sizeof(ok), 1,
-                                                 &error));
+               wt_http3_control_on_frame_payload(&control, WT_HTTP3_FRAME_SETTINGS, ok, sizeof(ok),
+                                                 1, &error));
   WT_EXPECT_U64("with nothing left buffered", 0U, (uint64_t)control.settings_length);
 
   /* A frame that is not SETTINGS has no payload this machine reads. */

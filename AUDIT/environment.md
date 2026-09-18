@@ -36,7 +36,7 @@ versions CI uses.
 | Swift | `swiftlint` | linter (`--strict`) | 0.65.1 | CI installs the pinned release: `portable_swiftlint.zip` from the 0.65.1 GitHub release, sha256 `c1e429b0599cf1b516f369a2d9ec04eaf0e436f3c12b637df8851fa52ff694d0`. The release publishes no checksum file, so the digest was taken from the downloaded asset and is asserted in `swift-ci.yml`; the asset unpacks to a universal binary reporting `0.65.1` | Mac14,3 |
 | C | Apple `clang` (`/usr/bin/clang`) | compiler for the CMake tree | Apple clang 21.0.0 (clang-2100.3.34.2) | Xcode 27 | Mac14,3 |
 | C | Homebrew `clang` | second compiler for portability probes | Homebrew clang 23.1.1 | `brew install llvm` | Mac14,3 |
-| C | `clang-format` | formatter | 23.1.1 (llvm) | `brew install llvm` | Mac14,3 |
+| C | `clang-format` | formatter (`check-format.sh`) | 23.1.1 (llvm) | local `brew install llvm`; CI installs the pinned `clang-format==23.1.1` from PyPI, because formatter output differs between releases and a gate that runs on a matrix would otherwise fail on whichever leg shipped another version | Mac14,3 |
 | C | `scan-build` (Clang Static Analyzer) | SAST | from llvm 23.1.1 | `brew install llvm` | Mac14,3 |
 | C | `cppcheck` | SAST | 2.21.0 | `brew install cppcheck` | Mac14,3 |
 | C | ASan / UBSan | sanitizer/memory checker | toolchain runtimes | Xcode 27 | Mac14,3 |

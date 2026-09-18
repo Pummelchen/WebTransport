@@ -35,8 +35,7 @@ void free_frame(wt_quic_connection_t *connection, uint64_t tag) {
     connection->frames[tag].in_use = 0;
   }
 }
-int probe_time(const wt_quic_connection_t *connection, wt_quic_space_t space,
-                      uint64_t *out_time) {
+int probe_time(const wt_quic_connection_t *connection, wt_quic_space_t space, uint64_t *out_time) {
   const wt_quic_pn_space_t *space_state = &connection->spaces[space];
   uint64_t earliest = 0U;
   uint64_t backoff;
@@ -65,8 +64,9 @@ int probe_time(const wt_quic_connection_t *connection, wt_quic_space_t space,
   return 1;
 }
 uint64_t tag_for_control(wt_quic_connection_t *connection, size_t slot) {
-  int index = alloc_frame(connection, connection->control_frames[slot].space, 0, WT_QUIC_CONTROL_STREAM_ID,
-                          (uint64_t)slot, connection->control_frames[slot].wire_length);
+  int index =
+      alloc_frame(connection, connection->control_frames[slot].space, 0, WT_QUIC_CONTROL_STREAM_ID,
+                  (uint64_t)slot, connection->control_frames[slot].wire_length);
   return index < 0 ? (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX : (uint64_t)index;
 }
 static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t space,
@@ -94,7 +94,8 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
    * is BEFORE the packet is protected, so the limit is never exceeded -- and for the Application space an update
    * is attempted first, because that is what the section asks for rather than closing. */
   if (connection->aead_encrypted[space] >= connection->aead_confidentiality_limit) {
-    if (space == WT_QUIC_SPACE_APPLICATION && wt_quic_connection_key_update_allowed(connection) != 0) {
+    if (space == WT_QUIC_SPACE_APPLICATION &&
+        wt_quic_connection_key_update_allowed(connection) != 0) {
       wt_status_t updated_keys = wt_quic_connection_initiate_key_update(connection, now);
       if (updated_keys != WT_OK) return updated_keys;
     } else {
@@ -125,10 +126,10 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
   memset(&build, 0, sizeof(build));
   /* The type is what a long header carries. A short header has none, and the builder ignores this
    * field for one -- which is why the Application space borrows a value rather than inventing one. */
-  build.type = space == WT_QUIC_SPACE_INITIAL
-                   ? WT_QUIC_PACKET_INITIAL
-                   : (space == WT_QUIC_SPACE_HANDSHAKE ? WT_QUIC_PACKET_HANDSHAKE
-                                                       : WT_QUIC_PACKET_INITIAL);
+  build.type =
+      space == WT_QUIC_SPACE_INITIAL
+          ? WT_QUIC_PACKET_INITIAL
+          : (space == WT_QUIC_SPACE_HANDSHAKE ? WT_QUIC_PACKET_HANDSHAKE : WT_QUIC_PACKET_INITIAL);
   build.short_header = space == WT_QUIC_SPACE_APPLICATION ? 1 : 0;
   build.version = connection->config.version;
   build.destination_connection_id = connection->config.peer_connection_id;
@@ -255,9 +256,12 @@ static wt_status_t send_packet(wt_quic_connection_t *connection, wt_quic_space_t
     if (packet_log_path != NULL && packet_length > 0U) {
       FILE *packet_log = fopen(packet_log_path, "a");
       if (packet_log != NULL) {
-        size_t dump_limit = packet_length < 1300U ? packet_length : 1300U;  /* an Initial is 1200 and has to be whole to open */
+        size_t dump_limit = packet_length < 1300U
+                                ? packet_length
+                                : 1300U; /* an Initial is 1200 and has to be whole to open */
         size_t dump_index;
-        fprintf(packet_log, "sent space=%d type_bits=%u first=0x%02x length=%zu pn=%llu bytes=", (int)space,
+        fprintf(packet_log,
+                "sent space=%d type_bits=%u first=0x%02x length=%zu pn=%llu bytes=", (int)space,
                 (unsigned)((packet[0] >> 4) & 0x03U), (unsigned)packet[0], packet_length,
                 (unsigned long long)packet_number);
         for (dump_index = 0U; dump_index < dump_limit; dump_index++) {
@@ -306,8 +310,8 @@ int control_frame_is_retained(wt_quic_frame_type_t kind) {
   return 0;
 }
 wt_status_t send_control_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
-                                      const wt_quic_frame_t *frame, int ack_eliciting, int *out_sent,
-                                      uint64_t now) {
+                               const wt_quic_frame_t *frame, int ack_eliciting, int *out_sent,
+                               uint64_t now) {
   uint8_t wire[WT_QUIC_CONTROL_WIRE_MAX];
   wt_writer_t kept = wt_writer_init(wire, sizeof(wire));
   size_t slot = WT_QUIC_CONTROL_FRAMES_MAX;
@@ -337,17 +341,17 @@ wt_status_t send_control_frame(wt_quic_connection_t *connection, wt_quic_space_t
   connection->control_frames[slot].wire_length = wt_writer_offset(&kept);
   memcpy(connection->control_frames[slot].wire, wire, wt_writer_offset(&kept));
   {
-    wt_status_t status = send_one_frame(connection, space, frame, ack_eliciting, 1, 0,
-                                        WT_QUIC_CONTROL_STREAM_ID, (uint64_t)slot,
-                                        wt_writer_offset(&kept), out_sent, now);
+    wt_status_t status =
+        send_one_frame(connection, space, frame, ack_eliciting, 1, 0, WT_QUIC_CONTROL_STREAM_ID,
+                       (uint64_t)slot, wt_writer_offset(&kept), out_sent, now);
     if (status != WT_OK) connection->control_frames[slot].in_use = 0;
     return status;
   }
 }
 wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
-                                  const wt_quic_frame_t *frame, int ack_eliciting,
-                                  int has_descriptor, int is_crypto, uint64_t stream_id,
-                                  uint64_t offset, size_t length, int *out_sent, uint64_t now) {
+                           const wt_quic_frame_t *frame, int ack_eliciting, int has_descriptor,
+                           int is_crypto, uint64_t stream_id, uint64_t offset, size_t length,
+                           int *out_sent, uint64_t now) {
   uint8_t payload[WT_QUIC_CONNECTION_PAYLOAD_MAX];
   wt_writer_t w = wt_writer_init(payload, sizeof(payload));
   size_t packet_number_length;
@@ -367,10 +371,11 @@ wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_space_t spa
    * to carry a header protection sample cannot be protected at all, so the runtime pads rather than
    * leaving the caller with a failure it cannot act on. PADDING is not ack-eliciting, so this does not
    * change what the peer owes. */
-  packet_number_length = packet_number_length_for(connection->spaces[space].next_send,
-                                                  &connection->spaces[space]);
+  packet_number_length =
+      packet_number_length_for(connection->spaces[space].next_send, &connection->spaces[space]);
   minimum = sample_minimum(packet_number_length);
-  while (wt_writer_offset(&w) < minimum) wt_writer_u8(&w, 0U);
+  while (wt_writer_offset(&w) < minimum)
+    wt_writer_u8(&w, 0U);
   if (!wt_writer_ok(&w)) return WT_ERR_LIMIT;
   payload_length = wt_writer_offset(&w);
 
@@ -379,11 +384,12 @@ wt_status_t send_one_frame(wt_quic_connection_t *connection, wt_quic_space_t spa
     if (index < 0) return WT_ERR_LIMIT;
     tag = (uint64_t)index;
   }
-  return send_encoded_frame(connection, space, payload, payload_length, ack_eliciting, tag, out_sent, now);
+  return send_encoded_frame(connection, space, payload, payload_length, ack_eliciting, tag,
+                            out_sent, now);
 }
 wt_status_t send_encoded_frame(wt_quic_connection_t *connection, wt_quic_space_t space,
-                                      const uint8_t *payload, size_t payload_length, int ack_eliciting,
-                                      uint64_t tag, int *out_sent, uint64_t now) {
+                               const uint8_t *payload, size_t payload_length, int ack_eliciting,
+                               uint64_t tag, int *out_sent, uint64_t now) {
   wt_status_t status;
 
   if (out_sent != NULL) *out_sent = 0;
@@ -419,7 +425,8 @@ static void resume_control_frame(wt_quic_connection_t *connection, size_t slot, 
     connection->control_frames_resend_deferred++;
     return;
   }
-  if (send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1, tag, NULL, now) != WT_OK) {
+  if (send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1, tag, NULL,
+                         now) != WT_OK) {
     connection->control_frames_resend_deferred++;
     return;
   }
@@ -429,13 +436,14 @@ static void resume_pending_control_frames(wt_quic_connection_t *connection, uint
   size_t slot;
 
   for (slot = 0U; slot < WT_QUIC_CONTROL_FRAMES_MAX; slot++) {
-    if (connection->control_frames[slot].in_use && connection->control_frames[slot].resend_pending != 0) {
+    if (connection->control_frames[slot].in_use &&
+        connection->control_frames[slot].resend_pending != 0) {
       resume_control_frame(connection, slot, now);
     }
   }
 }
 wt_status_t flush_space(wt_quic_connection_t *connection, wt_quic_space_t space, int probe,
-                               int force, uint64_t now) {
+                        int force, uint64_t now) {
   wt_quic_pn_space_t *space_state = &connection->spaces[space];
   uint8_t range_bytes[WT_QUIC_CONNECTION_ACK_RANGES_MAX];
   size_t range_length = 0U;

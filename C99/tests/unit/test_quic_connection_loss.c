@@ -15,14 +15,15 @@ void test_a_retransmission_descriptor_is_released_on_acknowledgement(void) {
   unsigned i;
 
   open_pair(WT_UDP_IPV4, &pair);
-  for (i = 0U; i < sizeof(payload); i++) payload[i] = (uint8_t)i;
+  for (i = 0U; i < sizeof(payload); i++)
+    payload[i] = (uint8_t)i;
 
   /* One CRYPTO frame at a time -- each takes a descriptor -- carried, acknowledged, and acknowledged AGAIN
    * until the loop has sent more than the descriptor table holds. */
   for (i = 0U; i < WT_QUIC_CONNECTION_FRAMES_MAX + 4U; i++) {
     WT_EXPECT_OK("a frame with a descriptor is sent",
-                 wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, (uint64_t)i, payload,
-                                                sizeof(payload), now));
+                 wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, (uint64_t)i,
+                                                payload, sizeof(payload), now));
     now += 1000U;
     receive_on(&pair.server, &pair.server_socket, now);
     WT_EXPECT_OK("the peer owes an acknowledgement", wt_quic_connection_flush(&pair.server, now));
@@ -56,7 +57,8 @@ void test_a_lost_control_frame_is_sent_again(void) {
   arm_application(&pair, 0xd0U);
 
   WT_EXPECT_OK("a grant is in force", wt_quic_connection_set_max_data(&pair.client, 100000U));
-  WT_EXPECT_OK("a MAX_DATA frame goes out", wt_quic_connection_send_max_data(&pair.client, 200000U, now));
+  WT_EXPECT_OK("a MAX_DATA frame goes out",
+               wt_quic_connection_send_max_data(&pair.client, 200000U, now));
   now += 1000U;
   /* The network drops it. The peer's limit stays where it was, which is the whole stake of this test. */
   discard_one_datagram(&pair.server_socket);
@@ -70,7 +72,8 @@ void test_a_lost_control_frame_is_sent_again(void) {
     now += 1000U;
     receive_on(&pair.server, &pair.server_socket, now);
   }
-  WT_EXPECT_U64("the peer never saw the raised limit", 0U, pair.server.peer_limits.initial_max_data);
+  WT_EXPECT_U64("the peer never saw the raised limit", 0U,
+                pair.server.peer_limits.initial_max_data);
 
   /* Past the acknowledgement delay the server's TIMER is what sends the acknowledgement -- `flush` only sends one
    * early for the two cases RFC 9000 section 13.2.1 names -- and that acknowledgement is what makes the client
@@ -118,7 +121,8 @@ void test_an_acknowledged_control_frame_is_not_sent_again(void) {
   arm_application(&pair, 0xe0U);
 
   WT_EXPECT_OK("a grant is in force", wt_quic_connection_set_max_data(&pair.client, 100000U));
-  WT_EXPECT_OK("a MAX_DATA frame goes out", wt_quic_connection_send_max_data(&pair.client, 300000U, now));
+  WT_EXPECT_OK("a MAX_DATA frame goes out",
+               wt_quic_connection_send_max_data(&pair.client, 300000U, now));
   for (i = 0U; i < WT_QUIC_CONTROL_FRAMES_MAX; i++) {
     if (pair.client.control_frames[i].in_use) retained = 1;
   }
@@ -163,7 +167,8 @@ void test_an_acknowledged_control_frame_is_not_sent_again(void) {
       (void)wt_quic_connection_receive(&pair.server, now);
     }
   }
-  WT_EXPECT_U64("so the peer keeps the one copy it had", received_before, pair.server.packets_received);
+  WT_EXPECT_U64("so the peer keeps the one copy it had", received_before,
+                pair.server.packets_received);
 
   close_pair(&pair);
 }
@@ -184,7 +189,8 @@ void test_a_failed_control_resend_is_redriven_by_flush(void) {
   arm_application(&pair, 0x90U);
 
   WT_EXPECT_OK("a grant is in force", wt_quic_connection_set_max_data(&pair.client, 100000U));
-  WT_EXPECT_OK("a MAX_DATA frame goes out", wt_quic_connection_send_max_data(&pair.client, 200000U, now));
+  WT_EXPECT_OK("a MAX_DATA frame goes out",
+               wt_quic_connection_send_max_data(&pair.client, 200000U, now));
   now += 1000U;
   /* The network drops it. */
   discard_one_datagram(&pair.server_socket);
@@ -220,7 +226,8 @@ void test_a_failed_control_resend_is_redriven_by_flush(void) {
                 pair.client.packets_sent);
 
   /* The peer sees the raised limit only now, carried by the re-driven copy. */
-  WT_EXPECT_U64("which the dropped packet never delivered", 0U, pair.server.peer_limits.initial_max_data);
+  WT_EXPECT_U64("which the dropped packet never delivered", 0U,
+                pair.server.peer_limits.initial_max_data);
   {
     unsigned round;
     for (round = 0U; round < 50U && pair.server.peer_limits.initial_max_data != 200000U; round++) {
@@ -256,21 +263,23 @@ void test_only_retransmittable_frames_keep_a_slot(void) {
   open_pair(WT_UDP_IPV4, &pair);
   arm_application(&pair, 0xf0U);
   wt_quic_transport_parameters_init(&params);
-  WT_EXPECT_OK("the peer offers datagrams",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U));
+  WT_EXPECT_OK(
+      "the peer offers datagrams",
+      wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U));
   WT_EXPECT_OK("which encodes", wt_quic_transport_parameters_encode(&pw, &params));
-  WT_EXPECT_OK("and is applied",
-               wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&pw)));
+  WT_EXPECT_OK("and is applied", wt_quic_connection_set_peer_parameters(&pair.client, payload,
+                                                                        wt_writer_offset(&pw)));
 
   /* Thirty frames over a table of eight slots. If any one of them took a slot, the table would fill and the
    * frame after it would go out unretained, which the counter below would show. */
   for (i = 0U; i < 10U; i++) {
-    WT_EXPECT_OK("a probe goes out",
-                 wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1, now));
+    WT_EXPECT_OK("a probe goes out", wt_quic_connection_send_frame(
+                                         &pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1, now));
     WT_EXPECT_OK("and a datagram after it",
                  wt_quic_connection_send_datagram(&pair.client, (const uint8_t *)"d", 1U, now));
-    WT_EXPECT_OK("then an acknowledgement, which is replaced rather than repeated",
-                 wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ack, 0, now));
+    WT_EXPECT_OK(
+        "then an acknowledgement, which is replaced rather than repeated",
+        wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ack, 0, now));
   }
   WT_EXPECT_U64("none of them asked for a retransmission slot", 0U,
                 pair.client.control_frames_unretained);
@@ -287,4 +296,3 @@ void test_only_retransmittable_frames_keep_a_slot(void) {
 
   close_pair(&pair);
 }
-

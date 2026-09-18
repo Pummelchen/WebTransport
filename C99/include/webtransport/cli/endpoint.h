@@ -51,7 +51,8 @@ void wt_cli_endpoint_close(wt_cli_endpoint_t *endpoint);
 /* One JSON object describing what the tool is talking to, after the bind: the family by name, the
  * address as given, and the port actually bound. A script reads the PORT rather than parsing the
  * text, which is why a listener on port 0 can be used by a test at all. */
-void wt_cli_endpoint_write_json(const wt_cli_endpoint_t *endpoint, const char *address, FILE *stream);
+void wt_cli_endpoint_write_json(const wt_cli_endpoint_t *endpoint, const char *address,
+                                FILE *stream);
 
 const char *wt_cli_family_name(wt_udp_family_t family);
 

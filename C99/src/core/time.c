@@ -59,10 +59,11 @@ uint64_t wt_now_micros(void) {
 }
 #endif
 
-uint64_t wt_now_millis(void) { return wt_now_micros() / 1000U; }
+uint64_t wt_now_millis(void) {
+  return wt_now_micros() / 1000U;
+}
 
-int wt_deadline_passed(uint64_t start_micros, uint64_t interval_micros,
-                       uint64_t now_micros) {
+int wt_deadline_passed(uint64_t start_micros, uint64_t interval_micros, uint64_t now_micros) {
   return (now_micros - start_micros) >= interval_micros;
 }
 

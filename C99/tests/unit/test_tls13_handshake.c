@@ -29,19 +29,16 @@
 
 /* Our client's shape, as the builder takes it. */
 static const uint16_t WT_TEST_CIPHER_SUITES[] = {WT_TLS_CIPHER_AES_128_GCM_SHA256};
-static const uint16_t WT_TEST_GROUPS[] = {WT_TLS_GROUP_X25519,
-                                          WT_TLS_GROUP_SECP256R1};
-static const uint16_t WT_TEST_SIGNATURES[] = {
-    WT_TLS_SIGNATURE_ECDSA_SECP256R1_SHA256,
-    WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256,
-    WT_TLS_SIGNATURE_ED25519};
+static const uint16_t WT_TEST_GROUPS[] = {WT_TLS_GROUP_X25519, WT_TLS_GROUP_SECP256R1};
+static const uint16_t WT_TEST_SIGNATURES[] = {WT_TLS_SIGNATURE_ECDSA_SECP256R1_SHA256,
+                                              WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256,
+                                              WT_TLS_SIGNATURE_ED25519};
 static const char *const WT_TEST_ALPN[] = {"h3"};
 
 /* A x25519 public key of the right shape; the key agreement tests it for real. */
 static const uint8_t WT_TEST_KEY_SHARE_KEY[32] = {
-    0x99, 0x38, 0x1d, 0xe5, 0x60, 0xe4, 0xbd, 0x43, 0xd2, 0x3d, 0x8e,
-    0x43, 0x5a, 0x7d, 0xba, 0xfe, 0xb3, 0xc0, 0x6e, 0x51, 0xc1, 0x3c,
-    0xae, 0x4d, 0x54, 0x13, 0x69, 0x1e, 0x52, 0x9a, 0xaf, 0x2c};
+    0x99, 0x38, 0x1d, 0xe5, 0x60, 0xe4, 0xbd, 0x43, 0xd2, 0x3d, 0x8e, 0x43, 0x5a, 0x7d, 0xba, 0xfe,
+    0xb3, 0xc0, 0x6e, 0x51, 0xc1, 0x3c, 0xae, 0x4d, 0x54, 0x13, 0x69, 0x1e, 0x52, 0x9a, 0xaf, 0x2c};
 
 static const uint8_t WT_TEST_TRANSPORT_PARAMETERS[] = {0x01, 0x02, 0x03, 0x04};
 
@@ -59,8 +56,7 @@ static void test_handshake_framing(void) {
   /* A header for an empty body is four bytes and parses on its own. */
   cursor = wt_cursor_init(framed, 4U);
   WT_EXPECT_OK("a header parses", wt_tls_handshake_header_parse(&cursor, &header));
-  WT_EXPECT_U64("with its type", (uint64_t)WT_TLS_HANDSHAKE_FINISHED,
-                (uint64_t)header.type);
+  WT_EXPECT_U64("with its type", (uint64_t)WT_TLS_HANDSHAKE_FINISHED, (uint64_t)header.type);
   WT_EXPECT_U64("and its length", 0U, (uint64_t)header.length);
 
   /* A header whose length is not the rest of the buffer is a fabricated frame: the
@@ -68,8 +64,7 @@ static void test_handshake_framing(void) {
   {
     static const uint8_t claims_twelve[] = {0x14U, 0x00U, 0x00U, 0x0cU};
     cursor = wt_cursor_init(claims_twelve, sizeof(claims_twelve));
-    WT_EXPECT_STATUS("a length that disagrees with the buffer is refused",
-                     WT_ERR_PROTOCOL,
+    WT_EXPECT_STATUS("a length that disagrees with the buffer is refused", WT_ERR_PROTOCOL,
                      wt_tls_handshake_header_parse(&cursor, &header));
   }
   cursor = wt_cursor_init(framed, 3U);
@@ -81,16 +76,14 @@ static void test_handshake_framing(void) {
   /* The largest body a three-octet length can hold, and one more. */
   w = wt_writer_init(buffer, sizeof(buffer));
   WT_EXPECT_STATUS("a body length above three octets is refused", WT_ERR_LIMIT,
-                   wt_tls_handshake_header_encode(&w, 1U,
-                                                  WT_TLS_HANDSHAKE_MAX_BODY + 1U));
+                   wt_tls_handshake_header_encode(&w, 1U, WT_TLS_HANDSHAKE_MAX_BODY + 1U));
   WT_EXPECT_U64("and nothing was written", 0U, (uint64_t)wt_writer_offset(&w));
 
   WT_EXPECT_STR("finished is named", "finished",
                 wt_tls_handshake_type_name(WT_TLS_HANDSHAKE_FINISHED));
   WT_EXPECT_STR("client hello is named", "client-hello",
                 wt_tls_handshake_type_name(WT_TLS_HANDSHAKE_CLIENT_HELLO));
-  WT_EXPECT_STR("an unknown type is named", "unknown",
-                wt_tls_handshake_type_name(0x7fU));
+  WT_EXPECT_STR("an unknown type is named", "unknown", wt_tls_handshake_type_name(0x7fU));
 }
 
 static void test_client_hello_from_rfc(void) {
@@ -105,20 +98,17 @@ static void test_client_hello_from_rfc(void) {
   wt_tls_key_share_t shares[WT_TLS_MAX_KEY_SHARES];
   size_t count = 0U;
 
-  WT_EXPECT_OK("the RFC's ClientHello parses",
-               wt_tls_client_hello_parse(WT_RFC8448_CLIENT_HELLO,
-                                         WT_RFC8448_CLIENT_HELLO_LEN, &hello));
+  WT_EXPECT_OK(
+      "the RFC's ClientHello parses",
+      wt_tls_client_hello_parse(WT_RFC8448_CLIENT_HELLO, WT_RFC8448_CLIENT_HELLO_LEN, &hello));
   /* RFC 8446 section 4.1.2: the legacy version is 0x0303 and the compression methods
    * are exactly one zero. */
-  WT_EXPECT_U64("with legacy version 0x0303", 0x0303U,
-                (uint64_t)hello.legacy_version);
+  WT_EXPECT_U64("with legacy version 0x0303", 0x0303U, (uint64_t)hello.legacy_version);
   /* The RFC's client offers three suites, the first of which is the mandatory one. */
   WT_EXPECT_U64("three cipher suites", 3U, (uint64_t)hello.cipher_suite_count);
   WT_EXPECT_U64("the first of which is TLS_AES_128_GCM_SHA256",
-                (uint64_t)WT_TLS_CIPHER_AES_128_GCM_SHA256,
-                (uint64_t)hello.cipher_suites[0]);
-  WT_EXPECT_U64("one compression method", 1U,
-                (uint64_t)hello.compression_method_count);
+                (uint64_t)WT_TLS_CIPHER_AES_128_GCM_SHA256, (uint64_t)hello.cipher_suites[0]);
+  WT_EXPECT_U64("one compression method", 1U, (uint64_t)hello.compression_method_count);
   WT_EXPECT_U64("which is zero", 0U, (uint64_t)hello.compression_methods[0]);
   WT_EXPECT_U64("an empty session id", 0U, (uint64_t)hello.session_id_len);
 
@@ -126,62 +116,49 @@ static void test_client_hello_from_rfc(void) {
    * here, which is the point: a parsed message keeps them as views. */
   WT_EXPECT_U64("nine extensions", 9U, (uint64_t)hello.extensions.count);
   WT_EXPECT_TRUE("including a key_share",
-                 wt_tls_extensions_contains(&hello.extensions,
-                                            WT_TLS_EXTENSION_KEY_SHARE));
+                 wt_tls_extensions_contains(&hello.extensions, WT_TLS_EXTENSION_KEY_SHARE));
   WT_EXPECT_TRUE("and an unimplemented one",
                  wt_tls_extensions_contains(&hello.extensions, 0xff01U));
 
   /* supported_versions: RFC 8448's client offers TLS 1.3. */
-  extension = wt_tls_extensions_find(&hello.extensions,
-                                     WT_TLS_EXTENSION_SUPPORTED_VERSIONS);
+  extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_SUPPORTED_VERSIONS);
   WT_EXPECT_OK("the supported versions read",
                wt_tls_supported_versions_client(extension, versions, 4U, &count));
   WT_EXPECT_U64("one version", 1U, (uint64_t)count);
-  WT_EXPECT_U64("which is TLS 1.3", (uint64_t)WT_TLS_VERSION_1_3,
-                (uint64_t)versions[0]);
+  WT_EXPECT_U64("which is TLS 1.3", (uint64_t)WT_TLS_VERSION_1_3, (uint64_t)versions[0]);
 
   /* supported_groups and signature_algorithms are the same shape. */
-  extension = wt_tls_extensions_find(&hello.extensions,
-                                     WT_TLS_EXTENSION_SUPPORTED_GROUPS);
+  extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_SUPPORTED_GROUPS);
   WT_EXPECT_OK("the supported groups read",
-               wt_tls_u16_list_parse(extension, groups,
-                                     WT_TLS_MAX_NAMED_GROUPS, &count));
+               wt_tls_u16_list_parse(extension, groups, WT_TLS_MAX_NAMED_GROUPS, &count));
   WT_EXPECT_U64("nine groups", 9U, (uint64_t)count);
-  WT_EXPECT_U64("the first of which is x25519", (uint64_t)WT_TLS_GROUP_X25519,
-                (uint64_t)groups[0]);
+  WT_EXPECT_U64("the first of which is x25519", (uint64_t)WT_TLS_GROUP_X25519, (uint64_t)groups[0]);
 
-  extension = wt_tls_extensions_find(&hello.extensions,
-                                     WT_TLS_EXTENSION_SIGNATURE_ALGORITHMS);
+  extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_SIGNATURE_ALGORITHMS);
   WT_EXPECT_OK("the signature algorithms read",
-               wt_tls_u16_list_parse(extension, schemes,
-                                     WT_TLS_MAX_SIGNATURE_SCHEMES, &count));
+               wt_tls_u16_list_parse(extension, schemes, WT_TLS_MAX_SIGNATURE_SCHEMES, &count));
   WT_EXPECT_U64("fifteen schemes", 15U, (uint64_t)count);
 
   /* key_share: one x25519 share whose key is the RFC's public key. */
-  extension = wt_tls_extensions_find(&hello.extensions,
-                                     WT_TLS_EXTENSION_KEY_SHARE);
+  extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_KEY_SHARE);
   WT_EXPECT_OK("the client key shares read",
-               wt_tls_key_share_client(extension, shares, WT_TLS_MAX_KEY_SHARES,
-                                       &count));
+               wt_tls_key_share_client(extension, shares, WT_TLS_MAX_KEY_SHARES, &count));
   WT_EXPECT_U64("one share", 1U, (uint64_t)count);
-  WT_EXPECT_U64("for x25519", (uint64_t)WT_TLS_GROUP_X25519,
-                (uint64_t)shares[0].group);
+  WT_EXPECT_U64("for x25519", (uint64_t)WT_TLS_GROUP_X25519, (uint64_t)shares[0].group);
   WT_EXPECT_U64("with a 32-byte key", 32U, (uint64_t)shares[0].key_len);
   /* RFC 8448 prints the client's public key beside the ClientHello. */
   {
-    static const uint8_t expected[32] = {
-        0x99, 0x38, 0x1d, 0xe5, 0x60, 0xe4, 0xbd, 0x43, 0xd2, 0x3d, 0x8e,
-        0x43, 0x5a, 0x7d, 0xba, 0xfe, 0xb3, 0xc0, 0x6e, 0x51, 0xc1, 0x3c,
-        0xae, 0x4d, 0x54, 0x13, 0x69, 0x1e, 0x52, 0x9a, 0xaf, 0x2c};
+    static const uint8_t expected[32] = {0x99, 0x38, 0x1d, 0xe5, 0x60, 0xe4, 0xbd, 0x43,
+                                         0xd2, 0x3d, 0x8e, 0x43, 0x5a, 0x7d, 0xba, 0xfe,
+                                         0xb3, 0xc0, 0x6e, 0x51, 0xc1, 0x3c, 0xae, 0x4d,
+                                         0x54, 0x13, 0x69, 0x1e, 0x52, 0x9a, 0xaf, 0x2c};
     WT_EXPECT_BYTES("and it is the RFC's public key", expected, shares[0].key, 32U);
   }
 
   /* A parsed message re-encodes to the same bytes, unknown extensions included. */
   w = wt_writer_init(rebuilt, sizeof(rebuilt));
-  WT_EXPECT_OK("the parsed ClientHello re-encodes",
-               wt_tls_client_hello_encode(&hello, &w));
-  WT_EXPECT_U64("to the same length",
-                (uint64_t)WT_RFC8448_CLIENT_HELLO_LEN,
+  WT_EXPECT_OK("the parsed ClientHello re-encodes", wt_tls_client_hello_encode(&hello, &w));
+  WT_EXPECT_U64("to the same length", (uint64_t)WT_RFC8448_CLIENT_HELLO_LEN,
                 (uint64_t)wt_writer_offset(&w));
   WT_EXPECT_BYTES("and the same bytes", WT_RFC8448_CLIENT_HELLO, rebuilt,
                   WT_RFC8448_CLIENT_HELLO_LEN);
@@ -189,8 +166,8 @@ static void test_client_hello_from_rfc(void) {
   /* The random is read from the right place: the RFC prints the ClientHello, whose
    * random starts after the four-byte header and the two-byte legacy version. */
   memcpy(random, hello.random, sizeof(random));
-  WT_EXPECT_BYTES("the random is the message's own bytes", WT_RFC8448_CLIENT_HELLO + 6U,
-                  random, WT_TLS_RANDOM_LEN);
+  WT_EXPECT_BYTES("the random is the message's own bytes", WT_RFC8448_CLIENT_HELLO + 6U, random,
+                  WT_TLS_RANDOM_LEN);
 }
 
 static void test_server_hello_from_rfc(void) {
@@ -201,43 +178,33 @@ static void test_server_hello_from_rfc(void) {
   uint16_t version = 0U;
   wt_tls_key_share_t share;
 
-  WT_EXPECT_OK("the RFC's ServerHello parses",
-               wt_tls_server_hello_parse(WT_RFC8448_SERVER_HELLO,
-                                         WT_RFC8448_SERVER_HELLO_LEN, &hello));
-  WT_EXPECT_U64("with legacy version 0x0303", 0x0303U,
-                (uint64_t)hello.legacy_version);
-  WT_EXPECT_U64("the ciphersuite the RFC chose",
-                (uint64_t)WT_TLS_CIPHER_AES_128_GCM_SHA256,
+  WT_EXPECT_OK(
+      "the RFC's ServerHello parses",
+      wt_tls_server_hello_parse(WT_RFC8448_SERVER_HELLO, WT_RFC8448_SERVER_HELLO_LEN, &hello));
+  WT_EXPECT_U64("with legacy version 0x0303", 0x0303U, (uint64_t)hello.legacy_version);
+  WT_EXPECT_U64("the ciphersuite the RFC chose", (uint64_t)WT_TLS_CIPHER_AES_128_GCM_SHA256,
                 (uint64_t)hello.cipher_suite);
-  WT_EXPECT_U64("one compression method", 0U,
-                (uint64_t)hello.compression_method);
+  WT_EXPECT_U64("one compression method", 0U, (uint64_t)hello.compression_method);
   WT_EXPECT_U64("two extensions", 2U, (uint64_t)hello.extensions.count);
 
-  extension = wt_tls_extensions_find(&hello.extensions,
-                                     WT_TLS_EXTENSION_SUPPORTED_VERSIONS);
-  WT_EXPECT_OK("the server's version reads",
-               wt_tls_supported_versions_server(extension, &version));
-  WT_EXPECT_U64("and is TLS 1.3", (uint64_t)WT_TLS_VERSION_1_3,
-                (uint64_t)version);
+  extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_SUPPORTED_VERSIONS);
+  WT_EXPECT_OK("the server's version reads", wt_tls_supported_versions_server(extension, &version));
+  WT_EXPECT_U64("and is TLS 1.3", (uint64_t)WT_TLS_VERSION_1_3, (uint64_t)version);
 
-  extension = wt_tls_extensions_find(&hello.extensions,
-                                     WT_TLS_EXTENSION_KEY_SHARE);
-  WT_EXPECT_OK("the server's key share reads",
-               wt_tls_key_share_server(extension, &share));
-  WT_EXPECT_U64("for x25519", (uint64_t)WT_TLS_GROUP_X25519,
-                (uint64_t)share.group);
+  extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_KEY_SHARE);
+  WT_EXPECT_OK("the server's key share reads", wt_tls_key_share_server(extension, &share));
+  WT_EXPECT_U64("for x25519", (uint64_t)WT_TLS_GROUP_X25519, (uint64_t)share.group);
   WT_EXPECT_U64("with a 32-byte key", 32U, (uint64_t)share.key_len);
   {
-    static const uint8_t expected[32] = {
-        0xc9, 0x82, 0x88, 0x76, 0x11, 0x20, 0x95, 0xfe, 0x66, 0x76, 0x2b,
-        0xdb, 0xf7, 0xc6, 0x72, 0xe1, 0x56, 0xd6, 0xcc, 0x25, 0x3b, 0x83,
-        0x3d, 0xf1, 0xdd, 0x69, 0xb1, 0xb0, 0x4e, 0x75, 0x1f, 0x0f};
+    static const uint8_t expected[32] = {0xc9, 0x82, 0x88, 0x76, 0x11, 0x20, 0x95, 0xfe,
+                                         0x66, 0x76, 0x2b, 0xdb, 0xf7, 0xc6, 0x72, 0xe1,
+                                         0x56, 0xd6, 0xcc, 0x25, 0x3b, 0x83, 0x3d, 0xf1,
+                                         0xdd, 0x69, 0xb1, 0xb0, 0x4e, 0x75, 0x1f, 0x0f};
     WT_EXPECT_BYTES("and it is the RFC's public key", expected, share.key, 32U);
   }
 
   w = wt_writer_init(rebuilt, sizeof(rebuilt));
-  WT_EXPECT_OK("the parsed ServerHello re-encodes",
-               wt_tls_server_hello_encode(&hello, &w));
+  WT_EXPECT_OK("the parsed ServerHello re-encodes", wt_tls_server_hello_encode(&hello, &w));
   WT_EXPECT_U64("to the same length", (uint64_t)WT_RFC8448_SERVER_HELLO_LEN,
                 (uint64_t)wt_writer_offset(&w));
   WT_EXPECT_BYTES("and the same bytes", WT_RFC8448_SERVER_HELLO, rebuilt,
@@ -278,31 +245,24 @@ static void test_build_and_parse_back(void) {
   params.transport_parameters_len = sizeof(WT_TEST_TRANSPORT_PARAMETERS);
 
   WT_EXPECT_OK("our ClientHello builds",
-               wt_tls_client_hello_build(&params, message, sizeof(message),
-                                         &message_len));
+               wt_tls_client_hello_build(&params, message, sizeof(message), &message_len));
   WT_EXPECT_TRUE("and is not empty", message_len > 0U);
   WT_EXPECT_U64("with the ClientHello type", (uint64_t)WT_TLS_HANDSHAKE_CLIENT_HELLO,
                 (uint64_t)message[0]);
   /* The header's length is the body's, which is what a peer checks. */
-  WT_EXPECT_U64("and a length that fits the buffer",
-                (uint64_t)(message_len - WT_TLS_HANDSHAKE_HEADER_LEN),
-                (uint64_t)(((size_t)message[1] << 16) | ((size_t)message[2] << 8) |
-                           (size_t)message[3]));
+  WT_EXPECT_U64(
+      "and a length that fits the buffer", (uint64_t)(message_len - WT_TLS_HANDSHAKE_HEADER_LEN),
+      (uint64_t)(((size_t)message[1] << 16) | ((size_t)message[2] << 8) | (size_t)message[3]));
 
-  WT_EXPECT_OK("and parses back",
-               wt_tls_client_hello_parse(message, message_len, &hello));
-  WT_EXPECT_BYTES("with the random we chose", random, hello.random,
-                  WT_TLS_RANDOM_LEN);
-  WT_EXPECT_U64("the session id we chose", sizeof(session_id),
-                (uint64_t)hello.session_id_len);
-  WT_EXPECT_BYTES("byte for byte", session_id, hello.session_id,
-                  sizeof(session_id));
+  WT_EXPECT_OK("and parses back", wt_tls_client_hello_parse(message, message_len, &hello));
+  WT_EXPECT_BYTES("with the random we chose", random, hello.random, WT_TLS_RANDOM_LEN);
+  WT_EXPECT_U64("the session id we chose", sizeof(session_id), (uint64_t)hello.session_id_len);
+  WT_EXPECT_BYTES("byte for byte", session_id, hello.session_id, sizeof(session_id));
   WT_EXPECT_U64("the ciphersuite we chose", (uint64_t)WT_TLS_CIPHER_AES_128_GCM_SHA256,
                 (uint64_t)hello.cipher_suites[0]);
   /* server_name, supported_groups, signature_algorithms, supported_versions,
    * key_share, ALPN, psk_key_exchange_modes and quic_transport_parameters. */
-  WT_EXPECT_U64("and every extension we asked for", 8U,
-                (uint64_t)hello.extensions.count);
+  WT_EXPECT_U64("and every extension we asked for", 8U, (uint64_t)hello.extensions.count);
 
   /* The typed readers see what the builder wrote. */
   {
@@ -322,34 +282,26 @@ static void test_build_and_parse_back(void) {
     WT_EXPECT_U64("two bytes long", 2U, (uint64_t)alpn.lengths[0]);
     WT_EXPECT_BYTES("and it is h3", (const uint8_t *)"h3", alpn.names[0], 2U);
 
-    extension = wt_tls_extensions_find(&hello.extensions,
-                                       WT_TLS_EXTENSION_SUPPORTED_GROUPS);
+    extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_SUPPORTED_GROUPS);
     WT_EXPECT_OK("the groups read",
-                 wt_tls_u16_list_parse(extension, groups, WT_TLS_MAX_NAMED_GROUPS,
-                                       &count));
+                 wt_tls_u16_list_parse(extension, groups, WT_TLS_MAX_NAMED_GROUPS, &count));
     WT_EXPECT_U64("two of them", 2U, (uint64_t)count);
-    WT_EXPECT_U64("x25519 first", (uint64_t)WT_TLS_GROUP_X25519,
-                  (uint64_t)groups[0]);
+    WT_EXPECT_U64("x25519 first", (uint64_t)WT_TLS_GROUP_X25519, (uint64_t)groups[0]);
 
-    extension = wt_tls_extensions_find(&hello.extensions,
-                                       WT_TLS_EXTENSION_KEY_SHARE);
+    extension = wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_KEY_SHARE);
     WT_EXPECT_OK("the key shares read",
-                 wt_tls_key_share_client(extension, parsed, WT_TLS_MAX_KEY_SHARES,
-                                         &count));
+                 wt_tls_key_share_client(extension, parsed, WT_TLS_MAX_KEY_SHARES, &count));
     WT_EXPECT_U64("one share", 1U, (uint64_t)count);
-    WT_EXPECT_BYTES("with the key we put in", WT_TEST_KEY_SHARE_KEY, parsed[0].key,
-                    32U);
+    WT_EXPECT_BYTES("with the key we put in", WT_TEST_KEY_SHARE_KEY, parsed[0].key, 32U);
 
-    extension = wt_tls_extensions_find(
-        &hello.extensions, WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS);
+    extension =
+        wt_tls_extensions_find(&hello.extensions, WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS);
     WT_EXPECT_OK("the transport parameters read",
-                 wt_tls_transport_parameters(extension, &parameters,
-                                             &parameters_len));
-    WT_EXPECT_U64("at the length we put in",
-                  (uint64_t)sizeof(WT_TEST_TRANSPORT_PARAMETERS),
+                 wt_tls_transport_parameters(extension, &parameters, &parameters_len));
+    WT_EXPECT_U64("at the length we put in", (uint64_t)sizeof(WT_TEST_TRANSPORT_PARAMETERS),
                   (uint64_t)parameters_len);
-    WT_EXPECT_BYTES("with the bytes we put in", WT_TEST_TRANSPORT_PARAMETERS,
-                    parameters, parameters_len);
+    WT_EXPECT_BYTES("with the bytes we put in", WT_TEST_TRANSPORT_PARAMETERS, parameters,
+                    parameters_len);
     (void)server_share;
     (void)version;
   }
@@ -376,31 +328,23 @@ static void test_build_and_parse_back(void) {
     server_params.supported_version = WT_TLS_VERSION_1_3;
 
     WT_EXPECT_OK("our ServerHello builds",
-                 wt_tls_server_hello_build(&server_params, message, sizeof(message),
-                                           &server_len));
-    WT_EXPECT_OK("and parses back",
-                 wt_tls_server_hello_parse(message, server_len, &server));
-    WT_EXPECT_BYTES("with the random we chose", server_random, server.random,
-                    WT_TLS_RANDOM_LEN);
-    WT_EXPECT_U64("the session id echoed", sizeof(session_id),
-                  (uint64_t)server.session_id_len);
-    WT_EXPECT_BYTES("byte for byte", session_id, server.session_id,
-                    sizeof(session_id));
+                 wt_tls_server_hello_build(&server_params, message, sizeof(message), &server_len));
+    WT_EXPECT_OK("and parses back", wt_tls_server_hello_parse(message, server_len, &server));
+    WT_EXPECT_BYTES("with the random we chose", server_random, server.random, WT_TLS_RANDOM_LEN);
+    WT_EXPECT_U64("the session id echoed", sizeof(session_id), (uint64_t)server.session_id_len);
+    WT_EXPECT_BYTES("byte for byte", session_id, server.session_id, sizeof(session_id));
     {
-      const wt_tls_extension_t *extension = wt_tls_extensions_find(
-          &server.extensions, WT_TLS_EXTENSION_SUPPORTED_VERSIONS);
+      const wt_tls_extension_t *extension =
+          wt_tls_extensions_find(&server.extensions, WT_TLS_EXTENSION_SUPPORTED_VERSIONS);
       WT_EXPECT_OK("and the version extension",
                    wt_tls_supported_versions_server(extension, &version));
-      WT_EXPECT_U64("saying TLS 1.3", (uint64_t)WT_TLS_VERSION_1_3,
-                    (uint64_t)version);
+      WT_EXPECT_U64("saying TLS 1.3", (uint64_t)WT_TLS_VERSION_1_3, (uint64_t)version);
     }
     {
-      const wt_tls_extension_t *extension = wt_tls_extensions_find(
-          &server.extensions, WT_TLS_EXTENSION_KEY_SHARE);
-      WT_EXPECT_OK("and the key share", wt_tls_key_share_server(extension,
-                                                                &server_share));
-      WT_EXPECT_BYTES("with the key we put in", WT_TEST_KEY_SHARE_KEY,
-                      server_share.key, 32U);
+      const wt_tls_extension_t *extension =
+          wt_tls_extensions_find(&server.extensions, WT_TLS_EXTENSION_KEY_SHARE);
+      WT_EXPECT_OK("and the key share", wt_tls_key_share_server(extension, &server_share));
+      WT_EXPECT_BYTES("with the key we put in", WT_TEST_KEY_SHARE_KEY, server_share.key, 32U);
     }
   }
 
@@ -408,17 +352,14 @@ static void test_build_and_parse_back(void) {
   {
     size_t short_len = 0U;
     WT_EXPECT_STATUS("a buffer too small is refused", WT_ERR_LIMIT,
-                     wt_tls_client_hello_build(&params, message, message_len - 1U,
-                                               &short_len));
+                     wt_tls_client_hello_build(&params, message, message_len - 1U, &short_len));
     WT_EXPECT_U64("and no length is reported", 0U, (uint64_t)short_len);
     WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
                      wt_tls_client_hello_build(&params, NULL, 64U, &short_len));
     WT_EXPECT_STATUS("a NULL length output is refused", WT_ERR_INVALID_ARGUMENT,
-                     wt_tls_client_hello_build(&params, message, sizeof(message),
-                                               NULL));
+                     wt_tls_client_hello_build(&params, message, sizeof(message), NULL));
     WT_EXPECT_STATUS("a NULL parameter block is refused", WT_ERR_INVALID_ARGUMENT,
-                     wt_tls_client_hello_build(NULL, message, sizeof(message),
-                                               &short_len));
+                     wt_tls_client_hello_build(NULL, message, sizeof(message), &short_len));
   }
 }
 
@@ -432,7 +373,7 @@ static void test_extension_refusals(void) {
    * would otherwise disagree about which one applies. */
   {
     static const uint8_t duplicated[] = {
-        0x00, 0x0a, /* block length: ten bytes, which is both extensions */
+        0x00, 0x0a,                         /* block length: ten bytes, which is both extensions */
         0x00, 0x2b, 0x00, 0x02, 0x03, 0x04, /* supported_versions */
         0x00, 0x2b, 0x00, 0x00              /* and again */
     };
@@ -442,8 +383,7 @@ static void test_extension_refusals(void) {
   }
   /* A block whose inner lengths do not fill it. */
   {
-    static const uint8_t trailing[] = {
-        0x00, 0x05, 0x00, 0x2b, 0x00, 0x00, 0xff};
+    static const uint8_t trailing[] = {0x00, 0x05, 0x00, 0x2b, 0x00, 0x00, 0xff};
     cursor = wt_cursor_init(trailing, sizeof(trailing));
     WT_EXPECT_STATUS("a block with trailing bytes is refused", WT_ERR_PROTOCOL,
                      wt_tls_extensions_parse(&cursor, &list));
@@ -452,8 +392,8 @@ static void test_extension_refusals(void) {
   {
     static const uint8_t oversized[] = {0x00, 0x04, 0x00, 0x2b, 0x00, 0x10};
     cursor = wt_cursor_init(oversized, sizeof(oversized));
-    WT_EXPECT_STATUS("an extension longer than its block is refused",
-                     WT_ERR_PROTOCOL, wt_tls_extensions_parse(&cursor, &list));
+    WT_EXPECT_STATUS("an extension longer than its block is refused", WT_ERR_PROTOCOL,
+                     wt_tls_extensions_parse(&cursor, &list));
   }
   /* More extensions than the list can hold. The count is a peer's choice, so this is
    * the bound rather than an impossible input. */
@@ -480,8 +420,7 @@ static void test_extension_refusals(void) {
   {
     uint8_t empty[] = {0x00, 0x00};
     cursor = wt_cursor_init(empty, sizeof(empty));
-    WT_EXPECT_OK("an empty extension block parses",
-                 wt_tls_extensions_parse(&cursor, &list));
+    WT_EXPECT_OK("an empty extension block parses", wt_tls_extensions_parse(&cursor, &list));
     WT_EXPECT_U64("with no entries", 0U, (uint64_t)list.count);
     w = wt_writer_init(buffer, sizeof(buffer));
     WT_EXPECT_OK("and re-encodes", wt_tls_extensions_encode(&w, &list));
@@ -495,8 +434,7 @@ static void test_extension_refusals(void) {
                    wt_tls_extensions_encode(NULL, &list));
   WT_EXPECT_STATUS("and a NULL list to encode", WT_ERR_INVALID_ARGUMENT,
                    wt_tls_extensions_encode(&w, NULL));
-  WT_EXPECT_TRUE("an unknown type is not found",
-                 wt_tls_extensions_find(&list, 0x1234U) == NULL);
+  WT_EXPECT_TRUE("an unknown type is not found", wt_tls_extensions_find(&list, 0x1234U) == NULL);
 }
 
 static void test_message_refusals(void) {
@@ -510,37 +448,32 @@ static void test_message_refusals(void) {
    * rather than truncation, because the bytes are all there and the length is wrong. */
   memcpy(message, WT_RFC8448_CLIENT_HELLO, sizeof(message));
   message[3] = (uint8_t)(message[3] - 1U);
-  WT_EXPECT_STATUS("a ClientHello whose length is short is refused",
-                   WT_ERR_PROTOCOL,
+  WT_EXPECT_STATUS("a ClientHello whose length is short is refused", WT_ERR_PROTOCOL,
                    wt_tls_client_hello_parse(message, sizeof(message), &hello));
 
   /* The wrong message type for the parser. */
-  WT_EXPECT_STATUS("a ServerHello parsed as a ClientHello is refused",
-                   WT_ERR_PROTOCOL,
-                   wt_tls_client_hello_parse(WT_RFC8448_SERVER_HELLO,
-                                             WT_RFC8448_SERVER_HELLO_LEN, &hello));
-  WT_EXPECT_STATUS("and the other way round", WT_ERR_PROTOCOL,
-                   wt_tls_server_hello_parse(WT_RFC8448_CLIENT_HELLO,
-                                             WT_RFC8448_CLIENT_HELLO_LEN,
-                                             &server));
-  WT_EXPECT_STATUS("a message shorter than a header is refused",
-                   WT_ERR_TRUNCATED,
+  WT_EXPECT_STATUS(
+      "a ServerHello parsed as a ClientHello is refused", WT_ERR_PROTOCOL,
+      wt_tls_client_hello_parse(WT_RFC8448_SERVER_HELLO, WT_RFC8448_SERVER_HELLO_LEN, &hello));
+  WT_EXPECT_STATUS(
+      "and the other way round", WT_ERR_PROTOCOL,
+      wt_tls_server_hello_parse(WT_RFC8448_CLIENT_HELLO, WT_RFC8448_CLIENT_HELLO_LEN, &server));
+  WT_EXPECT_STATUS("a message shorter than a header is refused", WT_ERR_TRUNCATED,
                    wt_tls_client_hello_parse(WT_RFC8448_CLIENT_HELLO, 3U, &hello));
 
   /* A legacy version that is not 0x0303. */
   memcpy(message, WT_RFC8448_CLIENT_HELLO, sizeof(message));
   message[4] = 0x03U;
   message[5] = 0x01U;
-  WT_EXPECT_STATUS("a legacy version that is not 0x0303 is refused",
-                   WT_ERR_PROTOCOL,
+  WT_EXPECT_STATUS("a legacy version that is not 0x0303 is refused", WT_ERR_PROTOCOL,
                    wt_tls_client_hello_parse(message, sizeof(message), &hello));
 
   /* A compression method that is not a single zero (RFC 8446 section 4.1.2). The
    * field is at a known offset in the RFC's message: after the header, the version,
    * the random, the session id length and the cipher suite list. */
-  WT_EXPECT_OK("the RFC's ClientHello parses for the offset check",
-               wt_tls_client_hello_parse(WT_RFC8448_CLIENT_HELLO,
-                                         WT_RFC8448_CLIENT_HELLO_LEN, &hello));
+  WT_EXPECT_OK(
+      "the RFC's ClientHello parses for the offset check",
+      wt_tls_client_hello_parse(WT_RFC8448_CLIENT_HELLO, WT_RFC8448_CLIENT_HELLO_LEN, &hello));
   {
     /* Its layout is 4 header + 2 version + 32 random + 1 + 0 session + 2 + 2 cipher +
      * 1 compression methods. */
@@ -597,8 +530,8 @@ static void test_message_refusals(void) {
                      wt_tls_key_share_server(&bogus, &share));
     bogus.data = short_key;
     bogus.len = sizeof(short_key);
-    WT_EXPECT_STATUS("a key share shorter than its key is refused",
-                     WT_ERR_PROTOCOL, wt_tls_key_share_server(&bogus, &share));
+    WT_EXPECT_STATUS("a key share shorter than its key is refused", WT_ERR_PROTOCOL,
+                     wt_tls_key_share_server(&bogus, &share));
     WT_EXPECT_STATUS("a NULL key share output is refused", WT_ERR_INVALID_ARGUMENT,
                      wt_tls_key_share_server(&bogus, NULL));
     WT_EXPECT_STATUS("a NULL extension is refused", WT_ERR_INVALID_ARGUMENT,
@@ -610,9 +543,9 @@ static void test_message_refusals(void) {
     wt_tls_client_hello_t broken;
     uint8_t out[512];
     wt_writer_t w = wt_writer_init(out, sizeof(out));
-    WT_EXPECT_OK("the RFC's ClientHello parses again",
-                 wt_tls_client_hello_parse(WT_RFC8448_CLIENT_HELLO,
-                                           WT_RFC8448_CLIENT_HELLO_LEN, &hello));
+    WT_EXPECT_OK(
+        "the RFC's ClientHello parses again",
+        wt_tls_client_hello_parse(WT_RFC8448_CLIENT_HELLO, WT_RFC8448_CLIENT_HELLO_LEN, &hello));
     broken = hello;
     broken.cipher_suite_count = 0U;
     WT_EXPECT_STATUS("a ClientHello with no ciphersuite is refused", WT_ERR_LIMIT,
@@ -633,10 +566,8 @@ static void test_message_refusals(void) {
     const size_t compression_at = 4U + 2U + 32U + 1U + 2U;
     memcpy(server_message, WT_RFC8448_SERVER_HELLO, sizeof(server_message));
     server_message[compression_at] = 1U;
-    WT_EXPECT_STATUS("a non-zero server compression method is refused",
-                     WT_ERR_PROTOCOL,
-                     wt_tls_server_hello_parse(server_message,
-                                               sizeof(server_message), &server));
+    WT_EXPECT_STATUS("a non-zero server compression method is refused", WT_ERR_PROTOCOL,
+                     wt_tls_server_hello_parse(server_message, sizeof(server_message), &server));
   }
 
   /* A ClientHello with no extensions at all: legal to parse, and the missing mandatory
@@ -652,7 +583,7 @@ static void test_message_refusals(void) {
     minimal[at++] = (uint8_t)(sizeof(minimal) - 4U);
     minimal[at++] = 0x03U;
     minimal[at++] = 0x03U;
-    at += 32U; /* random */
+    at += 32U;          /* random */
     minimal[at++] = 0U; /* empty session id */
     minimal[at++] = 0U; /* cipher suites: two bytes */
     minimal[at++] = 0x02U;
@@ -662,17 +593,14 @@ static void test_message_refusals(void) {
     minimal[at++] = 0U;
     minimal[at++] = 0U; /* no extensions */
     minimal[at++] = 0U;
-    WT_EXPECT_U64("the minimal message is as long as it should be", at,
-                  (uint64_t)sizeof(minimal));
+    WT_EXPECT_U64("the minimal message is as long as it should be", at, (uint64_t)sizeof(minimal));
     WT_EXPECT_OK("a ClientHello with no extensions parses",
                  wt_tls_client_hello_parse(minimal, sizeof(minimal), &parsed));
     WT_EXPECT_U64("with no extensions", 0U, (uint64_t)parsed.extensions.count);
-    extension = wt_tls_extensions_find(&parsed.extensions,
-                                       WT_TLS_EXTENSION_KEY_SHARE);
+    extension = wt_tls_extensions_find(&parsed.extensions, WT_TLS_EXTENSION_KEY_SHARE);
     WT_EXPECT_TRUE("and no key share to find", extension == NULL);
   }
 }
-
 
 static void test_certificate_messages(void) {
   wt_tls_certificate_t certificate;
@@ -683,18 +611,14 @@ static void test_certificate_messages(void) {
 
   /* RFC 8448's Certificate: one entry, an empty request context, and the DER of a real
    * certificate. */
-  WT_EXPECT_OK("the RFC's Certificate parses",
-               wt_tls_certificate_parse(WT_RFC8448_CERTIFICATE,
-                                        WT_RFC8448_CERTIFICATE_LEN, &certificate));
-  WT_EXPECT_U64("with no request context", 0U,
-                (uint64_t)certificate.request_context_len);
+  WT_EXPECT_OK(
+      "the RFC's Certificate parses",
+      wt_tls_certificate_parse(WT_RFC8448_CERTIFICATE, WT_RFC8448_CERTIFICATE_LEN, &certificate));
+  WT_EXPECT_U64("with no request context", 0U, (uint64_t)certificate.request_context_len);
   WT_EXPECT_U64("one entry", 1U, (uint64_t)certificate.count);
-  WT_EXPECT_U64("whose DER is 432 bytes", 432U,
-                (uint64_t)certificate.entries[0].der_len);
-  WT_EXPECT_U64("an X.509 SEQUENCE", 0x30U,
-                (uint64_t)certificate.entries[0].der[0]);
-  WT_EXPECT_U64("with no entry extensions", 0U,
-                (uint64_t)certificate.entries[0].extensions_len);
+  WT_EXPECT_U64("whose DER is 432 bytes", 432U, (uint64_t)certificate.entries[0].der_len);
+  WT_EXPECT_U64("an X.509 SEQUENCE", 0x30U, (uint64_t)certificate.entries[0].der[0]);
+  WT_EXPECT_U64("with no entry extensions", 0U, (uint64_t)certificate.entries[0].extensions_len);
 
   w = wt_writer_init(rebuilt, sizeof(rebuilt));
   WT_EXPECT_OK("and it re-encodes", wt_tls_certificate_encode(&certificate, &w));
@@ -712,11 +636,9 @@ static void test_certificate_messages(void) {
     size_t message_len = 0U;
     memset(&params, 0, sizeof(params));
     WT_EXPECT_OK("an empty chain builds",
-                 wt_tls_certificate_build(&params, message, sizeof(message),
-                                          &message_len));
+                 wt_tls_certificate_build(&params, message, sizeof(message), &message_len));
     WT_EXPECT_U64("as eight bytes", 8U, (uint64_t)message_len);
-    WT_EXPECT_OK("and parses back",
-                 wt_tls_certificate_parse(message, message_len, &parsed));
+    WT_EXPECT_OK("and parses back", wt_tls_certificate_parse(message, message_len, &parsed));
     WT_EXPECT_U64("with no entries", 0U, (uint64_t)parsed.count);
   }
 
@@ -724,18 +646,13 @@ static void test_certificate_messages(void) {
    * signature. */
   WT_EXPECT_OK("the RFC's CertificateVerify parses",
                wt_tls_certificate_verify_parse(WT_RFC8448_CERTIFICATE_VERIFY,
-                                               WT_RFC8448_CERTIFICATE_VERIFY_LEN,
-                                               &verify));
-  WT_EXPECT_U64("with the scheme the RFC used",
-                (uint64_t)WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256,
+                                               WT_RFC8448_CERTIFICATE_VERIFY_LEN, &verify));
+  WT_EXPECT_U64("with the scheme the RFC used", (uint64_t)WT_TLS_SIGNATURE_RSA_PSS_RSAE_SHA256,
                 (uint64_t)verify.scheme);
-  WT_EXPECT_U64("and a 128-byte signature", 128U,
-                (uint64_t)verify.signature_len);
+  WT_EXPECT_U64("and a 128-byte signature", 128U, (uint64_t)verify.signature_len);
   w = wt_writer_init(rebuilt, sizeof(rebuilt));
-  WT_EXPECT_OK("and it re-encodes",
-               wt_tls_certificate_verify_encode(&verify, &w));
-  WT_EXPECT_U64("to the same length",
-                (uint64_t)WT_RFC8448_CERTIFICATE_VERIFY_LEN,
+  WT_EXPECT_OK("and it re-encodes", wt_tls_certificate_verify_encode(&verify, &w));
+  WT_EXPECT_U64("to the same length", (uint64_t)WT_RFC8448_CERTIFICATE_VERIFY_LEN,
                 (uint64_t)wt_writer_offset(&w));
   WT_EXPECT_BYTES("and the same bytes", WT_RFC8448_CERTIFICATE_VERIFY, rebuilt,
                   WT_RFC8448_CERTIFICATE_VERIFY_LEN);
@@ -749,39 +666,36 @@ static void test_certificate_messages(void) {
     size_t message_len = 0U;
 
     WT_EXPECT_OK("the CertificateVerify builder reproduces the RFC's message",
-                 wt_tls_certificate_verify_build(
-                     verify.scheme, verify.signature, verify.signature_len, message,
-                     sizeof(message), &message_len));
-    WT_EXPECT_U64("as the same length",
-                  (uint64_t)WT_RFC8448_CERTIFICATE_VERIFY_LEN,
+                 wt_tls_certificate_verify_build(verify.scheme, verify.signature,
+                                                 verify.signature_len, message, sizeof(message),
+                                                 &message_len));
+    WT_EXPECT_U64("as the same length", (uint64_t)WT_RFC8448_CERTIFICATE_VERIFY_LEN,
                   (uint64_t)message_len);
     WT_EXPECT_BYTES("and the same bytes", WT_RFC8448_CERTIFICATE_VERIFY, message,
                     WT_RFC8448_CERTIFICATE_VERIFY_LEN);
 
     WT_EXPECT_STATUS("a buffer too small for the message is refused", WT_ERR_LIMIT,
-                     wt_tls_certificate_verify_build(
-                         verify.scheme, verify.signature, verify.signature_len,
-                         message, 4U, &message_len));
+                     wt_tls_certificate_verify_build(verify.scheme, verify.signature,
+                                                     verify.signature_len, message, 4U,
+                                                     &message_len));
     WT_EXPECT_U64("and no length is reported", 0U, (uint64_t)message_len);
     WT_EXPECT_STATUS("a NULL output buffer is refused", WT_ERR_INVALID_ARGUMENT,
-                     wt_tls_certificate_verify_build(
-                         verify.scheme, verify.signature, verify.signature_len, NULL,
-                         sizeof(message), &message_len));
+                     wt_tls_certificate_verify_build(verify.scheme, verify.signature,
+                                                     verify.signature_len, NULL, sizeof(message),
+                                                     &message_len));
   }
 
   /* Finished: the RFC's message carries the verify data the key schedule test uses. */
   WT_EXPECT_OK("the RFC's Finished parses",
                wt_tls_finished_parse(WT_RFC8448_SERVER_FINISHED_MESSAGE,
-                                     WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN,
-                                     finished));
-  WT_EXPECT_BYTES("to the verify data the key schedule derives",
-                  WT_RFC8448_SERVER_FINISHED, finished, WT_TLS13_FINISHED_LEN);
+                                     WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN, finished));
+  WT_EXPECT_BYTES("to the verify data the key schedule derives", WT_RFC8448_SERVER_FINISHED,
+                  finished, WT_TLS13_FINISHED_LEN);
   {
     uint8_t message[WT_TLS13_FINISHED_LEN + WT_TLS_HANDSHAKE_HEADER_LEN];
     size_t message_len = 0U;
-    WT_EXPECT_OK("and it builds",
-                 wt_tls_finished_build(WT_RFC8448_SERVER_FINISHED, message,
-                                       sizeof(message), &message_len));
+    WT_EXPECT_OK("and it builds", wt_tls_finished_build(WT_RFC8448_SERVER_FINISHED, message,
+                                                        sizeof(message), &message_len));
     WT_EXPECT_BYTES("byte for byte", WT_RFC8448_SERVER_FINISHED_MESSAGE, message,
                     WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN);
   }
@@ -808,8 +722,7 @@ static void test_certificate_messages(void) {
                      wt_tls_finished_parse(broken, 35U, finished));
     WT_EXPECT_STATUS("a NULL Finished output is refused", WT_ERR_INVALID_ARGUMENT,
                      wt_tls_finished_parse(WT_RFC8448_SERVER_FINISHED_MESSAGE,
-                                           WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN,
-                                           NULL));
+                                           WT_RFC8448_SERVER_FINISHED_MESSAGE_LEN, NULL));
 
     {
       wt_tls_certificate_entry_t entry;
@@ -823,8 +736,7 @@ static void test_certificate_messages(void) {
       params.entries = &entry;
       params.count = 1U;
       WT_EXPECT_STATUS("a buffer too small for a certificate is refused", WT_ERR_LIMIT,
-                       wt_tls_certificate_build(&params, small, sizeof(small),
-                                                &small_len));
+                       wt_tls_certificate_build(&params, small, sizeof(small), &small_len));
       WT_EXPECT_U64("and no length is reported", 0U, (uint64_t)small_len);
       WT_EXPECT_STATUS("a NULL output is refused", WT_ERR_INVALID_ARGUMENT,
                        wt_tls_certificate_build(&params, NULL, 0U, &small_len));
@@ -868,19 +780,16 @@ static void test_certificate_messages(void) {
       params.request_context_len = 0U;
       params.entries = &entry;
       params.count = 1U;
-      WT_EXPECT_STATUS("an entry with no certificate is refused",
-                       WT_ERR_INVALID_ARGUMENT,
-                       wt_tls_certificate_build(&params, message, sizeof(message),
-                                                &message_len));
+      WT_EXPECT_STATUS("an entry with no certificate is refused", WT_ERR_INVALID_ARGUMENT,
+                       wt_tls_certificate_build(&params, message, sizeof(message), &message_len));
     }
 
     /* A CertificateVerify whose signature length overruns its body. */
     {
-      static const uint8_t overrun[] = {0x0fU, 0x00U, 0x00U, 0x06U,
-                                        0x08U, 0x04U, 0x00U, 0x10U, 0x00U, 0x00U};
+      static const uint8_t overrun[] = {0x0fU, 0x00U, 0x00U, 0x06U, 0x08U,
+                                        0x04U, 0x00U, 0x10U, 0x00U, 0x00U};
       WT_EXPECT_STATUS("a signature that overruns is refused", WT_ERR_PROTOCOL,
-                       wt_tls_certificate_verify_parse(overrun, sizeof(overrun),
-                                                       &verify));
+                       wt_tls_certificate_verify_parse(overrun, sizeof(overrun), &verify));
     }
   }
 }
@@ -911,8 +820,7 @@ static void test_encrypted_extensions_build(void) {
   list.entries[1].len = sizeof(transport_parameters);
 
   WT_EXPECT_OK("EncryptedExtensions builds",
-               wt_tls_encrypted_extensions_build(&list, message, sizeof(message),
-                                                 &message_len));
+               wt_tls_encrypted_extensions_build(&list, message, sizeof(message), &message_len));
   w = wt_writer_init(encoded, sizeof(encoded));
   WT_EXPECT_OK("the encoder writes the same message",
                wt_tls_encrypted_extensions_encode(&list, &w));
@@ -931,16 +839,14 @@ static void test_encrypted_extensions_build(void) {
   extension = wt_tls_extensions_find(&parsed, WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS);
   WT_EXPECT_TRUE("and the transport parameters", extension != NULL);
   if (extension != NULL) {
-    WT_EXPECT_BYTES("whose body round-trips too", transport_parameters,
-                    extension->data, sizeof(transport_parameters));
+    WT_EXPECT_BYTES("whose body round-trips too", transport_parameters, extension->data,
+                    sizeof(transport_parameters));
   }
 
   WT_EXPECT_STATUS("a NULL extension list is refused", WT_ERR_INVALID_ARGUMENT,
-                   wt_tls_encrypted_extensions_build(NULL, message, sizeof(message),
-                                                     &message_len));
+                   wt_tls_encrypted_extensions_build(NULL, message, sizeof(message), &message_len));
   WT_EXPECT_STATUS("a short buffer is refused", WT_ERR_LIMIT,
-                   wt_tls_encrypted_extensions_build(&list, message, 4U,
-                                                     &message_len));
+                   wt_tls_encrypted_extensions_build(&list, message, 4U, &message_len));
   WT_EXPECT_U64("and no length is reported", 0U, (uint64_t)message_len);
 }
 

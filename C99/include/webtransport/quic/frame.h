@@ -284,8 +284,7 @@ typedef struct wt_quic_frame {
  * the code says what to tell the peer, which is what the close path needs. A
  * caller that ignores the code still gets a correct refusal, and one that
  * reports it gets the RFC's code rather than a generic one. */
-wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
-                                 wt_quic_error_t *out_error);
+wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out, wt_quic_error_t *out_error);
 
 /* Parse every frame in a buffer. Calls `visit` for each in order, stopping at
  * the first refusal and returning it. The visitor returns WT_OK to continue or
@@ -294,8 +293,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
  *
  * The frames share one structure that is reused for each call, so a visitor
  * that needs to keep a frame must copy what it needs. */
-typedef wt_status_t (*wt_quic_frame_visitor_fn)(void *context,
-                                                const wt_quic_frame_t *frame);
+typedef wt_status_t (*wt_quic_frame_visitor_fn)(void *context, const wt_quic_frame_t *frame);
 
 wt_status_t wt_quic_frames_decode(const uint8_t *data, size_t length,
                                   wt_quic_frame_visitor_fn visit, void *context,
@@ -310,8 +308,7 @@ wt_status_t wt_quic_frames_decode(const uint8_t *data, size_t length,
  * pays quadratic time in the number of ranges, which is why the frames decoder
  * hands the whole frame to a visitor that can walk the list once; this accessor
  * is for a caller that wants one range. */
-wt_status_t wt_quic_frame_ack_range_at(const wt_quic_frame_t *frame,
-                                       uint64_t index,
+wt_status_t wt_quic_frame_ack_range_at(const wt_quic_frame_t *frame, uint64_t index,
                                        wt_quic_ack_range_t *out);
 
 /* Encode a frame through a writer. Returns WT_OK, or WT_ERR_INVALID_ARGUMENT

@@ -24,16 +24,14 @@ static void test_an_unattempted_scenario_is_not_a_pass(void) {
 
   WT_EXPECT_OK("a pass is recorded",
                wt_cli_report_add(&report, "varint-boundaries", WT_CLI_RESULT_PASSED, "all forms"));
-  WT_EXPECT_OK("a failure is recorded",
-               wt_cli_report_add(&report, "capsule-roundtrip", WT_CLI_RESULT_FAILED, "length wrong"));
+  WT_EXPECT_OK("a failure is recorded", wt_cli_report_add(&report, "capsule-roundtrip",
+                                                          WT_CLI_RESULT_FAILED, "length wrong"));
   WT_EXPECT_OK("and an unattempted one is recorded as such",
                wt_cli_report_add(&report, "session-over-udp", WT_CLI_RESULT_UNSUPPORTED,
                                  "needs the packet-session wiring"));
   WT_EXPECT_U64("three scenarios", 3U, (uint64_t)wt_cli_report_count(&report));
-  WT_EXPECT_U64("one passed", 1U,
-                (uint64_t)wt_cli_report_count_of(&report, WT_CLI_RESULT_PASSED));
-  WT_EXPECT_U64("one failed", 1U,
-                (uint64_t)wt_cli_report_count_of(&report, WT_CLI_RESULT_FAILED));
+  WT_EXPECT_U64("one passed", 1U, (uint64_t)wt_cli_report_count_of(&report, WT_CLI_RESULT_PASSED));
+  WT_EXPECT_U64("one failed", 1U, (uint64_t)wt_cli_report_count_of(&report, WT_CLI_RESULT_FAILED));
   WT_EXPECT_U64("one unsupported", 1U,
                 (uint64_t)wt_cli_report_count_of(&report, WT_CLI_RESULT_UNSUPPORTED));
   WT_EXPECT_INT("and the exit status is the failure, not the pass", 1,
@@ -57,8 +55,9 @@ static void test_an_unattempted_scenario_is_not_a_pass(void) {
     WT_EXPECT_TRUE("with a name", strstr(buffer, "\"name\":\"varint-boundaries\"") != NULL);
     WT_EXPECT_TRUE("a result", strstr(buffer, "\"result\":\"passed\"") != NULL);
     WT_EXPECT_TRUE("a detail", strstr(buffer, "\"detail\":\"all forms\"") != NULL);
-    WT_EXPECT_TRUE("and a summary", strstr(buffer, "\"summary\":{\"total\":3,\"passed\":1,"
-                                                   "\"failed\":1,\"unsupported\":1,\"rejected\":0}") != NULL);
+    WT_EXPECT_TRUE("and a summary",
+                   strstr(buffer, "\"summary\":{\"total\":3,\"passed\":1,"
+                                  "\"failed\":1,\"unsupported\":1,\"rejected\":0}") != NULL);
   }
 
   /* Without a failure, an unattempted scenario is still not success: the status says so. */
@@ -104,14 +103,18 @@ static void test_the_report_refuses_rather_than_drops(void) {
    * is added with -- and a name two bytes too long was exactly how a row disappeared from a report while the run
    * still read as green (WT-165). */
   wt_cli_report_init(&report);
-  WT_EXPECT_U64("a fresh report has refused nothing", 0U, (uint64_t)wt_cli_report_rejected(&report));
-  WT_EXPECT_OK("a pass is recorded", wt_cli_report_add(&report, "ok", WT_CLI_RESULT_PASSED, "fine"));
+  WT_EXPECT_U64("a fresh report has refused nothing", 0U,
+                (uint64_t)wt_cli_report_rejected(&report));
+  WT_EXPECT_OK("a pass is recorded",
+               wt_cli_report_add(&report, "ok", WT_CLI_RESULT_PASSED, "fine"));
   WT_EXPECT_INT("and the run is clean", 0, wt_cli_report_exit_status(&report));
   WT_EXPECT_STATUS("a name past the table is refused", WT_ERR_LIMIT,
                    wt_cli_report_add(&report, long_name, WT_CLI_RESULT_PASSED, "fine"));
   WT_EXPECT_U64("counted rather than dropped", 1U, (uint64_t)wt_cli_report_rejected(&report));
-  WT_EXPECT_U64("with the rows that landed still there", 1U, (uint64_t)wt_cli_report_count(&report));
-  WT_EXPECT_INT("and the run FAILS on it, whatever the rows say", 1, wt_cli_report_exit_status(&report));
+  WT_EXPECT_U64("with the rows that landed still there", 1U,
+                (uint64_t)wt_cli_report_count(&report));
+  WT_EXPECT_INT("and the run FAILS on it, whatever the rows say", 1,
+                wt_cli_report_exit_status(&report));
   {
     FILE *stream = tmpfile();
     char buffer[512];
@@ -152,7 +155,8 @@ static void test_the_text_report_says_the_same(void) {
     fclose(stream);
     WT_EXPECT_TRUE("the name is there", strstr(buffer, "varint-boundaries") != NULL);
     WT_EXPECT_TRUE("the result is there", strstr(buffer, "unsupported") != NULL);
-    WT_EXPECT_TRUE("and the summary counts", strstr(buffer, "1 passed, 0 failed, 1 unsupported") != NULL);
+    WT_EXPECT_TRUE("and the summary counts",
+                   strstr(buffer, "1 passed, 0 failed, 1 unsupported") != NULL);
   }
 }
 

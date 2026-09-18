@@ -294,7 +294,7 @@ static wt_status_t process_messages(wt_quic_handshake_t *handshake, wt_quic_spac
           return status;
         }
         /* The rest of the flight is built once and sent under the handshake keys. */
-      if (!handshake->server_flight_built) {
+        if (!handshake->server_flight_built) {
           uint8_t flight[WT_QUIC_HANDSHAKE_FLIGHT_MAX];
           size_t flight_len = 0U;
           status = wt_tls_server_flight(&handshake->server, flight, sizeof(flight), &flight_len);
@@ -530,11 +530,13 @@ wt_status_t wt_quic_handshake_flush(wt_quic_handshake_t *handshake, uint64_t now
       uint64_t offset = 0U;
       size_t length = 0U;
 
-      status = wt_quic_crypto_send_next(&handshake->send[space], crypto_range_max(handshake->connection),
-                                        &offset, &data, &length);
+      status =
+          wt_quic_crypto_send_next(&handshake->send[space], crypto_range_max(handshake->connection),
+                                   &offset, &data, &length);
       if (status == WT_ERR_STATE) break;
       if (status != WT_OK) return status;
-      status = wt_quic_connection_send_crypto(handshake->connection, space, offset, data, length, now);
+      status =
+          wt_quic_connection_send_crypto(handshake->connection, space, offset, data, length, now);
       if (status == WT_ERR_AGAIN || status == WT_ERR_LIMIT) return WT_OK;
       if (status != WT_OK) return status;
       status = wt_quic_crypto_send_advance(&handshake->send[space], length);
@@ -543,7 +545,8 @@ wt_status_t wt_quic_handshake_flush(wt_quic_handshake_t *handshake, uint64_t now
   }
 
   /* And the server's confirmation, once, when the handshake is complete. */
-  if (handshake->handshake_done_pending && handshake->connection->has_keys_out[WT_QUIC_SPACE_APPLICATION]) {
+  if (handshake->handshake_done_pending &&
+      handshake->connection->has_keys_out[WT_QUIC_SPACE_APPLICATION]) {
     wt_quic_frame_t frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_HANDSHAKE_DONE);
     status = wt_quic_connection_send_frame(handshake->connection, WT_QUIC_SPACE_APPLICATION, &frame,
                                            1, now);

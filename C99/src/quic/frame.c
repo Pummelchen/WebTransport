@@ -4,8 +4,8 @@
 
 #include "webtransport/checked.h"
 
-#include <string.h>
 #include "webtransport/endian.h"
+#include <string.h>
 
 /* A length field is a varint, so it can name more bytes than any packet can
  * hold. Every one of them is refused against the cursor's remaining bytes before
@@ -17,8 +17,8 @@
  * nothing to add -- and `wt_cursor_bytes(c, 0)` returns NULL for a cursor whose
  * buffer is NULL, which is a valid empty range. A caller testing the pointer
  * would refuse that frame; a caller testing the status does not. */
-static wt_status_t wt_quic_take(wt_cursor_t *c, uint64_t length,
-                                const uint8_t **out, size_t *out_length) {
+static wt_status_t wt_quic_take(wt_cursor_t *c, uint64_t length, const uint8_t **out,
+                                size_t *out_length) {
   size_t narrowed = 0U;
   if (out == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;
   *out = NULL;
@@ -109,14 +109,12 @@ const char *wt_quic_frame_kind_name(wt_quic_frame_type_t kind) {
   }
 }
 
-static wt_status_t wt_quic_decode_fail(wt_quic_error_t *out_error,
-                                       wt_quic_error_t code) {
+static wt_status_t wt_quic_decode_fail(wt_quic_error_t *out_error, wt_quic_error_t code) {
   if (out_error != NULL) *out_error = code;
   return WT_ERR_PROTOCOL;
 }
 
-wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
-                                 wt_quic_error_t *out_error) {
+wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out, wt_quic_error_t *out_error) {
   uint64_t type = 0U;
   size_t type_size = 0U;
 
@@ -204,8 +202,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
     case WT_QUIC_FRAME_RESET_STREAM:
       out->kind = WT_QUIC_FRAME_KIND_RESET_STREAM;
       if (wt_quic_read_varint(c, &out->as.reset_stream.id) != WT_OK ||
-          wt_quic_read_varint(c, &out->as.reset_stream.application_error_code) !=
-              WT_OK ||
+          wt_quic_read_varint(c, &out->as.reset_stream.application_error_code) != WT_OK ||
           wt_quic_read_varint(c, &out->as.reset_stream.final_size) != WT_OK) {
         return WT_ERR_TRUNCATED;
       }
@@ -214,18 +211,15 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
     case WT_QUIC_FRAME_RESET_STREAM_AT:
       out->kind = WT_QUIC_FRAME_KIND_RESET_STREAM_AT;
       if (wt_quic_read_varint(c, &out->as.reset_stream_at.id) != WT_OK ||
-          wt_quic_read_varint(
-              c, &out->as.reset_stream_at.application_error_code) != WT_OK ||
+          wt_quic_read_varint(c, &out->as.reset_stream_at.application_error_code) != WT_OK ||
           wt_quic_read_varint(c, &out->as.reset_stream_at.final_size) != WT_OK ||
-          wt_quic_read_varint(c, &out->as.reset_stream_at.reliable_size) !=
-              WT_OK) {
+          wt_quic_read_varint(c, &out->as.reset_stream_at.reliable_size) != WT_OK) {
         return WT_ERR_TRUNCATED;
       }
       /* The reliable size is the part of the stream that survives the reset, so
        * it cannot exceed the final size: nothing beyond the end of a stream can
        * be delivered. The Swift mirror refuses this at parse time too. */
-      if (out->as.reset_stream_at.reliable_size >
-          out->as.reset_stream_at.final_size) {
+      if (out->as.reset_stream_at.reliable_size > out->as.reset_stream_at.final_size) {
         return wt_quic_decode_fail(out_error, WT_QUIC_FRAME_ENCODING_ERROR);
       }
       return WT_OK;
@@ -233,8 +227,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
     case WT_QUIC_FRAME_STOP_SENDING:
       out->kind = WT_QUIC_FRAME_KIND_STOP_SENDING;
       if (wt_quic_read_varint(c, &out->as.stop_sending.id) != WT_OK ||
-          wt_quic_read_varint(c, &out->as.stop_sending.application_error_code) !=
-              WT_OK) {
+          wt_quic_read_varint(c, &out->as.stop_sending.application_error_code) != WT_OK) {
         return WT_ERR_TRUNCATED;
       }
       return WT_OK;
@@ -249,8 +242,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
         if (wt_quic_read_varint(c, &length) != WT_OK) return WT_ERR_TRUNCATED;
         /* One take: it advances the cursor, so calling it twice would read past
          * the field the first call already consumed. */
-        return wt_quic_take(c, length, &out->as.crypto.data,
-                            &out->as.crypto.length);
+        return wt_quic_take(c, length, &out->as.crypto.data, &out->as.crypto.length);
       }
 
     case WT_QUIC_FRAME_NEW_TOKEN: {
@@ -263,8 +255,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
       if (length == 0U) {
         return wt_quic_decode_fail(out_error, WT_QUIC_FRAME_ENCODING_ERROR);
       }
-      status = wt_quic_take(c, length, &out->as.new_token.token,
-                            &out->as.new_token.length);
+      status = wt_quic_take(c, length, &out->as.new_token.token, &out->as.new_token.length);
       out->as.new_token.token_length = length;
       return status;
     }
@@ -287,9 +278,9 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
     case WT_QUIC_FRAME_MAX_STREAMS_BIDI:
     case WT_QUIC_FRAME_MAX_STREAMS_UNI:
       out->kind = WT_QUIC_FRAME_KIND_MAX_STREAMS;
-      out->as.max_streams.direction =
-          (type == WT_QUIC_FRAME_MAX_STREAMS_BIDI) ? WT_QUIC_STREAM_BIDIRECTIONAL
-                                                   : WT_QUIC_STREAM_UNIDIRECTIONAL;
+      out->as.max_streams.direction = (type == WT_QUIC_FRAME_MAX_STREAMS_BIDI)
+                                          ? WT_QUIC_STREAM_BIDIRECTIONAL
+                                          : WT_QUIC_STREAM_UNIDIRECTIONAL;
       if (wt_quic_read_varint(c, &out->as.max_streams.maximum) != WT_OK) {
         return WT_ERR_TRUNCATED;
       }
@@ -319,10 +310,9 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
     case WT_QUIC_FRAME_STREAMS_BLOCKED_BIDI:
     case WT_QUIC_FRAME_STREAMS_BLOCKED_UNI:
       out->kind = WT_QUIC_FRAME_KIND_STREAMS_BLOCKED;
-      out->as.streams_blocked.direction =
-          (type == WT_QUIC_FRAME_STREAMS_BLOCKED_BIDI)
-              ? WT_QUIC_STREAM_BIDIRECTIONAL
-              : WT_QUIC_STREAM_UNIDIRECTIONAL;
+      out->as.streams_blocked.direction = (type == WT_QUIC_FRAME_STREAMS_BLOCKED_BIDI)
+                                              ? WT_QUIC_STREAM_BIDIRECTIONAL
+                                              : WT_QUIC_STREAM_UNIDIRECTIONAL;
       if (wt_quic_read_varint(c, &out->as.streams_blocked.maximum) != WT_OK) {
         return WT_ERR_TRUNCATED;
       }
@@ -335,8 +325,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
       uint8_t length = 0U;
       out->kind = WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID;
       if (wt_quic_read_varint(c, &out->as.new_connection_id.sequence) != WT_OK ||
-          wt_quic_read_varint(c, &out->as.new_connection_id.retire_prior_to) !=
-              WT_OK) {
+          wt_quic_read_varint(c, &out->as.new_connection_id.retire_prior_to) != WT_OK) {
         return WT_ERR_TRUNCATED;
       }
       /* RFC 9000 section 19.15: the length is a single byte, and "Values less
@@ -350,8 +339,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
       if (length < 1U || length > WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
         return wt_quic_decode_fail(out_error, WT_QUIC_FRAME_ENCODING_ERROR);
       }
-      out->as.new_connection_id.connection_id =
-          wt_cursor_bytes(c, (size_t)length);
+      out->as.new_connection_id.connection_id = wt_cursor_bytes(c, (size_t)length);
       if (out->as.new_connection_id.connection_id == NULL) {
         return WT_ERR_TRUNCATED;
       }
@@ -364,8 +352,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
       /* RFC 9000 section 19.15: a retire_prior_to above the sequence is a
        * FRAME_ENCODING_ERROR, since it would retire the connection ID the frame
        * is issuing. */
-      if (out->as.new_connection_id.retire_prior_to >
-          out->as.new_connection_id.sequence) {
+      if (out->as.new_connection_id.retire_prior_to > out->as.new_connection_id.sequence) {
         return wt_quic_decode_fail(out_error, WT_QUIC_FRAME_ENCODING_ERROR);
       }
       return WT_OK;
@@ -373,8 +360,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
 
     case WT_QUIC_FRAME_RETIRE_CONNECTION_ID:
       out->kind = WT_QUIC_FRAME_KIND_RETIRE_CONNECTION_ID;
-      if (wt_quic_read_varint(c, &out->as.retire_connection_id.sequence) !=
-          WT_OK) {
+      if (wt_quic_read_varint(c, &out->as.retire_connection_id.sequence) != WT_OK) {
         return WT_ERR_TRUNCATED;
       }
       return WT_OK;
@@ -403,8 +389,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
       }
       if (type == WT_QUIC_FRAME_CONNECTION_CLOSE_TRANSPORT) {
         out->as.connection_close.has_frame_type = 1;
-        if (wt_quic_read_varint(c, &out->as.connection_close.frame_type) !=
-            WT_OK) {
+        if (wt_quic_read_varint(c, &out->as.connection_close.frame_type) != WT_OK) {
           return WT_ERR_TRUNCATED;
         }
       } else {
@@ -440,8 +425,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
       {
         uint64_t length = 0U;
         if (wt_quic_read_varint(c, &length) != WT_OK) return WT_ERR_TRUNCATED;
-        return wt_quic_take(c, length, &out->as.datagram.data,
-                            &out->as.datagram.length);
+        return wt_quic_take(c, length, &out->as.datagram.data, &out->as.datagram.length);
       }
     }
 
@@ -467,8 +451,7 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out,
         }
         if (out->as.stream.has_length) {
           if (wt_quic_read_varint(c, &length) != WT_OK) return WT_ERR_TRUNCATED;
-          return wt_quic_take(c, length, &out->as.stream.data,
-                              &out->as.stream.length);
+          return wt_quic_take(c, length, &out->as.stream.data, &out->as.stream.length);
         }
         {
           size_t remaining = 0U;
@@ -506,8 +489,7 @@ wt_status_t wt_quic_frames_decode(const uint8_t *data, size_t length,
   return WT_OK;
 }
 
-wt_status_t wt_quic_frame_ack_range_at(const wt_quic_frame_t *frame,
-                                       uint64_t index,
+wt_status_t wt_quic_frame_ack_range_at(const wt_quic_frame_t *frame, uint64_t index,
                                        wt_quic_ack_range_t *out) {
   wt_cursor_t c;
   uint64_t i;
@@ -526,7 +508,9 @@ wt_status_t wt_quic_frame_ack_range_at(const wt_quic_frame_t *frame,
 
 /* --------------------------------------------------------------- encoding */
 
-static wt_status_t wt_quic_encode_fail(void) { return WT_ERR_INVALID_ARGUMENT; }
+static wt_status_t wt_quic_encode_fail(void) {
+  return WT_ERR_INVALID_ARGUMENT;
+}
 
 wt_status_t wt_quic_frame_encode(wt_writer_t *w, const wt_quic_frame_t *frame) {
   if (w == NULL || frame == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -543,9 +527,8 @@ wt_status_t wt_quic_frame_encode(wt_writer_t *w, const wt_quic_frame_t *frame) {
 
     case WT_QUIC_FRAME_KIND_ACK: {
       uint64_t i;
-      (void)wt_quic_writer_varint(w, frame->as.ack.has_ecn
-                                         ? WT_QUIC_FRAME_ACK_ECN
-                                         : WT_QUIC_FRAME_ACK);
+      (void)wt_quic_writer_varint(w, frame->as.ack.has_ecn ? WT_QUIC_FRAME_ACK_ECN
+                                                           : WT_QUIC_FRAME_ACK);
       (void)wt_quic_writer_varint(w, frame->as.ack.largest);
       (void)wt_quic_writer_varint(w, frame->as.ack.delay);
       (void)wt_quic_writer_varint(w, frame->as.ack.range_count);
@@ -604,20 +587,17 @@ wt_status_t wt_quic_frame_encode(wt_writer_t *w, const wt_quic_frame_t *frame) {
     case WT_QUIC_FRAME_KIND_RESET_STREAM:
       (void)wt_quic_writer_varint(w, WT_QUIC_FRAME_RESET_STREAM);
       (void)wt_quic_writer_varint(w, frame->as.reset_stream.id);
-      (void)wt_quic_writer_varint(w,
-                                  frame->as.reset_stream.application_error_code);
+      (void)wt_quic_writer_varint(w, frame->as.reset_stream.application_error_code);
       (void)wt_quic_writer_varint(w, frame->as.reset_stream.final_size);
       return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 
     case WT_QUIC_FRAME_KIND_RESET_STREAM_AT:
-      if (frame->as.reset_stream_at.reliable_size >
-          frame->as.reset_stream_at.final_size) {
+      if (frame->as.reset_stream_at.reliable_size > frame->as.reset_stream_at.final_size) {
         return wt_quic_encode_fail();
       }
       (void)wt_quic_writer_varint(w, WT_QUIC_FRAME_RESET_STREAM_AT);
       (void)wt_quic_writer_varint(w, frame->as.reset_stream_at.id);
-      (void)wt_quic_writer_varint(
-          w, frame->as.reset_stream_at.application_error_code);
+      (void)wt_quic_writer_varint(w, frame->as.reset_stream_at.application_error_code);
       (void)wt_quic_writer_varint(w, frame->as.reset_stream_at.final_size);
       (void)wt_quic_writer_varint(w, frame->as.reset_stream_at.reliable_size);
       return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
@@ -625,8 +605,7 @@ wt_status_t wt_quic_frame_encode(wt_writer_t *w, const wt_quic_frame_t *frame) {
     case WT_QUIC_FRAME_KIND_STOP_SENDING:
       (void)wt_quic_writer_varint(w, WT_QUIC_FRAME_STOP_SENDING);
       (void)wt_quic_writer_varint(w, frame->as.stop_sending.id);
-      (void)wt_quic_writer_varint(
-          w, frame->as.stop_sending.application_error_code);
+      (void)wt_quic_writer_varint(w, frame->as.stop_sending.application_error_code);
       return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 
     case WT_QUIC_FRAME_KIND_MAX_DATA:
@@ -641,10 +620,10 @@ wt_status_t wt_quic_frame_encode(wt_writer_t *w, const wt_quic_frame_t *frame) {
       return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 
     case WT_QUIC_FRAME_KIND_MAX_STREAMS:
-      (void)wt_quic_writer_varint(
-          w, (frame->as.max_streams.direction == WT_QUIC_STREAM_BIDIRECTIONAL)
-                 ? WT_QUIC_FRAME_MAX_STREAMS_BIDI
-                 : WT_QUIC_FRAME_MAX_STREAMS_UNI);
+      (void)wt_quic_writer_varint(w,
+                                  (frame->as.max_streams.direction == WT_QUIC_STREAM_BIDIRECTIONAL)
+                                      ? WT_QUIC_FRAME_MAX_STREAMS_BIDI
+                                      : WT_QUIC_FRAME_MAX_STREAMS_UNI);
       (void)wt_quic_writer_varint(w, frame->as.max_streams.maximum);
       return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 
@@ -669,14 +648,12 @@ wt_status_t wt_quic_frame_encode(wt_writer_t *w, const wt_quic_frame_t *frame) {
 
     case WT_QUIC_FRAME_KIND_NEW_CONNECTION_ID:
       if (frame->as.new_connection_id.connection_id_length < 1U ||
-          frame->as.new_connection_id.connection_id_length >
-              WT_QUIC_MAX_CONNECTION_ID_LENGTH ||
+          frame->as.new_connection_id.connection_id_length > WT_QUIC_MAX_CONNECTION_ID_LENGTH ||
           frame->as.new_connection_id.connection_id == NULL ||
           frame->as.new_connection_id.stateless_reset_token == NULL) {
         return wt_quic_encode_fail();
       }
-      if (frame->as.new_connection_id.retire_prior_to >
-          frame->as.new_connection_id.sequence) {
+      if (frame->as.new_connection_id.retire_prior_to > frame->as.new_connection_id.sequence) {
         return wt_quic_encode_fail();
       }
       (void)wt_quic_writer_varint(w, WT_QUIC_FRAME_NEW_CONNECTION_ID);
@@ -697,23 +674,20 @@ wt_status_t wt_quic_frame_encode(wt_writer_t *w, const wt_quic_frame_t *frame) {
     case WT_QUIC_FRAME_KIND_PATH_CHALLENGE:
       if (frame->as.path_challenge.data == NULL) return wt_quic_encode_fail();
       (void)wt_quic_writer_varint(w, WT_QUIC_FRAME_PATH_CHALLENGE);
-      wt_writer_bytes(w, frame->as.path_challenge.data,
-                      WT_QUIC_PATH_CHALLENGE_LENGTH);
+      wt_writer_bytes(w, frame->as.path_challenge.data, WT_QUIC_PATH_CHALLENGE_LENGTH);
       return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 
     case WT_QUIC_FRAME_KIND_PATH_RESPONSE:
       if (frame->as.path_response.data == NULL) return wt_quic_encode_fail();
       (void)wt_quic_writer_varint(w, WT_QUIC_FRAME_PATH_RESPONSE);
-      wt_writer_bytes(w, frame->as.path_response.data,
-                      WT_QUIC_PATH_CHALLENGE_LENGTH);
+      wt_writer_bytes(w, frame->as.path_response.data, WT_QUIC_PATH_CHALLENGE_LENGTH);
       return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 
     case WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT:
     case WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION:
-      (void)wt_quic_writer_varint(
-          w, (frame->kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT)
-                 ? WT_QUIC_FRAME_CONNECTION_CLOSE_TRANSPORT
-                 : WT_QUIC_FRAME_CONNECTION_CLOSE_APPLICATION);
+      (void)wt_quic_writer_varint(w, (frame->kind == WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT)
+                                         ? WT_QUIC_FRAME_CONNECTION_CLOSE_TRANSPORT
+                                         : WT_QUIC_FRAME_CONNECTION_CLOSE_APPLICATION);
       (void)wt_quic_writer_varint(w, frame->as.connection_close.error_code);
       if (frame->as.connection_close.has_frame_type) {
         if (frame->kind != WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT) {
@@ -727,8 +701,7 @@ wt_status_t wt_quic_frame_encode(wt_writer_t *w, const wt_quic_frame_t *frame) {
          * 19.19 says an endpoint that cannot name the frame uses 0. */
         (void)wt_quic_writer_varint(w, 0U);
       }
-      (void)wt_quic_writer_varint(
-          w, (uint64_t)frame->as.connection_close.reason_length);
+      (void)wt_quic_writer_varint(w, (uint64_t)frame->as.connection_close.reason_length);
       wt_writer_bytes(w, frame->as.connection_close.reason,
                       frame->as.connection_close.reason_length);
       return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;

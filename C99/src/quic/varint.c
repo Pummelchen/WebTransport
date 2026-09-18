@@ -49,8 +49,7 @@ size_t wt_quic_writer_varint(wt_writer_t *w, uint64_t value) {
   return size;
 }
 
-wt_status_t wt_quic_varint_decode_sized(wt_cursor_t *c, uint64_t *out,
-                                        size_t *out_size) {
+wt_status_t wt_quic_varint_decode_sized(wt_cursor_t *c, uint64_t *out, size_t *out_size) {
   uint8_t first;
   size_t size;
   uint64_t value;

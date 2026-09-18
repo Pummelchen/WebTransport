@@ -15,9 +15,9 @@
 #include <string.h>
 
 #include "webtransport/quic/stream.h"
+#include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
-#include "webtransport/quic/varint.h"
 
 #include "driver_internal.h"
 
@@ -162,7 +162,8 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
     return WT_ERR_STATE;
   }
 
-  status = transport->send_stream(transport->context, stream_id, framed, wt_writer_offset(&w), fin, now);
+  status =
+      transport->send_stream(transport->context, stream_id, framed, wt_writer_offset(&w), fin, now);
   if (status != WT_OK) return status;
 
   /* Remembered only once the bytes are away: an owner that has not sent anything yet would make the receive
@@ -176,7 +177,8 @@ wt_status_t wt_http3_driver_open_data_stream(wt_http3_driver_t *driver,
 }
 
 wt_status_t wt_http3_driver_resend_request(wt_http3_driver_t *driver,
-                                           const wt_http3_driver_transport_t *transport, uint64_t now) {
+                                           const wt_http3_driver_transport_t *transport,
+                                           uint64_t now) {
   if (driver == NULL || transport == NULL || transport->send_stream == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
@@ -194,7 +196,8 @@ wt_status_t wt_http3_driver_classify_bidi_start(const uint8_t *bytes, size_t len
   size_t type_bytes;
   size_t session_bytes;
 
-  if (out_kind == NULL || out_session_id == NULL || out_consumed == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (out_kind == NULL || out_session_id == NULL || out_consumed == NULL)
+    return WT_ERR_INVALID_ARGUMENT;
   *out_kind = WT_HTTP3_BIDI_START_REQUEST;
   *out_session_id = 0U;
   *out_consumed = 0U;
@@ -221,7 +224,8 @@ wt_status_t wt_http3_driver_classify_bidi_start(const uint8_t *bytes, size_t len
 wt_status_t wt_http3_driver_open_session_stream(wt_http3_driver_t *driver,
                                                 const wt_http3_driver_transport_t *transport,
                                                 const wt_http3_settings_t *settings, uint64_t now,
-                                                uint64_t *out_stream_id, wt_http3_error_t *out_error) {
+                                                uint64_t *out_stream_id,
+                                                wt_http3_error_t *out_error) {
   uint64_t stream_id = 0U;
   wt_status_t status;
 
@@ -256,8 +260,8 @@ wt_status_t wt_http3_driver_open_session_stream(wt_http3_driver_t *driver,
 wt_status_t wt_http3_driver_send_session_request(wt_http3_driver_t *driver,
                                                  const wt_http3_driver_transport_t *transport,
                                                  uint64_t stream_id, const char *authority,
-                                                 const char *path, uint64_t peer_max_entries, uint64_t now,
-                                                 wt_http3_error_t *out_error) {
+                                                 const char *path, uint64_t peer_max_entries,
+                                                 uint64_t now, wt_http3_error_t *out_error) {
   wt_http3_message_t request;
   const char *token;
 
@@ -286,19 +290,22 @@ wt_status_t wt_http3_driver_send_session_request(wt_http3_driver_t *driver,
   request.protocol = (const uint8_t *)token;
   request.protocol_length = strlen(token);
 
-  return wt_http3_driver_send_message(driver, transport, stream_id, &request, peer_max_entries, 0, now);
+  return wt_http3_driver_send_message(driver, transport, stream_id, &request, peer_max_entries, 0,
+                                      now);
 }
 
 wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
                                           const wt_http3_driver_transport_t *transport,
-                                          const wt_http3_settings_t *settings, const char *authority,
-                                          const char *path, uint64_t peer_max_entries, uint64_t now,
+                                          const wt_http3_settings_t *settings,
+                                          const char *authority, const char *path,
+                                          uint64_t peer_max_entries, uint64_t now,
                                           uint64_t *out_stream_id, wt_http3_error_t *out_error) {
   uint64_t stream_id = 0U;
   wt_status_t status;
 
   if (out_stream_id == NULL) return WT_ERR_INVALID_ARGUMENT;
-  status = wt_http3_driver_open_session_stream(driver, transport, settings, now, &stream_id, out_error);
+  status =
+      wt_http3_driver_open_session_stream(driver, transport, settings, now, &stream_id, out_error);
   if (status != WT_OK) return status;
   status = wt_http3_driver_send_session_request(driver, transport, stream_id, authority, path,
                                                 peer_max_entries, now, out_error);
@@ -309,8 +316,8 @@ wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
 
 wt_status_t wt_http3_driver_send_response(wt_http3_driver_t *driver,
                                           const wt_http3_driver_transport_t *transport,
-                                          uint64_t stream_id, uint32_t status, uint64_t peer_max_entries,
-                                          int fin, uint64_t now) {
+                                          uint64_t stream_id, uint32_t status,
+                                          uint64_t peer_max_entries, int fin, uint64_t now) {
   wt_http3_message_t response;
 
   if (driver == NULL || driver->endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -321,8 +328,8 @@ wt_status_t wt_http3_driver_send_response(wt_http3_driver_t *driver,
   response.type = WT_HTTP3_HEADER_RESPONSE;
   response.status = (uint64_t)status;
   response.has_status = 1;
-  return wt_http3_driver_send_message(driver, transport, stream_id, &response, peer_max_entries, fin,
-                                      now);
+  return wt_http3_driver_send_message(driver, transport, stream_id, &response, peer_max_entries,
+                                      fin, now);
 }
 
 wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,

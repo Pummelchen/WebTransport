@@ -29,8 +29,8 @@
 
 #include "webtransport/http3/message.h"
 #include "webtransport/http3/settings.h"
-#include "webtransport/webtransport/protocol.h"
 #include "webtransport/status.h"
+#include "webtransport/webtransport/protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -90,7 +90,6 @@ const char *wt_webtransport_upgrade_token_value(wt_webtransport_upgrade_token_t 
 #define WT_HTTP3_SETTING_WT_MAX_SESSIONS ((uint64_t)0xc671706a)
 #define WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED ((uint64_t)0x2b603742)
 #define WT_HTTP3_SETTING_WT_MAX_SESSIONS_DEPRECATED ((uint64_t)0x2b603743)
-
 
 /* The draft-16 settings that carry a session's INITIAL flow-control limits (section 5.1).
  * They are what turns the session's own flow control on: an endpoint that omits all three
@@ -153,23 +152,24 @@ typedef struct wt_webtransport_session_request {
  * When nothing can be selected and `require_selection` is set, the decision becomes a rejection with
  * WT_WEBTRANSPORT_REJECT_PROTOCOL_REQUIRED -- the draft's own "requirements not met" answer -- rather than a
  * session that quietly speaks no sub-protocol while the client believes one was chosen. */
-wt_status_t wt_webtransport_session_request_negotiate(wt_webtransport_session_request_t *decision,
-                                                      const wt_webtransport_protocol_list_t *offered,
-                                                      const wt_webtransport_protocol_list_t *supported,
-                                                      int require_selection);
+wt_status_t wt_webtransport_session_request_negotiate(
+    wt_webtransport_session_request_t *decision, const wt_webtransport_protocol_list_t *offered,
+    const wt_webtransport_protocol_list_t *supported, int require_selection);
 
 /* The client's side of the same conversation: the response's `wt-protocol` value, which must name a token
  * THIS CLIENT offered. A value that names anything else is WT_ERR_PROTOCOL, because accepting it would leave
  * the two ends speaking different sub-protocols. */
-wt_status_t wt_webtransport_session_response_selected_protocol(
-    const uint8_t *value, size_t length, const wt_webtransport_protocol_list_t *offered,
-    wt_webtransport_protocol_token_t *out);
+wt_status_t
+wt_webtransport_session_response_selected_protocol(const uint8_t *value, size_t length,
+                                                   const wt_webtransport_protocol_list_t *offered,
+                                                   wt_webtransport_protocol_token_t *out);
 
 /* Decide what a decoded request is. `message` must have come from
  * `wt_http3_message_decode` with WT_HTTP3_HEADER_REQUEST. */
-wt_status_t wt_webtransport_session_request_validate(
-    const wt_http3_message_t *message, const wt_webtransport_request_policy_t *policy,
-    wt_webtransport_session_request_t *out, wt_http3_error_t *out_error);
+wt_status_t wt_webtransport_session_request_validate(const wt_http3_message_t *message,
+                                                     const wt_webtransport_request_policy_t *policy,
+                                                     wt_webtransport_session_request_t *out,
+                                                     wt_http3_error_t *out_error);
 
 /* What a WebTransport endpoint MUST advertise in its SETTINGS (section 3.1), in one place -- the same rule the
  * mandatory transport parameters follow in `wt_quic_transport_parameters_build`, and for the same reason: a

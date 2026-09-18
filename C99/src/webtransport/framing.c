@@ -26,8 +26,8 @@ wt_status_t wt_webtransport_stream_prefix_write(wt_writer_t *w, int unidirection
   /* A prefix can only name a session, so a caller asking for another ID has a bug
    * rather than a peer. */
   if (!wt_webtransport_is_session_stream_id(session_id)) return WT_ERR_INVALID_ARGUMENT;
-  (void)wt_quic_writer_varint(w,
-                              unidirectional ? WT_WEBTRANSPORT_STREAM_UNI : WT_WEBTRANSPORT_STREAM_BIDI);
+  (void)wt_quic_writer_varint(w, unidirectional ? WT_WEBTRANSPORT_STREAM_UNI
+                                                : WT_WEBTRANSPORT_STREAM_BIDI);
   (void)wt_quic_writer_varint(w, session_id);
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }

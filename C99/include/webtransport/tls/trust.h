@@ -103,8 +103,7 @@ int wt_tls_trust_host_is_loopback(const char *host_name);
  * WT_ERR_PROTOCOL for a chain that is not well formed DER. */
 wt_status_t wt_tls_trust_verify(const wt_tls_trust_policy_t *policy,
                                 const wt_tls_certificate_t *certificate,
-                                uint8_t spki_out[WT_TLS_SPKI_MAX],
-                                size_t *spki_len);
+                                uint8_t spki_out[WT_TLS_SPKI_MAX], size_t *spki_len);
 
 /* The content a CertificateVerify signs (RFC 8446 section 4.4.3):
  *
@@ -115,9 +114,9 @@ wt_status_t wt_tls_trust_verify(const wt_tls_trust_policy_t *policy,
  * 1 + 32. The construction is here rather than in the handshake layer because a wrong
  * context string produces a signature that verifies against nothing and names no cause. */
 #define WT_TLS_CERTIFICATE_VERIFY_CONTENT_LEN 130U
-wt_status_t wt_tls_certificate_verify_content(
-    int from_server, const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS_CERTIFICATE_VERIFY_CONTENT_LEN]);
+wt_status_t wt_tls_certificate_verify_content(int from_server,
+                                              const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                              uint8_t out[WT_TLS_CERTIFICATE_VERIFY_CONTENT_LEN]);
 
 /* Verify a CertificateVerify signature over `content` with the peer's public key.
  *
@@ -129,10 +128,9 @@ wt_status_t wt_tls_certificate_verify_content(
  * WT_ERR_AUTHENTICATION when the signature does not verify, WT_ERR_UNSUPPORTED for a
  * scheme this implementation does not carry, WT_ERR_PROTOCOL for a key or signature that
  * is not well formed. */
-wt_status_t wt_tls_signature_verify(const uint8_t *spki, size_t spki_len,
-                                    uint16_t scheme, const uint8_t *content,
-                                    size_t content_len, const uint8_t *signature,
-                                    size_t signature_len);
+wt_status_t wt_tls_signature_verify(const uint8_t *spki, size_t spki_len, uint16_t scheme,
+                                    const uint8_t *content, size_t content_len,
+                                    const uint8_t *signature, size_t signature_len);
 
 /* Sign `content` with a private key, for the server's CertificateVerify. The mirror of
  * `wt_tls_signature_verify`, and the reason a client and a server here cannot disagree about
@@ -144,9 +142,8 @@ wt_status_t wt_tls_signature_verify(const uint8_t *spki, size_t spki_len,
  * implementation does not carry or a key that does not match it, WT_ERR_PROTOCOL for a key
  * that is not a key. */
 wt_status_t wt_tls_signature_sign(const uint8_t *private_key, size_t private_key_len,
-                                  uint16_t scheme, const uint8_t *content,
-                                  size_t content_len, uint8_t *signature_out,
-                                  size_t capacity, size_t *signature_len);
+                                  uint16_t scheme, const uint8_t *content, size_t content_len,
+                                  uint8_t *signature_out, size_t capacity, size_t *signature_len);
 
 /* Whether a scheme is one this implementation can verify, for a caller assembling the
  * signature_algorithms extension from the same list. */

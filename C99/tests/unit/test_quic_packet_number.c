@@ -17,8 +17,7 @@
 
 /* The reconstruction, for a range of distances either side of the expectation.
  * Shared because both the "round trip" and the "wrong distance" cases need it. */
-static uint64_t decode_bytes(const uint8_t *bytes, size_t byte_count,
-                             uint64_t largest_received) {
+static uint64_t decode_bytes(const uint8_t *bytes, size_t byte_count, uint64_t largest_received) {
   uint64_t truncated = 0U;
   size_t i;
   for (i = 0U; i < byte_count; i++) {
@@ -43,16 +42,12 @@ int main(void) {
   }
 
   /* The window and half window for each width. */
-  WT_EXPECT_U64("a one-byte window is 256", 256U,
-                wt_quic_packet_number_window(1U));
-  WT_EXPECT_U64("a two-byte window is 65536", 65536U,
-                wt_quic_packet_number_window(2U));
+  WT_EXPECT_U64("a one-byte window is 256", 256U, wt_quic_packet_number_window(1U));
+  WT_EXPECT_U64("a two-byte window is 65536", 65536U, wt_quic_packet_number_window(2U));
   WT_EXPECT_U64("a four-byte window is 2^32", UINT64_C(4294967296),
                 wt_quic_packet_number_window(4U));
-  WT_EXPECT_U64("zero bytes is not a width", 0U,
-                wt_quic_packet_number_window(0U));
-  WT_EXPECT_U64("five bytes is not a width", 0U,
-                wt_quic_packet_number_window(5U));
+  WT_EXPECT_U64("zero bytes is not a width", 0U, wt_quic_packet_number_window(0U));
+  WT_EXPECT_U64("five bytes is not a width", 0U, wt_quic_packet_number_window(5U));
 
   /* THE RULE IS THE RECONSTRUCTION WINDOW, NOT THE RFC'S PSEUDOCODE VERBATIM.
    * RFC 9000 appendix A.2 chooses a width from the number of outstanding
@@ -63,14 +58,10 @@ int main(void) {
    * a byte and is one bit optimistic at `num_unacked = 2^15 + 1`, where 16 bits
    * cannot carry twice the range; being a byte wider there is always safe, and
    * the reconstruction window is what has to hold. */
-  WT_EXPECT_U64("packet 1 needs one byte", 1U,
-                wt_quic_packet_number_size(1U, 0U));
-  WT_EXPECT_U64("packet 128 still fits in one byte", 1U,
-                wt_quic_packet_number_size(128U, 0U));
-  WT_EXPECT_U64("packet 256 needs two", 2U,
-                wt_quic_packet_number_size(256U, 0U));
-  WT_EXPECT_U64("packet 32769 needs three", 3U,
-                wt_quic_packet_number_size(32769U, 0U));
+  WT_EXPECT_U64("packet 1 needs one byte", 1U, wt_quic_packet_number_size(1U, 0U));
+  WT_EXPECT_U64("packet 128 still fits in one byte", 1U, wt_quic_packet_number_size(128U, 0U));
+  WT_EXPECT_U64("packet 256 needs two", 2U, wt_quic_packet_number_size(256U, 0U));
+  WT_EXPECT_U64("packet 32769 needs three", 3U, wt_quic_packet_number_size(32769U, 0U));
   WT_EXPECT_U64("packet 2^31 is the widest that fits", 4U,
                 wt_quic_packet_number_size(UINT64_C(1) << 31, 0U));
   WT_EXPECT_U64("one more is too far ahead to send", 0U,
@@ -79,10 +70,10 @@ int main(void) {
   /* The RFC's two worked examples, which are the check that the rule above is
    * the RFC's and not a rule invented here. With 0xabe8b3 acknowledged, a packet
    * numbered 0xac5c02 needs 16 bits and 0xace8fe needs 24. */
-  WT_EXPECT_U64("the RFC's first encoding example",
-                2U, wt_quic_packet_number_size(0xac5c02U, 0xabe8b3U));
-  WT_EXPECT_U64("the RFC's second encoding example",
-                3U, wt_quic_packet_number_size(0xace8feU, 0xabe8b3U));
+  WT_EXPECT_U64("the RFC's first encoding example", 2U,
+                wt_quic_packet_number_size(0xac5c02U, 0xabe8b3U));
+  WT_EXPECT_U64("the RFC's second encoding example", 3U,
+                wt_quic_packet_number_size(0xace8feU, 0xabe8b3U));
   /* A number at or below the largest acknowledged is in the past. */
   WT_EXPECT_U64("the acknowledged number itself is not sendable", 0U,
                 wt_quic_packet_number_size(10U, 10U));
@@ -125,8 +116,7 @@ int main(void) {
       uint64_t number = largest + 1U + offsets[i];
       size_t written = wt_quic_packet_number_encode(number, size, bytes);
       uint64_t back;
-      WT_EXPECT_U64("the encode reports the width", (uint64_t)size,
-                    (uint64_t)written);
+      WT_EXPECT_U64("the encode reports the width", (uint64_t)size, (uint64_t)written);
       back = decode_bytes(bytes, size, largest);
       WT_EXPECT_U64("the round trip reconstructs it", number, back);
     }
@@ -147,8 +137,7 @@ int main(void) {
   {
     size_t written = wt_quic_packet_number_encode(4096U + 256U, 1U, bytes);
     WT_EXPECT_U64("a one-byte encode", 1U, (uint64_t)written);
-    WT_EXPECT_U64("reconstructs to the nearer epoch", 4096U,
-                  decode_bytes(bytes, 1U, 4096U));
+    WT_EXPECT_U64("reconstructs to the nearer epoch", 4096U, decode_bytes(bytes, 1U, 4096U));
   }
 
   /* Reconstruction when the expectation is near the top of the 62-bit range,
@@ -161,26 +150,20 @@ int main(void) {
     size = wt_quic_packet_number_size(number, largest);
     WT_EXPECT_U64("a number near the maximum is encodable", 1U, (uint64_t)size);
     (void)wt_quic_packet_number_encode(number, size, bytes);
-    WT_EXPECT_U64("and reconstructs", number,
-                  decode_bytes(bytes, size, largest));
+    WT_EXPECT_U64("and reconstructs", number, decode_bytes(bytes, size, largest));
   }
 
   /* Encoding writes the low bytes big-endian. */
   (void)wt_quic_packet_number_encode(UINT64_C(0x123456789A), 4U, bytes);
-  WT_EXPECT_BYTES("four bytes are the low four", (const uint8_t *)"\x56\x78\x9a"
-                                                      + 0,
-                  bytes, 0U);
+  WT_EXPECT_BYTES("four bytes are the low four", (const uint8_t *)"\x56\x78\x9a" + 0, bytes, 0U);
   (void)wt_quic_packet_number_encode(UINT64_C(0x123456789A), 4U, bytes);
-  WT_EXPECT_BYTES("the low four bytes big-endian",
-                  (const uint8_t *)"\x34\x56\x78\x9a", bytes, 4U);
+  WT_EXPECT_BYTES("the low four bytes big-endian", (const uint8_t *)"\x34\x56\x78\x9a", bytes, 4U);
   (void)wt_quic_packet_number_encode(UINT64_C(0x123456789A), 1U, bytes);
   WT_EXPECT_BYTES("the low byte", (const uint8_t *)"\x9a", bytes, 1U);
   (void)wt_quic_packet_number_encode(UINT64_C(0x123456789A), 2U, bytes);
-  WT_EXPECT_BYTES("the low two bytes big-endian",
-                  (const uint8_t *)"\x78\x9a", bytes, 2U);
+  WT_EXPECT_BYTES("the low two bytes big-endian", (const uint8_t *)"\x78\x9a", bytes, 2U);
   (void)wt_quic_packet_number_encode(UINT64_C(0x123456789A), 3U, bytes);
-  WT_EXPECT_BYTES("the low three bytes big-endian",
-                  (const uint8_t *)"\x56\x78\x9a", bytes, 3U);
+  WT_EXPECT_BYTES("the low three bytes big-endian", (const uint8_t *)"\x56\x78\x9a", bytes, 3U);
 
   /* Refusals: a width outside 1..4, and a truncated value that does not fit the
    * width it was read with. */
@@ -214,11 +197,9 @@ int main(void) {
     uint64_t half = 32768U;
     uint64_t expected = largest + 1U;
     uint64_t candidate = expected & ~(UINT64_C(65536) - 1U);
-    WT_EXPECT_U64("the candidate is in the expectation's epoch", 65536U,
-                  candidate);
+    WT_EXPECT_U64("the candidate is in the expectation's epoch", 65536U, candidate);
     /* 65536 + 10 = 65546, which is more than half a window below 100001. */
-    WT_EXPECT_U64("a candidate a half window below moves up one",
-                  65536U + 10U + 65536U,
+    WT_EXPECT_U64("a candidate a half window below moves up one", 65536U + 10U + 65536U,
                   wt_quic_packet_number_decode(10U, 2U, largest));
     (void)half;
   }

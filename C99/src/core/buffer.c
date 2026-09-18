@@ -130,8 +130,7 @@ wt_cursor_t wt_buf_cursor(const wt_buf_t *b) {
   return wt_cursor_init(b->data, b->len);
 }
 
-uint8_t *wt_buf_copy_out(const wt_buf_t *b, size_t offset, size_t len,
-                         const wt_allocator_t *alloc,
+uint8_t *wt_buf_copy_out(const wt_buf_t *b, size_t offset, size_t len, const wt_allocator_t *alloc,
                          wt_status_t *out_status) {
   uint8_t *copy;
   if (out_status != NULL) *out_status = WT_OK;

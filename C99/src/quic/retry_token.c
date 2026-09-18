@@ -17,23 +17,27 @@
 #define WT_QUIC_RETRY_TOKEN_OFFSET_FORMAT 0U
 #define WT_QUIC_RETRY_TOKEN_OFFSET_TIME 1U
 #define WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS 9U
-#define WT_QUIC_RETRY_TOKEN_ADDRESS_LENGTH (WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS + WT_QUIC_RETRY_TOKEN_ADDRESS_MAX)
+#define WT_QUIC_RETRY_TOKEN_ADDRESS_LENGTH                                                         \
+  (WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS + WT_QUIC_RETRY_TOKEN_ADDRESS_MAX)
 #define WT_QUIC_RETRY_TOKEN_OFFSET_ODCID_LENGTH WT_QUIC_RETRY_TOKEN_ADDRESS_LENGTH
 #define WT_QUIC_RETRY_TOKEN_OFFSET_ODCID (WT_QUIC_RETRY_TOKEN_OFFSET_ODCID_LENGTH + 1U)
 
 /* The tag covers every byte before it. Both functions compute it the same way over the same length, which is what
  * makes the check a comparison rather than a parse. */
-static wt_status_t token_tag(const uint8_t secret[WT_QUIC_RETRY_TOKEN_SECRET_LEN], const uint8_t *body,
-                             size_t body_length, uint8_t out[WT_QUIC_RETRY_TOKEN_TAG_LEN]) {
+static wt_status_t token_tag(const uint8_t secret[WT_QUIC_RETRY_TOKEN_SECRET_LEN],
+                             const uint8_t *body, size_t body_length,
+                             uint8_t out[WT_QUIC_RETRY_TOKEN_TAG_LEN]) {
   uint8_t mac[WT_SHA256_LEN];
-  wt_status_t status = wt_hmac_sha256(secret, WT_QUIC_RETRY_TOKEN_SECRET_LEN, body, body_length, mac);
+  wt_status_t status =
+      wt_hmac_sha256(secret, WT_QUIC_RETRY_TOKEN_SECRET_LEN, body, body_length, mac);
 
   if (status != WT_OK) return status;
   memcpy(out, mac, WT_QUIC_RETRY_TOKEN_TAG_LEN);
   return WT_OK;
 }
 
-static void token_body_header(uint8_t *out, uint64_t now, const uint8_t *address, size_t address_length) {
+static void token_body_header(uint8_t *out, uint64_t now, const uint8_t *address,
+                              size_t address_length) {
   out[WT_QUIC_RETRY_TOKEN_OFFSET_FORMAT] = WT_QUIC_RETRY_TOKEN_FORMAT;
   wt_store_be64(out + WT_QUIC_RETRY_TOKEN_OFFSET_TIME, now);
   /* The address is padded to the maximum with zeros so that two addresses of different lengths cannot produce the
@@ -46,8 +50,9 @@ static void token_body_header(uint8_t *out, uint64_t now, const uint8_t *address
 
 wt_status_t wt_quic_retry_token_build(const uint8_t secret[WT_QUIC_RETRY_TOKEN_SECRET_LEN],
                                       const uint8_t *address, size_t address_length,
-                                      const uint8_t *original_destination_id, size_t original_length,
-                                      uint64_t now, uint8_t *out, size_t capacity, size_t *out_length) {
+                                      const uint8_t *original_destination_id,
+                                      size_t original_length, uint64_t now, uint8_t *out,
+                                      size_t capacity, size_t *out_length) {
   uint8_t body[WT_QUIC_RETRY_TOKEN_MAX];
   uint8_t tag[WT_QUIC_RETRY_TOKEN_TAG_LEN];
   size_t body_length;
@@ -83,10 +88,10 @@ wt_status_t wt_quic_retry_token_build(const uint8_t secret[WT_QUIC_RETRY_TOKEN_S
 }
 
 wt_status_t wt_quic_retry_token_validate(const uint8_t secret[WT_QUIC_RETRY_TOKEN_SECRET_LEN],
-                                         const uint8_t *address, size_t address_length, uint64_t now,
-                                         uint64_t max_age, const uint8_t *token, size_t token_length,
-                                         uint8_t *out_original, size_t capacity,
-                                         size_t *out_original_length) {
+                                         const uint8_t *address, size_t address_length,
+                                         uint64_t now, uint64_t max_age, const uint8_t *token,
+                                         size_t token_length, uint8_t *out_original,
+                                         size_t capacity, size_t *out_original_length) {
   uint8_t expected[WT_QUIC_RETRY_TOKEN_TAG_LEN];
   uint8_t padded[WT_QUIC_RETRY_TOKEN_MAX];
   uint64_t issued_at;
@@ -108,7 +113,8 @@ wt_status_t wt_quic_retry_token_validate(const uint8_t secret[WT_QUIC_RETRY_TOKE
       token_length > WT_QUIC_RETRY_TOKEN_MAX) {
     return WT_ERR_AUTHENTICATION;
   }
-  if (token[WT_QUIC_RETRY_TOKEN_OFFSET_FORMAT] != WT_QUIC_RETRY_TOKEN_FORMAT) return WT_ERR_AUTHENTICATION;
+  if (token[WT_QUIC_RETRY_TOKEN_OFFSET_FORMAT] != WT_QUIC_RETRY_TOKEN_FORMAT)
+    return WT_ERR_AUTHENTICATION;
 
   original_length = token[WT_QUIC_RETRY_TOKEN_OFFSET_ODCID_LENGTH];
   if (original_length == 0U || original_length > WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
@@ -131,8 +137,8 @@ wt_status_t wt_quic_retry_token_validate(const uint8_t secret[WT_QUIC_RETRY_TOKE
   memcpy(padded, token, body_length);
   memset(padded + WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS, 0, WT_QUIC_RETRY_TOKEN_ADDRESS_MAX);
   memcpy(padded + WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS, address, address_length);
-  if (memcmp(padded + WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS, token + WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS,
-             WT_QUIC_RETRY_TOKEN_ADDRESS_MAX) != 0) {
+  if (memcmp(padded + WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS,
+             token + WT_QUIC_RETRY_TOKEN_OFFSET_ADDRESS, WT_QUIC_RETRY_TOKEN_ADDRESS_MAX) != 0) {
     return WT_ERR_AUTHENTICATION;
   }
 

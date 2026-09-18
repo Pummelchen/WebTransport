@@ -15,8 +15,8 @@
 
 #include "webtransport/http3/endpoint.h"
 #include "webtransport/quic/varint.h"
-#include "webtransport/webtransport/session_request.h"
 #include "webtransport/webtransport/framing.h"
+#include "webtransport/webtransport/session_request.h"
 
 /* The prefix a peer would send for a stream of this type: its varint, shortest form. */
 static void write_type(uint8_t *out, size_t *length, uint64_t type) {
@@ -48,28 +48,30 @@ static void test_our_own_streams_exist_once(void) {
                    wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_CONTROL, &w));
 
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("our QPACK encoder prefix writes",
-               wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER, &w));
+  WT_EXPECT_OK(
+      "our QPACK encoder prefix writes",
+      wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER, &w));
   WT_EXPECT_U64("as its type", WT_HTTP3_STREAM_QPACK_ENCODER, (uint64_t)bytes[0]);
-  WT_EXPECT_STATUS("and not twice", WT_ERR_STATE,
-                   wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER,
-                                                  &w));
+  WT_EXPECT_STATUS(
+      "and not twice", WT_ERR_STATE,
+      wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER, &w));
 
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("our QPACK decoder prefix writes",
-               wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER, &w));
+  WT_EXPECT_OK(
+      "our QPACK decoder prefix writes",
+      wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER, &w));
   WT_EXPECT_U64("as its type", WT_HTTP3_STREAM_QPACK_DECODER, (uint64_t)bytes[0]);
-  WT_EXPECT_STATUS("and not twice", WT_ERR_STATE,
-                   wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER,
-                                                  &w));
+  WT_EXPECT_STATUS(
+      "and not twice", WT_ERR_STATE,
+      wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER, &w));
 
   /* A push stream is not ours to open, and a WebTransport stream is opened by the session
    * layer with a prefix naming its session -- not here, where there is no session yet. */
   WT_EXPECT_STATUS("a push prefix is not ours", WT_ERR_INVALID_ARGUMENT,
                    wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_PUSH, &w));
-  WT_EXPECT_STATUS("nor a WebTransport one", WT_ERR_INVALID_ARGUMENT,
-                   wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT,
-                                                  &w));
+  WT_EXPECT_STATUS(
+      "nor a WebTransport one", WT_ERR_INVALID_ARGUMENT,
+      wt_http3_endpoint_write_prefix(&endpoint, WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT, &w));
   (void)length;
 }
 
@@ -91,8 +93,9 @@ static void test_peer_streams_are_classified(void) {
   WT_EXPECT_INT("as control", (int)WT_HTTP3_ENDPOINT_STREAM_CONTROL, (int)kind);
   WT_EXPECT_INT("and recorded", (int)WT_HTTP3_ENDPOINT_STREAM_CONTROL,
                 (int)wt_http3_endpoint_stream_kind(&client, 3U));
-  WT_EXPECT_STATUS("a second control stream is a connection error", WT_ERR_PROTOCOL,
-                   wt_http3_endpoint_on_uni_stream(&client, 7U, bytes, length, NULL, &kind, &error));
+  WT_EXPECT_STATUS(
+      "a second control stream is a connection error", WT_ERR_PROTOCOL,
+      wt_http3_endpoint_on_uni_stream(&client, 7U, bytes, length, NULL, &kind, &error));
   WT_EXPECT_U64("with the stream creation code", WT_HTTP3_STREAM_CREATION_ERROR, (uint64_t)error);
 
   /* The QPACK streams, once each. */
@@ -100,16 +103,18 @@ static void test_peer_streams_are_classified(void) {
   WT_EXPECT_OK("a QPACK encoder stream is classified",
                wt_http3_endpoint_on_uni_stream(&client, 11U, bytes, length, NULL, &kind, &error));
   WT_EXPECT_INT("as the encoder", (int)WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER, (int)kind);
-  WT_EXPECT_STATUS("and only one is allowed", WT_ERR_PROTOCOL,
-                   wt_http3_endpoint_on_uni_stream(&client, 15U, bytes, length, NULL, &kind, &error));
+  WT_EXPECT_STATUS(
+      "and only one is allowed", WT_ERR_PROTOCOL,
+      wt_http3_endpoint_on_uni_stream(&client, 15U, bytes, length, NULL, &kind, &error));
   WT_EXPECT_U64("with the same code", WT_HTTP3_STREAM_CREATION_ERROR, (uint64_t)error);
 
   write_type(bytes, &length, WT_HTTP3_STREAM_QPACK_DECODER);
   WT_EXPECT_OK("a QPACK decoder stream is classified",
                wt_http3_endpoint_on_uni_stream(&client, 19U, bytes, length, NULL, &kind, &error));
   WT_EXPECT_INT("as the decoder", (int)WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER, (int)kind);
-  WT_EXPECT_STATUS("and only one is allowed", WT_ERR_PROTOCOL,
-                   wt_http3_endpoint_on_uni_stream(&client, 23U, bytes, length, NULL, &kind, &error));
+  WT_EXPECT_STATUS(
+      "and only one is allowed", WT_ERR_PROTOCOL,
+      wt_http3_endpoint_on_uni_stream(&client, 23U, bytes, length, NULL, &kind, &error));
 
   /* The draft's WebTransport unidirectional stream: not HTTP/3's to interpret, so it is
    * the layer above's, not an unknown type to ignore. */
@@ -140,17 +145,20 @@ static void test_peer_streams_are_classified(void) {
 
   /* Classifying the same stream twice means the caller lost its place. */
   write_type(bytes, &length, WT_WEBTRANSPORT_STREAM_UNI);
-  WT_EXPECT_STATUS("classifying a stream twice is a caller error", WT_ERR_STATE,
-                   wt_http3_endpoint_on_uni_stream(&client, 27U, bytes, length, NULL, &kind, &error));
+  WT_EXPECT_STATUS(
+      "classifying a stream twice is a caller error", WT_ERR_STATE,
+      wt_http3_endpoint_on_uni_stream(&client, 27U, bytes, length, NULL, &kind, &error));
 
   /* Push is refused deterministically and differently by role: a client did not ask for
    * one, and a client may not send one at all. */
   write_type(bytes, &length, WT_HTTP3_STREAM_PUSH);
-  WT_EXPECT_STATUS("an unrequested push is an identifier error for a client", WT_ERR_PROTOCOL,
-                   wt_http3_endpoint_on_uni_stream(&client, 39U, bytes, length, NULL, &kind, &error));
+  WT_EXPECT_STATUS(
+      "an unrequested push is an identifier error for a client", WT_ERR_PROTOCOL,
+      wt_http3_endpoint_on_uni_stream(&client, 39U, bytes, length, NULL, &kind, &error));
   WT_EXPECT_U64("with that code", WT_HTTP3_ID_ERROR, (uint64_t)error);
-  WT_EXPECT_STATUS("and a stream creation error for a server", WT_ERR_PROTOCOL,
-                   wt_http3_endpoint_on_uni_stream(&server, 43U, bytes, length, NULL, &kind, &error));
+  WT_EXPECT_STATUS(
+      "and a stream creation error for a server", WT_ERR_PROTOCOL,
+      wt_http3_endpoint_on_uni_stream(&server, 43U, bytes, length, NULL, &kind, &error));
   WT_EXPECT_U64("with its code", WT_HTTP3_STREAM_CREATION_ERROR, (uint64_t)error);
 }
 
@@ -184,8 +192,9 @@ static void test_control_frames_are_forwarded(void) {
   /* RFC 9114 section 7.2.7: a CLIENT that receives MAX_PUSH_ID MUST treat it as H3_FRAME_UNEXPECTED. Only the
    * ENDPOINT knows its own role, which is why the check belongs here rather than in the control stream -- and the
    * rule used to live only in a table (`wt_http3_frame_allowed`) that nothing calls, so it was never applied. */
-  WT_EXPECT_STATUS("a client refuses a server's MAX_PUSH_ID", WT_ERR_PROTOCOL,
-                   wt_http3_endpoint_on_control_frame(&endpoint, WT_HTTP3_FRAME_MAX_PUSH_ID, &error));
+  WT_EXPECT_STATUS(
+      "a client refuses a server's MAX_PUSH_ID", WT_ERR_PROTOCOL,
+      wt_http3_endpoint_on_control_frame(&endpoint, WT_HTTP3_FRAME_MAX_PUSH_ID, &error));
   WT_EXPECT_U64("as an unexpected frame", (uint64_t)WT_HTTP3_FRAME_UNEXPECTED, (uint64_t)error);
   {
     /* The server side of the same frame: MAX_PUSH_ID is a client's to send, so a server takes it. */
@@ -197,12 +206,13 @@ static void test_control_frames_are_forwarded(void) {
     wt_http3_endpoint_init(&server, WT_HTTP3_ROLE_SERVER);
     write_type(server_bytes, &server_length, WT_HTTP3_STREAM_CONTROL);
     WT_EXPECT_OK("a server classifies the control stream",
-                 wt_http3_endpoint_on_uni_stream(&server, 3U, server_bytes, server_length, NULL, NULL,
-                                                 &server_error));
-    WT_EXPECT_OK("takes its SETTINGS",
-                 wt_http3_endpoint_on_control_frame(&server, WT_HTTP3_FRAME_SETTINGS, &server_error));
-    WT_EXPECT_OK("and accepts MAX_PUSH_ID from a client",
-                 wt_http3_endpoint_on_control_frame(&server, WT_HTTP3_FRAME_MAX_PUSH_ID, &server_error));
+                 wt_http3_endpoint_on_uni_stream(&server, 3U, server_bytes, server_length, NULL,
+                                                 NULL, &server_error));
+    WT_EXPECT_OK("takes its SETTINGS", wt_http3_endpoint_on_control_frame(
+                                           &server, WT_HTTP3_FRAME_SETTINGS, &server_error));
+    WT_EXPECT_OK(
+        "and accepts MAX_PUSH_ID from a client",
+        wt_http3_endpoint_on_control_frame(&server, WT_HTTP3_FRAME_MAX_PUSH_ID, &server_error));
   }
 
   /* The peer's control stream ending is the error itself, whether or not SETTINGS came. */
@@ -213,8 +223,8 @@ static void test_control_frames_are_forwarded(void) {
   WT_EXPECT_U64("and it is forgotten", 0U, (uint64_t)wt_http3_endpoint_stream_count(&endpoint));
 
   /* Any other stream ending is not an error, and neither is one that was never tracked. */
-  WT_EXPECT_OK("an untracked stream ending is nothing", wt_http3_endpoint_on_uni_stream_end(
-                                                           &endpoint, 99U, &error));
+  WT_EXPECT_OK("an untracked stream ending is nothing",
+               wt_http3_endpoint_on_uni_stream_end(&endpoint, 99U, &error));
   WT_EXPECT_OK("and so is a QPACK stream ending",
                wt_http3_endpoint_on_uni_stream_end(&endpoint, 11U, &error));
 }
@@ -243,9 +253,9 @@ static void test_the_peer_table_is_bounded(void) {
 
   /* One past the bound is THIS endpoint's limit, with no error code: the peer did nothing
    * wrong, and inventing a code for it would blame the peer for our table. */
-  WT_EXPECT_STATUS("one more is limited", WT_ERR_LIMIT,
-                   wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length, NULL, &kind,
-                                                   &error));
+  WT_EXPECT_STATUS(
+      "one more is limited", WT_ERR_LIMIT,
+      wt_http3_endpoint_on_uni_stream(&endpoint, 4096U, bytes, length, NULL, &kind, &error));
   WT_EXPECT_U64("with no error code", (uint64_t)WT_HTTP3_NO_ERROR, (uint64_t)error);
 
   /* And a PUSH stream at the bound is where an audit found an OUT-OF-BOUNDS WRITE: that branch recorded the
@@ -294,8 +304,7 @@ static void test_request_streams_follow_the_roles(void) {
   WT_EXPECT_U64("with the unexpected-frame code", WT_HTTP3_FRAME_UNEXPECTED, (uint64_t)error);
   WT_EXPECT_OK("HEADERS is accepted",
                wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_HEADERS, &error));
-  WT_EXPECT_OK("and its state moves",
-               wt_http3_endpoint_request_state(&client, 0U, &state));
+  WT_EXPECT_OK("and its state moves", wt_http3_endpoint_request_state(&client, 0U, &state));
   WT_EXPECT_INT("to the body", (int)WT_HTTP3_REQUEST_BODY, (int)state);
 
   /* A frame on a stream nobody opened is the caller's ordering. */
@@ -321,7 +330,8 @@ static void test_request_streams_follow_the_roles(void) {
 
   /* Ending before HEADERS is H3_REQUEST_INCOMPLETE -- the code section 4.1 defines for
    * aborting the response, not for closing the connection -- and the stream is forgotten. */
-  WT_EXPECT_OK("a second request stream opens", wt_http3_endpoint_open_request(&client, 4U, &error));
+  WT_EXPECT_OK("a second request stream opens",
+               wt_http3_endpoint_open_request(&client, 4U, &error));
   WT_EXPECT_STATUS("ending it before HEADERS is incomplete", WT_ERR_PROTOCOL,
                    wt_http3_endpoint_on_request_end(&client, 4U, &error));
   WT_EXPECT_U64("with that code", WT_HTTP3_REQUEST_INCOMPLETE, (uint64_t)error);
@@ -341,8 +351,7 @@ static void test_request_streams_follow_the_roles(void) {
                wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_DATA, &error));
   WT_EXPECT_OK("and a trailer",
                wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_HEADERS, &error));
-  WT_EXPECT_OK("then the state is read",
-               wt_http3_endpoint_request_state(&client, 0U, &state));
+  WT_EXPECT_OK("then the state is read", wt_http3_endpoint_request_state(&client, 0U, &state));
   WT_EXPECT_INT("as complete", (int)WT_HTTP3_REQUEST_COMPLETE, (int)state);
   WT_EXPECT_STATUS("and nothing follows a trailer", WT_ERR_PROTOCOL,
                    wt_http3_endpoint_on_request_frame(&client, 0U, WT_HTTP3_FRAME_DATA, &error));
@@ -385,7 +394,8 @@ static size_t build_section(uint8_t *out, size_t capacity, const char *name, con
   line.value_huffman = 0;
   line.bytes_consumed = 0U;
 
-  if (wt_qpack_field_section_encode(&w, &prefix, 0U, &line, 1U, scratch, sizeof(scratch)) != WT_OK) {
+  if (wt_qpack_field_section_encode(&w, &prefix, 0U, &line, 1U, scratch, sizeof(scratch)) !=
+      WT_OK) {
     return 0U;
   }
   return wt_writer_offset(&w);
@@ -442,11 +452,16 @@ static void test_request_headers_are_decoded(void) {
     const char *names[5];
     const char *values[5];
 
-    names[0] = ":method";    values[0] = "CONNECT";
-    names[1] = ":scheme";    values[1] = "https";
-    names[2] = ":authority"; values[2] = "example.com";
-    names[3] = ":path";      values[3] = "/chat";
-    names[4] = ":protocol";  values[4] = WT_WEBTRANSPORT_PROTOCOL_TOKEN;
+    names[0] = ":method";
+    values[0] = "CONNECT";
+    names[1] = ":scheme";
+    values[1] = "https";
+    names[2] = ":authority";
+    values[2] = "example.com";
+    names[3] = ":path";
+    values[3] = "/chat";
+    names[4] = ":protocol";
+    values[4] = WT_WEBTRANSPORT_PROTOCOL_TOKEN;
 
     prefix.required_insert_count = 0U;
     prefix.base = 0U;
@@ -484,8 +499,8 @@ static void test_request_headers_are_decoded(void) {
     policy.wt_enabled = 1;
     WT_EXPECT_OK("the session layer accepts it",
                  wt_webtransport_session_request_validate(&message, &policy, &decision, &error));
-    WT_EXPECT_INT("as an accepted WebTransport request",
-                  (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)decision.outcome);
+    WT_EXPECT_INT("as an accepted WebTransport request", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT,
+                  (int)decision.outcome);
 
     /* A trailer may not carry pseudo-headers (section 4.1), and this layer is where that is
      * enforced, because the message decoder has one request shape and one response shape. */
@@ -654,9 +669,9 @@ static void test_a_client_writes_the_request_it_means(void) {
   /* The caller's scratch is a bound, and running into it is WT_ERR_LIMIT with no error code:
    * it is this endpoint's buffer, not anything the peer did. */
   w = wt_writer_init(wire, sizeof(wire));
-  WT_EXPECT_STATUS("a section that does not fit the scratch is limited", WT_ERR_LIMIT,
-                   wt_http3_endpoint_write_headers(&client, &outgoing, 0U, section, 4U, &w,
-                                                   &error));
+  WT_EXPECT_STATUS(
+      "a section that does not fit the scratch is limited", WT_ERR_LIMIT,
+      wt_http3_endpoint_write_headers(&client, &outgoing, 0U, section, 4U, &w, &error));
   WT_EXPECT_U64("with no error code", (uint64_t)WT_HTTP3_NO_ERROR, (uint64_t)error);
   WT_EXPECT_U64("and nothing written", 0U, (uint64_t)wt_writer_offset(&w));
 }

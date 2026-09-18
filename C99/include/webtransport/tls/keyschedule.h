@@ -95,8 +95,8 @@ wt_status_t wt_tls13_transcript_init(wt_tls13_transcript_t *transcript);
  * WT_ERR_TRUNCATED if the bytes are shorter than a handshake header;
  * WT_ERR_PROTOCOL if the header's length field is not the message's length;
  * WT_ERR_STATE if the transcript was not initialised or has been cleared. */
-wt_status_t wt_tls13_transcript_append(wt_tls13_transcript_t *transcript,
-                                       const uint8_t *message, size_t len);
+wt_status_t wt_tls13_transcript_append(wt_tls13_transcript_t *transcript, const uint8_t *message,
+                                       size_t len);
 
 /* The transcript hash so far, leaving the transcript usable. */
 wt_status_t wt_tls13_transcript_hash(const wt_tls13_transcript_t *transcript,
@@ -126,9 +126,8 @@ wt_status_t wt_tls13_handshake_secret(const uint8_t early_secret[WT_TLS13_SECRET
                                       uint8_t out[WT_TLS13_SECRET_LEN]);
 
 /* Master Secret = HKDF-Extract(Derive-Secret(Handshake, "derived", ""), 0). */
-wt_status_t wt_tls13_master_secret(
-    const uint8_t handshake_secret[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS13_SECRET_LEN]);
+wt_status_t wt_tls13_master_secret(const uint8_t handshake_secret[WT_TLS13_SECRET_LEN],
+                                   uint8_t out[WT_TLS13_SECRET_LEN]);
 
 /* ------------------------------------------------------------------ derivations */
 
@@ -136,8 +135,7 @@ wt_status_t wt_tls13_master_secret(
  * "tls13 " prefix the wire format adds. Exposed because a caller may need a label
  * this file does not name -- and because spelling one wrongly is a mistake a test
  * can only catch if the function takes one. */
-wt_status_t wt_tls13_derive_secret(const uint8_t secret[WT_TLS13_SECRET_LEN],
-                                   const char *label,
+wt_status_t wt_tls13_derive_secret(const uint8_t secret[WT_TLS13_SECRET_LEN], const char *label,
                                    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
                                    uint8_t out[WT_TLS13_SECRET_LEN]);
 
@@ -148,31 +146,27 @@ wt_status_t wt_tls13_derived(const uint8_t secret[WT_TLS13_SECRET_LEN],
 
 /* client_handshake_traffic_secret and server_handshake_traffic_secret, both from the
  * transcript through the ServerHello. */
-wt_status_t wt_tls13_handshake_traffic_secrets(
-    const uint8_t handshake_secret[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t client_out[WT_TLS13_SECRET_LEN],
-    uint8_t server_out[WT_TLS13_SECRET_LEN]);
+wt_status_t wt_tls13_handshake_traffic_secrets(const uint8_t handshake_secret[WT_TLS13_SECRET_LEN],
+                                               const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                               uint8_t client_out[WT_TLS13_SECRET_LEN],
+                                               uint8_t server_out[WT_TLS13_SECRET_LEN]);
 
 /* client_application_traffic_secret_0 and server_application_traffic_secret_0, both
  * from the transcript through the server's Finished. */
-wt_status_t wt_tls13_application_traffic_secrets(
-    const uint8_t master_secret[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t client_out[WT_TLS13_SECRET_LEN],
-    uint8_t server_out[WT_TLS13_SECRET_LEN]);
+wt_status_t wt_tls13_application_traffic_secrets(const uint8_t master_secret[WT_TLS13_SECRET_LEN],
+                                                 const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                                 uint8_t client_out[WT_TLS13_SECRET_LEN],
+                                                 uint8_t server_out[WT_TLS13_SECRET_LEN]);
 
 /* exporter_master_secret and resumption_master_secret. The first is part of the
  * schedule and is checked by RFC 8448's trace; the second is what a NewSessionTicket
  * would be built from, which this implementation does not yet send or accept. */
-wt_status_t wt_tls13_exporter_master_secret(
-    const uint8_t master_secret[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS13_SECRET_LEN]);
-wt_status_t wt_tls13_resumption_master_secret(
-    const uint8_t master_secret[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS13_SECRET_LEN]);
+wt_status_t wt_tls13_exporter_master_secret(const uint8_t master_secret[WT_TLS13_SECRET_LEN],
+                                            const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                            uint8_t out[WT_TLS13_SECRET_LEN]);
+wt_status_t wt_tls13_resumption_master_secret(const uint8_t master_secret[WT_TLS13_SECRET_LEN],
+                                              const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                              uint8_t out[WT_TLS13_SECRET_LEN]);
 
 /* The next application traffic secret after a key update (RFC 8446 section 7.2):
  * HKDF-Expand-Label(secret, "traffic upd", "", Hash.length). */
@@ -182,8 +176,7 @@ wt_status_t wt_tls13_next_traffic_secret(const uint8_t secret[WT_TLS13_SECRET_LE
 /* The record protection keys a traffic secret produces, HKDF-Expand-Label(secret,
  * "key", "", 16) and (secret, "iv", "", 12). */
 wt_status_t wt_tls13_traffic_keys(const uint8_t secret[WT_TLS13_SECRET_LEN],
-                                  uint8_t key[WT_TLS13_KEY_LEN],
-                                  uint8_t iv[WT_TLS13_IV_LEN]);
+                                  uint8_t key[WT_TLS13_KEY_LEN], uint8_t iv[WT_TLS13_IV_LEN]);
 
 /* --------------------------------------------------------------------- Finished */
 
@@ -193,19 +186,17 @@ wt_status_t wt_tls13_finished_key(const uint8_t base_key[WT_TLS13_SECRET_LEN],
                                   uint8_t out[WT_TLS13_FINISHED_LEN]);
 
 /* verify_data = HMAC(finished_key, transcript_hash). */
-wt_status_t wt_tls13_finished_verify_data(
-    const uint8_t base_key[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS13_FINISHED_LEN]);
+wt_status_t wt_tls13_finished_verify_data(const uint8_t base_key[WT_TLS13_SECRET_LEN],
+                                          const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                          uint8_t out[WT_TLS13_FINISHED_LEN]);
 
 /* Verify a peer's Finished. Returns WT_OK, WT_ERR_AUTHENTICATION when the data does
  * not match, or WT_ERR_INVALID_ARGUMENT for a length that is not Hash.length -- a
  * short comparison that "matched" is the forgery this exists to prevent. The
  * comparison is constant time. */
-wt_status_t wt_tls13_finished_check(
-    const uint8_t base_key[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    const uint8_t *verify_data, size_t verify_data_len);
+wt_status_t wt_tls13_finished_check(const uint8_t base_key[WT_TLS13_SECRET_LEN],
+                                    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                    const uint8_t *verify_data, size_t verify_data_len);
 
 #ifdef __cplusplus
 }

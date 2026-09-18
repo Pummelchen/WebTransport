@@ -244,6 +244,29 @@ jobs:
       - name: Check the Python is formatted
         run: ruff format --check .
 
+  # AUD-0010. A formatting gate is only meaningful with ONE formatter version: clang-format's
+  # output changes between releases, so running it on every matrix leg would fail on whichever
+  # leg happened to ship a different one -- and "reformat the tree to satisfy today's Ubuntu"
+  # is not a standard. The version is pinned to the one the audit ran, and PyPI publishes the
+  # LLVM-matched builds, so the gate is the same tool on the same input everywhere.
+  #
+  # It is its own job rather than a matrix step for that reason, exactly as `python-lint` is.
+  format:
+    name: C99 / formatting
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install the pinned clang-format
+        run: |
+          set -euo pipefail
+          command -v clang-format >/dev/null || python3 -m pip install --user 'clang-format==23.1.1'
+          clang-format --version
+
+      - name: Check the tree matches .clang-format
+        run: C99/scripts/check-format.sh
+
   # AUD-0009: the audit baseline needs a coverage number for the C99 library, and before this
   # job the tree could not produce one. It is a report rather than a threshold gate -- a
   # threshold is a policy decision the repository has not made -- but it fails if the

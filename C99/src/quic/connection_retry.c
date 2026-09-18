@@ -35,7 +35,8 @@ static wt_status_t forget_peer_connection_id(wt_quic_connection_t *connection, u
   return WT_OK;
 }
 static void adopt_stored_peer_id(wt_quic_connection_t *connection, size_t slot) {
-  adopt_peer_connection_id(connection, connection->peer_ids[slot].id, connection->peer_ids[slot].length);
+  adopt_peer_connection_id(connection, connection->peer_ids[slot].id,
+                           connection->peer_ids[slot].length);
   connection->current_peer_sequence = connection->peer_ids[slot].sequence;
   connection->current_peer_sequence_set = 1;
 }
@@ -51,7 +52,8 @@ static size_t first_other_peer_id(const wt_quic_connection_t *connection) {
   }
   return WT_QUIC_PEER_CONNECTION_IDS_MAX;
 }
-wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *connection, uint64_t now) {
+wt_status_t wt_quic_connection_use_new_connection_id(wt_quic_connection_t *connection,
+                                                     uint64_t now) {
   size_t slot;
   uint64_t abandoned;
   int had_current;
@@ -101,8 +103,8 @@ uint64_t wt_quic_connection_peer_ids_retired(const wt_quic_connection_t *connect
 size_t wt_quic_connection_peer_id_count(const wt_quic_connection_t *connection) {
   return connection != NULL ? connection->peer_id_count : 0U;
 }
-wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
-                                            const wt_quic_frame_t *frame, uint64_t now) {
+wt_status_t handle_new_connection_id(wt_quic_connection_t *connection, const wt_quic_frame_t *frame,
+                                     uint64_t now) {
   const uint8_t *id = frame->as.new_connection_id.connection_id;
   size_t length = frame->as.new_connection_id.connection_id_length;
   uint64_t sequence = frame->as.new_connection_id.sequence;
@@ -113,12 +115,12 @@ wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
   /* A length outside 1..20 is a FRAME_ENCODING_ERROR, and a retire_prior_to above the sequence it
    * arrives with is one too (section 19.15). */
   if (length == 0U || length > WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
-    return close_with(connection, WT_QUIC_FRAME_ENCODING_ERROR,
-                      WT_QUIC_FRAME_NEW_CONNECTION_ID, now);
+    return close_with(connection, WT_QUIC_FRAME_ENCODING_ERROR, WT_QUIC_FRAME_NEW_CONNECTION_ID,
+                      now);
   }
   if (frame->as.new_connection_id.retire_prior_to > sequence) {
-    return close_with(connection, WT_QUIC_FRAME_ENCODING_ERROR,
-                      WT_QUIC_FRAME_NEW_CONNECTION_ID, now);
+    return close_with(connection, WT_QUIC_FRAME_ENCODING_ERROR, WT_QUIC_FRAME_NEW_CONNECTION_ID,
+                      now);
   }
 
   for (i = 0U; i < WT_QUIC_PEER_CONNECTION_IDS_MAX; i++) {
@@ -132,8 +134,8 @@ wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
        * PROTOCOL_VIOLATION, and the same one again merely a duplicate. */
       if (known->length != length || memcmp(known->id, id, length) != 0 ||
           memcmp(known->reset_token, frame->as.new_connection_id.stateless_reset_token, 16U) != 0) {
-        return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION,
-                          WT_QUIC_FRAME_NEW_CONNECTION_ID, now);
+        return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, WT_QUIC_FRAME_NEW_CONNECTION_ID,
+                          now);
       }
       return WT_OK;
     }
@@ -183,8 +185,8 @@ wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
   connection->peer_ids[slot].sequence = sequence;
   memcpy(connection->peer_ids[slot].id, id, length);
   connection->peer_ids[slot].length = length;
-  memcpy(connection->peer_ids[slot].reset_token,
-         frame->as.new_connection_id.stateless_reset_token, 16U);
+  memcpy(connection->peer_ids[slot].reset_token, frame->as.new_connection_id.stateless_reset_token,
+         16U);
   connection->peer_id_count++;
   if (connection->retire_current_after_store != 0) {
     connection->retire_current_after_store = 0;
@@ -197,15 +199,15 @@ wt_status_t handle_new_connection_id(wt_quic_connection_t *connection,
     wt_status_t status;
     if (!connection->peer_ids[i].in_use) continue;
     if (connection->peer_ids[i].sequence >= frame->as.new_connection_id.retire_prior_to) continue;
-    status = forget_peer_connection_id(connection, connection->peer_ids[i].sequence, now, &forgotten);
+    status =
+        forget_peer_connection_id(connection, connection->peer_ids[i].sequence, now, &forgotten);
     if (status != WT_OK) return status;
     i = (size_t)-1; /* the table compacted under this index; start again */
   }
   return WT_OK;
 }
 wt_status_t handle_retire_connection_id(wt_quic_connection_t *connection,
-                                               const wt_quic_frame_t *frame,
-                                               wt_quic_visit_t *visit) {
+                                        const wt_quic_frame_t *frame, wt_quic_visit_t *visit) {
   uint64_t sequence = frame->as.retire_connection_id.sequence;
   size_t i;
 
@@ -225,7 +227,7 @@ wt_status_t handle_retire_connection_id(wt_quic_connection_t *connection,
   return deliver_to_handler(connection, visit, frame);
 }
 int local_connection_id_sequence(const wt_quic_connection_t *connection, const uint8_t *id,
-                                        size_t length, uint64_t *out_sequence) {
+                                 size_t length, uint64_t *out_sequence) {
   size_t i;
 
   if (length == connection->local_connection_id_length &&
@@ -319,8 +321,8 @@ wt_status_t wt_quic_connection_issue_connection_id(wt_quic_connection_t *connect
   connection->next_issued_sequence++;
   return WT_OK;
 }
-const wt_quic_issued_connection_id_t *wt_quic_connection_issued_id(
-    const wt_quic_connection_t *connection, uint64_t sequence) {
+const wt_quic_issued_connection_id_t *
+wt_quic_connection_issued_id(const wt_quic_connection_t *connection, uint64_t sequence) {
   size_t i;
   if (connection == NULL) return NULL;
   for (i = 0U; i < WT_QUIC_CONNECTION_IDS_MAX; i++) {
@@ -335,7 +337,7 @@ static void discard_retry(wt_quic_connection_t *connection) {
   connection->packets_discarded++;
 }
 wt_status_t on_retry_packet(wt_quic_connection_t *connection, const uint8_t *packet, size_t length,
-                                   uint64_t now) {
+                            uint64_t now) {
   wt_quic_retry_packet_t retry;
   wt_quic_error_t error = WT_QUIC_NO_ERROR;
 
@@ -408,17 +410,20 @@ wt_status_t on_retry_packet(wt_quic_connection_t *connection, const uint8_t *pac
    * against bytes that will never arrive. The descriptors come back through `on_lost`, which is what makes the
    * handshake re-offer the SAME cryptographic handshake message -- section 17.2.5.3 requires exactly that
    * message, and the retransmit path is the one that re-sends bytes it still holds. */
-  (void)wt_quic_loss_discard_space(&connection->loss, (uint8_t)WT_QUIC_SPACE_INITIAL, on_lost, connection);
+  (void)wt_quic_loss_discard_space(&connection->loss, (uint8_t)WT_QUIC_SPACE_INITIAL, on_lost,
+                                   connection);
   return WT_OK;
 }
-wt_status_t wt_quic_connection_retry(const wt_quic_connection_t *connection, const uint8_t **out_token,
-                                     size_t *out_token_length, const uint8_t **out_source_connection_id,
+wt_status_t wt_quic_connection_retry(const wt_quic_connection_t *connection,
+                                     const uint8_t **out_token, size_t *out_token_length,
+                                     const uint8_t **out_source_connection_id,
                                      size_t *out_source_connection_id_length) {
   if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (connection->retry_accepted == 0) return WT_ERR_STATE;
   if (out_token != NULL) *out_token = connection->retry_token;
   if (out_token_length != NULL) *out_token_length = connection->retry_token_length;
-  if (out_source_connection_id != NULL) *out_source_connection_id = connection->retry_source_connection_id;
+  if (out_source_connection_id != NULL)
+    *out_source_connection_id = connection->retry_source_connection_id;
   if (out_source_connection_id_length != NULL) {
     *out_source_connection_id_length = connection->retry_source_connection_id_length;
   }

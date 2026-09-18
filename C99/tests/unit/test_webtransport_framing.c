@@ -37,29 +37,27 @@ static void test_stream_prefix(void) {
 
   /* A bidirectional prefix. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a bidirectional prefix writes",
-               wt_webtransport_stream_prefix_write(&w, 0, 8U));
+  WT_EXPECT_OK("a bidirectional prefix writes", wt_webtransport_stream_prefix_write(&w, 0, 8U));
   /* 0x41 is above 63, so its varint is two bytes: 0x40 | the high bits, then the low
    * byte. The stream type is the VALUE, not the first byte, and a test that compared the
    * first byte with the value would be checking the varint's shape by accident. */
   WT_EXPECT_U64("as a two-byte varint", 0x40U, (uint64_t)bytes[0]);
   WT_EXPECT_U64("carrying the 0x41 type", WT_WEBTRANSPORT_STREAM_BIDI, (uint64_t)bytes[1]);
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
-  WT_EXPECT_OK("and parses", wt_webtransport_stream_prefix_parse(&c, &unidirectional, &session_id,
-                                                                 &error));
+  WT_EXPECT_OK("and parses",
+               wt_webtransport_stream_prefix_parse(&c, &unidirectional, &session_id, &error));
   WT_EXPECT_INT("as bidirectional", 0, unidirectional);
   WT_EXPECT_U64("for its session", 8U, session_id);
   WT_EXPECT_TRUE("leaving the stream data behind", wt_cursor_at_end(&c));
 
   /* A unidirectional one, distinguished by its type. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a unidirectional prefix writes",
-               wt_webtransport_stream_prefix_write(&w, 1, 12U));
+  WT_EXPECT_OK("a unidirectional prefix writes", wt_webtransport_stream_prefix_write(&w, 1, 12U));
   WT_EXPECT_U64("as a two-byte varint too", 0x40U, (uint64_t)bytes[0]);
   WT_EXPECT_U64("carrying the 0x54 type", WT_WEBTRANSPORT_STREAM_UNI, (uint64_t)bytes[1]);
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
-  WT_EXPECT_OK("and parses", wt_webtransport_stream_prefix_parse(&c, &unidirectional, &session_id,
-                                                                 &error));
+  WT_EXPECT_OK("and parses",
+               wt_webtransport_stream_prefix_parse(&c, &unidirectional, &session_id, &error));
   WT_EXPECT_INT("as unidirectional", 1, unidirectional);
   WT_EXPECT_U64("for its session", 12U, session_id);
 
@@ -70,8 +68,8 @@ static void test_stream_prefix(void) {
     WT_EXPECT_OK("a prefix writes", wt_webtransport_stream_prefix_write(&w, 0, 4U));
     wt_writer_bytes(&w, payload, sizeof(payload));
     c = wt_cursor_init(bytes, wt_writer_offset(&w));
-    WT_EXPECT_OK("and parses", wt_webtransport_stream_prefix_parse(&c, &unidirectional, &session_id,
-                                                                   &error));
+    WT_EXPECT_OK("and parses",
+                 wt_webtransport_stream_prefix_parse(&c, &unidirectional, &session_id, &error));
     WT_EXPECT_U64("leaving the payload", (uint64_t)sizeof(payload),
                   (uint64_t)wt_cursor_remaining(&c));
   }
@@ -95,8 +93,7 @@ static void test_stream_prefix(void) {
     c = wt_cursor_init(other_type, sizeof(other_type));
     WT_EXPECT_STATUS("another stream type is refused", WT_ERR_PROTOCOL,
                      wt_webtransport_stream_prefix_parse(&c, &unidirectional, &session_id, &error));
-    WT_EXPECT_U64("as a frame that is unexpected here", WT_HTTP3_FRAME_UNEXPECTED,
-                  (uint64_t)error);
+    WT_EXPECT_U64("as a frame that is unexpected here", WT_HTTP3_FRAME_UNEXPECTED, (uint64_t)error);
   }
 
   /* An incomplete prefix: a type with no session id. */
@@ -131,8 +128,7 @@ static void test_datagrams(void) {
 
   /* An empty payload is legal: a datagram can be a signal rather than a message. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("an empty datagram writes",
-               wt_webtransport_datagram_write(&w, 0U, NULL, 0U));
+  WT_EXPECT_OK("an empty datagram writes", wt_webtransport_datagram_write(&w, 0U, NULL, 0U));
   WT_EXPECT_OK("and parses", wt_webtransport_datagram_parse(bytes, wt_writer_offset(&w), &quarter,
                                                             &parsed, &parsed_length, &error));
   WT_EXPECT_U64("with no payload", 0U, (uint64_t)parsed_length);
@@ -148,9 +144,9 @@ static void test_datagrams(void) {
      * one for a datagram whose quarter stream ID is missing, and the assertion here used to pin the wrong rule. */
     WT_EXPECT_U64("as a datagram error", WT_HTTP3_DATAGRAM_ERROR, (uint64_t)error);
   }
-  WT_EXPECT_STATUS("and an empty one is too", WT_ERR_PROTOCOL,
-                   wt_webtransport_datagram_parse(NULL, 0U, &quarter, &parsed, &parsed_length,
-                                                  &error));
+  WT_EXPECT_STATUS(
+      "and an empty one is too", WT_ERR_PROTOCOL,
+      wt_webtransport_datagram_parse(NULL, 0U, &quarter, &parsed, &parsed_length, &error));
 }
 
 int main(void) {

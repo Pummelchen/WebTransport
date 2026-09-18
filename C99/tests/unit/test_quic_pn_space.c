@@ -20,8 +20,7 @@
 #include "webtransport/quic/varint.h"
 
 /* The ranges, as a readable string of run lengths, so a failure says which shape came out. */
-static int ranges_are(const wt_quic_ack_state_t *state, const uint64_t *bounds,
-                      size_t count) {
+static int ranges_are(const wt_quic_ack_state_t *state, const uint64_t *bounds, size_t count) {
   size_t i;
   if (state->count != count) return 0;
   for (i = 0U; i < count; i++) {
@@ -57,8 +56,7 @@ static void test_received_ranges(void) {
                 (uint64_t)state.ack_eliciting_since_ack);
   WT_EXPECT_OK("recording it again", wt_quic_ack_record(&state, 5U, 1));
   WT_EXPECT_U64("changes nothing", 1U, (uint64_t)state.count);
-  WT_EXPECT_U64("and does not count twice", 1U,
-                (uint64_t)state.ack_eliciting_since_ack);
+  WT_EXPECT_U64("and does not count twice", 1U, (uint64_t)state.ack_eliciting_since_ack);
 
   /* A packet that fills a gap joins the two ranges. */
   wt_quic_ack_state_init(&state);
@@ -101,10 +99,8 @@ static void test_received_ranges(void) {
     wt_quic_ack_state_init(&forward);
     wt_quic_ack_state_init(&backward);
     for (i = 0U; i < 10U; i++) {
-      WT_EXPECT_OK("a packet is recorded in order",
-                   wt_quic_ack_record(&forward, packets[i], 1));
-      WT_EXPECT_OK("and in reverse order",
-                   wt_quic_ack_record(&backward, reversed[i], 1));
+      WT_EXPECT_OK("a packet is recorded in order", wt_quic_ack_record(&forward, packets[i], 1));
+      WT_EXPECT_OK("and in reverse order", wt_quic_ack_record(&backward, reversed[i], 1));
     }
     WT_EXPECT_U64("both are one range", 1U, (uint64_t)forward.count);
     WT_EXPECT_U64("of the same count", 10U, wt_quic_ack_received_count(&forward));
@@ -130,9 +126,9 @@ static void test_received_ranges(void) {
     WT_EXPECT_U64("the set stays at its bound", (uint64_t)WT_QUIC_RECEIVED_RANGES_MAX,
                   (uint64_t)bounded.count);
     /* The oldest were dropped, so the newest is still there and packet 0 is not. */
-    WT_EXPECT_INT("the newest is still recorded", 1,
-                  wt_quic_ack_contains(
-                      &bounded, (uint64_t)(2U * (WT_QUIC_RECEIVED_RANGES_MAX + 3U))));
+    WT_EXPECT_INT(
+        "the newest is still recorded", 1,
+        wt_quic_ack_contains(&bounded, (uint64_t)(2U * (WT_QUIC_RECEIVED_RANGES_MAX + 3U))));
     WT_EXPECT_INT("and the oldest was dropped", 0, wt_quic_ack_contains(&bounded, 0U));
   }
 
@@ -149,8 +145,7 @@ static void test_ack_frame(void) {
   /* Nothing received: there is no acknowledgement to build. */
   wt_quic_ack_state_init(&state);
   WT_EXPECT_STATUS("no ACK without a packet", WT_ERR_STATE,
-                   wt_quic_ack_build(&state, 0U, ranges, sizeof(ranges), &ranges_len,
-                                     &frame));
+                   wt_quic_ack_build(&state, 0U, ranges, sizeof(ranges), &ranges_len, &frame));
 
   /* One range: the first_range describes it and there are no ranges behind it. */
   WT_EXPECT_OK("5 arrives", wt_quic_ack_record(&state, 5U, 1));
@@ -163,8 +158,7 @@ static void test_ack_frame(void) {
   WT_EXPECT_U64("a first range of two", 2U, frame.as.ack.first_range);
   WT_EXPECT_U64("and no further ranges", 0U, frame.as.ack.range_count);
   WT_EXPECT_U64("with no range bytes", 0U, (uint64_t)ranges_len);
-  WT_EXPECT_U64("and the frame is an ACK", (uint64_t)WT_QUIC_FRAME_KIND_ACK,
-                (uint64_t)frame.kind);
+  WT_EXPECT_U64("and the frame is an ACK", (uint64_t)WT_QUIC_FRAME_KIND_ACK, (uint64_t)frame.kind);
   WT_EXPECT_INT("which is not ECN", 0, frame.as.ack.has_ecn);
 
   /* Two ranges: the gap and the length are the wire's, and a decoder must read them back as the
@@ -185,8 +179,7 @@ static void test_ack_frame(void) {
    * describing the wrong set. */
   {
     wt_quic_ack_range_t range;
-    WT_EXPECT_OK("the range decodes",
-                 wt_quic_frame_ack_range_at(&frame, 0U, &range));
+    WT_EXPECT_OK("the range decodes", wt_quic_frame_ack_range_at(&frame, 0U, &range));
     WT_EXPECT_U64("with the gap the missing packet implies", 1U, range.gap);
     WT_EXPECT_U64("and the length of the older range", 2U, range.length);
   }
@@ -208,8 +201,7 @@ static void test_ack_frame(void) {
   WT_EXPECT_INT("and clearing NULL leaves the debt owed", 1, state.ack_pending);
   wt_quic_ack_sent(&state);
   WT_EXPECT_INT("and is no longer", 0, state.ack_pending);
-  WT_EXPECT_U64("with the counter reset", 0U,
-                (uint64_t)state.ack_eliciting_since_ack);
+  WT_EXPECT_U64("with the counter reset", 0U, (uint64_t)state.ack_eliciting_since_ack);
 
   /* Whether to send now or wait: two ack-eliciting packets, or a gap, make it now. */
   wt_quic_ack_state_init(&state);
@@ -234,8 +226,7 @@ static void test_rtt(void) {
 
   /* The first sample: RFC 9002 section 5.3's "smoothed_rtt = latest_rtt; rttvar = latest_rtt / 2".
    * The handshake is not confirmed, so the reported delay is not subtracted yet. */
-  WT_EXPECT_OK("the first sample",
-               wt_quic_rtt_update(&rtt, 100000U, 50000U, 25000U, 0));
+  WT_EXPECT_OK("the first sample", wt_quic_rtt_update(&rtt, 100000U, 50000U, 25000U, 0));
   WT_EXPECT_U64("sets the latest", 100000U, rtt.latest);
   WT_EXPECT_U64("the smoothed value to the sample", 100000U, rtt.smoothed);
   WT_EXPECT_U64("and the variation to half of it", 50000U, rtt.rttvar);
@@ -260,8 +251,7 @@ static void test_rtt(void) {
    *   difference = |102500 - 175000| = 72500
    *   rttvar = (3 * 42500 + 72500) / 4 = 50000
    *   smoothed = (7 * 102500 + 175000) / 8 = 111562 (integer division) */
-  WT_EXPECT_OK("a sample with a delay",
-               wt_quic_rtt_update(&rtt, 200000U, 60000U, 25000U, 1));
+  WT_EXPECT_OK("a sample with a delay", wt_quic_rtt_update(&rtt, 200000U, 60000U, 25000U, 1));
   /* `latest` is the raw sample: the adjustment is applied to the estimate, not to the sample a
    * caller might compare against something else. */
   WT_EXPECT_U64("keeps the raw sample", 200000U, rtt.latest);
@@ -270,8 +260,7 @@ static void test_rtt(void) {
 
   /* A sample below the minimum updates it, and a delay that would take more than the sample is
    * not subtracted (which would underflow). */
-  WT_EXPECT_OK("a smaller sample",
-               wt_quic_rtt_update(&rtt, 50000U, 40000U, 25000U, 1));
+  WT_EXPECT_OK("a smaller sample", wt_quic_rtt_update(&rtt, 50000U, 40000U, 25000U, 1));
   WT_EXPECT_U64("updates the minimum", 50000U, rtt.min_rtt);
   WT_EXPECT_U64("and is not reduced below itself", 50000U, rtt.latest);
   WT_EXPECT_OK("the probe timeout still computes", wt_quic_rtt_pto(&rtt, 25000U, &pto));
@@ -291,8 +280,7 @@ static void test_pn_space(void) {
   WT_EXPECT_U64("a fresh space sends packet number zero first", 0U, space.next_send);
   WT_EXPECT_INT("with nothing sent", 0, space.has_sent);
   WT_EXPECT_INT("and nothing acknowledged", 0, space.has_largest_acked);
-  WT_EXPECT_U64("so nothing is in flight", 0U,
-                wt_quic_pn_space_first_in_flight(&space));
+  WT_EXPECT_U64("so nothing is in flight", 0U, wt_quic_pn_space_first_in_flight(&space));
 
   WT_EXPECT_OK("a packet number is taken", wt_quic_pn_space_next(&space, &packet_number));
   WT_EXPECT_U64("which is zero", 0U, packet_number);
@@ -326,8 +314,7 @@ static void test_pn_space(void) {
                    wt_quic_pn_space_next(NULL, &packet_number));
   WT_EXPECT_STATUS("a NULL packet number is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_quic_pn_space_next(&space, NULL));
-  WT_EXPECT_U64("a NULL space has nothing in flight", 0U,
-                wt_quic_pn_space_first_in_flight(NULL));
+  WT_EXPECT_U64("a NULL space has nothing in flight", 0U, wt_quic_pn_space_first_in_flight(NULL));
 }
 
 int main(void) {

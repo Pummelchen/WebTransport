@@ -13,7 +13,8 @@
 #include "webtransport/writer.h"
 
 static void add(wt_cli_report_t *report, const char *name, int ok, const char *detail) {
-  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                          detail);
 }
 
 void wt_scenario_control_run(wt_cli_report_t *report) {
@@ -207,9 +208,8 @@ void wt_scenario_control_run(wt_cli_report_t *report) {
 
     w = wt_writer_init(buffer, sizeof(buffer));
     wrote = wt_webtransport_datagram_write(&w, 6U, (const uint8_t *)"probe", 5U) == WT_OK;
-    parsed = wrote &&
-             wt_webtransport_datagram_parse(buffer, wt_writer_offset(&w), &quarter, &payload, &length,
-                                            &error) == WT_OK;
+    parsed = wrote && wt_webtransport_datagram_parse(buffer, wt_writer_offset(&w), &quarter,
+                                                     &payload, &length, &error) == WT_OK;
 
     add(report, "datagram-carries-its-session-quarter-id",
         parsed && quarter == 6U && length == 5U && memcmp(payload, "probe", 5U) == 0,

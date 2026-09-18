@@ -106,12 +106,14 @@ wt_status_t wt_http3_frame_encoded_size(const wt_http3_frame_t *frame, size_t *o
 }
 
 wt_writer_t wt_http3_frame_data_writer(uint8_t *buffer, size_t capacity) {
-  if (buffer == NULL || capacity < WT_HTTP3_FRAME_DATA_HEADER_MAX) return wt_writer_init(buffer, 0U);
-  return wt_writer_init(buffer + WT_HTTP3_FRAME_DATA_HEADER_MAX, capacity - WT_HTTP3_FRAME_DATA_HEADER_MAX);
+  if (buffer == NULL || capacity < WT_HTTP3_FRAME_DATA_HEADER_MAX)
+    return wt_writer_init(buffer, 0U);
+  return wt_writer_init(buffer + WT_HTTP3_FRAME_DATA_HEADER_MAX,
+                        capacity - WT_HTTP3_FRAME_DATA_HEADER_MAX);
 }
 
-wt_status_t wt_http3_frame_wrap_data_in_place(uint8_t *buffer, size_t capacity, size_t payload_length,
-                                              size_t *out_length) {
+wt_status_t wt_http3_frame_wrap_data_in_place(uint8_t *buffer, size_t capacity,
+                                              size_t payload_length, size_t *out_length) {
   uint8_t header[WT_HTTP3_FRAME_DATA_HEADER_MAX];
   size_t header_length = 0U;
   size_t length_bytes;
@@ -136,7 +138,8 @@ wt_status_t wt_http3_frame_wrap_data_in_place(uint8_t *buffer, size_t capacity, 
   header_length++;
   length_bytes = wt_quic_varint_encode((uint64_t)payload_length, header + header_length,
                                        sizeof(header) - header_length);
-  if (length_bytes == 0U) return WT_ERR_INVALID_ARGUMENT; /* unreachable: the reservation is the varint's ceiling */
+  if (length_bytes == 0U)
+    return WT_ERR_INVALID_ARGUMENT; /* unreachable: the reservation is the varint's ceiling */
   header_length += length_bytes;
   if (header_length > capacity - payload_length) return WT_ERR_LIMIT;
 
@@ -201,9 +204,8 @@ wt_status_t wt_http3_frame_decode(wt_cursor_t *c, wt_http3_frame_t *out,
   }
 }
 
-wt_status_t wt_http3_frame_decode_prefix(const uint8_t *data, size_t length,
-                                         wt_http3_frame_t *out, size_t *out_consumed,
-                                         wt_http3_error_t *out_error) {
+wt_status_t wt_http3_frame_decode_prefix(const uint8_t *data, size_t length, wt_http3_frame_t *out,
+                                         size_t *out_consumed, wt_http3_error_t *out_error) {
   wt_cursor_t c;
   wt_status_t status;
 

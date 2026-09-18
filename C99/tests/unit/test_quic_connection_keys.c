@@ -50,8 +50,9 @@ void test_a_key_update_moves_both_directions(void) {
                           WT_SHA256_LEN) != 0);
     /* Section 6.1: the header protection key is NOT updated, which is what lets the peer unprotect a header of
      * any phase with the keys it holds. */
-    WT_EXPECT_TRUE("while header protection did not",
-                   memcmp(before.hp, pair.client.keys_out[WT_QUIC_SPACE_APPLICATION].hp, before.hp_len) == 0);
+    WT_EXPECT_TRUE(
+        "while header protection did not",
+        memcmp(before.hp, pair.client.keys_out[WT_QUIC_SPACE_APPLICATION].hp, before.hp_len) == 0);
     /* Section 6.1 also moves the initiator's RECEIVE keys, because the peer answers in the new phase. */
     WT_EXPECT_TRUE("and the receive secret changed with it",
                    memcmp(before.secret, pair.client.keys_in[WT_QUIC_SPACE_APPLICATION].secret,
@@ -70,7 +71,8 @@ void test_a_key_update_moves_both_directions(void) {
   WT_EXPECT_INT("the server read it", 0, wt_quic_connection_is_closed(&pair.server));
   WT_EXPECT_U64("and RESPONDED by moving its own keys", 1U,
                 wt_quic_connection_key_updates_responded(&pair.server));
-  WT_EXPECT_U64("its phase bit moved too", 1U, (uint64_t)wt_quic_connection_key_phase(&pair.server));
+  WT_EXPECT_U64("its phase bit moved too", 1U,
+                (uint64_t)wt_quic_connection_key_phase(&pair.server));
 
   /* The assertion the whole feature rests on: both ends derived the same secret in both directions. */
   phase_one = pair.client.keys_out[WT_QUIC_SPACE_APPLICATION];
@@ -110,13 +112,16 @@ void test_an_acknowledgement_confirms_the_update(void) {
   arm_application(&pair, 0x50U);
 
   /* One packet in phase zero, so the server has something to acknowledge and the phase has a start. */
-  WT_EXPECT_OK("the client sends in phase zero",
-               wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1, now));
+  WT_EXPECT_OK(
+      "the client sends in phase zero",
+      wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1, now));
   WT_EXPECT_OK("and flushes it", wt_quic_connection_flush(&pair.client, now));
   receive_on(&pair.server, &pair.server_socket, now + 1000U);
 
-  WT_EXPECT_OK("the client updates", wt_quic_connection_initiate_key_update(&pair.client, now + 2000U));
-  WT_EXPECT_U64("awaiting confirmation", 1U, (uint64_t)pair.client.key_update_awaiting_confirmation);
+  WT_EXPECT_OK("the client updates",
+               wt_quic_connection_initiate_key_update(&pair.client, now + 2000U));
+  WT_EXPECT_U64("awaiting confirmation", 1U,
+                (uint64_t)pair.client.key_update_awaiting_confirmation);
   WT_EXPECT_OK("a packet in the new phase goes out",
                wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1,
                                              now + 3000U));
@@ -164,8 +169,8 @@ void test_a_reordered_packet_is_read_with_the_retained_keys(void) {
 
   /* A packet the network holds back, protected with the phase-zero keys and numbered BELOW the ones that
    * follow it. */
-  delayed_len = build_application_packet(&pair.server.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, 0, delayed,
-                                         sizeof(delayed), 4U);
+  delayed_len = build_application_packet(&pair.server.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, 0,
+                                         delayed, sizeof(delayed), 4U);
 
   /* The client initiates an update: it retains the phase-zero KEYS it was reading with (section 6.1). */
   WT_EXPECT_OK("the client updates", wt_quic_connection_initiate_key_update(&pair.client, now));
@@ -235,8 +240,8 @@ void test_a_reordered_packet_with_no_reference_is_read(void) {
 
   /* The packet the network holds back: phase ZERO, packet number 0, protected with the keys the client is still
    * sending with -- it has not updated anything. */
-  delayed_len = build_application_packet(&pair.client.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, 0, delayed,
-                                         sizeof(delayed), 4U);
+  delayed_len = build_application_packet(&pair.client.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, 0,
+                                         delayed, sizeof(delayed), 4U);
 
   /* The update: the client's OWN next phase, derived the way `initiate_key_update` derives it. The header's bit
    * and the keys have to agree, which is what a first version of this test got wrong -- it set the bit and kept
@@ -276,7 +281,8 @@ void test_a_second_update_without_an_answer_is_refused(void) {
 
   open_pair(WT_UDP_IPV4, &pair);
   arm_application(&pair, 0x80U);
-  WT_EXPECT_OK("the client updates once", wt_quic_connection_initiate_key_update(&pair.client, now));
+  WT_EXPECT_OK("the client updates once",
+               wt_quic_connection_initiate_key_update(&pair.client, now));
 
   /* Phase one reaches the server, which responds and now OWES an acknowledgement in the new phase. */
   datagram_len = build_application_packet(&pair.client.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, 1,
@@ -333,7 +339,8 @@ void test_the_confidentiality_limit_rotates_the_keys(void) {
                                                now + i * 1000U));
     WT_EXPECT_U64("and counted against the key", i + 1U,
                   wt_quic_connection_aead_encrypted(&pair.client, WT_QUIC_SPACE_APPLICATION));
-    WT_EXPECT_U64("with the phase unchanged", 0U, (uint64_t)wt_quic_connection_key_phase(&pair.client));
+    WT_EXPECT_U64("with the phase unchanged", 0U,
+                  (uint64_t)wt_quic_connection_key_phase(&pair.client));
     WT_EXPECT_OK("and flushed", wt_quic_connection_flush(&pair.client, now + i * 1000U));
   }
 
@@ -344,7 +351,8 @@ void test_the_confidentiality_limit_rotates_the_keys(void) {
                                              now + 3000U));
   WT_EXPECT_U64("which the connection counts", 1U,
                 wt_quic_connection_key_updates_initiated(&pair.client));
-  WT_EXPECT_U64("with the phase bit moved", 1U, (uint64_t)wt_quic_connection_key_phase(&pair.client));
+  WT_EXPECT_U64("with the phase bit moved", 1U,
+                (uint64_t)wt_quic_connection_key_phase(&pair.client));
   WT_EXPECT_U64("and the new key set's count started", 1U,
                 wt_quic_connection_aead_encrypted(&pair.client, WT_QUIC_SPACE_APPLICATION));
   WT_EXPECT_INT("and nothing closed", 0, wt_quic_connection_is_closed(&pair.client));
@@ -364,10 +372,11 @@ void test_a_limit_with_no_update_possible_closes(void) {
 
   /* An update that has been sent and not yet acknowledged is one that cannot be initiated again (section 6.1),
    * so a connection in that state that reaches its limit has nowhere to go. */
-  WT_EXPECT_OK("one packet goes out",
-               wt_quic_connection_send_frame(&pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1, now));
+  WT_EXPECT_OK("one packet goes out", wt_quic_connection_send_frame(
+                                          &pair.client, WT_QUIC_SPACE_APPLICATION, &ping, 1, now));
   WT_EXPECT_OK("and is flushed", wt_quic_connection_flush(&pair.client, now));
-  WT_EXPECT_OK("the client updates", wt_quic_connection_initiate_key_update(&pair.client, now + 1000U));
+  WT_EXPECT_OK("the client updates",
+               wt_quic_connection_initiate_key_update(&pair.client, now + 1000U));
   pair.client.aead_confidentiality_limit = 0U;
   WT_EXPECT_INT("and no FURTHER update is possible while that one is unconfirmed", 0,
                 wt_quic_connection_key_update_allowed(&pair.client));
@@ -397,15 +406,17 @@ void test_the_integrity_limit_closes_the_connection(void) {
 
   /* A well-formed packet whose tag is wrong, which is what a forgery attempt looks like to a receiver. Built
    * once and corrupted per attempt, because the first two failures wipe it (that is the point of the wipe). */
-  packet_len = build_application_packet(&pair.server.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, 0, saved,
-                                        sizeof(saved), 4U);
+  packet_len = build_application_packet(&pair.server.keys_out[WT_QUIC_SPACE_APPLICATION], 0U, 0,
+                                        saved, sizeof(saved), 4U);
   for (i = 0U; i < 3U; i++) {
     memcpy(packet, saved, packet_len);
     packet[packet_len - 1U] ^= (uint8_t)(0x01U + i);
     deliver_to_peer(&pair, 1, packet, packet_len, now + i * 1000U);
-    WT_EXPECT_U64("the forgery attempt is counted", i + 1U, wt_quic_connection_aead_failed(&pair.server));
+    WT_EXPECT_U64("the forgery attempt is counted", i + 1U,
+                  wt_quic_connection_aead_failed(&pair.server));
   }
-  WT_EXPECT_INT("and the third closes the connection", 1, wt_quic_connection_is_closed(&pair.server));
+  WT_EXPECT_INT("and the third closes the connection", 1,
+                wt_quic_connection_is_closed(&pair.server));
   WT_EXPECT_U64("with AEAD_LIMIT_REACHED", (uint64_t)WT_QUIC_AEAD_LIMIT_REACHED,
                 pair.server.close.error_code);
 
@@ -431,10 +442,10 @@ void test_the_limits_follow_the_suite(void) {
   config.local_max_ack_delay = 25000U;
   config.idle_timeout = 30000000U;
   config.max_datagram_size = WT_QUIC_MAX_PACKET;
-  WT_EXPECT_OK("a ChaCha20-Poly1305 connection initialises", wt_quic_connection_init(&connection, &config));
+  WT_EXPECT_OK("a ChaCha20-Poly1305 connection initialises",
+               wt_quic_connection_init(&connection, &config));
   WT_EXPECT_U64("whose confidentiality limit is above the packet number space", UINT64_MAX,
                 wt_quic_connection_aead_confidentiality_limit(&connection));
   WT_EXPECT_U64("and whose integrity limit is the section's 2^36", (uint64_t)UINT64_C(1) << 36,
                 wt_quic_connection_aead_integrity_limit(&connection));
 }
-

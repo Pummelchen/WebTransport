@@ -11,8 +11,8 @@ void wt_quic_close_state_init(wt_quic_close_state_t *state) {
 }
 
 static wt_status_t close_common(wt_quic_close_state_t *state, uint64_t error_code,
-                                uint64_t frame_type, const uint8_t *reason,
-                                size_t reason_length, uint64_t now, uint64_t pto) {
+                                uint64_t frame_type, const uint8_t *reason, size_t reason_length,
+                                uint64_t now, uint64_t pto) {
   if (state == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (reason == NULL && reason_length != 0U) return WT_ERR_INVALID_ARGUMENT;
   /* A connection closes once. A second close would move the draining deadline and could be sent as a
@@ -39,16 +39,15 @@ static wt_status_t close_common(wt_quic_close_state_t *state, uint64_t error_cod
 wt_status_t wt_quic_close_transport(wt_quic_close_state_t *state, uint64_t error_code,
                                     uint64_t frame_type, const uint8_t *reason,
                                     size_t reason_length, uint64_t now, uint64_t pto) {
-  wt_status_t status = close_common(state, error_code, frame_type, reason, reason_length,
-                                    now, pto);
+  wt_status_t status = close_common(state, error_code, frame_type, reason, reason_length, now, pto);
   if (status != WT_OK) return status;
   state->kind = WT_QUIC_CLOSE_TRANSPORT;
   return WT_OK;
 }
 
 wt_status_t wt_quic_close_application(wt_quic_close_state_t *state, uint64_t error_code,
-                                      const uint8_t *reason, size_t reason_length,
-                                      uint64_t now, uint64_t pto) {
+                                      const uint8_t *reason, size_t reason_length, uint64_t now,
+                                      uint64_t pto) {
   wt_status_t status = close_common(state, error_code, 0U, reason, reason_length, now, pto);
   if (status != WT_OK) return status;
   state->kind = WT_QUIC_CLOSE_APPLICATION;

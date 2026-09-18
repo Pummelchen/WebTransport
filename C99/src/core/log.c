@@ -28,8 +28,7 @@ int wt_log_enabled(const wt_logger_t *logger, wt_log_level_t level) {
   return (int)level <= (int)logger->level;
 }
 
-void wt_log_emit(const wt_logger_t *logger, wt_log_level_t level,
-                 const char *message) {
+void wt_log_emit(const wt_logger_t *logger, wt_log_level_t level, const char *message) {
   if (message == NULL) return;
   if (!wt_log_enabled(logger, level)) return;
   /* The callback is invoked with the level this library chose, so a caller that

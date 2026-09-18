@@ -34,9 +34,7 @@ typedef enum wt_cli_mode {
   WT_CLI_MODE_CONNECT = 2
 } wt_cli_mode_t;
 
-typedef enum wt_cli_transport {
-  WT_CLI_TRANSPORT_PACKET = 1
-} wt_cli_transport_t;
+typedef enum wt_cli_transport { WT_CLI_TRANSPORT_PACKET = 1 } wt_cli_transport_t;
 
 typedef enum wt_cli_trust {
   WT_CLI_TRUST_SYSTEM = 1,

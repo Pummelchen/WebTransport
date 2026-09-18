@@ -84,7 +84,8 @@ wt_status_t wt_webtransport_session_on_stream_end(wt_webtransport_session_t *ses
  * the session's own -- the flow-control grants and the blocked signals, whose meaning depends on a stream table
  * and a flow account this lifecycle machine does not have -- and it may set `out_error` to the HTTP/3 code of its
  * refusal, which the walker passes on. */
-typedef wt_status_t (*wt_webtransport_capsule_fn)(void *context, const wt_webtransport_capsule_t *capsule,
+typedef wt_status_t (*wt_webtransport_capsule_fn)(void *context,
+                                                  const wt_webtransport_capsule_t *capsule,
                                                   wt_http3_error_t *out_error);
 
 /* Walk the capsules a peer sent on the CONNECT stream, applying the ones this layer owns.
@@ -105,8 +106,8 @@ typedef wt_status_t (*wt_webtransport_capsule_fn)(void *context, const wt_webtra
  * restated. */
 wt_status_t wt_webtransport_session_on_capsule_bytes(wt_webtransport_session_t *session,
                                                      wt_cursor_t *cursor, size_t max_capsule_bytes,
-                                                     wt_webtransport_capsule_fn observe, void *context,
-                                                     wt_http3_error_t *out_error);
+                                                     wt_webtransport_capsule_fn observe,
+                                                     void *context, wt_http3_error_t *out_error);
 
 /* Whether a new stream may be started for this session: not while establishing, and not
  * after a drain or a close in either direction. */
@@ -116,8 +117,8 @@ int wt_webtransport_session_allows_new_streams(const wt_webtransport_session_t *
  * closed, because a capsule after the end is a message the peer has no state for. */
 wt_status_t wt_webtransport_session_write_drain(wt_webtransport_session_t *session, wt_writer_t *w);
 wt_status_t wt_webtransport_session_write_close(wt_webtransport_session_t *session, wt_writer_t *w,
-                                               uint32_t error_code, const uint8_t *reason,
-                                               size_t reason_length);
+                                                uint32_t error_code, const uint8_t *reason,
+                                                size_t reason_length);
 
 #ifdef __cplusplus
 }

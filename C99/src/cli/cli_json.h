@@ -26,14 +26,29 @@ static void wt_cli_write_json_string(FILE *stream, const char *text) {
     for (i = 0U; text[i] != '\0'; i++) {
       unsigned char c = (unsigned char)text[i];
       switch (c) {
-        case '"': fputs("\\\"", stream); continue;
-        case '\\': fputs("\\\\", stream); continue;
-        case '\b': fputs("\\b", stream); continue;
-        case '\f': fputs("\\f", stream); continue;
-        case '\n': fputs("\\n", stream); continue;
-        case '\r': fputs("\\r", stream); continue;
-        case '\t': fputs("\\t", stream); continue;
-        default: break;
+        case '"':
+          fputs("\\\"", stream);
+          continue;
+        case '\\':
+          fputs("\\\\", stream);
+          continue;
+        case '\b':
+          fputs("\\b", stream);
+          continue;
+        case '\f':
+          fputs("\\f", stream);
+          continue;
+        case '\n':
+          fputs("\\n", stream);
+          continue;
+        case '\r':
+          fputs("\\r", stream);
+          continue;
+        case '\t':
+          fputs("\\t", stream);
+          continue;
+        default:
+          break;
       }
       if (c < 0x20U) {
         fprintf(stream, "\\u%04x", (unsigned)c);

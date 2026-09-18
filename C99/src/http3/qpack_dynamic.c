@@ -25,8 +25,7 @@ static void drop_oldest(wt_qpack_dynamic_table_t *table) {
   gone = (size_t)table->entries[0].name_length + (size_t)table->entries[0].value_length;
   memmove(table->bytes, table->bytes + gone, table->used - gone);
   table->used -= gone;
-  memmove(&table->entries[0], &table->entries[1],
-          (table->count - 1U) * sizeof(table->entries[0]));
+  memmove(&table->entries[0], &table->entries[1], (table->count - 1U) * sizeof(table->entries[0]));
   table->count--;
   table->dropped++;
   /* The bytes of every surviving entry just moved down by `gone`, so their offsets
@@ -49,7 +48,8 @@ void wt_qpack_dynamic_set_capacity(wt_qpack_dynamic_table_t *table, size_t capac
 /* Whether a caller's view points INTO the table's own arena. A pointer comparison between unrelated objects is
  * undefined in C, so the addresses are compared as integers -- which is exactly what the question is about: this
  * is an address-range test, not a pointer comparison. */
-static int aliases_arena(const wt_qpack_dynamic_table_t *table, const uint8_t *bytes, size_t length) {
+static int aliases_arena(const wt_qpack_dynamic_table_t *table, const uint8_t *bytes,
+                         size_t length) {
   uintptr_t start;
   uintptr_t end;
   uintptr_t arena_start;
@@ -78,7 +78,8 @@ wt_status_t wt_qpack_dynamic_insert(wt_qpack_dynamic_table_t *table, const uint8
   if (name == NULL && name_length != 0U) return WT_ERR_INVALID_ARGUMENT;
   if (value == NULL && value_length != 0U) return WT_ERR_INVALID_ARGUMENT;
   if (name_length > 0xffffU || value_length > 0xffffU) return WT_ERR_LIMIT;
-  if (name_length > SIZE_MAX - value_length - WT_QPACK_DYNAMIC_ENTRY_OVERHEAD) return WT_ERR_OVERFLOW;
+  if (name_length > SIZE_MAX - value_length - WT_QPACK_DYNAMIC_ENTRY_OVERHEAD)
+    return WT_ERR_OVERFLOW;
 
   entry_size = name_length + value_length + (size_t)WT_QPACK_DYNAMIC_ENTRY_OVERHEAD;
   /* Section 3.2.1: an entry larger than the whole capacity can never be stored,

@@ -23,9 +23,8 @@ void test_frame_boundaries_on_a_stream(void) {
   frame.payload = (const uint8_t *)"abc";
   frame.length = 3U;
   WT_EXPECT_OK("a DATA frame writes", wt_http3_frame_encode(&w, &frame));
-  WT_EXPECT_OK("and arrives",
-               wt_http3_driver_on_stream_bytes(&driver, 3U, bytes, wt_writer_offset(&w), 0, 64U,
-                                               &sink, &error));
+  WT_EXPECT_OK("and arrives", wt_http3_driver_on_stream_bytes(
+                                  &driver, 3U, bytes, wt_writer_offset(&w), 0, 64U, &sink, &error));
   WT_EXPECT_U64("as one frame", 1U, (uint64_t)log.frames);
   WT_EXPECT_U64("of type data", WT_HTTP3_FRAME_DATA, log.last_type);
   WT_EXPECT_U64("with its three bytes", 3U, (uint64_t)log.total_bytes);
@@ -41,8 +40,8 @@ void test_frame_boundaries_on_a_stream(void) {
                wt_http3_driver_on_stream_bytes(&driver, 3U, bytes + 1U, 1U, 0, 64U, &sink, &error));
   WT_EXPECT_U64("still none", 0U, (uint64_t)log.frames);
   WT_EXPECT_OK("and the rest",
-               wt_http3_driver_on_stream_bytes(&driver, 3U, bytes + 2U,
-                                               wt_writer_offset(&w) - 2U, 0, 64U, &sink, &error));
+               wt_http3_driver_on_stream_bytes(&driver, 3U, bytes + 2U, wt_writer_offset(&w) - 2U,
+                                               0, 64U, &sink, &error));
   WT_EXPECT_U64("now it is one frame", 1U, (uint64_t)log.frames);
   WT_EXPECT_U64("with every byte of it", 3U, (uint64_t)log.total_bytes);
 
@@ -152,8 +151,7 @@ void test_settling_a_capsule_stream_leaves_the_other_streams_framing(void) {
 
   /* The CONNECT stream is marked with its HEADERS frame still to come, so it takes the FIRST table slot and
    * holds it with the frame half-read. */
-  WT_EXPECT_OK("the CONNECT stream is marked",
-               wt_http3_driver_mark_capsule_stream(&driver, 5U, 1));
+  WT_EXPECT_OK("the CONNECT stream is marked", wt_http3_driver_mark_capsule_stream(&driver, 5U, 1));
   WT_EXPECT_OK("its HEADERS header arrives alone",
                wt_http3_driver_on_stream_bytes(&driver, 5U, headers, 2U, 0, 64U, &sink, &error));
 
@@ -164,8 +162,9 @@ void test_settling_a_capsule_stream_leaves_the_other_streams_framing(void) {
 
   /* The HEADERS frame's last byte settles the CONNECT stream. Settling releases its slot and moves the other
    * stream's state into it, so a write through the old pointer after that would clear the other stream's flag. */
-  WT_EXPECT_OK("the HEADERS frame completes",
-               wt_http3_driver_on_stream_bytes(&driver, 5U, headers + 2U, 1U, 0, 64U, &sink, &error));
+  WT_EXPECT_OK(
+      "the HEADERS frame completes",
+      wt_http3_driver_on_stream_bytes(&driver, 5U, headers + 2U, 1U, 0, 64U, &sink, &error));
   WT_EXPECT_U64("delivering the HEADERS frame", 1U, (uint64_t)log.frames);
   WT_EXPECT_TRUE("and the stream is now a capsule stream",
                  wt_http3_driver_is_capsule_stream(&driver, 5U) != 0);
@@ -178,4 +177,3 @@ void test_settling_a_capsule_stream_leaves_the_other_streams_framing(void) {
   WT_EXPECT_U64("as a DATA frame", WT_HTTP3_FRAME_DATA, log.last_type);
   WT_EXPECT_U64("with its payload stitched across the boundary", 4U, (uint64_t)log.total_bytes);
 }
-

@@ -150,8 +150,7 @@ typedef enum wt_quic_packet_kind {
 } wt_quic_packet_kind_t;
 
 /* Which kind of packet the datagram at `c` begins with, without parsing it. */
-wt_status_t wt_quic_packet_kind(const uint8_t *data, size_t length,
-                                wt_quic_packet_kind_t *out);
+wt_status_t wt_quic_packet_kind(const uint8_t *data, size_t length, wt_quic_packet_kind_t *out);
 
 /* The two connection IDs a LONG header names, and nothing else.
  *
@@ -190,17 +189,14 @@ wt_status_t wt_quic_initial_token(const uint8_t *data, size_t length, const uint
  * and a packet number length outside 1..4. RFC 9000 section 17.2 makes the
  * reserved bits a PROTOCOL_VIOLATION and the rest a FRAME_ENCODING_ERROR or a
  * truncation. */
-wt_status_t wt_quic_long_header_decode(wt_cursor_t *c,
-                                       wt_quic_long_header_t *out,
+wt_status_t wt_quic_long_header_decode(wt_cursor_t *c, wt_quic_long_header_t *out,
                                        wt_quic_error_t *out_error);
 
 /* Parse a short header. `destination_connection_id_len` is the local connection
  * ID length, which the wire does not carry. A short header runs to the end of
  * the datagram, so `payload_len` is what remains. */
-wt_status_t wt_quic_short_header_decode(wt_cursor_t *c,
-                                        size_t destination_connection_id_len,
-                                        wt_quic_short_header_t *out,
-                                        wt_quic_error_t *out_error);
+wt_status_t wt_quic_short_header_decode(wt_cursor_t *c, size_t destination_connection_id_len,
+                                        wt_quic_short_header_t *out, wt_quic_error_t *out_error);
 
 /* Where the packet number begins in a header that is STILL PROTECTED, and how long the packet is.
  *
@@ -219,15 +215,13 @@ wt_status_t wt_quic_short_header_decode(wt_cursor_t *c,
  * (no Length field), both WT_ERR_INVALID_ARGUMENT because they have their own parsers.
  * WT_ERR_TRUNCATED when the datagram ends before the walk does. */
 wt_status_t wt_quic_protected_pn_offset(const uint8_t *data, size_t length,
-                                        size_t local_connection_id_len,
-                                        size_t *out_offset, size_t *out_total_len,
-                                        int *out_short_header);
+                                        size_t local_connection_id_len, size_t *out_offset,
+                                        size_t *out_total_len, int *out_short_header);
 
 /* Parse a Retry packet. It occupies the rest of the datagram, so the caller must
  * pass a cursor over exactly one datagram. */
 wt_status_t wt_quic_retry_packet_decode(const uint8_t *data, size_t length,
-                                        wt_quic_retry_packet_t *out,
-                                        wt_quic_error_t *out_error);
+                                        wt_quic_retry_packet_t *out, wt_quic_error_t *out_error);
 
 /* Encode a long header through a writer, which writes the header and the
  * protected payload as given. The Length field is computed from the packet
@@ -238,17 +232,13 @@ wt_status_t wt_quic_retry_packet_decode(const uint8_t *data, size_t length,
  * Refuses a Retry type (use the Retry encoder), a connection ID above 20 bytes,
  * a packet number length outside 1..4, a token on a non-Initial packet, and a
  * payload whose length does not fit the Length field's varint. */
-wt_status_t wt_quic_long_header_encode(wt_writer_t *w,
-                                       wt_quic_packet_type_t type,
-                                       uint32_t version,
+wt_status_t wt_quic_long_header_encode(wt_writer_t *w, wt_quic_packet_type_t type, uint32_t version,
                                        const uint8_t *destination_connection_id,
                                        size_t destination_connection_id_len,
                                        const uint8_t *source_connection_id,
-                                       size_t source_connection_id_len,
-                                       const uint8_t *token, size_t token_len,
-                                       uint64_t packet_number,
-                                       size_t packet_number_len,
-                                       const uint8_t *payload,
+                                       size_t source_connection_id_len, const uint8_t *token,
+                                       size_t token_len, uint64_t packet_number,
+                                       size_t packet_number_len, const uint8_t *payload,
                                        size_t payload_len);
 
 /* Encode a long header WITHOUT its payload, for a caller that will produce the payload itself.
@@ -261,27 +251,25 @@ wt_status_t wt_quic_long_header_encode(wt_writer_t *w,
 wt_status_t wt_quic_long_header_encode_prefix(
     wt_writer_t *w, wt_quic_packet_type_t type, uint32_t version,
     const uint8_t *destination_connection_id, size_t destination_connection_id_len,
-    const uint8_t *source_connection_id, size_t source_connection_id_len,
-    const uint8_t *token, size_t token_len, uint64_t packet_number,
-    size_t packet_number_len, size_t payload_len);
+    const uint8_t *source_connection_id, size_t source_connection_id_len, const uint8_t *token,
+    size_t token_len, uint64_t packet_number, size_t packet_number_len, size_t payload_len);
 
 /* Encode a short header and its protected payload. */
-wt_status_t wt_quic_short_header_encode(wt_writer_t *w,
-                                        const uint8_t *destination_connection_id,
+wt_status_t wt_quic_short_header_encode(wt_writer_t *w, const uint8_t *destination_connection_id,
                                         size_t destination_connection_id_len,
-                                        uint64_t packet_number,
-                                        size_t packet_number_len, int key_phase,
-                                        int spin, const uint8_t *payload,
+                                        uint64_t packet_number, size_t packet_number_len,
+                                        int key_phase, int spin, const uint8_t *payload,
                                         size_t payload_len);
 
 /* Encode a Retry packet, whose integrity tag the caller supplies: computing it
  * needs the original destination connection ID and the AEAD, which is the
  * crypto layer's job and not the header codec's. */
-wt_status_t wt_quic_retry_packet_encode(
-    wt_writer_t *w, uint32_t version, const uint8_t *destination_connection_id,
-    size_t destination_connection_id_len,
-    const uint8_t *source_connection_id, size_t source_connection_id_len,
-    const uint8_t *token, size_t token_len, const uint8_t integrity_tag[16]);
+wt_status_t wt_quic_retry_packet_encode(wt_writer_t *w, uint32_t version,
+                                        const uint8_t *destination_connection_id,
+                                        size_t destination_connection_id_len,
+                                        const uint8_t *source_connection_id,
+                                        size_t source_connection_id_len, const uint8_t *token,
+                                        size_t token_len, const uint8_t integrity_tag[16]);
 
 /* A short stable name for a packet type: "initial", "0-rtt", "handshake",
  * "retry". Never NULL. */

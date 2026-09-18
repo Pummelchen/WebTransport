@@ -37,11 +37,9 @@ static void test_forms(void) {
   WT_EXPECT_U64("with the transport kind", (uint64_t)WT_QUIC_CLOSE_TRANSPORT,
                 (uint64_t)wt_quic_close_kind(&state));
   WT_EXPECT_U64("the error code", 0x0aU, (uint64_t)state.error_code);
-  WT_EXPECT_U64("the frame that caused it", WT_QUIC_FRAME_STREAM_BASE,
-                (uint64_t)state.frame_type);
+  WT_EXPECT_U64("the frame that caused it", WT_QUIC_FRAME_STREAM_BASE, (uint64_t)state.frame_type);
   WT_EXPECT_OK("the frame it produces", wt_quic_close_frame(&state, &frame));
-  WT_EXPECT_U64("is the transport form",
-                (uint64_t)WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT,
+  WT_EXPECT_U64("is the transport form", (uint64_t)WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_TRANSPORT,
                 (uint64_t)frame.kind);
   WT_EXPECT_INT("which carries a frame type", 1, frame.as.connection_close.has_frame_type);
   WT_EXPECT_U64("the same frame type", WT_QUIC_FRAME_STREAM_BASE,
@@ -68,14 +66,12 @@ static void test_forms(void) {
     wt_quic_close_state_t app;
     wt_quic_close_state_init(&app);
     WT_EXPECT_OK("an application close",
-                 wt_quic_close_application(&app, 42U, reason, sizeof(reason) - 1U, 500U,
-                                           50U));
+                 wt_quic_close_application(&app, 42U, reason, sizeof(reason) - 1U, 500U, 50U));
     WT_EXPECT_U64("with the application kind", (uint64_t)WT_QUIC_CLOSE_APPLICATION,
                   (uint64_t)wt_quic_close_kind(&app));
     WT_EXPECT_OK("the frame", wt_quic_close_frame(&app, &frame));
     WT_EXPECT_U64("is the application form",
-                  (uint64_t)WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION,
-                  (uint64_t)frame.kind);
+                  (uint64_t)WT_QUIC_FRAME_KIND_CONNECTION_CLOSE_APPLICATION, (uint64_t)frame.kind);
     WT_EXPECT_INT("which has no frame type", 0, frame.as.connection_close.has_frame_type);
     WT_EXPECT_U64("and the application's error code", 42U,
                   (uint64_t)frame.as.connection_close.error_code);
@@ -94,8 +90,7 @@ static void test_forms(void) {
     WT_EXPECT_OK("a transport close with no frame",
                  wt_quic_close_transport(&plain, 1U, 0U, NULL, 0U, 0U, 0U));
     WT_EXPECT_OK("produces its frame", wt_quic_close_frame(&plain, &frame));
-    WT_EXPECT_INT("with the frame field present", 1,
-                  frame.as.connection_close.has_frame_type);
+    WT_EXPECT_INT("with the frame field present", 1, frame.as.connection_close.has_frame_type);
     WT_EXPECT_U64("and zero in it", 0U, (uint64_t)frame.as.connection_close.frame_type);
   }
 
@@ -148,26 +143,19 @@ static void test_accepted_frames(void) {
   WT_EXPECT_INT("CONNECTION_CLOSE is processed", 1,
                 wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_CONNECTION_CLOSE_TRANSPORT));
   WT_EXPECT_INT("the application form too", 1,
-                wt_quic_close_accepts_frame_type(
-                    WT_QUIC_FRAME_CONNECTION_CLOSE_APPLICATION));
-  WT_EXPECT_INT("PADDING is processed", 1,
-                wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_PADDING));
-  WT_EXPECT_INT("PING is processed", 1,
-                wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_PING));
+                wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_CONNECTION_CLOSE_APPLICATION));
+  WT_EXPECT_INT("PADDING is processed", 1, wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_PADDING));
+  WT_EXPECT_INT("PING is processed", 1, wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_PING));
   WT_EXPECT_INT("a path challenge is processed", 1,
                 wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_PATH_CHALLENGE));
   WT_EXPECT_INT("a path response is processed", 1,
                 wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_PATH_RESPONSE));
   /* And the list is narrow: everything that would act on a dead connection is not. */
-  WT_EXPECT_INT("STREAM is not", 0,
-                wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_STREAM_BASE));
-  WT_EXPECT_INT("CRYPTO is not", 0,
-                wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_CRYPTO));
+  WT_EXPECT_INT("STREAM is not", 0, wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_STREAM_BASE));
+  WT_EXPECT_INT("CRYPTO is not", 0, wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_CRYPTO));
   WT_EXPECT_INT("ACK is not", 0, wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_ACK));
-  WT_EXPECT_INT("MAX_DATA is not", 0,
-                wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_MAX_DATA));
-  WT_EXPECT_INT("nor is an unknown frame type", 0,
-                wt_quic_close_accepts_frame_type(0x3fU));
+  WT_EXPECT_INT("MAX_DATA is not", 0, wt_quic_close_accepts_frame_type(WT_QUIC_FRAME_MAX_DATA));
+  WT_EXPECT_INT("nor is an unknown frame type", 0, wt_quic_close_accepts_frame_type(0x3fU));
 }
 
 int main(void) {

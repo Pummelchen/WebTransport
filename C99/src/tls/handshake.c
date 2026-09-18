@@ -9,8 +9,7 @@
  * which understands only this field is not given a reason to interfere. */
 #define WT_TLS_LEGACY_VERSION 0x0303U
 
-wt_status_t wt_tls_handshake_header_parse(wt_cursor_t *cursor,
-                                          wt_tls_handshake_header_t *out) {
+wt_status_t wt_tls_handshake_header_parse(wt_cursor_t *cursor, wt_tls_handshake_header_t *out) {
   uint8_t type;
   uint32_t length;
 
@@ -27,8 +26,7 @@ wt_status_t wt_tls_handshake_header_parse(wt_cursor_t *cursor,
   return WT_OK;
 }
 
-wt_status_t wt_tls_handshake_header_encode(wt_writer_t *w, uint8_t type,
-                                           size_t body_len) {
+wt_status_t wt_tls_handshake_header_encode(wt_writer_t *w, uint8_t type, size_t body_len) {
   if (w == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (body_len > WT_TLS_HANDSHAKE_MAX_BODY) return WT_ERR_LIMIT;
   wt_writer_u8(w, type);
@@ -83,8 +81,7 @@ const char *wt_tls_handshake_type_name(uint8_t type) {
  */
 
 /* Everything of a ClientHello except the extension block. */
-static void client_hello_prefix_body(const wt_tls_client_hello_t *hello,
-                                     wt_writer_t *w) {
+static void client_hello_prefix_body(const wt_tls_client_hello_t *hello, wt_writer_t *w) {
   size_t i;
   wt_writer_u16(w, hello->legacy_version);
   wt_writer_bytes(w, hello->random, WT_TLS_RANDOM_LEN);
@@ -101,8 +98,7 @@ static void client_hello_prefix_body(const wt_tls_client_hello_t *hello,
 }
 
 /* Everything of a ServerHello except the extension block. */
-static void server_hello_prefix_body(const wt_tls_server_hello_t *hello,
-                                     wt_writer_t *w) {
+static void server_hello_prefix_body(const wt_tls_server_hello_t *hello, wt_writer_t *w) {
   wt_writer_u16(w, hello->legacy_version);
   wt_writer_bytes(w, hello->random, WT_TLS_RANDOM_LEN);
   wt_writer_u8(w, (uint8_t)hello->session_id_len);
@@ -115,8 +111,8 @@ static void server_hello_prefix_body(const wt_tls_server_hello_t *hello,
  * their own two-byte length. RFC 9001 section 8.2 makes quic_transport_parameters
  * mandatory in a ClientHello, and RFC 8446 section 9.2 makes supported_versions
  * mandatory as soon as TLS 1.3 may be negotiated. */
-static wt_status_t client_hello_extensions(
-    const wt_tls_client_hello_params_t *params, wt_writer_t *w) {
+static wt_status_t client_hello_extensions(const wt_tls_client_hello_params_t *params,
+                                           wt_writer_t *w) {
   uint16_t version = WT_TLS_VERSION_1_3;
   wt_writer_t measure;
 
@@ -126,19 +122,16 @@ static wt_status_t client_hello_extensions(
     wt_tls_extension_server_name(&measure, params->host_name);
   }
   if (params->supported_group_count != 0U) {
-    wt_tls_extension_u16_list(&measure, WT_TLS_EXTENSION_SUPPORTED_GROUPS,
-                              params->supported_groups,
+    wt_tls_extension_u16_list(&measure, WT_TLS_EXTENSION_SUPPORTED_GROUPS, params->supported_groups,
                               params->supported_group_count);
   }
   if (params->signature_scheme_count != 0U) {
     wt_tls_extension_u16_list(&measure, WT_TLS_EXTENSION_SIGNATURE_ALGORITHMS,
-                              params->signature_schemes,
-                              params->signature_scheme_count);
+                              params->signature_schemes, params->signature_scheme_count);
   }
   wt_tls_extension_supported_versions_client(&measure, &version, 1U);
   if (params->key_share_count != 0U) {
-    wt_tls_extension_key_share_client(&measure, params->key_shares,
-                                      params->key_share_count);
+    wt_tls_extension_key_share_client(&measure, params->key_shares, params->key_share_count);
   }
   if (params->alpn_count != 0U) {
     wt_tls_extension_alpn(&measure, params->alpn, params->alpn_count);
@@ -157,19 +150,16 @@ static wt_status_t client_hello_extensions(
     wt_tls_extension_server_name(w, params->host_name);
   }
   if (params->supported_group_count != 0U) {
-    wt_tls_extension_u16_list(w, WT_TLS_EXTENSION_SUPPORTED_GROUPS,
-                              params->supported_groups,
+    wt_tls_extension_u16_list(w, WT_TLS_EXTENSION_SUPPORTED_GROUPS, params->supported_groups,
                               params->supported_group_count);
   }
   if (params->signature_scheme_count != 0U) {
-    wt_tls_extension_u16_list(w, WT_TLS_EXTENSION_SIGNATURE_ALGORITHMS,
-                              params->signature_schemes,
+    wt_tls_extension_u16_list(w, WT_TLS_EXTENSION_SIGNATURE_ALGORITHMS, params->signature_schemes,
                               params->signature_scheme_count);
   }
   wt_tls_extension_supported_versions_client(w, &version, 1U);
   if (params->key_share_count != 0U) {
-    wt_tls_extension_key_share_client(w, params->key_shares,
-                                      params->key_share_count);
+    wt_tls_extension_key_share_client(w, params->key_shares, params->key_share_count);
   }
   if (params->alpn_count != 0U) {
     wt_tls_extension_alpn(w, params->alpn, params->alpn_count);
@@ -183,8 +173,8 @@ static wt_status_t client_hello_extensions(
 }
 
 /* The extensions our server answers with: the version it chose and its key share. */
-static wt_status_t server_hello_extensions(
-    const wt_tls_server_hello_params_t *params, wt_writer_t *w) {
+static wt_status_t server_hello_extensions(const wt_tls_server_hello_params_t *params,
+                                           wt_writer_t *w) {
   wt_writer_t measure = wt_writer_measure();
 
   if (params->key_share->key == NULL || params->key_share->key_len == 0U ||
@@ -203,8 +193,7 @@ static wt_status_t server_hello_extensions(
 
 /* ------------------------------------------------------------------- encoders */
 
-wt_status_t wt_tls_client_hello_encode(const wt_tls_client_hello_t *hello,
-                                       wt_writer_t *w) {
+wt_status_t wt_tls_client_hello_encode(const wt_tls_client_hello_t *hello, wt_writer_t *w) {
   wt_writer_t measure;
   size_t body_len;
 
@@ -216,8 +205,7 @@ wt_status_t wt_tls_client_hello_encode(const wt_tls_client_hello_t *hello,
    * violates one was built by hand -- and refusing here keeps the encoder from writing
    * a length field that cannot hold what follows it. */
   if (hello->session_id_len > WT_TLS_SESSION_ID_MAX) return WT_ERR_LIMIT;
-  if (hello->cipher_suite_count == 0U ||
-      hello->cipher_suite_count > WT_TLS_CIPHER_SUITES_MAX) {
+  if (hello->cipher_suite_count == 0U || hello->cipher_suite_count > WT_TLS_CIPHER_SUITES_MAX) {
     return WT_ERR_LIMIT;
   }
   if (hello->compression_method_count == 0U ||
@@ -231,8 +219,7 @@ wt_status_t wt_tls_client_hello_encode(const wt_tls_client_hello_t *hello,
   body_len = wt_writer_offset(&measure);
   if (body_len > WT_TLS_HANDSHAKE_MAX_BODY) return WT_ERR_LIMIT;
 
-  if (wt_tls_handshake_header_encode(w, WT_TLS_HANDSHAKE_CLIENT_HELLO, body_len) !=
-      WT_OK) {
+  if (wt_tls_handshake_header_encode(w, WT_TLS_HANDSHAKE_CLIENT_HELLO, body_len) != WT_OK) {
     return WT_ERR_LIMIT;
   }
   client_hello_prefix_body(hello, w);
@@ -242,8 +229,7 @@ wt_status_t wt_tls_client_hello_encode(const wt_tls_client_hello_t *hello,
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
 
-wt_status_t wt_tls_server_hello_encode(const wt_tls_server_hello_t *hello,
-                                       wt_writer_t *w) {
+wt_status_t wt_tls_server_hello_encode(const wt_tls_server_hello_t *hello, wt_writer_t *w) {
   wt_writer_t measure;
   size_t body_len;
 
@@ -259,8 +245,7 @@ wt_status_t wt_tls_server_hello_encode(const wt_tls_server_hello_t *hello,
   body_len = wt_writer_offset(&measure);
   if (body_len > WT_TLS_HANDSHAKE_MAX_BODY) return WT_ERR_LIMIT;
 
-  if (wt_tls_handshake_header_encode(w, WT_TLS_HANDSHAKE_SERVER_HELLO, body_len) !=
-      WT_OK) {
+  if (wt_tls_handshake_header_encode(w, WT_TLS_HANDSHAKE_SERVER_HELLO, body_len) != WT_OK) {
     return WT_ERR_LIMIT;
   }
   server_hello_prefix_body(hello, w);
@@ -279,9 +264,8 @@ wt_status_t wt_tls_server_hello_encode(const wt_tls_server_hello_t *hello,
  * having been written out twice.
  */
 
-wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params,
-                                      uint8_t *out, size_t capacity,
-                                      size_t *out_len) {
+wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params, uint8_t *out,
+                                      size_t capacity, size_t *out_len) {
   wt_tls_client_hello_t fixed;
   wt_writer_t extensions;
   wt_writer_t measure;
@@ -313,8 +297,7 @@ wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params
   if (params->alpn == NULL && params->alpn_count != 0U) {
     return WT_ERR_INVALID_ARGUMENT;
   }
-  if (params->transport_parameters == NULL &&
-      params->transport_parameters_len != 0U) {
+  if (params->transport_parameters == NULL && params->transport_parameters_len != 0U) {
     return WT_ERR_INVALID_ARGUMENT;
   }
 
@@ -348,8 +331,7 @@ wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params
   /* Pass two: the same functions, into the message. */
   {
     wt_writer_t w = wt_writer_init(out, capacity);
-    if (wt_tls_handshake_header_encode(&w, WT_TLS_HANDSHAKE_CLIENT_HELLO,
-                                       body_len) != WT_OK) {
+    if (wt_tls_handshake_header_encode(&w, WT_TLS_HANDSHAKE_CLIENT_HELLO, body_len) != WT_OK) {
       return WT_ERR_LIMIT;
     }
     client_hello_prefix_body(&fixed, &w);
@@ -366,9 +348,8 @@ wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params
   return WT_OK;
 }
 
-wt_status_t wt_tls_server_hello_build(const wt_tls_server_hello_params_t *params,
-                                      uint8_t *out, size_t capacity,
-                                      size_t *out_len) {
+wt_status_t wt_tls_server_hello_build(const wt_tls_server_hello_params_t *params, uint8_t *out,
+                                      size_t capacity, size_t *out_len) {
   wt_tls_server_hello_t fixed;
   wt_writer_t extensions;
   wt_writer_t measure;
@@ -410,8 +391,7 @@ wt_status_t wt_tls_server_hello_build(const wt_tls_server_hello_params_t *params
 
   {
     wt_writer_t w = wt_writer_init(out, capacity);
-    if (wt_tls_handshake_header_encode(&w, WT_TLS_HANDSHAKE_SERVER_HELLO,
-                                       body_len) != WT_OK) {
+    if (wt_tls_handshake_header_encode(&w, WT_TLS_HANDSHAKE_SERVER_HELLO, body_len) != WT_OK) {
       return WT_ERR_LIMIT;
     }
     server_hello_prefix_body(&fixed, &w);
@@ -428,8 +408,7 @@ wt_status_t wt_tls_server_hello_build(const wt_tls_server_hello_params_t *params
 /* -------------------------------------------------------------------- parsing */
 
 /* The two fields every Hello starts with, checked for the one legal legacy version. */
-static wt_status_t hello_prefix(wt_cursor_t *cursor, uint16_t *version,
-                                const uint8_t **random) {
+static wt_status_t hello_prefix(wt_cursor_t *cursor, uint16_t *version, const uint8_t **random) {
   *version = wt_cursor_u16(cursor);
   *random = wt_cursor_bytes(cursor, WT_TLS_RANDOM_LEN);
   if (*random == NULL) return WT_ERR_PROTOCOL;
@@ -582,18 +561,15 @@ wt_status_t wt_tls_server_hello_parse(const uint8_t *message, size_t len,
  * this layer's question, trust is the layer above.
  */
 
-static void certificate_body(const wt_tls_certificate_t *certificate,
-                             wt_writer_t *w) {
+static void certificate_body(const wt_tls_certificate_t *certificate, wt_writer_t *w) {
   size_t i;
   size_t list_len = 0U;
 
   for (i = 0U; i < certificate->count; i++) {
-    list_len += 3U + certificate->entries[i].der_len + 2U +
-                certificate->entries[i].extensions_len;
+    list_len += 3U + certificate->entries[i].der_len + 2U + certificate->entries[i].extensions_len;
   }
   wt_writer_u8(w, (uint8_t)certificate->request_context_len);
-  wt_writer_bytes(w, certificate->request_context,
-                  certificate->request_context_len);
+  wt_writer_bytes(w, certificate->request_context, certificate->request_context_len);
   wt_writer_u24(w, (uint32_t)list_len);
   for (i = 0U; i < certificate->count; i++) {
     const wt_tls_certificate_entry_t *entry = &certificate->entries[i];
@@ -604,19 +580,17 @@ static void certificate_body(const wt_tls_certificate_t *certificate,
   }
 }
 
-static void certificate_verify_body(
-    const wt_tls_certificate_verify_t *certificate_verify, wt_writer_t *w) {
+static void certificate_verify_body(const wt_tls_certificate_verify_t *certificate_verify,
+                                    wt_writer_t *w) {
   wt_writer_u16(w, certificate_verify->scheme);
   wt_writer_u16(w, (uint16_t)certificate_verify->signature_len);
-  wt_writer_bytes(w, certificate_verify->signature,
-                  certificate_verify->signature_len);
+  wt_writer_bytes(w, certificate_verify->signature, certificate_verify->signature_len);
 }
 
 /* The same measure-then-write shape every encoder here uses. `body` writes the body and
  * returns the status the values themselves deserve; the framing checks only need to
  * happen once, before the measuring pass. */
-static wt_status_t frame_and_write(const void *structure, void (*body)(const void *,
-                                                                     wt_writer_t *),
+static wt_status_t frame_and_write(const void *structure, void (*body)(const void *, wt_writer_t *),
                                    uint8_t type, wt_writer_t *w) {
   wt_writer_t measure;
   size_t body_len;
@@ -648,8 +622,7 @@ static wt_status_t certificate_check(const wt_tls_certificate_t *certificate) {
   size_t i;
   size_t list_len = 0U;
 
-  if (certificate->request_context == NULL &&
-      certificate->request_context_len != 0U) {
+  if (certificate->request_context == NULL && certificate->request_context_len != 0U) {
     return WT_ERR_INVALID_ARGUMENT;
   }
   /* RFC 8446 section 4.4.2: the context is 0..255 bytes, one length octet. */
@@ -674,19 +647,16 @@ static wt_status_t certificate_check(const wt_tls_certificate_t *certificate) {
   return WT_OK;
 }
 
-wt_status_t wt_tls_certificate_encode(const wt_tls_certificate_t *certificate,
-                                      wt_writer_t *w) {
+wt_status_t wt_tls_certificate_encode(const wt_tls_certificate_t *certificate, wt_writer_t *w) {
   wt_status_t status;
   if (certificate == NULL) return WT_ERR_INVALID_ARGUMENT;
   status = certificate_check(certificate);
   if (status != WT_OK) return status;
-  return frame_and_write(certificate, certificate_body_thunk,
-                         WT_TLS_HANDSHAKE_CERTIFICATE, w);
+  return frame_and_write(certificate, certificate_body_thunk, WT_TLS_HANDSHAKE_CERTIFICATE, w);
 }
 
-wt_status_t wt_tls_certificate_build(const wt_tls_certificate_params_t *params,
-                                     uint8_t *out, size_t capacity,
-                                     size_t *out_len) {
+wt_status_t wt_tls_certificate_build(const wt_tls_certificate_params_t *params, uint8_t *out,
+                                     size_t capacity, size_t *out_len) {
   wt_tls_certificate_t certificate;
 
   if (params == NULL || out == NULL || out_len == NULL) {
@@ -705,8 +675,7 @@ wt_status_t wt_tls_certificate_build(const wt_tls_certificate_params_t *params,
   /* An empty certificate list is legal, so the copy is guarded: that is what keeps
    * a NULL with a zero count away from `memcpy`'s nonnull parameters. */
   if (params->count != 0U) {
-    memcpy(certificate.entries, params->entries,
-           params->count * sizeof(certificate.entries[0]));
+    memcpy(certificate.entries, params->entries, params->count * sizeof(certificate.entries[0]));
   }
 
   {
@@ -721,11 +690,10 @@ wt_status_t wt_tls_certificate_build(const wt_tls_certificate_params_t *params,
   return WT_OK;
 }
 
-wt_status_t wt_tls_certificate_verify_encode(
-    const wt_tls_certificate_verify_t *certificate_verify, wt_writer_t *w) {
+wt_status_t wt_tls_certificate_verify_encode(const wt_tls_certificate_verify_t *certificate_verify,
+                                             wt_writer_t *w) {
   if (certificate_verify == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (certificate_verify->signature == NULL &&
-      certificate_verify->signature_len != 0U) {
+  if (certificate_verify->signature == NULL && certificate_verify->signature_len != 0U) {
     return WT_ERR_INVALID_ARGUMENT;
   }
   /* RFC 8446 section 4.4.3: the signature is 0..2^16-1 bytes. Zero is legal for an
@@ -736,10 +704,9 @@ wt_status_t wt_tls_certificate_verify_encode(
                          WT_TLS_HANDSHAKE_CERTIFICATE_VERIFY, w);
 }
 
-wt_status_t wt_tls_certificate_verify_build(uint16_t scheme,
-                                            const uint8_t *signature,
-                                            size_t signature_len, uint8_t *out,
-                                            size_t capacity, size_t *out_len) {
+wt_status_t wt_tls_certificate_verify_build(uint16_t scheme, const uint8_t *signature,
+                                            size_t signature_len, uint8_t *out, size_t capacity,
+                                            size_t *out_len) {
   wt_tls_certificate_verify_t certificate_verify;
   wt_writer_t w;
   wt_status_t status;
@@ -757,8 +724,8 @@ wt_status_t wt_tls_certificate_verify_build(uint16_t scheme,
   return WT_OK;
 }
 
-wt_status_t wt_tls_finished_build(const uint8_t verify_data[WT_TLS13_FINISHED_LEN],
-                                  uint8_t *out, size_t capacity, size_t *out_len) {
+wt_status_t wt_tls_finished_build(const uint8_t verify_data[WT_TLS13_FINISHED_LEN], uint8_t *out,
+                                  size_t capacity, size_t *out_len) {
   wt_writer_t w;
 
   if (verify_data == NULL || out == NULL || out_len == NULL) {
@@ -769,8 +736,8 @@ wt_status_t wt_tls_finished_build(const uint8_t verify_data[WT_TLS13_FINISHED_LE
     return WT_ERR_LIMIT;
   }
   w = wt_writer_init(out, capacity);
-  if (wt_tls_handshake_header_encode(&w, WT_TLS_HANDSHAKE_FINISHED,
-                                     WT_TLS13_FINISHED_LEN) != WT_OK) {
+  if (wt_tls_handshake_header_encode(&w, WT_TLS_HANDSHAKE_FINISHED, WT_TLS13_FINISHED_LEN) !=
+      WT_OK) {
     return WT_ERR_LIMIT;
   }
   wt_writer_bytes(&w, verify_data, WT_TLS13_FINISHED_LEN);
@@ -829,8 +796,8 @@ wt_status_t wt_tls_certificate_parse(const uint8_t *message, size_t len,
   return wt_cursor_at_end(&body) ? WT_OK : WT_ERR_PROTOCOL;
 }
 
-wt_status_t wt_tls_certificate_verify_parse(
-    const uint8_t *message, size_t len, wt_tls_certificate_verify_t *out) {
+wt_status_t wt_tls_certificate_verify_parse(const uint8_t *message, size_t len,
+                                            wt_tls_certificate_verify_t *out) {
   wt_cursor_t body;
   uint16_t signature_len;
   wt_status_t status;
@@ -866,8 +833,8 @@ wt_status_t wt_tls_finished_parse(const uint8_t *message, size_t len,
   return wt_cursor_at_end(&body) ? WT_OK : WT_ERR_PROTOCOL;
 }
 
-wt_status_t wt_tls_encrypted_extensions_encode(
-    const wt_tls_extension_list_t *extensions, wt_writer_t *w) {
+wt_status_t wt_tls_encrypted_extensions_encode(const wt_tls_extension_list_t *extensions,
+                                               wt_writer_t *w) {
   wt_writer_t measure;
   size_t body_len;
 
@@ -877,17 +844,15 @@ wt_status_t wt_tls_encrypted_extensions_encode(
   if (!wt_writer_ok(&measure)) return WT_ERR_LIMIT;
   body_len = wt_writer_offset(&measure);
   if (body_len > WT_TLS_HANDSHAKE_MAX_BODY) return WT_ERR_LIMIT;
-  if (wt_tls_handshake_header_encode(w, WT_TLS_HANDSHAKE_ENCRYPTED_EXTENSIONS,
-                                     body_len) != WT_OK) {
+  if (wt_tls_handshake_header_encode(w, WT_TLS_HANDSHAKE_ENCRYPTED_EXTENSIONS, body_len) != WT_OK) {
     return WT_ERR_LIMIT;
   }
   if (wt_tls_extensions_encode(w, extensions) != WT_OK) return WT_ERR_LIMIT;
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
 
-wt_status_t wt_tls_encrypted_extensions_build(
-    const wt_tls_extension_list_t *extensions, uint8_t *out, size_t capacity,
-    size_t *out_len) {
+wt_status_t wt_tls_encrypted_extensions_build(const wt_tls_extension_list_t *extensions,
+                                              uint8_t *out, size_t capacity, size_t *out_len) {
   wt_writer_t w;
   wt_status_t status;
 

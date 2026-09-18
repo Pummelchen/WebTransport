@@ -13,9 +13,9 @@
 /* RFC 9001 section 5.2: the version 1 Initial salt, "the salt for version 1".
  * It is the ASCII of the draft version this QUIC version came from, which is why
  * it looks random and is not. */
-const uint8_t wt_quic_initial_salt_v1[20] = {
-    0x38U, 0x76U, 0x2cU, 0xf7U, 0xf5U, 0x59U, 0x34U, 0xb3U, 0x4dU, 0x17U,
-    0x9aU, 0xe6U, 0xa4U, 0xc8U, 0x0cU, 0xadU, 0xccU, 0xbbU, 0x7fU, 0x0aU};
+const uint8_t wt_quic_initial_salt_v1[20] = {0x38U, 0x76U, 0x2cU, 0xf7U, 0xf5U, 0x59U, 0x34U,
+                                             0xb3U, 0x4dU, 0x17U, 0x9aU, 0xe6U, 0xa4U, 0xc8U,
+                                             0x0cU, 0xadU, 0xccU, 0xbbU, 0x7fU, 0x0aU};
 
 /* The label lengths RFC 9001 section 5.1 uses: six for "quic ku" and eight for
  * the rest. The lengths are not written as constants in the derivation -- the
@@ -28,9 +28,8 @@ void wt_quic_packet_keys_clear(wt_quic_packet_keys_t *keys) {
   wt_secure_zero(keys, sizeof(*keys));
 }
 
-wt_status_t wt_quic_initial_secret(const uint8_t *salt, size_t salt_len,
-                                   const uint8_t *dcid, size_t dcid_len,
-                                   uint8_t out[WT_SHA256_LEN]) {
+wt_status_t wt_quic_initial_secret(const uint8_t *salt, size_t salt_len, const uint8_t *dcid,
+                                   size_t dcid_len, uint8_t out[WT_SHA256_LEN]) {
   if (salt == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* A connection ID of zero length is legal in QUIC (RFC 9000 section 5.1), so it
    * is not refused here: the Initial keys of a connection whose client chose an
@@ -44,9 +43,8 @@ wt_status_t wt_quic_initial_secret(const uint8_t *salt, size_t salt_len,
  * initial, traffic and update paths, because RFC 9001 section 5.1 uses the same
  * three labels for all of them and three copies of this would be three chances to
  * write a different label. */
-static wt_status_t wt_quic_derive_packet_keys(
-    const uint8_t secret[WT_SHA256_LEN], wt_aead_t aead,
-    wt_quic_packet_keys_t *out) {
+static wt_status_t wt_quic_derive_packet_keys(const uint8_t secret[WT_SHA256_LEN], wt_aead_t aead,
+                                              wt_quic_packet_keys_t *out) {
   size_t key_len = wt_aead_key_len(aead);
   size_t iv_len = wt_aead_iv_len(aead);
   wt_status_t status;
@@ -65,14 +63,14 @@ static wt_status_t wt_quic_derive_packet_keys(
    * a simplification this code is allowed to make silently. */
   out->hp_len = key_len;
 
-  status = wt_hkdf_expand_label_sha256(secret, WT_QUIC_SECRET_LEN, "quic key",
-                                       NULL, 0U, out->key, key_len);
+  status = wt_hkdf_expand_label_sha256(secret, WT_QUIC_SECRET_LEN, "quic key", NULL, 0U, out->key,
+                                       key_len);
   if (status != WT_OK) goto fail;
-  status = wt_hkdf_expand_label_sha256(secret, WT_QUIC_SECRET_LEN, "quic iv",
-                                       NULL, 0U, out->iv, iv_len);
+  status =
+      wt_hkdf_expand_label_sha256(secret, WT_QUIC_SECRET_LEN, "quic iv", NULL, 0U, out->iv, iv_len);
   if (status != WT_OK) goto fail;
-  status = wt_hkdf_expand_label_sha256(secret, WT_QUIC_SECRET_LEN, "quic hp",
-                                       NULL, 0U, out->hp, key_len);
+  status = wt_hkdf_expand_label_sha256(secret, WT_QUIC_SECRET_LEN, "quic hp", NULL, 0U, out->hp,
+                                       key_len);
   if (status != WT_OK) goto fail;
   return WT_OK;
 
@@ -83,9 +81,8 @@ fail:
   return status;
 }
 
-wt_status_t wt_quic_packet_keys_from_secret(
-    const uint8_t secret[WT_SHA256_LEN], wt_aead_t aead,
-    wt_quic_packet_keys_t *out) {
+wt_status_t wt_quic_packet_keys_from_secret(const uint8_t secret[WT_SHA256_LEN], wt_aead_t aead,
+                                            wt_quic_packet_keys_t *out) {
   if (secret == NULL) return WT_ERR_INVALID_ARGUMENT;
   return wt_quic_derive_packet_keys(secret, aead, out);
 }
@@ -96,10 +93,9 @@ wt_status_t wt_quic_initial_packet_keys(const uint8_t initial_secret[WT_SHA256_L
   uint8_t secret[WT_QUIC_SECRET_LEN];
   wt_status_t status;
   if (initial_secret == NULL) return WT_ERR_INVALID_ARGUMENT;
-  status = wt_hkdf_expand_label_sha256(
-      initial_secret, WT_QUIC_SECRET_LEN,
-      from_server ? "server in" : "client in", NULL, 0U, secret,
-      sizeof(secret));
+  status = wt_hkdf_expand_label_sha256(initial_secret, WT_QUIC_SECRET_LEN,
+                                       from_server ? "server in" : "client in", NULL, 0U, secret,
+                                       sizeof(secret));
   if (status != WT_OK) return status;
   status = wt_quic_derive_packet_keys(secret, aead, out);
   wt_secure_zero(secret, sizeof(secret));
@@ -129,9 +125,8 @@ wt_status_t wt_quic_packet_keys_update(const wt_quic_packet_keys_t *current,
    * suite comes from the current keys rather than from the caller -- a caller
    * that passed a different one would have a connection whose two directions use
    * different algorithms. */
-  status = wt_hkdf_expand_label_sha256(current->secret, WT_QUIC_SECRET_LEN,
-                                       "quic ku", NULL, 0U, next_secret,
-                                       sizeof(next_secret));
+  status = wt_hkdf_expand_label_sha256(current->secret, WT_QUIC_SECRET_LEN, "quic ku", NULL, 0U,
+                                       next_secret, sizeof(next_secret));
   if (status != WT_OK) return status;
   status = wt_quic_derive_packet_keys(next_secret, current->aead, out);
   wt_secure_zero(next_secret, sizeof(next_secret));
@@ -153,8 +148,7 @@ wt_status_t wt_quic_packet_keys_update(const wt_quic_packet_keys_t *current,
   return WT_OK;
 }
 
-wt_status_t wt_quic_packet_nonce(const uint8_t iv[WT_AEAD_IV_LEN],
-                                 uint64_t packet_number,
+wt_status_t wt_quic_packet_nonce(const uint8_t iv[WT_AEAD_IV_LEN], uint64_t packet_number,
                                  uint8_t out[WT_AEAD_IV_LEN]) {
   size_t i;
   if (iv == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -168,10 +162,8 @@ wt_status_t wt_quic_packet_nonce(const uint8_t iv[WT_AEAD_IV_LEN],
   return WT_OK;
 }
 
-wt_status_t wt_quic_header_protection_sample(size_t pn_offset,
-                                             const uint8_t *packet,
-                                             size_t packet_len,
-                                             uint8_t sample[16]) {
+wt_status_t wt_quic_header_protection_sample(size_t pn_offset, const uint8_t *packet,
+                                             size_t packet_len, uint8_t sample[16]) {
   size_t sample_offset;
   if (packet == NULL || sample == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* RFC 9001 section 5.4.2: the sample starts four bytes after the start of the
@@ -190,10 +182,8 @@ wt_status_t wt_quic_header_protection_sample(size_t pn_offset,
   return WT_OK;
 }
 
-wt_status_t wt_quic_header_protection_mask(wt_aead_t aead, const uint8_t *hp,
-                                           size_t hp_len,
-                                           const uint8_t sample[16],
-                                           uint8_t out[5]) {
+wt_status_t wt_quic_header_protection_mask(wt_aead_t aead, const uint8_t *hp, size_t hp_len,
+                                           const uint8_t sample[16], uint8_t out[5]) {
   if (hp == NULL || sample == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (hp_len < wt_aead_key_len(aead)) return WT_ERR_INVALID_ARGUMENT;
   switch (aead) {
@@ -222,10 +212,8 @@ wt_status_t wt_quic_header_protection_mask(wt_aead_t aead, const uint8_t *hp,
       counter_bytes[2] = sample[2];
       counter_bytes[3] = sample[3];
       counter = (uint32_t)counter_bytes[0] | ((uint32_t)counter_bytes[1] << 8) |
-                ((uint32_t)counter_bytes[2] << 16) |
-                ((uint32_t)counter_bytes[3] << 24);
-      status = wt_chacha20_xor(hp, sample + 4U, counter, zeros, sizeof(zeros),
-                               out);
+                ((uint32_t)counter_bytes[2] << 16) | ((uint32_t)counter_bytes[3] << 24);
+      status = wt_chacha20_xor(hp, sample + 4U, counter, zeros, sizeof(zeros), out);
       wt_secure_zero(zeros, sizeof(zeros));
       return status;
     }
@@ -234,9 +222,8 @@ wt_status_t wt_quic_header_protection_mask(wt_aead_t aead, const uint8_t *hp,
   }
 }
 
-wt_status_t wt_quic_protect_header(wt_aead_t aead, const uint8_t *hp,
-                                   size_t hp_len, uint8_t *packet,
-                                   size_t packet_len, size_t pn_offset,
+wt_status_t wt_quic_protect_header(wt_aead_t aead, const uint8_t *hp, size_t hp_len,
+                                   uint8_t *packet, size_t packet_len, size_t pn_offset,
                                    size_t pn_len) {
   uint8_t sample[16];
   uint8_t mask[5];
@@ -248,8 +235,7 @@ wt_status_t wt_quic_protect_header(wt_aead_t aead, const uint8_t *hp,
   if (pn_offset >= packet_len) return WT_ERR_INVALID_ARGUMENT;
   if (pn_len > packet_len - pn_offset) return WT_ERR_INVALID_ARGUMENT;
 
-  status = wt_quic_header_protection_sample(pn_offset, packet, packet_len,
-                                            sample);
+  status = wt_quic_header_protection_sample(pn_offset, packet, packet_len, sample);
   if (status != WT_OK) return status;
   status = wt_quic_header_protection_mask(aead, hp, hp_len, sample, mask);
   wt_secure_zero(sample, sizeof(sample));
@@ -275,9 +261,8 @@ wt_status_t wt_quic_protect_header(wt_aead_t aead, const uint8_t *hp,
   return WT_OK;
 }
 
-wt_status_t wt_quic_unprotect_header(wt_aead_t aead, const uint8_t *hp,
-                                     size_t hp_len, uint8_t *packet,
-                                     size_t packet_len, size_t pn_offset,
+wt_status_t wt_quic_unprotect_header(wt_aead_t aead, const uint8_t *hp, size_t hp_len,
+                                     uint8_t *packet, size_t packet_len, size_t pn_offset,
                                      size_t *out_pn_len) {
   uint8_t sample[16];
   uint8_t mask[5];
@@ -289,8 +274,7 @@ wt_status_t wt_quic_unprotect_header(wt_aead_t aead, const uint8_t *hp,
   if (pn_offset >= packet_len) return WT_ERR_INVALID_ARGUMENT;
   if (out_pn_len != NULL) *out_pn_len = 0U;
 
-  status = wt_quic_header_protection_sample(pn_offset, packet, packet_len,
-                                            sample);
+  status = wt_quic_header_protection_sample(pn_offset, packet, packet_len, sample);
   if (status != WT_OK) return status;
   status = wt_quic_header_protection_mask(aead, hp, hp_len, sample, mask);
   wt_secure_zero(sample, sizeof(sample));
@@ -319,11 +303,10 @@ wt_status_t wt_quic_unprotect_header(wt_aead_t aead, const uint8_t *hp,
   return WT_OK;
 }
 
-wt_status_t wt_quic_protect_frames(const wt_quic_packet_keys_t *keys,
-                                   uint64_t packet_number, const uint8_t *aad,
-                                   size_t aad_len, const uint8_t *frames,
-                                   size_t frames_len, uint8_t *out,
-                                   size_t out_capacity, size_t *out_len) {
+wt_status_t wt_quic_protect_frames(const wt_quic_packet_keys_t *keys, uint64_t packet_number,
+                                   const uint8_t *aad, size_t aad_len, const uint8_t *frames,
+                                   size_t frames_len, uint8_t *out, size_t out_capacity,
+                                   size_t *out_len) {
   uint8_t nonce[WT_AEAD_IV_LEN];
   uint8_t tag[WT_AEAD_TAG_LEN];
   wt_status_t status;
@@ -334,14 +317,12 @@ wt_status_t wt_quic_protect_frames(const wt_quic_packet_keys_t *keys,
   *out_len = 0U;
   if (aad == NULL && aad_len != 0U) return WT_ERR_INVALID_ARGUMENT;
   if (frames == NULL && frames_len != 0U) return WT_ERR_INVALID_ARGUMENT;
-  if (out_capacity < frames_len ||
-      out_capacity - frames_len < WT_AEAD_TAG_LEN) {
+  if (out_capacity < frames_len || out_capacity - frames_len < WT_AEAD_TAG_LEN) {
     return WT_ERR_LIMIT;
   }
   status = wt_quic_packet_nonce(keys->iv, packet_number, nonce);
   if (status != WT_OK) return status;
-  status = wt_aead_seal(keys->aead, keys->key, nonce, aad, aad_len, frames,
-                        frames_len, out, tag);
+  status = wt_aead_seal(keys->aead, keys->key, nonce, aad, aad_len, frames, frames_len, out, tag);
   wt_secure_zero(nonce, sizeof(nonce));
   if (status != WT_OK) {
     wt_secure_zero(tag, sizeof(tag));
@@ -353,11 +334,9 @@ wt_status_t wt_quic_protect_frames(const wt_quic_packet_keys_t *keys,
   return WT_OK;
 }
 
-wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys,
-                                     uint64_t packet_number, const uint8_t *aad,
-                                     size_t aad_len, uint8_t *packet,
-                                     size_t len,
-                                     const uint8_t tag[WT_AEAD_TAG_LEN]) {
+wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys, uint64_t packet_number,
+                                     const uint8_t *aad, size_t aad_len, uint8_t *packet,
+                                     size_t len, const uint8_t tag[WT_AEAD_TAG_LEN]) {
   uint8_t nonce[WT_AEAD_IV_LEN];
   wt_status_t status;
 
@@ -377,8 +356,7 @@ wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys,
    * is cleared here as well as there, because this function's promise is that a
    * caller never holds bytes whose tag did not verify, and that promise should
    * not depend on the backend keeping the same one. */
-  status = wt_aead_open(keys->aead, keys->key, nonce, aad, aad_len, packet, len,
-                        tag, packet);
+  status = wt_aead_open(keys->aead, keys->key, nonce, aad, aad_len, packet, len, tag, packet);
   wt_secure_zero(nonce, sizeof(nonce));
   if (status == WT_ERR_AUTHENTICATION) {
     if (len != 0U) wt_secure_zero(packet, len);
@@ -395,10 +373,11 @@ wt_status_t wt_quic_unprotect_frames(const wt_quic_packet_keys_t *keys,
 
 /* RFC 9001 section 5.8's constants for version 1. They are protocol constants like the Initial salt,
  * written here rather than extracted because the RFC states them and nothing derives them. */
-static const uint8_t WT_QUIC_RETRY_KEY[16] = {0xbeU, 0x0cU, 0x69U, 0x0bU, 0x9fU, 0x66U, 0x57U, 0x5aU,
-                                              0x1dU, 0x76U, 0x6bU, 0x54U, 0xe3U, 0x68U, 0xc8U, 0x4eU};
+static const uint8_t WT_QUIC_RETRY_KEY[16] = {0xbeU, 0x0cU, 0x69U, 0x0bU, 0x9fU, 0x66U,
+                                              0x57U, 0x5aU, 0x1dU, 0x76U, 0x6bU, 0x54U,
+                                              0xe3U, 0x68U, 0xc8U, 0x4eU};
 static const uint8_t WT_QUIC_RETRY_NONCE[12] = {0x46U, 0x15U, 0x99U, 0xd3U, 0x5dU, 0x63U,
-                                                 0x2bU, 0xf2U, 0x23U, 0x98U, 0x25U, 0xbbU};
+                                                0x2bU, 0xf2U, 0x23U, 0x98U, 0x25U, 0xbbU};
 
 /* The pseudo-packet: one length byte, the original destination connection ID, and the packet. Bounded by
  * the protocol's own connection ID bound plus a packet, so the buffer is a constant. */

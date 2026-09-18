@@ -11,24 +11,27 @@
 #include "webtransport/writer.h"
 
 static void add(wt_cli_report_t *report, const char *name, int ok, const char *detail) {
-  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                          detail);
 }
 
 /* Walk a field section for one field by name, which is what a client does with a response: the pseudo-headers
  * are the message decoder's business and everything else is the caller's, so the search is here rather than
  * assumed to be done. */
-static int find_field(const uint8_t *section, size_t length, const char *name, const uint8_t **out_value,
-                      size_t *out_value_length) {
+static int find_field(const uint8_t *section, size_t length, const char *name,
+                      const uint8_t **out_value, size_t *out_value_length) {
   wt_qpack_field_section_decoder_t decoder;
   wt_qpack_resolved_field_t field;
   uint8_t scratch[256];
   wt_qpack_error_t error = WT_QPACK_ERROR_NONE;
   size_t name_length = strlen(name);
 
-  if (wt_qpack_field_section_begin(&decoder, NULL, 0U, section, length, 0U, &error) != WT_OK) return 0;
+  if (wt_qpack_field_section_begin(&decoder, NULL, 0U, section, length, 0U, &error) != WT_OK)
+    return 0;
   for (;;) {
     memset(&field, 0, sizeof(field));
-    if (wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &field, &error) != WT_OK) {
+    if (wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &field, &error) !=
+        WT_OK) {
       return 0;
     }
     if (field.name_length == name_length && memcmp(field.name, name, name_length) == 0) {
@@ -78,11 +81,13 @@ void wt_scenario_protocol_run(wt_cli_report_t *report) {
 
   memset(&decision, 0, sizeof(decision));
   error = WT_HTTP3_NO_ERROR;
-  ok = ok && wt_webtransport_session_request_validate(&request, &(wt_webtransport_request_policy_t){
-                                                                  "example.com", "/chat", 1},
-                                                      &decision, &error) == WT_OK &&
+  ok = ok &&
+       wt_webtransport_session_request_validate(
+           &request, &(wt_webtransport_request_policy_t){"example.com", "/chat", 1}, &decision,
+           &error) == WT_OK &&
        decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT;
-  ok = ok && wt_webtransport_session_request_negotiate(&decision, &offered, &supported, 1) == WT_OK &&
+  ok = ok &&
+       wt_webtransport_session_request_negotiate(&decision, &offered, &supported, 1) == WT_OK &&
        decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT &&
        decision.selected_protocol_length == 7U &&
        memcmp(decision.selected_protocol, "chat.v2", 7U) == 0;
@@ -108,13 +113,15 @@ void wt_scenario_protocol_run(wt_cli_report_t *report) {
     memset(&received, 0, sizeof(received));
     ok = ok && find_field(section, wt_writer_offset(&w), WT_WEBTRANSPORT_PROTOCOL_HEADER, &value,
                           &value_length);
-    ok = ok && wt_webtransport_session_response_selected_protocol(value, value_length, &offered, &received) ==
-                   WT_OK &&
+    ok = ok &&
+         wt_webtransport_session_response_selected_protocol(value, value_length, &offered,
+                                                            &received) == WT_OK &&
          received.length == 7U && memcmp(received.bytes, "chat.v2", 7U) == 0;
   }
 
   add(report, "protocol-negotiation", ok,
-      "the client's list is offered, the server selects the first token it supports, and the client accepts "
+      "the client's list is offered, the server selects the first token it supports, and the "
+      "client accepts "
       "the answer only because it offered it");
 
   /* The refusal: a client that REQUIRES a sub-protocol and offers nothing this server supports is answered
@@ -141,10 +148,11 @@ void wt_scenario_protocol_run(wt_cli_report_t *report) {
       unoffered.bytes = (const uint8_t *)"other.v1";
       unoffered.length = 8U;
       (void)wt_webtransport_protocol_encode_item(&value_writer, &unoffered);
-      answered = wt_webtransport_session_response_selected_protocol(value, wt_writer_offset(&value_writer),
-                                                                    &offered, &received);
+      answered = wt_webtransport_session_response_selected_protocol(
+          value, wt_writer_offset(&value_writer), &offered, &received);
       add(report, "protocol-negotiation-unoffered-selection", answered == WT_ERR_PROTOCOL,
-          "a response naming a sub-protocol the client never offered is refused rather than spoken");
+          "a response naming a sub-protocol the client never offered is refused rather than "
+          "spoken");
     }
   }
   (void)scratch;

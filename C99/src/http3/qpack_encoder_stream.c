@@ -207,8 +207,8 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
       if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
       return WT_ERR_PROTOCOL;
     }
-    if (wt_qpack_dynamic_entry(stream->table, absolute, &name, &name_length, &value, &value_length) !=
-        WT_OK) {
+    if (wt_qpack_dynamic_entry(stream->table, absolute, &name, &name_length, &value,
+                               &value_length) != WT_OK) {
       if (out_error != NULL) *out_error = WT_QPACK_ERROR_ENCODER_STREAM;
       return WT_ERR_PROTOCOL;
     }
@@ -222,8 +222,9 @@ wt_status_t wt_qpack_encoder_stream_write_capacity(wt_writer_t *w, size_t capaci
 }
 
 wt_status_t wt_qpack_encoder_stream_write_insert_name_reference(wt_writer_t *w, int from_static,
-                                                               uint64_t index, const uint8_t *value,
-                                                               size_t value_length) {
+                                                                uint64_t index,
+                                                                const uint8_t *value,
+                                                                size_t value_length) {
   if (w == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (wt_qpack_integer_encode(w, 6U, from_static ? 0xc0U : 0x80U, index) != WT_OK) {
     return WT_ERR_LIMIT;
@@ -232,8 +233,8 @@ wt_status_t wt_qpack_encoder_stream_write_insert_name_reference(wt_writer_t *w, 
 }
 
 wt_status_t wt_qpack_encoder_stream_write_insert_literal(wt_writer_t *w, const uint8_t *name,
-                                                        size_t name_length, const uint8_t *value,
-                                                        size_t value_length) {
+                                                         size_t name_length, const uint8_t *value,
+                                                         size_t value_length) {
   if (w == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (name == NULL && name_length != 0U) return WT_ERR_INVALID_ARGUMENT;
   if (wt_qpack_integer_encode(w, 5U, 0x40U, (uint64_t)name_length) != WT_OK) return WT_ERR_LIMIT;

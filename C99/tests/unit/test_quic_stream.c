@@ -51,24 +51,21 @@ static void test_send_states(void) {
     wt_quic_stream_t fresh;
     init_stream(&fresh);
     WT_EXPECT_OK("a zero-length send", wt_quic_stream_on_data_sent(&fresh, 0U));
-    WT_EXPECT_STR("leaves the stream ready", "ready",
-                  wt_quic_send_state_name(fresh.send_state));
+    WT_EXPECT_STR("leaves the stream ready", "ready", wt_quic_send_state_name(fresh.send_state));
   }
 
   /* The FIN fixes the size and moves to Data Sent. */
   WT_EXPECT_OK("more data", wt_quic_stream_on_data_sent(&stream, 99U));
   WT_EXPECT_U64("at offset 100", 100U, (uint64_t)stream.send_offset);
   WT_EXPECT_OK("the FIN is sent", wt_quic_stream_on_fin_sent(&stream));
-  WT_EXPECT_STR("moving to data sent", "data-sent",
-                wt_quic_send_state_name(stream.send_state));
+  WT_EXPECT_STR("moving to data sent", "data-sent", wt_quic_send_state_name(stream.send_state));
   WT_EXPECT_U64("with the stream's size fixed", 100U, (uint64_t)stream.final_size);
   WT_EXPECT_INT("and the send half finished", 1, wt_quic_stream_send_finished(&stream));
 
   /* Nothing more may be written, and a second FIN is refused. */
   WT_EXPECT_STATUS("data after the FIN is refused", WT_ERR_STATE,
                    wt_quic_stream_on_data_sent(&stream, 1U));
-  WT_EXPECT_STATUS("a second FIN is refused", WT_ERR_STATE,
-                   wt_quic_stream_on_fin_sent(&stream));
+  WT_EXPECT_STATUS("a second FIN is refused", WT_ERR_STATE, wt_quic_stream_on_fin_sent(&stream));
 
   /* Acknowledging part of it does not complete the stream; acknowledging all of it does. */
   WT_EXPECT_OK("half is acknowledged", wt_quic_stream_on_ack(&stream, 50U));
@@ -96,8 +93,7 @@ static void test_reset_and_stop(void) {
                    wt_quic_stream_on_data_sent(&stream, 1U));
   /* Its acknowledgement completes the send half rather than leaving it in Reset Sent forever. */
   WT_EXPECT_OK("the reset is acknowledged", wt_quic_stream_on_ack(&stream, 30U));
-  WT_EXPECT_STR("completing it", "reset-received",
-                wt_quic_send_state_name(stream.send_state));
+  WT_EXPECT_STR("completing it", "reset-received", wt_quic_send_state_name(stream.send_state));
 
   /* STOP_SENDING finishes the send half as the reset does, so a caller that forgets to send the
    * RESET_STREAM cannot keep writing to a stream the peer has abandoned. */
@@ -105,8 +101,7 @@ static void test_reset_and_stop(void) {
   WT_EXPECT_OK("some data is sent", wt_quic_stream_on_data_sent(&stream, 10U));
   WT_EXPECT_OK("the peer asks to stop", wt_quic_stream_on_stop_sending(&stream, 3U));
   WT_EXPECT_INT("which finishes the send half", 1, wt_quic_stream_send_finished(&stream));
-  WT_EXPECT_STR("as a reset sent", "reset-sent",
-                wt_quic_send_state_name(stream.send_state));
+  WT_EXPECT_STR("as a reset sent", "reset-sent", wt_quic_send_state_name(stream.send_state));
   WT_EXPECT_STATUS("so nothing more may be sent", WT_ERR_STATE,
                    wt_quic_stream_on_data_sent(&stream, 1U));
 
@@ -119,8 +114,7 @@ static void test_reset_and_stop(void) {
   /* The reset has arrived but the application has not been told, so the stream is not finished: a
    * connection that treated the two as the same thing would forget a stream the application is still
    * waiting on. */
-  WT_EXPECT_INT("but the stream is not finished yet", 0,
-                wt_quic_stream_recv_finished(&stream));
+  WT_EXPECT_INT("but the stream is not finished yet", 0, wt_quic_stream_recv_finished(&stream));
   WT_EXPECT_INT("and the peer's error is kept", 9, (int)stream.peer_error_code);
   WT_EXPECT_STATUS("a second reset with another size is refused", WT_ERR_PROTOCOL,
                    wt_quic_stream_on_reset_received(&stream, 9U, 50U));
@@ -128,8 +122,7 @@ static void test_reset_and_stop(void) {
                    wt_quic_stream_on_data_read(&stream, 1U));
   WT_EXPECT_STATUS("and telling the application completes it", WT_OK,
                    wt_quic_stream_on_reset_read(&stream));
-  WT_EXPECT_STR("moving to reset read", "reset-read",
-                wt_quic_recv_state_name(stream.recv_state));
+  WT_EXPECT_STR("moving to reset read", "reset-read", wt_quic_recv_state_name(stream.recv_state));
   WT_EXPECT_INT("which is finished", 1, wt_quic_stream_recv_finished(&stream));
   WT_EXPECT_STATUS("telling it twice is refused", WT_ERR_STATE,
                    wt_quic_stream_on_reset_read(&stream));
@@ -181,15 +174,12 @@ static void test_final_size(void) {
     WT_EXPECT_OK("three bytes and a FIN",
                  wt_quic_stream_on_data(&bounded, &flow, 0U, 3U, 1, &new_bytes, &in_order));
     WT_EXPECT_STATUS("data beyond the end is refused", WT_ERR_PROTOCOL,
-                     wt_quic_stream_on_data(&bounded, &flow, 3U, 1U, 0, &new_bytes,
-                                            &in_order));
+                     wt_quic_stream_on_data(&bounded, &flow, 3U, 1U, 0, &new_bytes, &in_order));
     WT_EXPECT_STATUS("and an overlap that reaches past it", WT_ERR_PROTOCOL,
-                     wt_quic_stream_on_data(&bounded, &flow, 2U, 2U, 0, &new_bytes,
-                                            &in_order));
+                     wt_quic_stream_on_data(&bounded, &flow, 2U, 2U, 0, &new_bytes, &in_order));
     /* A FIN that claims a different size is the same error by another route. */
     WT_EXPECT_STATUS("a FIN for another size is refused", WT_ERR_PROTOCOL,
-                     wt_quic_stream_on_data(&bounded, &flow, 5U, 0U, 1, &new_bytes,
-                                            &in_order));
+                     wt_quic_stream_on_data(&bounded, &flow, 5U, 0U, 1, &new_bytes, &in_order));
   }
 
   /* A stream whose size is known from a RESET_STREAM refuses later data as well. */
@@ -205,9 +195,9 @@ static void test_final_size(void) {
   {
     wt_quic_stream_t huge;
     init_stream(&huge);
-    WT_EXPECT_STATUS("an offset near the top of the range is refused", WT_ERR_PROTOCOL,
-                     wt_quic_stream_on_data(&huge, &flow, UINT64_MAX - 1U, 4U, 0,
-                                            &new_bytes, &in_order));
+    WT_EXPECT_STATUS(
+        "an offset near the top of the range is refused", WT_ERR_PROTOCOL,
+        wt_quic_stream_on_data(&huge, &flow, UINT64_MAX - 1U, 4U, 0, &new_bytes, &in_order));
   }
 }
 
@@ -221,15 +211,12 @@ static void test_flow_control(void) {
   wt_quic_flow_init(&flow, WT_MAX_DATA, WT_PEER_MAX_DATA);
   WT_EXPECT_U64("a new stream may send its whole limit", WT_PEER_MAX_STREAM_DATA,
                 wt_quic_stream_send_allowance(&stream, &flow));
-  WT_EXPECT_INT("so a datagram fits", 1,
-                wt_quic_stream_can_send(&stream, &flow, 1200U));
+  WT_EXPECT_INT("so a datagram fits", 1, wt_quic_stream_can_send(&stream, &flow, 1200U));
 
   /* The stream's own limit runs out first. */
   WT_EXPECT_OK("the stream's limit is consumed", wt_quic_stream_on_data_sent(&stream, 16384U));
-  WT_EXPECT_U64("leaving no stream credit", 0U,
-                wt_quic_stream_send_allowance(&stream, &flow));
-  WT_EXPECT_INT("so nothing may be sent", 0,
-                wt_quic_stream_can_send(&stream, &flow, 1U));
+  WT_EXPECT_U64("leaving no stream credit", 0U, wt_quic_stream_send_allowance(&stream, &flow));
+  WT_EXPECT_INT("so nothing may be sent", 0, wt_quic_stream_can_send(&stream, &flow, 1U));
   /* The connection's limit is untouched, which is what makes the two limits two limits. */
   WT_EXPECT_U64("while the connection still has credit", WT_PEER_MAX_DATA,
                 wt_quic_flow_send_allowance(&flow));
@@ -238,8 +225,7 @@ static void test_flow_control(void) {
    * refused. */
   WT_EXPECT_STATUS("a lower stream limit is refused", WT_ERR_PROTOCOL,
                    wt_quic_stream_on_max_stream_data(&stream, 1000U));
-  WT_EXPECT_OK("a higher one is accepted",
-               wt_quic_stream_on_max_stream_data(&stream, 32768U));
+  WT_EXPECT_OK("a higher one is accepted", wt_quic_stream_on_max_stream_data(&stream, 32768U));
   WT_EXPECT_U64("giving the difference", 32768U - 16384U,
                 wt_quic_stream_send_allowance(&stream, &flow));
 
@@ -253,8 +239,7 @@ static void test_flow_control(void) {
                   wt_quic_stream_send_allowance(&small, &narrow));
     WT_EXPECT_INT("so a large frame does not fit", 0,
                   wt_quic_stream_can_send(&small, &narrow, 1200U));
-    WT_EXPECT_INT("while a small one does", 1,
-                  wt_quic_stream_can_send(&small, &narrow, 100U));
+    WT_EXPECT_INT("while a small one does", 1, wt_quic_stream_can_send(&small, &narrow, 100U));
     WT_EXPECT_OK("sending it consumes both", wt_quic_flow_on_sent(&narrow, 100U));
     WT_EXPECT_U64("leaving the connection empty", 0U,
                   wt_quic_stream_send_allowance(&small, &narrow));
@@ -263,8 +248,7 @@ static void test_flow_control(void) {
                      wt_quic_flow_on_max_data(&narrow, 50U));
     WT_EXPECT_OK("a higher one is accepted", wt_quic_flow_on_max_data(&narrow, 200U));
     /* A hundred bytes have been sent, so a limit of two hundred leaves a hundred to send. */
-    WT_EXPECT_U64("and the allowance follows", 100U,
-                  wt_quic_flow_send_allowance(&narrow));
+    WT_EXPECT_U64("and the allowance follows", 100U, wt_quic_flow_send_allowance(&narrow));
   }
 
   /* On the receiving side, the stream's limit and the connection's are both bounds, and the
@@ -275,20 +259,17 @@ static void test_flow_control(void) {
     init_stream(&receive);
     wt_quic_flow_init(&inbound, 1000U, WT_PEER_MAX_DATA);
     /* The stream may take up to 16384 but the connection only advertised 1000. */
-    WT_EXPECT_STATUS("more than the connection advertised is refused", WT_ERR_PROTOCOL,
-                     wt_quic_stream_on_data(&receive, &inbound, 0U, 1200U, 0, &new_bytes,
-                                            &in_order));
+    WT_EXPECT_STATUS(
+        "more than the connection advertised is refused", WT_ERR_PROTOCOL,
+        wt_quic_stream_on_data(&receive, &inbound, 0U, 1200U, 0, &new_bytes, &in_order));
     WT_EXPECT_OK("what fits is accepted",
-                 wt_quic_stream_on_data(&receive, &inbound, 0U, 800U, 0, &new_bytes,
-                                        &in_order));
+                 wt_quic_stream_on_data(&receive, &inbound, 0U, 800U, 0, &new_bytes, &in_order));
     WT_EXPECT_U64("and counted", 800U, (uint64_t)inbound.data_received);
     WT_EXPECT_INT("with the connection needing an extension", 0,
                   wt_quic_flow_should_extend(&inbound));
     WT_EXPECT_OK("more arrives",
-                 wt_quic_stream_on_data(&receive, &inbound, 800U, 200U, 0, &new_bytes,
-                                        &in_order));
-    WT_EXPECT_INT("which reaches the advertised limit", 1,
-                  wt_quic_flow_should_extend(&inbound));
+                 wt_quic_stream_on_data(&receive, &inbound, 800U, 200U, 0, &new_bytes, &in_order));
+    WT_EXPECT_INT("which reaches the advertised limit", 1, wt_quic_flow_should_extend(&inbound));
     WT_EXPECT_U64("so the next limit is the window past it", 1000U + 500U,
                   wt_quic_flow_next_max_data(&inbound));
     wt_quic_flow_on_max_data_sent(&inbound, wt_quic_flow_next_max_data(&inbound));
@@ -302,12 +283,11 @@ static void test_flow_control(void) {
     wt_quic_stream_init(&narrow_stream, 4U, 0, 1, 100U, WT_PEER_MAX_STREAM_DATA);
     wt_quic_flow_init(&wide, WT_MAX_DATA, WT_PEER_MAX_DATA);
     WT_EXPECT_OK("a frame inside the stream's limit",
-                 wt_quic_stream_on_data(&narrow_stream, &wide, 0U, 100U, 0, &new_bytes,
-                                        &in_order));
+                 wt_quic_stream_on_data(&narrow_stream, &wide, 0U, 100U, 0, &new_bytes, &in_order));
     WT_EXPECT_INT("reaches it", 1, wt_quic_stream_should_extend(&narrow_stream));
-    WT_EXPECT_STATUS("and the next byte is refused", WT_ERR_PROTOCOL,
-                     wt_quic_stream_on_data(&narrow_stream, &wide, 100U, 1U, 0, &new_bytes,
-                                            &in_order));
+    WT_EXPECT_STATUS(
+        "and the next byte is refused", WT_ERR_PROTOCOL,
+        wt_quic_stream_on_data(&narrow_stream, &wide, 100U, 1U, 0, &new_bytes, &in_order));
     WT_EXPECT_U64("with the next limit a window later", 100U + 50U,
                   wt_quic_stream_next_max_stream_data(&narrow_stream));
   }
@@ -378,9 +358,9 @@ static void test_stream_id_fields(void) {
   WT_EXPECT_U64("stream 12 is index 3", 3U, wt_quic_stream_id_index(12U));
 
   for (id = 0U; id < 16U; id++) {
-    uint64_t rebuilt = wt_quic_stream_id_make(wt_quic_stream_id_from_client(id),
-                                             wt_quic_stream_id_is_bidirectional(id),
-                                             wt_quic_stream_id_index(id));
+    uint64_t rebuilt =
+        wt_quic_stream_id_make(wt_quic_stream_id_from_client(id),
+                               wt_quic_stream_id_is_bidirectional(id), wt_quic_stream_id_index(id));
     WT_EXPECT_U64("and every number is the one its fields describe", id, rebuilt);
   }
 }
@@ -410,7 +390,8 @@ static void test_stream_table(void) {
   stream = wt_quic_stream_table_find(&table, wt_quic_stream_id_make(1, 1, 2U));
   WT_EXPECT_TRUE("a stream is found by number", stream != NULL);
   if (stream != NULL) {
-    WT_EXPECT_U64("with the number it was opened with", wt_quic_stream_id_make(1, 1, 2U), stream->id);
+    WT_EXPECT_U64("with the number it was opened with", wt_quic_stream_id_make(1, 1, 2U),
+                  stream->id);
     WT_EXPECT_INT("as this endpoint's", 1, stream->initiated_by_us);
     WT_EXPECT_INT("and bidirectional", 1, stream->bidirectional);
   }

@@ -61,8 +61,7 @@ typedef struct wt_quic_congestion {
   int in_recovery;
 } wt_quic_congestion_t;
 
-void wt_quic_congestion_init(wt_quic_congestion_t *congestion,
-                             uint64_t max_datagram_size);
+void wt_quic_congestion_init(wt_quic_congestion_t *congestion, uint64_t max_datagram_size);
 
 uint64_t wt_quic_congestion_window(const wt_quic_congestion_t *congestion);
 uint64_t wt_quic_congestion_ssthresh(const wt_quic_congestion_t *congestion);
@@ -70,8 +69,7 @@ int wt_quic_congestion_in_recovery(const wt_quic_congestion_t *congestion);
 
 /* Whether a packet sent at `time_sent` belongs to the current recovery period, and so may not move
  * the window in either direction. */
-int wt_quic_congestion_in_recovery_at(const wt_quic_congestion_t *congestion,
-                                      uint64_t time_sent);
+int wt_quic_congestion_in_recovery_at(const wt_quic_congestion_t *congestion, uint64_t time_sent);
 
 /* An acknowledged packet, by the bytes it carried and the time it was sent.
  *
@@ -80,25 +78,24 @@ int wt_quic_congestion_in_recovery_at(const wt_quic_congestion_t *congestion,
  * max_datagram_size * acked / cwnd (RFC 9002 section 7.3.1). The division is integer division, so a
  * small acknowledgement against a large window adds nothing; that is the RFC's formula and section
  * 7.3.3 discusses why it is preferred to growing faster. */
-wt_status_t wt_quic_congestion_on_ack(wt_quic_congestion_t *congestion,
-                                      uint64_t bytes_acked, uint64_t time_sent);
+wt_status_t wt_quic_congestion_on_ack(wt_quic_congestion_t *congestion, uint64_t bytes_acked,
+                                      uint64_t time_sent);
 
 /* A lost packet, by the time it was sent. The first loss of an event halves the window, sets the
  * slow start threshold to what the window was, and begins a recovery period at `now`; a loss of a
  * packet that belongs to that period changes nothing (RFC 9002 section 7.3.2). */
-wt_status_t wt_quic_congestion_on_loss(wt_quic_congestion_t *congestion,
-                                       uint64_t time_sent, uint64_t now);
+wt_status_t wt_quic_congestion_on_loss(wt_quic_congestion_t *congestion, uint64_t time_sent,
+                                       uint64_t now);
 
 /* Persistent congestion: the connection decides that everything it sent over a long enough period
  * was lost, and collapses the window to the minimum and starts a new recovery period (RFC 9002
  * section 7.6). The condition needs the loss history; the effect is here. */
-wt_status_t wt_quic_congestion_on_persistent_congestion(
-    wt_quic_congestion_t *congestion, uint64_t now);
+wt_status_t wt_quic_congestion_on_persistent_congestion(wt_quic_congestion_t *congestion,
+                                                        uint64_t now);
 
 /* Whether a packet may be sent: there has to be room in the window (RFC 9002 section 7). A caller
  * with nothing to send is application limited, which this file deliberately does not model. */
-int wt_quic_congestion_can_send(const wt_quic_congestion_t *congestion,
-                                uint64_t bytes_in_flight);
+int wt_quic_congestion_can_send(const wt_quic_congestion_t *congestion, uint64_t bytes_in_flight);
 
 /* Whether the connection is in slow start, which is what a caller's slow start exit rule (if it has
  * one) needs to know. */

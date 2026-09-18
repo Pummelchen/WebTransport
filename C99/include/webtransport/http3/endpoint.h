@@ -170,8 +170,8 @@ wt_status_t wt_http3_endpoint_on_uni_stream_end(wt_http3_endpoint_t *endpoint, u
 
 /* The recorded kind of a peer stream, for a caller routing its data. Returns
  * WT_HTTP3_ENDPOINT_STREAM_UNKNOWN when the stream is not one the endpoint recorded. */
-wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(
-    const wt_http3_endpoint_t *endpoint, uint64_t stream_id);
+wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(const wt_http3_endpoint_t *endpoint,
+                                                              uint64_t stream_id);
 
 /* How many peer streams the endpoint is tracking, for a caller that logs occupancy. */
 size_t wt_http3_endpoint_stream_count(const wt_http3_endpoint_t *endpoint);

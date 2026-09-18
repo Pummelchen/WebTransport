@@ -12,8 +12,8 @@
 #include "webtransport/http3/qpack.h"
 
 static void test_integer_round_trip(void) {
-  static const uint64_t values[] = {0U, 1U, 2U, 5U, 30U, 31U, 32U, 62U, 63U, 64U,
-                                    126U, 127U, 128U, 1337U, 100000U};
+  static const uint64_t values[] = {0U,  1U,  2U,   5U,   30U,  31U,   32U,    62U,
+                                    63U, 64U, 126U, 127U, 128U, 1337U, 100000U};
   unsigned bits;
 
   for (bits = 1U; bits <= 8U; bits++) {
@@ -25,14 +25,12 @@ static void test_integer_round_trip(void) {
       wt_cursor_t c;
       uint64_t decoded = 0U;
 
-      WT_EXPECT_OK("an integer encodes",
-                   wt_qpack_integer_encode(&w, bits, 0U, values[i]));
+      WT_EXPECT_OK("an integer encodes", wt_qpack_integer_encode(&w, bits, 0U, values[i]));
       /* The prefix boundary is where the encoding changes shape, so it is
        * exercised through the boundary itself rather than only through values
        * that are far from it. */
       if (values[i] < prefix_max) {
-        WT_EXPECT_U64("in one byte below the prefix maximum", 1U,
-                      (uint64_t)wt_writer_offset(&w));
+        WT_EXPECT_U64("in one byte below the prefix maximum", 1U, (uint64_t)wt_writer_offset(&w));
       }
       c = wt_cursor_init(buffer, wt_writer_offset(&w));
       WT_EXPECT_OK("and decodes", wt_qpack_integer_decode(&c, bits, &decoded));

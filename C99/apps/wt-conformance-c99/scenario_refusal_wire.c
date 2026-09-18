@@ -55,11 +55,15 @@ void wt_scenario_refusal_wire_run(wt_cli_report_t *report) {
 
   /* A bidirectional stream this endpoint initiated, with no WebTransport prefix: the peer reads it as a request
    * stream, which is what makes the frame below its problem. */
-  if (pair.client_transport.open_stream(pair.client_transport.context, 1, &stream_id, pair.now) != WT_OK ||
-      pair.client_transport.send_stream(pair.client_transport.context, stream_id, k_truncated_headers,
-                                        sizeof(k_truncated_headers), 1, pair.now) != WT_OK) {
-    refusal_wire_add(report, k_closed, WT_CLI_RESULT_FAILED, "the truncated HEADERS frame could not be sent");
-    refusal_wire_add(report, k_told, WT_CLI_RESULT_FAILED, "the truncated HEADERS frame could not be sent");
+  if (pair.client_transport.open_stream(pair.client_transport.context, 1, &stream_id, pair.now) !=
+          WT_OK ||
+      pair.client_transport.send_stream(pair.client_transport.context, stream_id,
+                                        k_truncated_headers, sizeof(k_truncated_headers), 1,
+                                        pair.now) != WT_OK) {
+    refusal_wire_add(report, k_closed, WT_CLI_RESULT_FAILED,
+                     "the truncated HEADERS frame could not be sent");
+    refusal_wire_add(report, k_told, WT_CLI_RESULT_FAILED,
+                     "the truncated HEADERS frame could not be sent");
     scenario_pair_close(&pair);
     return;
   }
@@ -79,14 +83,16 @@ void wt_scenario_refusal_wire_run(wt_cli_report_t *report) {
     if (state == NULL) {
       (void)snprintf(detail, sizeof(detail), "the refusing endpoint never closed");
     } else {
-      (void)snprintf(detail, sizeof(detail),
-                     passed != 0 ? "a frame cut off by the end of the stream closed the connection as an "
-                                   "application close with H3_FRAME_ERROR (0x106)"
-                                 : "the refusal was kind %d with code 0x%llx, not an application close with "
-                                   "0x106",
-                     (int)state->kind, (unsigned long long)state->error_code);
+      (void)snprintf(
+          detail, sizeof(detail),
+          passed != 0 ? "a frame cut off by the end of the stream closed the connection as an "
+                        "application close with H3_FRAME_ERROR (0x106)"
+                      : "the refusal was kind %d with code 0x%llx, not an application close with "
+                        "0x106",
+          (int)state->kind, (unsigned long long)state->error_code);
     }
-    refusal_wire_add(report, k_closed, passed != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+    refusal_wire_add(report, k_closed, passed != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                     detail);
   }
 
   /* And the OTHER end reads that code, which is the half a decision-only scenario cannot see. */
@@ -101,13 +107,16 @@ void wt_scenario_refusal_wire_run(wt_cli_report_t *report) {
     if (pair.client.connection.peer_closed == 0) {
       (void)snprintf(detail, sizeof(detail), "the refusal never reached the peer");
     } else {
-      (void)snprintf(detail, sizeof(detail),
-                     passed != 0 ? "the peer read the refusal as an application close with H3_FRAME_ERROR (0x106)"
-                                 : "the peer read kind %d with code 0x%llx",
-                     (int)pair.client.connection.peer_close_kind,
-                     (unsigned long long)pair.client.connection.peer_error_code);
+      (void)snprintf(
+          detail, sizeof(detail),
+          passed != 0
+              ? "the peer read the refusal as an application close with H3_FRAME_ERROR (0x106)"
+              : "the peer read kind %d with code 0x%llx",
+          (int)pair.client.connection.peer_close_kind,
+          (unsigned long long)pair.client.connection.peer_error_code);
     }
-    refusal_wire_add(report, k_told, passed != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+    refusal_wire_add(report, k_told, passed != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                     detail);
   }
 
   scenario_pair_close(&pair);

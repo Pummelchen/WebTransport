@@ -29,12 +29,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "webtransport/quic/packet.h"
 #include "webtransport/http3/frame.h"
+#include "webtransport/quic/packet.h"
 #include "webtransport/quic/transport_parameters.h"
 #include "webtransport/runtime/session.h"
-#include "webtransport/webtransport/framing.h"
 #include "webtransport/tls/self_signed.h"
+#include "webtransport/webtransport/framing.h"
 #include "webtransport/writer.h"
 
 /* How many rounds a phase gets before the act is reported as not attempted. A peer that never handshakes is a
@@ -45,7 +45,7 @@
 /* This peer's own Source Connection ID, a constant because nothing here reuses an ID or migrates: the act is what
  * is under test, and a random ID would only make a failure harder to read. */
 static const uint8_t k_server_connection_id[8] = {0x5aU, 0x6bU, 0x7cU, 0x8dU,
-                                                 0x9eU, 0xafU, 0xb0U, 0xc1U};
+                                                  0x9eU, 0xafU, 0xb0U, 0xc1U};
 
 static wt_cli_result_t fail_peer(char *detail, size_t detail_size, const char *text) {
   snprintf(detail, detail_size, "%s", text);
@@ -55,10 +55,10 @@ static wt_cli_result_t fail_peer(char *detail, size_t detail_size, const char *t
 /* Learn the peer by PEEKING, not by receiving: the datagram that names the client must still be in the queue when
  * the connection is armed, or this side waits for a retransmission it may never get. The same rule the tool's
  * other listener follows, and the reason `wt_quic_long_header_connection_ids` exists. */
-static wt_status_t wait_for_initial(wt_udp_socket_t *socket, wt_udp_address_t *peer, uint8_t *header,
-                                    size_t capacity, size_t *out_available, const uint8_t **out_destination,
-                                    size_t *out_destination_length, const uint8_t **out_source,
-                                    size_t *out_source_length) {
+static wt_status_t wait_for_initial(wt_udp_socket_t *socket, wt_udp_address_t *peer,
+                                    uint8_t *header, size_t capacity, size_t *out_available,
+                                    const uint8_t **out_destination, size_t *out_destination_length,
+                                    const uint8_t **out_source, size_t *out_source_length) {
   unsigned waited;
 
   for (waited = 0U; waited < WT_HOSTILE_ROUNDS; waited++) {
@@ -67,8 +67,9 @@ static wt_status_t wait_for_initial(wt_udp_socket_t *socket, wt_udp_address_t *p
     wt_udp_address_t candidate;
 
     if (wt_udp_peek(socket, header, capacity, &datagram_length, &available, &candidate) == WT_OK &&
-        wt_quic_long_header_connection_ids(header, available, out_destination, out_destination_length,
-                                           out_source, out_source_length) == WT_OK &&
+        wt_quic_long_header_connection_ids(header, available, out_destination,
+                                           out_destination_length, out_source,
+                                           out_source_length) == WT_OK &&
         *out_destination_length > 0U && *out_source_length > 0U) {
       *peer = candidate;
       *out_available = available;
@@ -88,14 +89,17 @@ static void peer_pump(wt_runtime_session_t *session, wt_udp_socket_t *socket, ui
 /* A MAX_STREAMS below the limit these transport parameters granted: a DECREASE by construction rather than by a
  * number a reader has to check against another file. RFC 9000 section 4.6 makes it a PROTOCOL_VIOLATION naming
  * frame 0x12, so the peer answers with a TRANSPORT close. */
-static wt_status_t send_max_streams_decrease(wt_runtime_session_t *session, uint64_t now, int *out_sent) {
+static wt_status_t send_max_streams_decrease(wt_runtime_session_t *session, uint64_t now,
+                                             int *out_sent) {
   wt_quic_frame_t frame = wt_quic_frame_make(WT_QUIC_FRAME_KIND_MAX_STREAMS);
   wt_status_t status;
 
   *out_sent = 0;
   frame.as.max_streams.direction = WT_QUIC_STREAM_BIDIRECTIONAL;
-  frame.as.max_streams.maximum = 4U; /* the parameters advertise 8 (WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI) */
-  status = wt_quic_connection_send_frame(&session->connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, now);
+  frame.as.max_streams.maximum =
+      4U; /* the parameters advertise 8 (WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI) */
+  status = wt_quic_connection_send_frame(&session->connection, WT_QUIC_SPACE_APPLICATION, &frame, 1,
+                                         now);
   if (status != WT_OK) return status;
   status = wt_quic_connection_flush(&session->connection, now);
   if (status != WT_OK) return status;
@@ -121,7 +125,8 @@ static wt_status_t send_datagram_for_another_session(wt_runtime_session_t *sessi
   }
   frame.as.datagram.data = payload;
   frame.as.datagram.length = wt_writer_offset(&writer);
-  status = wt_quic_connection_send_frame(&session->connection, WT_QUIC_SPACE_APPLICATION, &frame, 1, now);
+  status = wt_quic_connection_send_frame(&session->connection, WT_QUIC_SPACE_APPLICATION, &frame, 1,
+                                         now);
   if (status != WT_OK) return status;
   status = wt_quic_connection_flush(&session->connection, now);
   if (status != WT_OK) return status;
@@ -148,7 +153,8 @@ typedef struct hostile_watch {
   unsigned stream_frames;
 } hostile_watch_t;
 
-static wt_status_t watch_frames(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
+static wt_status_t watch_frames(void *context, wt_quic_space_t space,
+                                const wt_quic_frame_t *frame) {
   hostile_watch_t *watch = context;
   (void)space;
   if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) watch->stream_frames++;
@@ -161,7 +167,7 @@ static const hostile_act_t k_acts[] = {
     /* This act waits for the client's CONNECT first, so that what it measures is the refusal rather than the
    * parking rule: a datagram that arrives before the session exists is parked, not refused, and the test would
    * otherwise pass or fail on which of the two happened to come first. */
-  {"datagram-for-another-session", send_datagram_for_another_session, WT_HTTP3_ID_ERROR,
+    {"datagram-for-another-session", send_datagram_for_another_session, WT_HTTP3_ID_ERROR,
      WT_QUIC_CLOSE_APPLICATION, 0U},
 };
 
@@ -203,7 +209,8 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
 
   if (address == NULL || act == NULL) return fail_peer(detail, detail_size, "no address or act");
   chosen = find_act(act);
-  if (chosen == NULL) return fail_peer(detail, detail_size, "the act is not one this peer implements");
+  if (chosen == NULL)
+    return fail_peer(detail, detail_size, "the act is not one this peer implements");
   if (wt_udp_address_parse_host_port(address, &local) != WT_OK) {
     return fail_peer(detail, detail_size, "the address is not host:port");
   }
@@ -216,7 +223,8 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
   }
   /* The port it actually got, on its own line, so a caller that asked for 0 can reach it -- and the same line the
    * tool prints for a scenario run, because this is the same tool. */
-  printf("{\"role\":\"hostile-peer\",\"boundPort\":%u,\"act\":\"%s\"}\n", (unsigned)socket.port, act);
+  printf("{\"role\":\"hostile-peer\",\"boundPort\":%u,\"act\":\"%s\"}\n", (unsigned)socket.port,
+         act);
 
   memset(&session, 0, sizeof(session));
   memset(&identity, 0, sizeof(identity));
@@ -234,9 +242,9 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
   /* The parameters, through the library's own builder so that a mandatory one cannot be forgotten here (WT-141),
    * and with the SAME limits the session is told to advertise -- the promise and the enforcement are one pair, and
    * a peer that advertised 8 and enforced 0 would refuse the client's first stream for its own mistake (WT-110). */
-  if (wt_quic_transport_parameters_build(&params, 1, k_server_connection_id, sizeof(k_server_connection_id),
-                                         client_destination, client_destination_length, 0, NULL,
-                                         0U) != WT_OK ||
+  if (wt_quic_transport_parameters_build(&params, 1, k_server_connection_id,
+                                         sizeof(k_server_connection_id), client_destination,
+                                         client_destination_length, 0, NULL, 0U) != WT_OK ||
       wt_quic_transport_parameters_encode(&writer, &params) != WT_OK) {
     wt_udp_close(&socket);
     return fail_peer(detail, detail_size, "the transport parameters did not encode");
@@ -288,7 +296,8 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
   if (wt_runtime_session_established(&session) == 0) {
     wt_runtime_session_clear(&session);
     wt_udp_close(&socket);
-    return fail_peer(detail, detail_size, "the handshake did not complete, so the act was not performed");
+    return fail_peer(detail, detail_size,
+                     "the handshake did not complete, so the act was not performed");
   }
 
   /* The client's session must EXIST before any act, or an act about a session's content (a datagram naming one)
@@ -301,7 +310,8 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
   if (watch.stream_frames == 0U) {
     wt_runtime_session_clear(&session);
     wt_udp_close(&socket);
-    return fail_peer(detail, detail_size, "the client never sent a CONNECT, so the act was not performed");
+    return fail_peer(detail, detail_size,
+                     "the client never sent a CONNECT, so the act was not performed");
   }
 
   status = chosen->perform(&session, now, &sent);
@@ -320,8 +330,10 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
   }
 
   printf("{\"role\":\"hostile-peer\",\"act\":\"%s\",\"established\":true,\"sentHostileFrame\":%s,"
-         "\"peerClosed\":%s,\"peerErrorCode\":%llu,\"peerCloseFrameType\":%llu,\"peerCloseKind\":%u}\n",
-         act, "true", /* the early returns above are what make this true, and saying so is clearer than a
+         "\"peerClosed\":%s,\"peerErrorCode\":%llu,\"peerCloseFrameType\":%llu,\"peerCloseKind\":%"
+         "u}\n",
+         act,
+         "true", /* the early returns above are what make this true, and saying so is clearer than a
                        * condition the reader has to verify (WT-177) */
          session.connection.peer_closed != 0 ? "true" : "false",
          (unsigned long long)session.connection.peer_error_code,
@@ -339,11 +351,12 @@ wt_cli_result_t wt_scenario_hostile_peer_run(const char *address, const char *ac
              (unsigned long long)session.connection.peer_frame_type);
     result = WT_CLI_RESULT_PASSED;
   } else {
-    snprintf(detail, detail_size,
-             "the client did not answer %s as expected: peerClosed=%d code=0x%llx kind=%u frame=0x%llx", act,
-             session.connection.peer_closed, (unsigned long long)session.connection.peer_error_code,
-             (unsigned)session.connection.peer_close_kind,
-             (unsigned long long)session.connection.peer_frame_type);
+    snprintf(
+        detail, detail_size,
+        "the client did not answer %s as expected: peerClosed=%d code=0x%llx kind=%u frame=0x%llx",
+        act, session.connection.peer_closed, (unsigned long long)session.connection.peer_error_code,
+        (unsigned)session.connection.peer_close_kind,
+        (unsigned long long)session.connection.peer_frame_type);
   }
 
   wt_runtime_session_clear(&session);

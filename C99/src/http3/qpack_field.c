@@ -57,8 +57,8 @@ wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *ou
     /* 1 T index(6+): indexed field line, static when T is set. */
     status = wt_qpack_integer_decode(c, 6U, &out->index);
     if (status != WT_OK) return status;
-    out->kind = (first & 0x40U) != 0U ? WT_QPACK_FIELD_INDEXED_STATIC
-                                      : WT_QPACK_FIELD_INDEXED_DYNAMIC;
+    out->kind =
+        (first & 0x40U) != 0U ? WT_QPACK_FIELD_INDEXED_STATIC : WT_QPACK_FIELD_INDEXED_DYNAMIC;
   } else if ((first & 0x40U) != 0U) {
     /* 01 N T index(4+) then a value string. */
     status = wt_qpack_integer_decode(c, 4U, &out->index);
@@ -110,15 +110,14 @@ wt_status_t wt_qpack_field_line_decode(wt_cursor_t *c, wt_qpack_field_line_t *ou
 }
 
 wt_status_t wt_qpack_field_line_encode_coded(wt_writer_t *w, const wt_qpack_field_line_t *line,
-                                            uint8_t *scratch, size_t scratch_capacity) {
+                                             uint8_t *scratch, size_t scratch_capacity) {
   if (w == NULL || line == NULL) return WT_ERR_INVALID_ARGUMENT;
 
   switch (line->kind) {
     case WT_QPACK_FIELD_INDEXED_STATIC:
     case WT_QPACK_FIELD_INDEXED_DYNAMIC:
-      return wt_qpack_integer_encode(w, 6U,
-                                     line->kind == WT_QPACK_FIELD_INDEXED_STATIC ? 0xc0U : 0x80U,
-                                     line->index);
+      return wt_qpack_integer_encode(
+          w, 6U, line->kind == WT_QPACK_FIELD_INDEXED_STATIC ? 0xc0U : 0x80U, line->index);
     case WT_QPACK_FIELD_LITERAL_NAME_REF_STATIC:
     case WT_QPACK_FIELD_LITERAL_NAME_REF_DYNAMIC: {
       uint8_t flags = 0x40U;
@@ -156,8 +155,8 @@ wt_status_t wt_qpack_field_line_encode_coded(wt_writer_t *w, const wt_qpack_fiel
         }
         if (coded_length != 0U) wt_writer_bytes(w, scratch, coded_length);
         if (!wt_writer_ok(w)) return WT_ERR_LIMIT;
-        return wt_qpack_string_encode_coded(w, line->value, line->value_length,
-                                            line->value_huffman, scratch, scratch_capacity);
+        return wt_qpack_string_encode_coded(w, line->value, line->value_length, line->value_huffman,
+                                            scratch, scratch_capacity);
       }
       if (wt_qpack_integer_encode(w, 3U, flags, (uint64_t)name_wire_length) != WT_OK) {
         return WT_ERR_LIMIT;
@@ -188,8 +187,8 @@ wt_status_t wt_qpack_field_line_encode(wt_writer_t *w, const wt_qpack_field_line
   return wt_qpack_field_line_encode_coded(w, line, NULL, 0U);
 }
 
-wt_status_t wt_qpack_field_line_static_name(const wt_qpack_field_line_t *line, const char **out_name,
-                                            size_t *out_length) {
+wt_status_t wt_qpack_field_line_static_name(const wt_qpack_field_line_t *line,
+                                            const char **out_name, size_t *out_length) {
   wt_qpack_static_entry_t entry;
 
   if (line == NULL || out_name == NULL || out_length == NULL) return WT_ERR_INVALID_ARGUMENT;

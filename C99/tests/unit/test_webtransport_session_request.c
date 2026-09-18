@@ -115,7 +115,8 @@ static void test_rejections(void) {
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
 
-  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost", "/wt/deeper");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost",
+               "/wt/deeper");
   WT_EXPECT_OK("and a longer path",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
@@ -130,7 +131,6 @@ static void test_rejections(void) {
   WT_EXPECT_U64("with 501", (uint64_t)WT_WEBTRANSPORT_REJECT_NOT_IMPLEMENTED,
                 (uint64_t)request.status);
 }
-
 
 /* A helper for the test below: is `identifier` present with exactly `value`? */
 static int has_setting(const wt_http3_settings_t *settings, uint64_t identifier, uint64_t value) {
@@ -212,14 +212,16 @@ static void test_an_authority_may_name_the_port_it_is_talking_to(void) {
   policy.path = "/wt";
   policy.wt_enabled = 1;
 
-  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost:54070", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "localhost:54070",
+               "/wt");
   WT_EXPECT_OK("a port on the authority is decided",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
-  WT_EXPECT_INT("as an acceptance for the host the policy names", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT,
-                (int)request.outcome);
+  WT_EXPECT_INT("as an acceptance for the host the policy names",
+                (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
 
   /* The port is not part of the comparison, so a DIFFERENT host is still refused with one. */
-  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "elsewhere:54070", "/wt");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "elsewhere:54070",
+               "/wt");
   WT_EXPECT_OK("another host with a port is decided",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as a rejection", (int)WT_WEBTRANSPORT_REQUEST_REJECT, (int)request.outcome);
@@ -242,7 +244,8 @@ static void test_an_authority_may_name_the_port_it_is_talking_to(void) {
   memset(&policy, 0, sizeof(policy));
   policy.path = NULL;
   policy.wt_enabled = 1;
-  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "anything:1234", "/anything");
+  make_request(&message, "CONNECT", WT_WEBTRANSPORT_PROTOCOL_TOKEN, "https", "anything:1234",
+               "/anything");
   WT_EXPECT_OK("a policy with no authority and no path accepts any",
                wt_webtransport_session_request_validate(&message, &policy, &request, &error));
   WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
@@ -263,7 +266,8 @@ static void test_both_protocol_tokens_are_accepted_and_distinct(void) {
 
   /* The names are two tokens, which is what makes accepting both a decision rather than a tautology. */
   WT_EXPECT_TRUE("the draft-16 token is not the pre-draft token",
-                 strcmp(WT_WEBTRANSPORT_PROTOCOL_TOKEN, WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY) != 0);
+                 strcmp(WT_WEBTRANSPORT_PROTOCOL_TOKEN, WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY) !=
+                     0);
   WT_EXPECT_BYTES("and the draft-16 token is the one the draft registers",
                   (const uint8_t *)"webtransport-h3",
                   (const uint8_t *)WT_WEBTRANSPORT_PROTOCOL_TOKEN, strlen("webtransport-h3"));
@@ -278,9 +282,10 @@ static void test_both_protocol_tokens_are_accepted_and_distinct(void) {
                 wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16));
   WT_EXPECT_STR("the legacy selection names the pre-draft token", "webtransport",
                 wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY));
-  WT_EXPECT_TRUE("so the two selections put different strings on the wire",
-                 strcmp(wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16),
-                        wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY)) != 0);
+  WT_EXPECT_TRUE(
+      "so the two selections put different strings on the wire",
+      strcmp(wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_DRAFT16),
+             wt_webtransport_upgrade_token_value(WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY)) != 0);
 
   memset(&policy, 0, sizeof(policy));
   policy.authority = "localhost";

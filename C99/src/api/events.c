@@ -7,7 +7,8 @@
 #include "session_internal.h"
 #include "webtransport/webtransport/framing.h"
 
-wt_status_t wt_session_set_callbacks(wt_session_t *session, const wt_session_callbacks_t *callbacks) {
+wt_status_t wt_session_set_callbacks(wt_session_t *session,
+                                     const wt_session_callbacks_t *callbacks) {
   if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (callbacks == NULL) {
     /* Clearing is a memset rather than a flag, so a stale pointer cannot be called after
@@ -160,8 +161,8 @@ wt_status_t wt_session_on_datagram(wt_session_t *session, const uint8_t *data, s
     return WT_ERR_STATE;
   }
 
-  status = wt_webtransport_datagram_parse(data, length, &quarter, &payload, &payload_length,
-                                          &h3_error);
+  status =
+      wt_webtransport_datagram_parse(data, length, &quarter, &payload, &payload_length, &h3_error);
   if (status != WT_OK) {
     wt_session_set_error(session, status, (uint64_t)h3_error);
     return status;

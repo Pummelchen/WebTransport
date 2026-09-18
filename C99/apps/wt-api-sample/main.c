@@ -52,7 +52,8 @@ static void on_stream_data(void *context, uint64_t stream_id, const uint8_t *dat
   peer_log_t *log = context;
   (void)stream_id;
   log->bytes_received += length;
-  printf("  peer sent %llu bytes%s\n", (unsigned long long)length, end_stream != 0 ? " and ended" : "");
+  printf("  peer sent %llu bytes%s\n", (unsigned long long)length,
+         end_stream != 0 ? " and ended" : "");
   if (length > 0U) printf("  first byte: 0x%02x\n", (unsigned)data[0]);
 }
 

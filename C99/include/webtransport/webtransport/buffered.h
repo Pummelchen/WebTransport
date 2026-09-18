@@ -105,7 +105,8 @@ typedef struct wt_webtransport_buffered {
 typedef wt_status_t (*wt_webtransport_buffered_stream_fn)(void *context, uint64_t stream_id,
                                                           int unidirectional, const uint8_t *data,
                                                           size_t length);
-typedef wt_status_t (*wt_webtransport_buffered_datagram_fn)(void *context, uint64_t quarter_stream_id,
+typedef wt_status_t (*wt_webtransport_buffered_datagram_fn)(void *context,
+                                                            uint64_t quarter_stream_id,
                                                             const uint8_t *payload, size_t length);
 
 void wt_webtransport_buffered_init(wt_webtransport_buffered_t *buffer);
@@ -116,9 +117,10 @@ void wt_webtransport_buffered_init(wt_webtransport_buffered_t *buffer);
  * at the bound, or these bytes would not fit the hold, and the caller MUST close the stream with a
  * RESET_STREAM and/or STOP_SENDING carrying WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED.
  * `data` may be NULL only when `length` is 0. */
-wt_status_t wt_webtransport_buffered_park_stream(wt_webtransport_buffered_t *buffer, uint64_t stream_id,
-                                                 uint64_t session_id, int unidirectional,
-                                                 const uint8_t *data, size_t length);
+wt_status_t wt_webtransport_buffered_park_stream(wt_webtransport_buffered_t *buffer,
+                                                 uint64_t stream_id, uint64_t session_id,
+                                                 int unidirectional, const uint8_t *data,
+                                                 size_t length);
 
 /* Resolve the parked streams against the session ID that is now known: every parked stream that
  * names it is delivered through `deliver` in arrival order, and every one that names another is

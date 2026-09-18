@@ -10,11 +10,12 @@ void test_a_retry_is_accepted_and_answered(void) {
 
   open_pair(WT_UDP_IPV4, &pair);
   retry_client(&pair);
-  retry_length = build_retry(retry, sizeof(retry), k_retry_scid, sizeof(k_retry_scid), k_retry_token,
-                             sizeof(k_retry_token));
+  retry_length = build_retry(retry, sizeof(retry), k_retry_scid, sizeof(k_retry_scid),
+                             k_retry_token, sizeof(k_retry_token));
   WT_EXPECT_TRUE("the Retry is large enough to be one", retry_length > 1U + 4U + 16U);
-  WT_EXPECT_OK("and its tag verifies against the client's destination",
-               wt_quic_retry_integrity_verify(k_retry_odcid, sizeof(k_retry_odcid), retry, retry_length));
+  WT_EXPECT_OK(
+      "and its tag verifies against the client's destination",
+      wt_quic_retry_integrity_verify(k_retry_odcid, sizeof(k_retry_odcid), retry, retry_length));
 
   /* Something to re-send: the ClientHello's stand-in, recorded with a retransmission descriptor so that the
    * discard below has something to hand back. */
@@ -40,8 +41,9 @@ void test_a_retry_is_accepted_and_answered(void) {
     const uint8_t *source = NULL;
     size_t token_length = 0U;
     size_t source_length = 0U;
-    WT_EXPECT_OK("the token is remembered", wt_quic_connection_retry(&pair.client, &token, &token_length,
-                                                                     &source, &source_length));
+    WT_EXPECT_OK(
+        "the token is remembered",
+        wt_quic_connection_retry(&pair.client, &token, &token_length, &source, &source_length));
     /* Compound rather than a memcmp after a length assertion: a failure here must report, not dereference a view
      * the accessor did not set. */
     WT_EXPECT_TRUE("whole, and as the peer sent it",
@@ -64,8 +66,9 @@ void test_a_retry_is_accepted_and_answered(void) {
 
   /* Nothing at Initial level may go out until the keys are derived again: a packet protected with the old ones is
    * byte-for-byte what a client that ignored the Retry would send. */
-  WT_EXPECT_STATUS("an Initial is refused until the keys are re-derived", WT_ERR_AGAIN,
-                   wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 0U, initial, 4U, 2500U));
+  WT_EXPECT_STATUS(
+      "an Initial is refused until the keys are re-derived", WT_ERR_AGAIN,
+      wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 0U, initial, 4U, 2500U));
 
   /* What the runtime session does next (RFC 9001 section 5.2): derive them from the Retry's connection ID. */
   {
@@ -77,7 +80,8 @@ void test_a_retry_is_accepted_and_answered(void) {
                                         k_retry_scid, sizeof(k_retry_scid), secret));
     WT_EXPECT_OK("with new send keys",
                  wt_quic_initial_packet_keys(secret, 0, WT_AEAD_AES_128_GCM, &keys));
-    WT_EXPECT_OK("installed", wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_INITIAL, 0, &keys));
+    WT_EXPECT_OK("installed",
+                 wt_quic_connection_set_keys(&pair.client, WT_QUIC_SPACE_INITIAL, 0, &keys));
     WT_EXPECT_OK("and new receive keys",
                  wt_quic_initial_packet_keys(secret, 1, WT_AEAD_AES_128_GCM, &keys));
     WT_EXPECT_OK("installed too",
@@ -91,12 +95,14 @@ void test_a_retry_is_accepted_and_answered(void) {
   {
     uint8_t stale[WT_QUIC_MAX_PACKET];
     size_t stale_length = 0U;
-    while (wt_udp_receive(&pair.server_socket, stale, sizeof(stale), &stale_length, NULL) == WT_OK) {
+    while (wt_udp_receive(&pair.server_socket, stale, sizeof(stale), &stale_length, NULL) ==
+           WT_OK) {
       /* discarded */
     }
   }
-  WT_EXPECT_OK("and an Initial goes out",
-               wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 0U, initial, 4U, 3000U));
+  WT_EXPECT_OK(
+      "and an Initial goes out",
+      wt_quic_connection_send_crypto(&pair.client, WT_QUIC_SPACE_INITIAL, 0U, initial, 4U, 3000U));
 
   /* Read it off the wire: the token and the destination are the two fields RFC 9000 section 17.2.5.3 says every
    * later Initial carries, and the header protection comes off with the NEW keys -- which is itself the assertion
@@ -115,21 +121,23 @@ void test_a_retry_is_accepted_and_answered(void) {
     WT_EXPECT_OK("the server socket is waited on", wt_udp_wait(&pair.server_socket, 2000U));
     WT_EXPECT_OK("and reads the Initial",
                  wt_udp_receive(&pair.server_socket, packet, sizeof(packet), &packet_length, NULL));
-    WT_EXPECT_OK("its protected header is located",
-                 wt_quic_protected_pn_offset(packet, packet_length, 0U, &pn_offset, &total, &short_header));
+    WT_EXPECT_OK(
+        "its protected header is located",
+        wt_quic_protected_pn_offset(packet, packet_length, 0U, &pn_offset, &total, &short_header));
     WT_EXPECT_INT("as a long header", 0, short_header);
     WT_EXPECT_OK("and unprotected with the new keys",
                  wt_quic_unprotect_header(pair.client.keys_out[WT_QUIC_SPACE_INITIAL].aead,
                                           pair.client.keys_out[WT_QUIC_SPACE_INITIAL].hp,
-                                          pair.client.keys_out[WT_QUIC_SPACE_INITIAL].hp_len, packet,
-                                          packet_length, pn_offset, &pn_length));
+                                          pair.client.keys_out[WT_QUIC_SPACE_INITIAL].hp_len,
+                                          packet, packet_length, pn_offset, &pn_length));
     cursor = wt_cursor_init(packet, packet_length);
     memset(&header, 0, sizeof(header));
     WT_EXPECT_OK("the header parses", wt_quic_long_header_decode(&cursor, &header, &error));
-    WT_EXPECT_TRUE("the destination is the Retry's Source Connection ID, byte for byte",
-                   header.destination_connection_id != NULL &&
-                       header.destination_connection_id_len == sizeof(k_retry_scid) &&
-                       memcmp(header.destination_connection_id, k_retry_scid, sizeof(k_retry_scid)) == 0);
+    WT_EXPECT_TRUE(
+        "the destination is the Retry's Source Connection ID, byte for byte",
+        header.destination_connection_id != NULL &&
+            header.destination_connection_id_len == sizeof(k_retry_scid) &&
+            memcmp(header.destination_connection_id, k_retry_scid, sizeof(k_retry_scid)) == 0);
     WT_EXPECT_TRUE("and the TOKEN is on the wire as the peer sent it",
                    header.token != NULL && header.token_len == sizeof(k_retry_token) &&
                        memcmp(header.token, k_retry_token, sizeof(k_retry_token)) == 0);
@@ -149,8 +157,8 @@ void test_a_retry_that_breaks_a_rule_is_discarded(void) {
 
     open_pair(WT_UDP_IPV4, &pair);
     retry_client(&pair);
-    retry_length = build_retry(retry, sizeof(retry), k_retry_scid, sizeof(k_retry_scid), k_retry_token,
-                               sizeof(k_retry_token));
+    retry_length = build_retry(retry, sizeof(retry), k_retry_scid, sizeof(k_retry_scid),
+                               k_retry_token, sizeof(k_retry_token));
     retry[retry_length - 1U] ^= 0x01U;
     deliver_to(&pair, 0, retry, retry_length, 2000U);
     WT_EXPECT_U64("a Retry with a bad tag is discarded", 1U, pair.client.retries_discarded);
@@ -182,8 +190,8 @@ void test_a_retry_that_breaks_a_rule_is_discarded(void) {
 
     open_pair(WT_UDP_IPV4, &pair);
     retry_client(&pair);
-    retry_length = build_retry(retry, sizeof(retry), k_retry_odcid, sizeof(k_retry_odcid), k_retry_token,
-                               sizeof(k_retry_token));
+    retry_length = build_retry(retry, sizeof(retry), k_retry_odcid, sizeof(k_retry_odcid),
+                               k_retry_token, sizeof(k_retry_token));
     deliver_to(&pair, 0, retry, retry_length, 2000U);
     WT_EXPECT_U64("a Retry naming the client's own destination is discarded", 1U,
                   pair.client.retries_discarded);
@@ -201,8 +209,8 @@ void test_a_retry_that_breaks_a_rule_is_discarded(void) {
 
     open_pair(WT_UDP_IPV4, &pair);
     retry_client(&pair);
-    retry_length = build_retry(retry, sizeof(retry), k_retry_scid, sizeof(k_retry_scid), k_retry_token,
-                               sizeof(k_retry_token));
+    retry_length = build_retry(retry, sizeof(retry), k_retry_scid, sizeof(k_retry_scid),
+                               k_retry_token, sizeof(k_retry_token));
     deliver_to(&pair, 0, retry, retry_length, 2000U);
     WT_EXPECT_U64("the first is accepted", 1U, pair.client.retry_accepted_count);
     another_length = build_retry(another, sizeof(another), k_another_scid, sizeof(k_another_scid),
@@ -222,8 +230,8 @@ void test_a_retry_that_breaks_a_rule_is_discarded(void) {
     size_t retry_length;
 
     open_pair(WT_UDP_IPV4, &pair);
-    retry_length = build_retry(retry, sizeof(retry), k_retry_scid, sizeof(k_retry_scid), k_retry_token,
-                               sizeof(k_retry_token));
+    retry_length = build_retry(retry, sizeof(retry), k_retry_scid, sizeof(k_retry_scid),
+                               k_retry_token, sizeof(k_retry_token));
     deliver_to(&pair, 1, retry, retry_length, 2000U);
     WT_EXPECT_U64("a server discards a Retry", 1U, pair.server.retries_discarded);
     WT_EXPECT_U64("and never accepts one", 0U, pair.server.retry_accepted_count);
@@ -261,11 +269,11 @@ void test_an_unauthenticable_packet_is_discarded(void) {
   packet[at++] = 0U;    /* the packet number */
   at += 7U;             /* and the payload, which is never reached */
 
-  WT_EXPECT_OK("the datagram is sent", wt_udp_send(&pair.server_socket, &pair.client_address, packet, at));
+  WT_EXPECT_OK("the datagram is sent",
+               wt_udp_send(&pair.server_socket, &pair.client_address, packet, at));
   receive_on(&pair.client, &pair.client_socket, now);
   WT_EXPECT_U64("the client DISCARDED it", 1U, pair.client.packets_discarded);
   WT_EXPECT_INT("leaving the connection open", 0, wt_quic_connection_is_closed(&pair.client));
   WT_EXPECT_INT("and with no refusal to report", 0, pair.client.close_code_set);
   close_pair(&pair);
 }
-

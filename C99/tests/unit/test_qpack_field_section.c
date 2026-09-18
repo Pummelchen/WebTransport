@@ -19,11 +19,10 @@ static void fill_table(wt_qpack_dynamic_table_t *table) {
   uint64_t index = 0U;
   wt_qpack_dynamic_init(table, 4096U);
   WT_EXPECT_OK("the first entry inserts",
-               wt_qpack_dynamic_insert(table, (const uint8_t *)"x-a", 3U, (const uint8_t *)"one", 3U,
-                                       &index));
-  WT_EXPECT_OK("and the second",
-               wt_qpack_dynamic_insert(table, (const uint8_t *)"x-b", 3U, (const uint8_t *)"two", 3U,
-                                       &index));
+               wt_qpack_dynamic_insert(table, (const uint8_t *)"x-a", 3U, (const uint8_t *)"one",
+                                       3U, &index));
+  WT_EXPECT_OK("and the second", wt_qpack_dynamic_insert(table, (const uint8_t *)"x-b", 3U,
+                                                         (const uint8_t *)"two", 3U, &index));
 }
 
 static void write_line(wt_writer_t *w, wt_qpack_field_kind_t kind, uint64_t index,
@@ -57,8 +56,8 @@ static void test_static_forms(void) {
   write_line(&w, WT_QPACK_FIELD_INDEXED_STATIC, 1U, NULL);
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("a static indexed line resolves",
-               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                           &error));
+               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                           &scratch_used, &field, &error));
   WT_EXPECT_BYTES("to :path", (const uint8_t *)":path", field.name, 5U);
   WT_EXPECT_BYTES("with the value from the table", (const uint8_t *)"/", field.value, 1U);
   WT_EXPECT_STATUS("and then the section is finished", WT_ERR_CLOSED,
@@ -71,8 +70,8 @@ static void test_static_forms(void) {
   write_line(&w, WT_QPACK_FIELD_LITERAL_NAME_REF_STATIC, 15U, "NOTGET");
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("a literal with a static name resolves",
-               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                           &error));
+               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                           &scratch_used, &field, &error));
   WT_EXPECT_BYTES("to :method", (const uint8_t *)":method", field.name, 7U);
   WT_EXPECT_BYTES("with the line's value", (const uint8_t *)"NOTGET", field.value, 6U);
 }
@@ -98,8 +97,8 @@ static void test_dynamic_references(void) {
     write_line(&w, WT_QPACK_FIELD_INDEXED_DYNAMIC, 0U, NULL);
     c = wt_cursor_init(bytes, wt_writer_offset(&w));
     WT_EXPECT_OK("a dynamic indexed line resolves",
-                 wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                             &error));
+                 wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                             &scratch_used, &field, &error));
     WT_EXPECT_BYTES("to the newest entry's name", (const uint8_t *)"x-b", field.name, 3U);
     WT_EXPECT_BYTES("and its value", (const uint8_t *)"two", field.value, 3U);
   }
@@ -113,8 +112,8 @@ static void test_dynamic_references(void) {
     write_line(&w, WT_QPACK_FIELD_INDEXED_DYNAMIC, 1U, NULL);
     c = wt_cursor_init(bytes, wt_writer_offset(&w));
     WT_EXPECT_OK("the next index resolves",
-                 wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                             &error));
+                 wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                             &scratch_used, &field, &error));
     WT_EXPECT_BYTES("to the older entry's name", (const uint8_t *)"x-a", field.name, 3U);
     WT_EXPECT_BYTES("and its value", (const uint8_t *)"one", field.value, 3U);
   }
@@ -126,8 +125,8 @@ static void test_dynamic_references(void) {
     write_line(&w, WT_QPACK_FIELD_POST_BASE_INDEX, 1U, NULL);
     c = wt_cursor_init(bytes, wt_writer_offset(&w));
     WT_EXPECT_OK("a post-base index resolves",
-                 wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                             &error));
+                 wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                             &scratch_used, &field, &error));
     WT_EXPECT_BYTES("to the entry above the base", (const uint8_t *)"x-b", field.name, 3U);
     WT_EXPECT_BYTES("with its value", (const uint8_t *)"two", field.value, 3U);
   }
@@ -139,8 +138,8 @@ static void test_dynamic_references(void) {
     write_line(&w, WT_QPACK_FIELD_LITERAL_NAME_REF_DYNAMIC, 0U, "else");
     c = wt_cursor_init(bytes, wt_writer_offset(&w));
     WT_EXPECT_OK("a dynamic name reference resolves",
-                 wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                             &error));
+                 wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                             &scratch_used, &field, &error));
     WT_EXPECT_BYTES("with the entry's name", (const uint8_t *)"x-b", field.name, 3U);
     WT_EXPECT_BYTES("and the line's value", (const uint8_t *)"else", field.value, 4U);
   }
@@ -215,8 +214,8 @@ static void test_inline_and_huffman(void) {
   }
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("and resolves",
-               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                           &error));
+               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                           &scratch_used, &field, &error));
   WT_EXPECT_BYTES("to its inline name", (const uint8_t *)"x-test", field.name, 6U);
   WT_EXPECT_BYTES("and inline value", (const uint8_t *)"value", field.value, 5U);
 
@@ -248,8 +247,8 @@ static void test_inline_and_huffman(void) {
   }
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("and resolves",
-               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                           &error));
+               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                           &scratch_used, &field, &error));
   WT_EXPECT_BYTES("to the decoded name", (const uint8_t *)"x-test", field.name, 6U);
   WT_EXPECT_BYTES("and the decoded value", (const uint8_t *)"value", field.value, 5U);
 
@@ -271,9 +270,8 @@ static void test_inline_and_huffman(void) {
     WT_EXPECT_OK("the name huffman-encodes",
                  wt_qpack_huffman_encode((const uint8_t *)"x-test", 6U, name_bytes,
                                          sizeof(name_bytes), &name_length));
-    WT_EXPECT_OK("and the value",
-                 wt_qpack_huffman_encode((const uint8_t *)"value", 5U, value_bytes,
-                                         sizeof(value_bytes), &value_length));
+    WT_EXPECT_OK("and the value", wt_qpack_huffman_encode((const uint8_t *)"value", 5U, value_bytes,
+                                                          sizeof(value_bytes), &value_length));
     WT_EXPECT_OK("the name length writes",
                  wt_qpack_integer_encode(&w, 3U, 0x28U, (uint64_t)name_length));
     if (name_length != 0U) wt_writer_bytes(&w, name_bytes, name_length);
@@ -283,8 +281,8 @@ static void test_inline_and_huffman(void) {
   }
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("and resolves",
-               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch), &scratch_used, &field,
-                                           &error));
+               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                           &scratch_used, &field, &error));
   WT_EXPECT_BYTES("to the decoded name", (const uint8_t *)"x-test", field.name, 6U);
   WT_EXPECT_BYTES("and the decoded value", (const uint8_t *)"value", field.value, 5U);
   WT_EXPECT_TRUE("leaving nothing behind", wt_cursor_at_end(&c));
@@ -298,10 +296,9 @@ static void test_inline_and_huffman(void) {
     scratch_used = 0U;
     c = wt_cursor_init(bytes, wt_writer_offset(&w));
     WT_EXPECT_STATUS("a scratch buffer that is too small is a limit", WT_ERR_LIMIT,
-                     wt_qpack_field_section_next(&c, &prefix, &table, tiny, sizeof(tiny), &scratch_used, &field,
-                                                 &error));
-    WT_EXPECT_U64("with no error to send the peer", (uint64_t)WT_QPACK_ERROR_NONE,
-                  (uint64_t)error);
+                     wt_qpack_field_section_next(&c, &prefix, &table, tiny, sizeof(tiny),
+                                                 &scratch_used, &field, &error));
+    WT_EXPECT_U64("with no error to send the peer", (uint64_t)WT_QPACK_ERROR_NONE, (uint64_t)error);
   }
 }
 
@@ -322,10 +319,10 @@ static void test_inline_and_huffman(void) {
  * reading rather than this tree's. The bug is why our own encoder never showed it: it does not produce a literal
  * with a literAL name, so every test in the tree agreed with every other one. */
 static void test_a_third_party_section_decodes_every_field(void) {
-  static const uint8_t k_section[] = {
-      0x00U, 0x00U, 0xcfU, 0x2fU, 0x00U, 0xb9U, 0x5dU, 0x87U, 0x49U, 0xc8U, 0x7aU, 0x3fU, 0x89U, 0xf0U, 0x58U,
-      0xd3U, 0x60U, 0xeaU, 0x45U, 0x67U, 0xb1U, 0x3fU, 0xd7U, 0xc1U, 0x50U, 0x86U, 0xa0U, 0xe4U, 0x1dU, 0x13U,
-      0x9dU, 0x09U};
+  static const uint8_t k_section[] = {0x00U, 0x00U, 0xcfU, 0x2fU, 0x00U, 0xb9U, 0x5dU, 0x87U,
+                                      0x49U, 0xc8U, 0x7aU, 0x3fU, 0x89U, 0xf0U, 0x58U, 0xd3U,
+                                      0x60U, 0xeaU, 0x45U, 0x67U, 0xb1U, 0x3fU, 0xd7U, 0xc1U,
+                                      0x50U, 0x86U, 0xa0U, 0xe4U, 0x1dU, 0x13U, 0x9dU, 0x09U};
   static const struct {
     const char *name;
     const char *value;
@@ -347,8 +344,9 @@ static void test_a_third_party_section_decodes_every_field(void) {
     WT_EXPECT_OK("the third-party prefix reads",
                  wt_qpack_header_prefix_decode(&c, 0U, 0U, &prefix, &error));
   }
-  WT_EXPECT_OK("the third-party section begins",
-               wt_qpack_field_section_begin(&decoder, &table, 0U, k_section, sizeof(k_section), 0U, &error));
+  WT_EXPECT_OK(
+      "the third-party section begins",
+      wt_qpack_field_section_begin(&decoder, &table, 0U, k_section, sizeof(k_section), 0U, &error));
 
   /* EVERY field is read first and asserted afterwards, which is the whole point: the values have to survive the
    * fields that follow them, and a decoder that decodes them into the same bytes cannot pass this. */
@@ -357,17 +355,18 @@ static void test_a_third_party_section_decodes_every_field(void) {
     memset(fields, 0, sizeof(fields));
     for (index = 0U; index < 5U; index++) {
       WT_EXPECT_OK("a field resolves",
-                   wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &fields[index],
-                                                       &error));
+                   wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch),
+                                                       &fields[index], &error));
     }
     for (index = 0U; index < 5U; index++) {
-      WT_EXPECT_BYTES("with the name the peer sent", (const uint8_t *)k_expected[index].name, fields[index].name,
-                      strlen(k_expected[index].name));
+      WT_EXPECT_BYTES("with the name the peer sent", (const uint8_t *)k_expected[index].name,
+                      fields[index].name, strlen(k_expected[index].name));
       WT_EXPECT_BYTES("and the value the peer sent", (const uint8_t *)k_expected[index].value,
                       fields[index].value, strlen(k_expected[index].value));
     }
     WT_EXPECT_STATUS("and the section is finished", WT_ERR_CLOSED,
-                     wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &fields[0], &error));
+                     wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch),
+                                                         &fields[0], &error));
   }
 }
 

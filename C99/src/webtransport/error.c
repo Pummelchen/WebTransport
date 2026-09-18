@@ -20,7 +20,9 @@ int wt_webtransport_error_is_application_range(uint64_t http3_error) {
   /* RFC 9114 section 8.1 reserves the codepoints of the form `0x1f * N + 0x21`, and section 4.4 says they "have
    * to be skipped when mapping" -- so a codepoint with that residue is inside the range but is not one an
    * application error maps to. */
-  if ((http3_error - WT_WEBTRANSPORT_ERROR_RESERVED_RESIDUE) % WT_WEBTRANSPORT_ERROR_STRIDE_IN == 0U) return 0;
+  if ((http3_error - WT_WEBTRANSPORT_ERROR_RESERVED_RESIDUE) % WT_WEBTRANSPORT_ERROR_STRIDE_IN ==
+      0U)
+    return 0;
   return 1;
 }
 
@@ -29,10 +31,12 @@ uint64_t wt_webtransport_error_to_http3(uint32_t application_error) {
   /* `first + n + floor(n / 0x1e)`: every 0x1e application codes are followed by one reserved codepoint, and the
    * quotient is where the gaps accumulate. The arithmetic cannot overflow: 0xffffffff + 0xffffffff/0x1e is far
    * below 2^40, let alone 2^64. */
-  return WT_WEBTRANSPORT_APPLICATION_ERROR_FIRST + value + (value / WT_WEBTRANSPORT_ERROR_STRIDE_OUT);
+  return WT_WEBTRANSPORT_APPLICATION_ERROR_FIRST + value +
+         (value / WT_WEBTRANSPORT_ERROR_STRIDE_OUT);
 }
 
-wt_status_t wt_webtransport_error_from_http3(uint64_t http3_error, uint32_t *out_application_error) {
+wt_status_t wt_webtransport_error_from_http3(uint64_t http3_error,
+                                             uint32_t *out_application_error) {
   uint64_t shifted;
 
   if (out_application_error == NULL) return WT_ERR_INVALID_ARGUMENT;

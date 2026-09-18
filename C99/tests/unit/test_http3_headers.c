@@ -123,7 +123,8 @@ static void test_pseudo_header_values(void) {
   wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
   refuse(&validation, ":method", "GE\nT", "and one with an LF");
   wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
-  refuse(&validation, ":scheme", "https\r\nX: y", "a scheme carrying a header injection is refused");
+  refuse(&validation, ":scheme", "https\r\nX: y",
+         "a scheme carrying a header injection is refused");
   wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);
   refuse(&validation, ":path", "/a\r\nX: y", "and so is a path");
   wt_http3_header_validation_init(&validation, WT_HTTP3_HEADER_REQUEST);

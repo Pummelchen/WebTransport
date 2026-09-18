@@ -162,15 +162,14 @@ wt_status_t wt_http3_endpoint_on_request_headers(wt_http3_endpoint_t *endpoint, 
      *
      * The ordering rule is the request machine's, applied exactly as any other frame's: a
      * HEADERS frame after the trailer is as invalid here as anywhere. */
-    status = wt_http3_endpoint_on_request_frame(endpoint, stream_id, WT_HTTP3_FRAME_HEADERS,
-                                                out_error);
+    status =
+        wt_http3_endpoint_on_request_frame(endpoint, stream_id, WT_HTTP3_FRAME_HEADERS, out_error);
     if (status != WT_OK) return status;
 
-    status = wt_http3_message_decode(out_message, WT_HTTP3_HEADER_REQUEST, payload, length,
-                                     &endpoint->decoder_table,
-                                     wt_qpack_max_entries(endpoint->decoder_table.capacity),
-                                     endpoint->decoder_insert_count, scratch, scratch_capacity,
-                                     out_error);
+    status = wt_http3_message_decode(
+        out_message, WT_HTTP3_HEADER_REQUEST, payload, length, &endpoint->decoder_table,
+        wt_qpack_max_entries(endpoint->decoder_table.capacity), endpoint->decoder_insert_count,
+        scratch, scratch_capacity, out_error);
     if (status != WT_OK) return status;
 
     if (before != WT_HTTP3_REQUEST_EXPECT_HEADERS) {
@@ -246,11 +245,10 @@ wt_status_t wt_http3_endpoint_on_response_headers(wt_http3_endpoint_t *endpoint,
    * error as survivable and waited for another response would be wrong about the protocol, not about this
    * flag. */
   request->response_seen = 1;
-  return wt_http3_message_decode(out_message, WT_HTTP3_HEADER_RESPONSE, payload, length,
-                                 &endpoint->decoder_table,
-                                 wt_qpack_max_entries(endpoint->decoder_table.capacity),
-                                 endpoint->decoder_insert_count, scratch, scratch_capacity,
-                                 out_error);
+  return wt_http3_message_decode(
+      out_message, WT_HTTP3_HEADER_RESPONSE, payload, length, &endpoint->decoder_table,
+      wt_qpack_max_entries(endpoint->decoder_table.capacity), endpoint->decoder_insert_count,
+      scratch, scratch_capacity, out_error);
 }
 
 wt_status_t wt_http3_endpoint_on_request_frame(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
@@ -388,8 +386,8 @@ size_t wt_http3_endpoint_stream_count(const wt_http3_endpoint_t *endpoint) {
   return endpoint->stream_count;
 }
 
-wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(
-    const wt_http3_endpoint_t *endpoint, uint64_t stream_id) {
+wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(const wt_http3_endpoint_t *endpoint,
+                                                              uint64_t stream_id) {
   size_t i;
 
   if (endpoint == NULL) return WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
