@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 34 |
+| DONE | 35 |
 
 Non-terminal (open): 0
-Terminal: 36
+Terminal: 37
 
 ## Tasks
 
@@ -54,6 +54,7 @@ Terminal: 36
 | AUD-0034 | S3 | A | P2 | DONE | The Huffman decoder's bound is unreachable because its table is a complete prefix code, and the empty :method rule had no test | C99/src/http3/qpack_huffman.c:29 |
 | AUD-0035 | S3 | A | P2 | DONE | The quarter-ID overflow guard added for a past audit finding cannot fire from the wire, and the helper it protects still wraps silently | C99/src/webtransport/framing.c:99 |
 | AUD-0036 | S2 | A | P2 | DONE | The test for RFC 9114's no-pseudo-headers-in-trailers rule passed with the rule deleted, because the refusal came from the message decoder | C99/tests/unit/test_http3_endpoint.c:512 |
+| AUD-0037 | S3 | A | P2 | DONE | Both static-table index refusals were unexecuted, because every index the tests used was valid | C99/src/http3/qpack_field_section.c:95 |
 
 ## Detail
 
@@ -418,4 +419,14 @@ Terminal: 36
 - fix: The trailer now carries a COMPLETE request section -- `:method GET` (static 17), `:scheme https` (23) and `:path /` (1) -- so it decodes cleanly and the trailer rule is the only thing that can refuse it, and the test's comment says why that matters. The section stays in the position that demonstrably passes the frame-ordering check: an earlier attempt to insert a second trailer case before it was refused with `FRAME_UNEXPECTED`, which is the ordering rule rather than the section's, and that is recorded rather than worked around.
 - evidence after: Deliberate violation: removing the trailer rule now fails with `FAIL and is refused: want protocol, got ok` (1 of 181 checks), where before this change the same removal left the suite GREEN. `llvm-cov show` confirms endpoint.c:190-196 all execute (count 1 each) and the total moved 91.88% -> **91.93%** lines, the largest single-round gain of the review. `check-format.sh`: all 312 C sources match.
 - commit: 77ded8e
+
+### AUD-0037 — Both static-table index refusals were unexecuted, because every index the tests used was valid
+
+- severity: S3 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, peer-input coverage filter (AUDIT/tier-a-review.md)
+- where: C99/src/http3/qpack_field_section.c:95
+- evidence before: `qpack_field_section.c` refuses a static index at or past the table's end in two places -- the indexed form and the literal-name-reference form -- and line coverage showed both unexecuted: every index the tests used was a valid one. The index is peer input on the field-section path.
+- fix: Added the boundary to `test_static_forms` from BOTH sides: the last entry (size - 1) is asserted to resolve, and the first invalid one (size) is asserted refused in each form, with the decompression-failure code. Asserting only the refusal would pass against a table one entry short of the right size, so the control is the point of the case rather than decoration.
+- evidence after: Removing both refusals fails exactly two checks, one per case -- `FAIL an indexed line past the static table is refused: want protocol, got ok` and `FAIL a literal naming past the static table is refused: want protocol, got ok` (2 of 83). `llvm-cov show` confirms both refusal lines now execute, and the total moved 91.93% -> **91.97%** lines. `check-format.sh`: all 312 C sources match.
+- commit: PENDING
 

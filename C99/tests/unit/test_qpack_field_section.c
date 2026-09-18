@@ -74,6 +74,35 @@ static void test_static_forms(void) {
                                            &scratch_used, &field, &error));
   WT_EXPECT_BYTES("to :method", (const uint8_t *)":method", field.name, 7U);
   WT_EXPECT_BYTES("with the line's value", (const uint8_t *)"NOTGET", field.value, 6U);
+
+  /* An index past the static table is a decoder error, not a name. AUD-0037: BOTH static-index
+   * refusals were unexecuted, because every index the tests used was valid. The boundary is
+   * asserted from both sides -- the last entry resolves and the next is refused -- so a table one
+   * entry short of the right size cannot pass this. */
+  w = wt_writer_init(bytes, sizeof(bytes));
+  write_line(&w, WT_QPACK_FIELD_INDEXED_STATIC, (uint64_t)WT_QPACK_STATIC_TABLE_SIZE - 1U, NULL);
+  c = wt_cursor_init(bytes, wt_writer_offset(&w));
+  WT_EXPECT_OK("the last static entry resolves",
+               wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                           &scratch_used, &field, &error));
+
+  w = wt_writer_init(bytes, sizeof(bytes));
+  write_line(&w, WT_QPACK_FIELD_INDEXED_STATIC, (uint64_t)WT_QPACK_STATIC_TABLE_SIZE, NULL);
+  c = wt_cursor_init(bytes, wt_writer_offset(&w));
+  error = WT_QPACK_ERROR_NONE;
+  WT_EXPECT_STATUS("an indexed line past the static table is refused", WT_ERR_PROTOCOL,
+                   wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                               &scratch_used, &field, &error));
+  WT_EXPECT_U64("as a decompression failure", WT_QPACK_ERROR_DECOMPRESSION_FAILED, (uint64_t)error);
+
+  w = wt_writer_init(bytes, sizeof(bytes));
+  write_line(&w, WT_QPACK_FIELD_LITERAL_NAME_REF_STATIC, (uint64_t)WT_QPACK_STATIC_TABLE_SIZE, "x");
+  c = wt_cursor_init(bytes, wt_writer_offset(&w));
+  error = WT_QPACK_ERROR_NONE;
+  WT_EXPECT_STATUS("a literal naming past the static table is refused", WT_ERR_PROTOCOL,
+                   wt_qpack_field_section_next(&c, &prefix, &table, scratch, sizeof(scratch),
+                                               &scratch_used, &field, &error));
+  WT_EXPECT_U64("as a decompression failure", WT_QPACK_ERROR_DECOMPRESSION_FAILED, (uint64_t)error);
 }
 
 static void test_dynamic_references(void) {

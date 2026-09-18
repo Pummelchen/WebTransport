@@ -618,6 +618,23 @@
       "evidence_after": "Deliberate violation: removing the trailer rule now fails with `FAIL and is refused: want protocol, got ok` (1 of 181 checks), where before this change the same removal left the suite GREEN. `llvm-cov show` confirms endpoint.c:190-196 all execute (count 1 each) and the total moved 91.88% -> **91.93%** lines, the largest single-round gain of the review. `check-format.sh`: all 312 C sources match.",
       "commit": "77ded8e",
       "blocked_reason": ""
+    },
+    {
+      "id": "AUD-0037",
+      "severity": "S3",
+      "tier": "A",
+      "project": "P2",
+      "file_line": "C99/src/http3/qpack_field_section.c:95",
+      "title": "Both static-table index refusals were unexecuted, because every index the tests used was valid",
+      "category": "tests",
+      "status": "DONE",
+      "host": "Mac14,3",
+      "discovered_by": "Tier A review, peer-input coverage filter (AUDIT/tier-a-review.md)",
+      "evidence_before": "`qpack_field_section.c` refuses a static index at or past the table's end in two places -- the indexed form and the literal-name-reference form -- and line coverage showed both unexecuted: every index the tests used was a valid one. The index is peer input on the field-section path.",
+      "fix_summary": "Added the boundary to `test_static_forms` from BOTH sides: the last entry (size - 1) is asserted to resolve, and the first invalid one (size) is asserted refused in each form, with the decompression-failure code. Asserting only the refusal would pass against a table one entry short of the right size, so the control is the point of the case rather than decoration.",
+      "evidence_after": "Removing both refusals fails exactly two checks, one per case -- `FAIL an indexed line past the static table is refused: want protocol, got ok` and `FAIL a literal naming past the static table is refused: want protocol, got ok` (2 of 83). `llvm-cov show` confirms both refusal lines now execute, and the total moved 91.93% -> **91.97%** lines. `check-format.sh`: all 312 C sources match.",
+      "commit": "PENDING",
+      "blocked_reason": ""
     }
   ]
 }

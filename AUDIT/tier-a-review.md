@@ -262,6 +262,7 @@ rather than by deletion.
 | `http3/message.c` empty `:method` | `AUD-0034` |
 | `webtransport/protocol.c` the token grammar on a hand-built list | `AUD-0035` |
 | `http3/endpoint.c` pseudo-headers in a trailer -- **and the existing test for it proved nothing** | `AUD-0036` |
+| `http3/qpack_field_section.c` both static-index refusals, with the boundary asserted from both sides | `AUD-0037` |
 
 **Unreachable, and recorded as such:**
 
@@ -273,6 +274,9 @@ rather than by deletion.
 | `tls/keyshare.c:150` (an all-zero shared secret) | Unreachable with the OpenSSL backend, which fails the derivation for a small-order key instead of returning zeroes -- the code's own comment says the branch covers a backend that returns them. The contract is already tested twice. |
 | `http3/qpack_decoder_stream.c` (4 refusals) | Same unwired feature as the encoder stream: `wt_qpack_decoder_stream_apply` has no production caller either, because the runtime never enables the QPACK dynamic table (`AUD-0027`). Wiring either stream in is one piece of work and would make both reachable. |
 | `tls/self_signed.c:105,113` (the certificate generator's failure path) | Not peer input: the `fail:` label and the fingerprint check catch an OpenSSL failure while generating this endpoint's OWN development identity. Nothing a peer sends reaches them, and triggering one would mean breaking OpenSSL. |
+| `qpack_field_section.c:157` (a post-base index that would overflow the base) | **Unreachable from the wire**: the index is a 62-bit varint and the base comes from the section prefix, whose decode bounds it by `known_insert_count + max_entries` -- a base near `UINT64_MAX` cannot be produced. Reachable only by a caller handing the decoder a hand-built prefix, which is why it stays. |
+| `http3/qpack_field.c:87` (a name length that will not narrow) | The same shape as `transport_parameters.c:173`: `wt_checked_narrow_u64_to_size` cannot fail where `size_t` is 64 bits. A 32-bit-platform guard, exercised by cross-building for one. |
+| `quic/frame.c:507` (`wt_quic_frame_ack_range_at` past the range list) | The frame decoder walks the same list and refuses a truncated one before `handle_ack` sees it (recorded in `AUD-0024`). |
 | `quic/transport_parameters.c:173` (a parameter length that will not narrow) | **Unreachable on this platform**: `wt_checked_narrow_u64_to_size` fails only when a 64-bit length exceeds `size_t`, and `size_t` is 64 bits here. It is a 32-bit-platform guard, and it is exercised by cross-building for one. |
 | `webtransport/framing.c:99` (a quarter ID past `UINT64_MAX / 4`) | **Unreachable from the wire**: a QUIC varint caps at 2^62 - 1, which is exactly `UINT64_MAX / 4`, so the decoded value cannot exceed the threshold -- the condition ran 4,000 times under the suite with the body never entered. `AUD-0035` states it where the guard is, and states the precondition on the helper that actually multiplies. |
 | `http3/qpack_huffman.c:29` (a code longer than thirty bits) | **Unreachable because the table is a COMPLETE prefix code**: its Kraft sum is exactly 1 over 257 symbols, so every bit path resolves within thirty bits. A depth-first search of the whole code space finds no 31-bit path, and 31.3 million range lookups under the fuzz corpus never reach it. `AUD-0034` records both proofs where the guard is. |
