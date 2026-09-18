@@ -41,6 +41,7 @@ set(WT_UNIT_TESTS
   test_quic_protection
   test_tls13_keyschedule
   test_tls13_handshake
+  test_tls13_handshake_messages
   test_tls13_keyshare
   test_tls13_trust
   test_tls13_session
