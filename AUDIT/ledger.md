@@ -9,11 +9,11 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 12 |
-| OPEN | 3 |
+| DONE | 13 |
+| OPEN | 2 |
 
-Non-terminal (open): 3
-Terminal: 14
+Non-terminal (open): 2
+Terminal: 15
 
 ## Tasks
 
@@ -35,7 +35,7 @@ Terminal: 14
 | AUD-0014 | S1 | A | P1 | DONE | SwiftLint opening_brace conflicts with the committed formatter's multi-line condition style | .swiftlint.yml |
 | AUD-0015 | S3 | A | P1 | DONE | identifier_name: rename what is internal, exclude only RFC-registry and public-API names | .swiftlint.yml |
 | AUD-0016 | S1 | A | P1 | DONE | SwiftLint redundant_void_return's fix does not compile | .swiftlint.yml |
-| AUD-0017 | S2 | B | P1 | OPEN | The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage | Swift/check-api-compatibility.sh |
+| AUD-0017 | S2 | B | P1 | DONE | The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage | Swift/check-api-compatibility.sh |
 
 ## Detail
 
@@ -203,11 +203,11 @@ Terminal: 14
 
 ### AUD-0017 — The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage
 
-- severity: S2 | tier: B | project: P1 | status: OPEN | host: Mac14,3
+- severity: S2 | tier: B | project: P1 | status: DONE | host: Mac14,3
 - category: tests | discovered by: AUD-0008
 - where: Swift/check-api-compatibility.sh
 - evidence before: Found while testing AUD-0008: adding `.unsafeFlags(["-require-explicit-sendable"])` to the library targets still let `./Swift/check-api-compatibility.sh` pass. SwiftPM refuses unsafe build flags only for VERSION-BASED dependencies, and the check builds a consumer with `.package(path: ...)`, so the one gate whose job is to prove a consumer still builds is structurally unable to catch a change that stops consumers building.
-- fix: 
-- evidence after: 
-- commit: 
+- fix: Added `Swift/check-unsafe-flags.sh`, wired into `swift-ci.yml` next to the manifest-sync gate. It reads `swift package dump-package` for both manifests and fails naming every target whose settings carry `unsafeFlags`, so the class of change the path-based consumer check cannot see is now caught by a gate that reads what SwiftPM actually resolved.
+- evidence after: Proven both ways on the primary host: exit 0 with the tree as it stands, and exit 1 with `.unsafeFlags(["-require-explicit-sendable"])` added to `Swift/Package.swift`, listing all 22 affected targets (`WebTransport: -require-explicit-sendable`, ...). The deliberate violation was reverted and the gate re-run green. `shellcheck` clean; `check-workflows.py` parses the edited workflow.
+- commit: PENDING
 

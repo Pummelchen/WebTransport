@@ -43,6 +43,13 @@ jobs:
       - name: Verify package manifests agree on shared targets
         run: ./Swift/check-manifest-sync.sh
 
+      # AUD-0017. `.unsafeFlags` would make the published package unusable to anyone
+      # depending on it by version, and `check-api-compatibility.sh` cannot catch it:
+      # that check consumes the package by PATH, where SwiftPM permits unsafe flags.
+      # This gate reads `swift package dump-package`, so it sees what SwiftPM resolved.
+      - name: Refuse unsafe build flags in either manifest
+        run: ./Swift/check-unsafe-flags.sh
+
       # Blocking. The Swift library and the C99 one ship together and must carry
       # the same version, so a caller pairing them knows the pair is compatible.
       # The value is single-sourced from VERSION and mirrored in the C99 header
