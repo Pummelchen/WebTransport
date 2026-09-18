@@ -480,7 +480,7 @@
       "evidence_before": "RFC 8446 section 4.1.2 makes the cipher suite vector 2..2^16-2 bytes -- at least one suite and an even number of bytes -- and `wt_tls_client_hello_parse` enforces it. Line coverage showed the refusal at handshake.c:487 never executed, and it is reachable from production: `session_server.c:221` parses whatever a peer sends.",
       "fix_summary": "Added the case to `test_message_refusals` in `test_tls13_handshake.c`. The first version mutated the RFC 8448 vector in place, and the deliberate violation showed it was worthless: shortening the vector misaligns everything after it, so a LATER rule refuses the message and the test passes with this check deleted. The message is now REBUILT -- header, version, random, session id, a length of 0 or 1, then the RFC's compression methods and extensions spliced directly behind it -- so the vector's length is the message's only fault. The test also asserts the offset it edits first, because a test that mutates the wrong byte passes without testing anything.",
       "evidence_after": "With the check: `100% tests passed out of 97`. With it removed, BOTH cases fail -- `FAIL an empty cipher suite vector is refused: want protocol, got ok` and `FAIL an odd cipher suite vector length is refused: want protocol, got ok` (2 of 190 checks, exit 8) -- which is what the first version could not do. `check-format.sh`: all 312 C sources match. The same round recorded a dead-function scan: of 190 extern functions with no production call site, every one is public API or a function-pointer registration, so there is no internal dead code of the kind AUD-0027 found in the QPACK module.",
-      "commit": "PENDING",
+      "commit": "d06aa06",
       "blocked_reason": ""
     }
   ]
