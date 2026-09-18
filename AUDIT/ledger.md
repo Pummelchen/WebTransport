@@ -98,7 +98,7 @@ Terminal: 16
 - evidence before: git ls-files shows no .swiftlint.yml; no workflow step invokes swiftlint; `swiftlint lint Swift/Sources` reports 317 findings (292 warning, 25 error) that nothing consumes
 - fix: Committed `.swiftlint.yml` and brought the tree to zero findings rather than raising a threshold: 556 findings -> 0. 11 type_body_length fixed by splitting oversized types into same-file extensions; 18 cyclomatic_complexity and 40 function_body_length fixed by extracting named helpers along seams the code already had -- including `QUICFrame`'s two 19-way switches, split while keeping the outer switch exhaustive so a new frame type still fails to compile. Wired the gate into `swift-ci.yml` as `swiftlint lint --strict`, with SwiftLint itself installed from a digest-pinned 0.65.1 release so the step cannot silently skip.
 - evidence after: `swiftlint lint --strict --quiet Swift/Sources Swift/Tests` exits 0 with **zero** findings (from 556). `swift test`: 401 passed. `swift format lint --strict`: clean. `./Swift/run-library-smoke.sh`: passes. The gate is wired and green at the commit that adds it. Four rules are disabled in the config, each with its own numbered DONE task (AUD-0012..0016) recording the evidence: `inclusive_language`, `trailing_comma`, `opening_brace` and `redundant_void_return` -- the first two because `swift-format` owns that formatting and `swiftlint --fix` removed commas the formatter requires, the last because its suggested fix does not compile. No threshold was raised, no file excluded, and no rule silenced without a recorded reason.
-- commit: PENDING
+- commit: eba03c5
 
 ### AUD-0007 — Ruff has no config, so B, E722, S101 and PT are not enabled
 
