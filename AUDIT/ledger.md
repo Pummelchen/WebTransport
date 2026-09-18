@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 33 |
+| DONE | 34 |
 
 Non-terminal (open): 0
-Terminal: 35
+Terminal: 36
 
 ## Tasks
 
@@ -53,6 +53,7 @@ Terminal: 35
 | AUD-0033 | S2 | A | P2 | DONE | RFC 9000 section 7.3's client half -- the check that stops an injected connection ID -- had all three refusals unexecuted | C99/src/quic/connection.c:175 |
 | AUD-0034 | S3 | A | P2 | DONE | The Huffman decoder's bound is unreachable because its table is a complete prefix code, and the empty :method rule had no test | C99/src/http3/qpack_huffman.c:29 |
 | AUD-0035 | S3 | A | P2 | DONE | The quarter-ID overflow guard added for a past audit finding cannot fire from the wire, and the helper it protects still wraps silently | C99/src/webtransport/framing.c:99 |
+| AUD-0036 | S2 | A | P2 | DONE | The test for RFC 9114's no-pseudo-headers-in-trailers rule passed with the rule deleted, because the refusal came from the message decoder | C99/tests/unit/test_http3_endpoint.c:512 |
 
 ## Detail
 
@@ -407,4 +408,14 @@ Terminal: 35
 - fix: (1) Proved the quarter guard UNREACHABLE from the wire and wrote the proof where it is: a QUIC varint cannot encode more than 2^62 - 1, which is EXACTLY `UINT64_MAX / 4`, so the decoded value can never exceed the threshold -- the coverage run shows the condition evaluated 4,000 times with the body never entered. It stays as the second line of defence for the day the decode changes. The precondition it enforces is now stated on `wt_webtransport_session_id_from_quarter` itself, in the public header: that helper multiplies by four and returns a plain `uint64_t`, so it cannot report overflow and STILL WRAPS for a caller that builds a quarter by hand -- which is the actual defect the past finding named, and it is now documented rather than left as a trap. Changing its signature would be an ABI change under `WT_ABI_VERSION`, which is a maintainer's decision. (2) Added the hand-built invalid-token case to `test_webtransport_protocol.c`, which reaches the list-level grammar check the decoder short-circuits.
 - evidence after: Coverage: protocol.c:30 now executes and the total moved 91.87% -> **91.88%** lines. Deliberate violation on the token rule: removing it fails with `FAIL a hand-built list with an invalid token is refused: want protocol, got ok` (1 of 102 checks); restored, 97/97. `check-format.sh`: all 312 C sources match.
 - commit: 275a2c3
+
+### AUD-0036 — The test for RFC 9114's no-pseudo-headers-in-trailers rule passed with the rule deleted, because the refusal came from the message decoder
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, coverage worklist (AUDIT/tier-a-review.md)
+- where: C99/tests/unit/test_http3_endpoint.c:512
+- evidence before: endpoint.c's trailer rule (RFC 9114 section 4.1: "Trailers MUST NOT contain pseudo-header fields") was unexecuted, and the file contained a test that says it covers it: "A trailer may not carry pseudo-headers (section 4.1)", sending a trailer with `:path` and asserting a refusal. The refusal was real but came from somewhere else -- the message decoder refuses a section with no `:method` -- so the endpoint's rule could be DELETED with that test green. This is the same defect the review has been finding in its own new tests, sitting in the repository.
+- fix: The trailer now carries a COMPLETE request section -- `:method GET` (static 17), `:scheme https` (23) and `:path /` (1) -- so it decodes cleanly and the trailer rule is the only thing that can refuse it, and the test's comment says why that matters. The section stays in the position that demonstrably passes the frame-ordering check: an earlier attempt to insert a second trailer case before it was refused with `FRAME_UNEXPECTED`, which is the ordering rule rather than the section's, and that is recorded rather than worked around.
+- evidence after: Deliberate violation: removing the trailer rule now fails with `FAIL and is refused: want protocol, got ok` (1 of 181 checks), where before this change the same removal left the suite GREEN. `llvm-cov show` confirms endpoint.c:190-196 all execute (count 1 each) and the total moved 91.88% -> **91.93%** lines, the largest single-round gain of the review. `check-format.sh`: all 312 C sources match.
+- commit: PENDING
 

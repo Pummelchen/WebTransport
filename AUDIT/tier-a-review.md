@@ -261,6 +261,7 @@ rather than by deletion.
 | `quic/connection.c` section 7.3 client half (all three refusals) | `AUD-0033` |
 | `http3/message.c` empty `:method` | `AUD-0034` |
 | `webtransport/protocol.c` the token grammar on a hand-built list | `AUD-0035` |
+| `http3/endpoint.c` pseudo-headers in a trailer -- **and the existing test for it proved nothing** | `AUD-0036` |
 
 **Unreachable, and recorded as such:**
 
@@ -271,6 +272,8 @@ rather than by deletion.
 | `quic/protection.c:294` (`pn_len` past the packet's end) | Unreachable by arithmetic: `wt_quic_header_protection_sample` has already required `packet_len - pn_offset >= 4 + 16` and `pn_len` is at most 4, so the comparison cannot be true. `AUD-0031` records the proof, and the code now says so where the guard is. |
 | `tls/keyshare.c:150` (an all-zero shared secret) | Unreachable with the OpenSSL backend, which fails the derivation for a small-order key instead of returning zeroes -- the code's own comment says the branch covers a backend that returns them. The contract is already tested twice. |
 | `http3/qpack_decoder_stream.c` (4 refusals) | Same unwired feature as the encoder stream: `wt_qpack_decoder_stream_apply` has no production caller either, because the runtime never enables the QPACK dynamic table (`AUD-0027`). Wiring either stream in is one piece of work and would make both reachable. |
+| `tls/self_signed.c:105,113` (the certificate generator's failure path) | Not peer input: the `fail:` label and the fingerprint check catch an OpenSSL failure while generating this endpoint's OWN development identity. Nothing a peer sends reaches them, and triggering one would mean breaking OpenSSL. |
+| `quic/transport_parameters.c:173` (a parameter length that will not narrow) | **Unreachable on this platform**: `wt_checked_narrow_u64_to_size` fails only when a 64-bit length exceeds `size_t`, and `size_t` is 64 bits here. It is a 32-bit-platform guard, and it is exercised by cross-building for one. |
 | `webtransport/framing.c:99` (a quarter ID past `UINT64_MAX / 4`) | **Unreachable from the wire**: a QUIC varint caps at 2^62 - 1, which is exactly `UINT64_MAX / 4`, so the decoded value cannot exceed the threshold -- the condition ran 4,000 times under the suite with the body never entered. `AUD-0035` states it where the guard is, and states the precondition on the helper that actually multiplies. |
 | `http3/qpack_huffman.c:29` (a code longer than thirty bits) | **Unreachable because the table is a COMPLETE prefix code**: its Kraft sum is exactly 1 over 257 symbols, so every bit path resolves within thirty bits. A depth-first search of the whole code space finds no 31-bit path, and 31.3 million range lookups under the fuzz corpus never reach it. `AUD-0034` records both proofs where the guard is. |
 
@@ -318,3 +321,26 @@ same status. Changing the derive-failure status instead failed three tests -- th
 **It was reverted.** Keeping it would have moved a coverage figure and added nothing, which is the
 failure mode this whole exercise is aimed at. The filter's output is a list of *questions*, not a
 list of tests to write, and one of the three verdicts this round is "no test, and here is why".
+
+## A repository test that passed with its own rule deleted
+
+`AUD-0036` is the finding this whole method was built to produce, and it was in the repository
+rather than in anything new. `test_http3_endpoint.c` had a case labelled "A trailer may not carry
+pseudo-headers (section 4.1)" which sent a trailer containing `:path` and asserted a refusal. The
+refusal came from the **message decoder**, which refuses a request section with no `:method` -- so
+the endpoint's trailer rule could be deleted with that test green, which is exactly what the
+deliberate violation then demonstrated.
+
+The fix was one word of content: make the trailer a **complete** request section, so it decodes
+cleanly and the trailer rule is the only thing left that can refuse it. Removing the rule now fails
+the test. Coverage went from 91.88% to **91.93%**, the largest single-round gain of the review.
+
+Two things are worth carrying forward from it:
+
+- **A test's label is not evidence.** This one named the rule, quoted the section and asserted the
+  right status, and still did not test the rule. The only thing that settled it was deleting the
+  code and watching.
+- **The same trap appears in the schema of the fix.** The first attempt -- a second trailer case
+  inserted before the existing one -- came back `FRAME_UNEXPECTED`, because the frame-ordering rule
+  refuses a HEADERS at that point. That is recorded in the test's comment rather than smoothed
+  over: the section's position matters as much as its content.

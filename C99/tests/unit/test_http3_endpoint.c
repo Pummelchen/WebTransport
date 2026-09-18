@@ -510,29 +510,34 @@ static void test_request_headers_are_decoded(void) {
                   (int)decision.outcome);
 
     /* A trailer may not carry pseudo-headers (section 4.1), and this layer is where that is
-     * enforced, because the message decoder has one request shape and one response shape. */
+     * enforced, because the message decoder has one request shape and one response shape.
+     *
+     * AUD-0036: the section has to be a COMPLETE request -- `:method`, `:scheme` and `:path` --
+     * or the message decoder refuses it first and the rule below is never reached. The case this
+     * replaces carried only `:path`, so it passed with the trailer rule DELETED: the refusal it
+     * asserted was the missing `:method`, not the pseudo-header. A section that decodes cleanly
+     * leaves the trailer rule as the only thing that can refuse it. */
     wt_http3_endpoint_on_request_frame(&server, 4U, WT_HTTP3_FRAME_DATA, &error);
     {
       static uint8_t trailer[256];
       wt_writer_t tw = wt_writer_init(trailer, sizeof(trailer));
-      wt_qpack_field_line_t line;
+      wt_qpack_field_line_t trailer_lines[3];
       wt_qpack_header_prefix_t tprefix;
       uint8_t trailer_scratch[128];
       tprefix.required_insert_count = 0U;
       tprefix.base = 0U;
-      line.kind = WT_QPACK_FIELD_LITERAL_LITERAL_NAME;
-      line.never_indexed = 0;
-      line.index = 0U;
-      line.name_huffman = 0;
-      line.name = (const uint8_t *)":path";
-      line.name_length = 5U;
-      line.value = (const uint8_t *)"/again";
-      line.value_length = 6U;
-      line.value_huffman = 0;
-      line.bytes_consumed = 0U;
+      /* `:method GET` (17), `:scheme https` (23), `:path /` (1): the static indices RFC 9204
+       * appendix A lists. */
+      memset(trailer_lines, 0, sizeof(trailer_lines));
+      trailer_lines[0].kind = WT_QPACK_FIELD_INDEXED_STATIC;
+      trailer_lines[0].index = 17U;
+      trailer_lines[1].kind = WT_QPACK_FIELD_INDEXED_STATIC;
+      trailer_lines[1].index = 23U;
+      trailer_lines[2].kind = WT_QPACK_FIELD_INDEXED_STATIC;
+      trailer_lines[2].index = 1U;
       WT_EXPECT_OK("a pseudo-header trailer encodes",
-                   wt_qpack_field_section_encode(&tw, &tprefix, 0U, &line, 1U, trailer_scratch,
-                                                 sizeof(trailer_scratch)));
+                   wt_qpack_field_section_encode(&tw, &tprefix, 0U, trailer_lines, 3U,
+                                                 trailer_scratch, sizeof(trailer_scratch)));
       WT_EXPECT_STATUS("and is refused", WT_ERR_PROTOCOL,
                        wt_http3_endpoint_on_request_headers(&server, 4U, trailer,
                                                             wt_writer_offset(&tw), scratch,
