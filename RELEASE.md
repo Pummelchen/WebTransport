@@ -238,12 +238,27 @@ rule exists for.
   - output lands in `.build/release-artifacts/` with a `SHA256SUMS`.
 - **Gates** `Swift/check-toolchain.sh 6.4 27.0`, `Swift/check-manifest-sync.sh`
   (19 shared targets must agree across the two manifests), `Swift/check-version-sync.sh`,
-  `Swift/check-target-imports.sh`, `check-api-compatibility.sh`, the C99
-  `C99/scripts/check-*.sh` family, the Swift suite under ASan and TSan, and the C99
-  suite under ASan+UBSan. The C99 CI also runs a `linux-debian13` job and two
+  `Swift/check-target-imports.sh`, `Swift/check-pkcs12-keychain-free.sh` (a PKCS#12
+  identity must resolve while the default keychain is **locked**, which is the only state
+  in which the memory-only import is distinguishable from one that files the caller's key),
+  `check-api-compatibility.sh`, the library smoke pair, the nested manifest's own test
+  target, the client and server CLI conformance suites, and the C99
+  `C99/scripts/check-*.sh` family — which since the pre-production audit also carries
+  `check-format.sh` (every C source against the committed `.clang-format`),
+  `measure-coverage.sh` (line coverage from an instrumented build, so it is measured
+  rather than remembered) and `check-unused-locals.py` (a local assigned and never read,
+  hidden from `-Wunused-but-set-variable` by a `(void)` cast). The Swift suite runs under
+  ASan — the whole suite, not only the parser fuzz filter — and under TSan; the C99 suite
+  runs under ASan+UBSan, with the sanitizer flags chosen per compiler because
+  `-fno-sanitize=function` is clang-only and GNU C rejects it outright. The C99 CI also
+  runs a `linux-debian13` job and two
   enforced Windows jobs (`windows-wine` under Wine, `windows-native` on
   `windows-latest`), and the CMake configure fails on a version-mirror mismatch.
-  The `check-cli-*.sh` scripts run through CTest, not as workflow steps.
+  The `check-cli-*.sh` scripts run through CTest, not as workflow steps. `security-scan.yml`
+  runs gitleaks over the full history and trivy over the tree, and `soak.yml` runs the
+  connection-churn soak nightly rather than per pull request, because it watches resident
+  memory and thread count for sustained growth and a loaded shared runner can move those
+  numbers with nothing wrong.
 - **Two manifests** — the root `Package.swift` and `Swift/Package.swift` —
   intentionally expose different product sets; shared targets must not diverge.
 - **Publishing ships both libraries**, one artifact per library, under one tag and
