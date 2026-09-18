@@ -259,6 +259,7 @@ rather than by deletion.
 | `tls/trust.c` unparseable certificate in both trusting modes | `AUD-0030` |
 | `webtransport/session.c` malformed DRAIN and bytes after a CLOSE | `AUD-0032` |
 | `quic/connection.c` section 7.3 client half (all three refusals) | `AUD-0033` |
+| `http3/message.c` empty `:method` | `AUD-0034` |
 
 **Unreachable, and recorded as such:**
 
@@ -269,6 +270,7 @@ rather than by deletion.
 | `quic/protection.c:294` (`pn_len` past the packet's end) | Unreachable by arithmetic: `wt_quic_header_protection_sample` has already required `packet_len - pn_offset >= 4 + 16` and `pn_len` is at most 4, so the comparison cannot be true. `AUD-0031` records the proof, and the code now says so where the guard is. |
 | `tls/keyshare.c:150` (an all-zero shared secret) | Unreachable with the OpenSSL backend, which fails the derivation for a small-order key instead of returning zeroes -- the code's own comment says the branch covers a backend that returns them. The contract is already tested twice. |
 | `http3/qpack_decoder_stream.c` (4 refusals) | Same unwired feature as the encoder stream: `wt_qpack_decoder_stream_apply` has no production caller either, because the runtime never enables the QPACK dynamic table (`AUD-0027`). Wiring either stream in is one piece of work and would make both reachable. |
+| `http3/qpack_huffman.c:29` (a code longer than thirty bits) | **Unreachable because the table is a COMPLETE prefix code**: its Kraft sum is exactly 1 over 257 symbols, so every bit path resolves within thirty bits. A depth-first search of the whole code space finds no 31-bit path, and 31.3 million range lookups under the fuzz corpus never reach it. `AUD-0034` records both proofs where the guard is. |
 
 **A peer-input filter makes the rest tractable.** Of the worklist, a `return WT_ERR_PROTOCOL` or
 `WT_ERR_TRUNCATED` is a statement about the peer's bytes, while `WT_ERR_INVALID_ARGUMENT` is a

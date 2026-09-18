@@ -146,6 +146,23 @@ static void test_empty_values_and_blocked(void) {
                                            0U, 0U, scratch, sizeof(scratch), &error));
   WT_EXPECT_U64("as a message error", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
 
+  /* An empty :method, which is a SEPARATE check (message.c:135) and not the scheme/path one above.
+   * AUD-0034: it had no test. The scheme and path here are present, so the method is the message's
+   * only fault -- the rule AUD-0028 produced -- and removing the check makes this decode. */
+  memset(&lines[0], 0, sizeof(lines[0]));
+  lines[0].kind = WT_QPACK_FIELD_LITERAL_NAME_REF_STATIC;
+  lines[0].index = 17U; /* :method */
+  lines[0].value = (const uint8_t *)"";
+  lines[0].value_length = 0U;
+  indexed(23U, &lines[1]); /* :scheme https */
+  indexed(1U, &lines[2]);  /* :path / */
+  encode_section(section, sizeof(section), &length, lines, 3U);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("an empty :method is refused", WT_ERR_PROTOCOL,
+                   wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, section, length, NULL,
+                                           0U, 0U, scratch, sizeof(scratch), &error));
+  WT_EXPECT_U64("as a message error", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+
   /* A section that needs insertions the decoder has not received is blocked: the
    * caller waits for the encoder stream rather than closing the connection. */
   {

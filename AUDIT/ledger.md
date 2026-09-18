@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 31 |
+| DONE | 32 |
 
 Non-terminal (open): 0
-Terminal: 33
+Terminal: 34
 
 ## Tasks
 
@@ -51,6 +51,7 @@ Terminal: 33
 | AUD-0031 | S3 | A | P2 | DONE | Three uncovered peer-input refusals are unreachable, each with a proof, and one tried to be tested twice over | C99/src/quic/protection.c:294 |
 | AUD-0032 | S2 | A | P2 | DONE | Two WebTransport capsule refusals a previous audit added had no test, and both are honest regressions | C99/src/webtransport/session.c:144 |
 | AUD-0033 | S2 | A | P2 | DONE | RFC 9000 section 7.3's client half -- the check that stops an injected connection ID -- had all three refusals unexecuted | C99/src/quic/connection.c:175 |
+| AUD-0034 | S3 | A | P2 | DONE | The Huffman decoder's bound is unreachable because its table is a complete prefix code, and the empty :method rule had no test | C99/src/http3/qpack_huffman.c:29 |
 
 ## Detail
 
@@ -385,4 +386,14 @@ Terminal: 33
 - fix: Added `test_the_client_half_of_section_7_3` to `test_quic_connection_ids.c`. Every case differs from an ACCEPTED one only in the value under test -- the matching original destination id is asserted accepted first, and so is the matching Retry pair -- so a parameter that is merely absent from a message cannot pass for the wrong reason. `retry_accepted` and the source id it records are the state `wt_quic_connection_retry` leaves behind; the id the client addressed is set through the public `wt_quic_connection_set_original_destination_id`.
 - evidence after: `llvm-cov show` confirms connection.c:175, :185 and :188 now execute (counts 2, 2 and 1); the total moved 91.81% -> **91.85%** lines. Deliberate violation, one refusal at a time, each effect removed while its condition stayed: removing the original-destination check fails on BOTH its cases (`want protocol, got ok` twice); removing the Retry-mismatch check fails on both of its cases; removing the no-Retry-present check fails on its case -- 2, 2 and 1 failures of 2464 checks respectively. Restored, 97/97.
 - commit: 7f41dc8
+
+### AUD-0034 — The Huffman decoder's bound is unreachable because its table is a complete prefix code, and the empty :method rule had no test
+
+- severity: S3 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, peer-input coverage filter (AUDIT/tier-a-review.md)
+- where: C99/src/http3/qpack_huffman.c:29
+- evidence before: Two items. (1) `qpack_huffman.c`'s `bits > 30` guard bounds the `bits - 1U` index into the thirty-entry range table, so without it a crafted string would read past the array -- but no test executed it. (2) The empty `:method` refusal in `message.c` (RFC 9114 section 4.3.1) had no test; the file's existing empty-value test covers `:path`, which is a DIFFERENT branch of the same function.
+- fix: (1) Proved the guard unreachable and wrote the proof where the guard is. The RFC 7541 table is a COMPLETE prefix code: its Kraft sum is exactly 1 over 257 symbols, so every bit path resolves to a symbol within thirty bits and a run that never matches cannot exist. A search of the whole code space (DFS over unmatched prefixes, 30 levels) finds no 31-bit path, confirming it independently. The comment now says so, and why the guard is kept anyway: it is the bound that would matter if the table were regenerated with a code missing. (2) Added the empty `:method` case to `test_empty_values_and_blocked`, with `:scheme` and `:path` present so the method is the message's ONLY fault.
+- evidence after: Coverage: message.c:137 now executes and the total moved 91.85% -> **91.87%** lines. The Huffman guard stays at zero -- and the run gives it an empirical edge to the proof: the range lookup line executed **31.3 million times** without the guard ever firing, which is what a complete code looks like. Deliberate violation on the empty-method check: removing it fails with `FAIL an empty :method is refused: want protocol, got ok` (1 of 77 checks); restored, 97/97. `check-format.sh`: all 312 C sources match.
+- commit: PENDING
 
