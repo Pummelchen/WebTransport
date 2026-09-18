@@ -97,7 +97,7 @@ wt_status_t wt_qpack_decoder_stream_apply(wt_qpack_decoder_stream_t *stream,
 }
 
 wt_status_t wt_qpack_decoder_stream_write_section_acknowledgement(wt_writer_t *w,
-                                                                 uint64_t section_id) {
+                                                                  uint64_t section_id) {
   if (w == NULL) return WT_ERR_INVALID_ARGUMENT;
   return wt_qpack_integer_encode(w, 7U, 0x80U, section_id);
 }
@@ -108,7 +108,7 @@ wt_status_t wt_qpack_decoder_stream_write_stream_cancellation(wt_writer_t *w, ui
 }
 
 wt_status_t wt_qpack_decoder_stream_write_insert_count_increment(wt_writer_t *w,
-                                                                uint64_t increment) {
+                                                                 uint64_t increment) {
   if (w == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* Refused at the writer too, so this build cannot produce the instruction its
    * own reader refuses. */

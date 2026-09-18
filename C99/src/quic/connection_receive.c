@@ -20,9 +20,8 @@ static wt_status_t handle_connection_close(wt_quic_connection_t *connection,
                                     ? WT_QUIC_CLOSE_APPLICATION
                                     : WT_QUIC_CLOSE_TRANSPORT;
   connection->peer_error_code = frame->as.connection_close.error_code;
-  connection->peer_frame_type = frame->as.connection_close.has_frame_type
-                                    ? frame->as.connection_close.frame_type
-                                    : 0U;
+  connection->peer_frame_type =
+      frame->as.connection_close.has_frame_type ? frame->as.connection_close.frame_type : 0U;
   connection->peer_reason_length = length;
   if (length != 0U && frame->as.connection_close.reason != NULL) {
     memcpy(connection->peer_reason, frame->as.connection_close.reason, length);
@@ -85,7 +84,8 @@ static uint64_t frame_stream_id(const wt_quic_frame_t *frame) {
   if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM_AT) return frame->as.reset_stream_at.id;
   if (frame->kind == WT_QUIC_FRAME_KIND_STOP_SENDING) return frame->as.stop_sending.id;
   if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA) return frame->as.max_stream_data.id;
-  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM_DATA_BLOCKED) return frame->as.stream_data_blocked.id;
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM_DATA_BLOCKED)
+    return frame->as.stream_data_blocked.id;
   return 0U;
 }
 wt_status_t wt_quic_connection_validate_path(wt_quic_connection_t *connection, uint64_t now) {
@@ -121,7 +121,7 @@ uint64_t wt_quic_connection_path_validation_failures(const wt_quic_connection_t 
   return connection != NULL ? connection->path_validation_failures : 0U;
 }
 wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_visit_t *visit,
-                                      const wt_quic_frame_t *frame) {
+                               const wt_quic_frame_t *frame) {
   connection->frames_delivered++;
   wt_status_t status;
 
@@ -144,29 +144,31 @@ wt_status_t deliver_to_handler(wt_quic_connection_t *connection, wt_quic_visit_t
     if (application != 0) {
       /* An application close, so the peer is told the code this layer was refused WITH -- an HTTP/3 error code in
        * the application's space -- rather than a transport code invented here (WT-158). */
-      (void)wt_quic_close_application(&connection->close, code, NULL, 0U, visit->now, pto_of(connection));
+      (void)wt_quic_close_application(&connection->close, code, NULL, 0U, visit->now,
+                                      pto_of(connection));
     } else {
       (void)close_with(connection, code, type, visit->now);
     }
   }
   return status;
 }
-static wt_status_t handle_path_challenge(wt_quic_connection_t *connection, const wt_quic_frame_t *frame,
-                                        wt_quic_visit_t *visit) {
+static wt_status_t handle_path_challenge(wt_quic_connection_t *connection,
+                                         const wt_quic_frame_t *frame, wt_quic_visit_t *visit) {
   wt_quic_frame_t response = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PATH_RESPONSE);
   int sent = 0;
 
   response.as.path_response.data = frame->as.path_challenge.data;
   if (frame->as.path_challenge.data != NULL) {
-    if (send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &response, 1, &sent, visit->now) == WT_OK &&
+    if (send_control_frame(connection, WT_QUIC_SPACE_APPLICATION, &response, 1, &sent,
+                           visit->now) == WT_OK &&
         sent != 0) {
       connection->path_responses_sent++;
     }
   }
   return deliver_to_handler(connection, visit, frame);
 }
-static wt_status_t handle_path_response(wt_quic_connection_t *connection, const wt_quic_frame_t *frame,
-                                        wt_quic_visit_t *visit) {
+static wt_status_t handle_path_response(wt_quic_connection_t *connection,
+                                        const wt_quic_frame_t *frame, wt_quic_visit_t *visit) {
   if (connection->path_validating != 0 && frame->as.path_response.data != NULL &&
       wt_ct_equal(connection->path_challenge, frame->as.path_response.data,
                   WT_QUIC_PATH_CHALLENGE_LENGTH) != 0) {
@@ -239,7 +241,8 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
   /* RFC 9000 section 12.4: a frame that may not appear in this packet type is a PROTOCOL_VIOLATION,
    * named by the frame's own type so the peer can see which one. */
   if (frame_forbidden_in_space(frame->kind, visit->space)) {
-    return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, wire_type_of(frame->kind), visit->now);
+    return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, wire_type_of(frame->kind),
+                      visit->now);
   }
 
   /* RFC 9000 section 13.2.1: "All frames other than ACK, PADDING, and CONNECTION_CLOSE are considered
@@ -317,9 +320,9 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
        * asks this endpoint to stop sending -- both are facts about the stream rather than about the
        * application's data, which is why the state machine owns them and the handler only observes. */
       if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM && stream != NULL) {
-        status = wt_quic_stream_on_reset_received(stream,
-                                                  frame->as.reset_stream.application_error_code,
-                                                  frame->as.reset_stream.final_size);
+        status =
+            wt_quic_stream_on_reset_received(stream, frame->as.reset_stream.application_error_code,
+                                             frame->as.reset_stream.final_size);
         if (status != WT_OK) {
           /* A reset whose final size contradicts what arrived is the FINAL_SIZE_ERROR of RFC 9000
            * section 4.5. */
@@ -330,19 +333,19 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
         /* The reliable-stream-reset extension. Which rule a refusal broke decides the code the peer is told, and
          * the status alone cannot say: a commitment past the end of the stream is a FRAME_ENCODING_ERROR, while a
          * changed error code or final size is a STREAM_STATE_ERROR (draft-ietf-quic-reliable-stream-reset). */
-        status = wt_quic_stream_on_reset_at_received(stream,
-                                                     frame->as.reset_stream_at.application_error_code,
-                                                     frame->as.reset_stream_at.final_size,
-                                                     frame->as.reset_stream_at.reliable_size);
+        status = wt_quic_stream_on_reset_at_received(
+            stream, frame->as.reset_stream_at.application_error_code,
+            frame->as.reset_stream_at.final_size, frame->as.reset_stream_at.reliable_size);
         if (status != WT_OK) {
-          uint64_t code = frame->as.reset_stream_at.reliable_size > frame->as.reset_stream_at.final_size
-                              ? WT_QUIC_FRAME_ENCODING_ERROR
-                              : WT_QUIC_STREAM_STATE_ERROR;
+          uint64_t code =
+              frame->as.reset_stream_at.reliable_size > frame->as.reset_stream_at.final_size
+                  ? WT_QUIC_FRAME_ENCODING_ERROR
+                  : WT_QUIC_STREAM_STATE_ERROR;
           return close_with(connection, code, wire_type_of(frame->kind), visit->now);
         }
       } else if (frame->kind == WT_QUIC_FRAME_KIND_STOP_SENDING && stream != NULL) {
-        status = wt_quic_stream_on_stop_sending(stream,
-                                               frame->as.stop_sending.application_error_code);
+        status =
+            wt_quic_stream_on_stop_sending(stream, frame->as.stop_sending.application_error_code);
         if (status != WT_OK) {
           return close_with(connection, WT_QUIC_STREAM_STATE_ERROR, wire_type_of(frame->kind),
                             visit->now);
@@ -382,8 +385,8 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
           uint64_t next = wt_quic_flow_next_max_data(&connection->flow);
           int granted = 0;
           grant.as.max_data.maximum = next;
-          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U, 0U,
-                                  &granted, visit->now);
+          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U,
+                                  0U, &granted, visit->now);
           if (status == WT_OK && granted) {
             wt_quic_flow_on_max_data_sent(&connection->flow, next);
             connection->local_max_data = next;
@@ -395,8 +398,8 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
           int granted = 0;
           grant.as.max_stream_data.id = frame->as.stream.id;
           grant.as.max_stream_data.maximum = next;
-          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U, 0U,
-                                  &granted, visit->now);
+          status = send_one_frame(connection, WT_QUIC_SPACE_APPLICATION, &grant, 1, 0, 0, 0U, 0U,
+                                  0U, &granted, visit->now);
           if (status == WT_OK && granted) {
             wt_quic_stream_on_max_stream_data_sent(stream, next);
           }
@@ -404,8 +407,8 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
       } else if (frame->kind == WT_QUIC_FRAME_KIND_MAX_STREAM_DATA && stream != NULL) {
         status = wt_quic_stream_on_max_stream_data(stream, frame->as.max_stream_data.maximum);
         if (status != WT_OK) {
-          return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION,
-                            wire_type_of(frame->kind), visit->now);
+          return close_with(connection, WT_QUIC_PROTOCOL_VIOLATION, wire_type_of(frame->kind),
+                            visit->now);
         }
       }
       return deliver_to_handler(connection, visit, frame);
@@ -441,8 +444,9 @@ static wt_status_t visit_frame(void *context, const wt_quic_frame_t *frame) {
   return WT_ERR_STATE;
 }
 static wt_status_t process_packet(wt_quic_connection_t *connection, wt_quic_space_t space,
-                                  const uint8_t *payload, size_t payload_length, int *out_ack_eliciting,
-                                  uint64_t now, uint64_t destination_sequence) {
+                                  const uint8_t *payload, size_t payload_length,
+                                  int *out_ack_eliciting, uint64_t now,
+                                  uint64_t destination_sequence) {
   wt_quic_visit_t visit;
   wt_quic_error_t error = WT_QUIC_NO_ERROR;
   wt_status_t status;
@@ -465,8 +469,8 @@ static wt_status_t process_packet(wt_quic_connection_t *connection, wt_quic_spac
      * paths that raise one have already closed the connection with the code they chose. */
     if (!wt_quic_connection_is_closed(connection) &&
         (status == WT_ERR_PROTOCOL || status == WT_ERR_TRUNCATED)) {
-      uint64_t code = error == WT_QUIC_NO_ERROR ? (uint64_t)WT_QUIC_FRAME_ENCODING_ERROR
-                                                : (uint64_t)error;
+      uint64_t code =
+          error == WT_QUIC_NO_ERROR ? (uint64_t)WT_QUIC_FRAME_ENCODING_ERROR : (uint64_t)error;
       (void)close_with(connection, code, 0U, now);
     }
     if (wt_quic_connection_is_closed(connection)) {
@@ -478,8 +482,9 @@ static wt_status_t process_packet(wt_quic_connection_t *connection, wt_quic_spac
   if (out_ack_eliciting != NULL) *out_ack_eliciting = visit.ack_eliciting;
   return WT_OK;
 }
-static wt_status_t read_application_packet(wt_quic_connection_t *connection, uint8_t *packet, size_t length,
-                                           uint64_t largest_received, size_t local_connection_id_len,
+static wt_status_t read_application_packet(wt_quic_connection_t *connection, uint8_t *packet,
+                                           size_t length, uint64_t largest_received,
+                                           size_t local_connection_id_len,
                                            wt_quic_received_packet_t *out, uint64_t now) {
   uint8_t saved[WT_QUIC_MAX_PACKET];
   size_t total_len = 0U;
@@ -493,10 +498,9 @@ static wt_status_t read_application_packet(wt_quic_connection_t *connection, uin
   size_t i;
   wt_status_t status;
 
-  status = wt_quic_packet_unprotect_header(packet, length,
-                                           &connection->keys_in[WT_QUIC_SPACE_APPLICATION],
-                                           local_connection_id_len, &pn_offset, &total_len, &pn_len,
-                                           &short_header);
+  status = wt_quic_packet_unprotect_header(
+      packet, length, &connection->keys_in[WT_QUIC_SPACE_APPLICATION], local_connection_id_len,
+      &pn_offset, &total_len, &pn_len, &short_header);
   if (status != WT_OK) return status;
   phase = (packet[0] & WT_QUIC_KEY_PHASE_BIT) != 0U ? 1 : 0;
 
@@ -514,14 +518,15 @@ static wt_status_t read_application_packet(wt_quic_connection_t *connection, uin
 
   /* The packet number decides between the two phases that share this bit: lower than any number of the current
    * phase is a delayed packet from the one being retired, higher is the start of the next. */
-  for (i = 0U; i < pn_len; i++) truncated = (truncated << 8) | (uint64_t)packet[pn_offset + i];
+  for (i = 0U; i < pn_len; i++)
+    truncated = (truncated << 8) | (uint64_t)packet[pn_offset + i];
   packet_number = wt_quic_packet_number_decode(truncated, pn_len, largest_received);
   has_reference = connection->key_phase_in_first_pn_set != 0;
 
   if (has_reference && packet_number < connection->key_phase_in_first_pn) {
     if (connection->previous_keys_in_ready == 0) return WT_ERR_AUTHENTICATION;
-    return wt_quic_packet_open(packet, total_len, pn_len, &connection->previous_keys_in, largest_received,
-                               local_connection_id_len, out);
+    return wt_quic_packet_open(packet, total_len, pn_len, &connection->previous_keys_in,
+                               largest_received, local_connection_id_len, out);
   }
 
   /* The peer's next phase. Whether the packet is remembered for a second attempt depends on whether there is
@@ -534,8 +539,8 @@ static wt_status_t read_application_packet(wt_quic_connection_t *connection, uin
 
     status = ensure_next_keys_in(connection);
     if (status != WT_OK) return status;
-    status = wt_quic_packet_open(packet, total_len, pn_len, &connection->next_keys_in, largest_received,
-                                 local_connection_id_len, out);
+    status = wt_quic_packet_open(packet, total_len, pn_len, &connection->next_keys_in,
+                                 largest_received, local_connection_id_len, out);
     if (status == WT_OK) {
       /* The packet authenticated in the phase after this endpoint's: the peer has updated, and it has to be
        * answered in the new keys. */
@@ -548,8 +553,8 @@ static wt_status_t read_application_packet(wt_quic_connection_t *connection, uin
      * case), or the peer protected a HIGHER-numbered packet with the older keys -- which section 6.4 makes
      * KEY_UPDATE_ERROR. */
     memcpy(packet, saved, total_len);
-    status = wt_quic_packet_open(packet, total_len, pn_len, &connection->previous_keys_in, largest_received,
-                                 local_connection_id_len, out);
+    status = wt_quic_packet_open(packet, total_len, pn_len, &connection->previous_keys_in,
+                                 largest_received, local_connection_id_len, out);
     if (status != WT_OK) return WT_ERR_AUTHENTICATION;
     if (has_reference) {
       connection->key_update_errors++;
@@ -635,7 +640,8 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
         {
           uint32_t version = 0U;
           if (datagram_length - offset >= 5U) {
-            version = ((uint32_t)datagram[offset + 1U] << 24) | ((uint32_t)datagram[offset + 2U] << 16) |
+            version = ((uint32_t)datagram[offset + 1U] << 24) |
+                      ((uint32_t)datagram[offset + 2U] << 16) |
                       ((uint32_t)datagram[offset + 3U] << 8) | (uint32_t)datagram[offset + 4U];
           }
           if (version != connection->config.version) {
@@ -687,8 +693,8 @@ wt_status_t wt_quic_connection_receive(wt_quic_connection_t *connection, uint64_
       /* The Application space is the one that can be key-updated, so its keys are chosen AFTER the header
        * protection comes off: the Key Phase bit is inside the mask (RFC 9001 sections 5.4 and 6.2). */
       status = read_application_packet(connection, datagram + offset, datagram_length - offset,
-                                       largest_received, connection->local_connection_id_length, &packet,
-                                       now);
+                                       largest_received, connection->local_connection_id_length,
+                                       &packet, now);
     } else {
       status = wt_quic_packet_read(datagram + offset, datagram_length - offset,
                                    &connection->keys_in[space], largest_received,

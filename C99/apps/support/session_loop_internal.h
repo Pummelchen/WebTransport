@@ -35,8 +35,9 @@
  * pointed at a peer that never answers looked like it had hung (WT-140). The two macros are the two intervals
  * this file waits for -- `WT_LOOP_WAIT_MICROS`, and ten times that for the peer-discovery peek -- divided into
  * the timeout, so the number of rounds and the number of milliseconds agree. */
-#define WT_LOOP_ROUNDS_FOR(timeout_ms) (((uint64_t)(timeout_ms) * 1000U) / (uint64_t)WT_LOOP_WAIT_MICROS)
-#define WT_LOOP_PEEK_ROUNDS_FOR(timeout_ms) \
+#define WT_LOOP_ROUNDS_FOR(timeout_ms)                                                             \
+  (((uint64_t)(timeout_ms) * 1000U) / (uint64_t)WT_LOOP_WAIT_MICROS)
+#define WT_LOOP_PEEK_ROUNDS_FOR(timeout_ms)                                                        \
   (((uint64_t)(timeout_ms) * 1000U) / ((uint64_t)WT_LOOP_WAIT_MICROS * 10U))
 
 typedef struct loop_side {

@@ -96,17 +96,15 @@ typedef struct wt_tls_extension_list {
  * WT_ERR_PROTOCOL for a duplicate type (RFC 8446 section 4.2 forbids one), a
  * length that does not fill the block exactly, or a length field larger than the
  * cursor has. On success the cursor is past the whole block. */
-wt_status_t wt_tls_extensions_parse(wt_cursor_t *cursor,
-                                    wt_tls_extension_list_t *out);
+wt_status_t wt_tls_extensions_parse(wt_cursor_t *cursor, wt_tls_extension_list_t *out);
 
 /* Write a list as one block: the two-byte length, then each extension. */
-wt_status_t wt_tls_extensions_encode(wt_writer_t *w,
-                                     const wt_tls_extension_list_t *list);
+wt_status_t wt_tls_extensions_encode(wt_writer_t *w, const wt_tls_extension_list_t *list);
 
 /* The first extension of a type, or NULL. A list cannot hold two of one type, so
  * "first" and "the" are the same thing. */
-const wt_tls_extension_t *wt_tls_extensions_find(
-    const wt_tls_extension_list_t *list, uint16_t type);
+const wt_tls_extension_t *wt_tls_extensions_find(const wt_tls_extension_list_t *list,
+                                                 uint16_t type);
 
 /* Whether a list contains a type. */
 int wt_tls_extensions_contains(const wt_tls_extension_list_t *list, uint16_t type);
@@ -116,8 +114,7 @@ int wt_tls_extensions_contains(const wt_tls_extension_list_t *list, uint16_t typ
 /* supported_versions in a ClientHello: a one-byte length and then that many
  * two-byte versions (RFC 8446 section 4.2.1). */
 wt_status_t wt_tls_supported_versions_client(const wt_tls_extension_t *extension,
-                                             uint16_t *versions, size_t capacity,
-                                             size_t *count);
+                                             uint16_t *versions, size_t capacity, size_t *count);
 
 /* supported_versions in a ServerHello: a single two-byte version. */
 wt_status_t wt_tls_supported_versions_server(const wt_tls_extension_t *extension,
@@ -125,9 +122,8 @@ wt_status_t wt_tls_supported_versions_server(const wt_tls_extension_t *extension
 
 /* A list of two-byte values behind a two-byte length: `supported_groups` and
  * `signature_algorithms` are the same shape, and one reader serves both. */
-wt_status_t wt_tls_u16_list_parse(const wt_tls_extension_t *extension,
-                                  uint16_t *values, size_t capacity,
-                                  size_t *count);
+wt_status_t wt_tls_u16_list_parse(const wt_tls_extension_t *extension, uint16_t *values,
+                                  size_t capacity, size_t *count);
 
 /* One key share: a group and a public key. */
 typedef struct wt_tls_key_share {
@@ -137,13 +133,11 @@ typedef struct wt_tls_key_share {
 } wt_tls_key_share_t;
 
 /* key_share in a ClientHello: a list of shares. */
-wt_status_t wt_tls_key_share_client(const wt_tls_extension_t *extension,
-                                    wt_tls_key_share_t *shares, size_t capacity,
-                                    size_t *count);
+wt_status_t wt_tls_key_share_client(const wt_tls_extension_t *extension, wt_tls_key_share_t *shares,
+                                    size_t capacity, size_t *count);
 
 /* key_share in a ServerHello: exactly one share. */
-wt_status_t wt_tls_key_share_server(const wt_tls_extension_t *extension,
-                                    wt_tls_key_share_t *share);
+wt_status_t wt_tls_key_share_server(const wt_tls_extension_t *extension, wt_tls_key_share_t *share);
 
 /* application_layer_protocol_negotiation (RFC 7301): a list of one-byte-length
  * names behind a two-byte length. The names are views, and they are not
@@ -154,36 +148,30 @@ typedef struct wt_tls_alpn {
   size_t count;
 } wt_tls_alpn_t;
 
-wt_status_t wt_tls_alpn_parse(const wt_tls_extension_t *extension,
-                              wt_tls_alpn_t *out);
+wt_status_t wt_tls_alpn_parse(const wt_tls_extension_t *extension, wt_tls_alpn_t *out);
 
 /* quic_transport_parameters (RFC 9001 section 8.2): the QUIC parameters as opaque
  * bytes. Opaque here is deliberate -- the codec for them belongs to the QUIC
  * layer, which is what refuses a malformed set. */
-wt_status_t wt_tls_transport_parameters(const wt_tls_extension_t *extension,
-                                        const uint8_t **data, size_t *len);
+wt_status_t wt_tls_transport_parameters(const wt_tls_extension_t *extension, const uint8_t **data,
+                                        size_t *len);
 
 /* ------------------------------------------------------------ typed writers */
 
 /* Each writes a complete extension: type, length, body. The length is computed
  * from the values rather than remembered, which is why these take the values. */
 
-void wt_tls_extension_supported_versions_client(wt_writer_t *w,
-                                                const uint16_t *versions,
+void wt_tls_extension_supported_versions_client(wt_writer_t *w, const uint16_t *versions,
                                                 size_t count);
 void wt_tls_extension_supported_versions_server(wt_writer_t *w, uint16_t version);
-void wt_tls_extension_u16_list(wt_writer_t *w, uint16_t type,
-                               const uint16_t *values, size_t count);
-void wt_tls_extension_key_share_client(wt_writer_t *w,
-                                       const wt_tls_key_share_t *shares,
+void wt_tls_extension_u16_list(wt_writer_t *w, uint16_t type, const uint16_t *values, size_t count);
+void wt_tls_extension_key_share_client(wt_writer_t *w, const wt_tls_key_share_t *shares,
                                        size_t count);
-void wt_tls_extension_key_share_server(wt_writer_t *w,
-                                       const wt_tls_key_share_t *share);
+void wt_tls_extension_key_share_server(wt_writer_t *w, const wt_tls_key_share_t *share);
 /* `names` are C strings; a name that is empty or longer than 255 bytes is written
  * as nothing rather than as a wrong length, and the caller checks the result. */
 void wt_tls_extension_alpn(wt_writer_t *w, const char *const *names, size_t count);
-void wt_tls_extension_transport_parameters(wt_writer_t *w, const uint8_t *data,
-                                           size_t len);
+void wt_tls_extension_transport_parameters(wt_writer_t *w, const uint8_t *data, size_t len);
 /* psk_key_exchange_modes with a single psk_dhe_ke, which is the only mode a QUIC
  * client may offer (RFC 9001 section 8.3 makes 0-RTT's psk_ke unusable). */
 void wt_tls_extension_psk_key_exchange_modes(wt_writer_t *w);

@@ -16,12 +16,11 @@
 #include <string.h>
 
 #include "webtransport/quic/stream.h"
+#include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
-#include "webtransport/quic/varint.h"
 
 #include "driver_internal.h"
-
 
 /* How much of `bytes` completes a varint from `have` bytes already held, or zero when the
  * prefix is still incomplete. The bound is the varint's own length encoding: the first byte's
@@ -54,13 +53,10 @@ static size_t uni_prefix_length(const uint8_t *bytes, size_t have) {
   return type_width + prefix_needed(bytes + type_width, have - type_width);
 }
 
-wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64_t stream_id,
-                                               uint64_t offset, const uint8_t *data, size_t length,
-                                               wt_http3_endpoint_stream_kind_t *out_kind,
-                                               const uint8_t **out_payload,
-                                               size_t *out_payload_length,
-                                               size_t *out_prefix_consumed,
-                                               wt_http3_error_t *out_error) {
+wt_status_t wt_http3_driver_on_uni_stream_data(
+    wt_http3_driver_t *driver, uint64_t stream_id, uint64_t offset, const uint8_t *data,
+    size_t length, wt_http3_endpoint_stream_kind_t *out_kind, const uint8_t **out_payload,
+    size_t *out_payload_length, size_t *out_prefix_consumed, wt_http3_error_t *out_error) {
   wt_http3_driver_pending_t *pending;
   /* `have` is the contract: only the first `have` bytes are ever read, and `uni_prefix_length`
    * returns before touching a byte when `have == 0`, so the copy below can be skipped. That is
@@ -102,7 +98,8 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
    * what just arrived) look the same to the classifier. */
   if (have > 0U) {
     size_t i;
-    for (i = 0U; i < have; i++) prefix[i] = pending->bytes[i];
+    for (i = 0U; i < have; i++)
+      prefix[i] = pending->bytes[i];
   }
 
   /* Assemble the WHOLE prefix -- the stream type and, for the draft's WebTransport type, the session ID that
@@ -119,7 +116,8 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
       size_t want = needed - have;
       size_t i;
       if (want > length - take) want = length - take;
-      for (i = 0U; i < want; i++) prefix[have + i] = data[take + i];
+      for (i = 0U; i < want; i++)
+        prefix[have + i] = data[take + i];
       have += want;
       take += want;
       if (out_prefix_consumed != NULL) *out_prefix_consumed = take;
@@ -140,7 +138,8 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
     }
     {
       size_t i;
-      for (i = 0U; i < have; i++) pending->bytes[i] = prefix[i];
+      for (i = 0U; i < have; i++)
+        pending->bytes[i] = prefix[i];
     }
     pending->length = have;
     return WT_OK;
@@ -176,8 +175,8 @@ wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64
     /* The prefix is settled. Classify it through the endpoint, which applies the rules that belong to a stream
      * of that type -- one control stream, one of each QPACK stream, and the draft's WebTransport type claimed
      * for the layer above. */
-    status = wt_http3_endpoint_on_uni_stream(driver->endpoint, stream_id, prefix, have, NULL, out_kind,
-                                             out_error);
+    status = wt_http3_endpoint_on_uni_stream(driver->endpoint, stream_id, prefix, have, NULL,
+                                             out_kind, out_error);
     if (status != WT_OK) return status;
 
     if (is_webtransport != 0) {
@@ -212,7 +211,8 @@ wt_status_t wt_http3_driver_on_uni_stream_end(wt_http3_driver_t *driver, uint64_
     /* The stream is over, so any frame state it had goes with it: this is one of the two release points (the
      * other is the fin path in `on_stream_bytes`), and without them the eight-slot table filled up and stayed
      * full. */
-    wt_status_t status = wt_http3_endpoint_on_uni_stream_end(driver->endpoint, stream_id, out_error);
+    wt_status_t status =
+        wt_http3_endpoint_on_uni_stream_end(driver->endpoint, stream_id, out_error);
     (void)wt_http3_driver_forget_frame(driver, stream_id);
     return status;
   }
@@ -347,8 +347,7 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
     if (!state->in_frame) {
       /* Fill the header before the payload: the length is what says how much payload to
        * expect, so the header has to be complete first. */
-      while (position < length &&
-             state->header_length < (size_t)WT_HTTP3_DRIVER_FRAME_HEADER_MAX) {
+      while (position < length && state->header_length < (size_t)WT_HTTP3_DRIVER_FRAME_HEADER_MAX) {
         state->header[state->header_length] = data[position];
         state->header_length++;
         position++;
@@ -409,9 +408,9 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
         if ((uint64_t)from_header >= remaining) from_header = (size_t)remaining;
         last = ((uint64_t)from_header == remaining) ? 1 : 0;
         {
-          wt_status_t status = deliver_frame_payload(driver, stream_id, is_control, state->type,
-                                                     state->header, from_header, last, sink,
-                                                     out_error);
+          wt_status_t status =
+              deliver_frame_payload(driver, stream_id, is_control, state->type, state->header,
+                                    from_header, last, sink, out_error);
           if (status != WT_OK) return status;
         }
         state->payload_received += (uint64_t)from_header;
@@ -422,7 +421,8 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
            * entry -- another live stream, possibly mid-frame. Writing `state->in_frame = 0` after that would
            * clear THAT stream's flag through the stale pointer and desynchronise its framing. */
           state->in_frame = 0;
-          if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS) settle_capsule_stream(driver, stream_id);
+          if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS)
+            settle_capsule_stream(driver, stream_id);
           continue;
         }
       }
@@ -449,7 +449,8 @@ wt_status_t wt_http3_driver_on_stream_bytes(wt_http3_driver_t *driver, uint64_t 
         /* Cleared BEFORE the settle, for the reason given at the other completion point above: the settle
          * releases this slot and refills it from the table's tail. */
         state->in_frame = 0;
-        if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS) settle_capsule_stream(driver, stream_id);
+        if (state->type == (uint64_t)WT_HTTP3_FRAME_HEADERS)
+          settle_capsule_stream(driver, stream_id);
       }
     }
   }

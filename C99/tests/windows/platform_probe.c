@@ -43,8 +43,8 @@ int wt_udp_platform_probe(wt_udp_handle_t handle) {
   if (wt_udp_platform_acquire() != 0) return -1;
   if (wt_udp_platform_set_nonblocking(handle) != 0) return -2;
   if (wt_udp_platform_wait_readable(handle, 0) < 0) return -3;
-  if (wt_udp_platform_send_message(handle, (const struct sockaddr *)&storage, (int)sizeof(storage), bytes,
-                                   sizeof(bytes), &written) != 0) {
+  if (wt_udp_platform_send_message(handle, (const struct sockaddr *)&storage, (int)sizeof(storage),
+                                   bytes, sizeof(bytes), &written) != 0) {
     return wt_udp_platform_last_error();
   }
   if (wt_udp_platform_receive_message(handle, &message) != 0) return wt_udp_platform_last_error();
@@ -58,7 +58,8 @@ int wt_udp_platform_probe(wt_udp_handle_t handle) {
   address.family = WT_UDP_IPV4;
   address.port = 1U;
   if (wt_udp_platform_address_to_storage(&address, &storage, &length_out) != WT_OK) return -5;
-  if (wt_udp_platform_address_from_storage((const struct sockaddr *)&from, length_in, &address) != WT_OK) {
+  if (wt_udp_platform_address_from_storage((const struct sockaddr *)&from, length_in, &address) !=
+      WT_OK) {
     return -6;
   }
   if (wt_udp_platform_parse_address("127.0.0.1", domain, address.bytes) < 0) return -7;

@@ -56,8 +56,8 @@ static wt_status_t record_stream(void *context, uint64_t stream_id, int unidirec
   return WT_OK;
 }
 
-static wt_status_t record_datagram(void *context, uint64_t quarter_stream_id, const uint8_t *payload,
-                                   size_t length) {
+static wt_status_t record_datagram(void *context, uint64_t quarter_stream_id,
+                                   const uint8_t *payload, size_t length) {
   delivery_log_t *log = context;
 
   if (log->datagram_count >= DELIVERED_MAX) return WT_ERR_LIMIT;
@@ -82,12 +82,11 @@ static void test_a_stream_is_parked_and_delivered(void) {
                 (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
 
   /* A stream naming a session this endpoint has not accepted yet: parked, not refused. */
-  WT_EXPECT_OK("an early stream parks",
-               wt_webtransport_buffered_park_stream(&buffer, 8U, 4U, 1, (const uint8_t *)"hello", 5U));
+  WT_EXPECT_OK("an early stream parks", wt_webtransport_buffered_park_stream(
+                                            &buffer, 8U, 4U, 1, (const uint8_t *)"hello", 5U));
   WT_EXPECT_U64("and is held", 1U, (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
   WT_EXPECT_U64("under its session", 4U, buffer.streams[0].session_id);
-  WT_EXPECT_U64("with nothing rejected", 0U,
-                wt_webtransport_buffered_streams_rejected(&buffer));
+  WT_EXPECT_U64("with nothing rejected", 0U, wt_webtransport_buffered_streams_rejected(&buffer));
 
   /* And a datagram for the same session, which the section parks the same way. */
   WT_EXPECT_INT("an early datagram parks", 1,
@@ -95,9 +94,8 @@ static void test_a_stream_is_parked_and_delivered(void) {
   WT_EXPECT_U64("and is held", 1U, (uint64_t)wt_webtransport_buffered_datagram_count(&buffer));
 
   /* The session is known now: the stream is delivered and the buffer is empty. */
-  WT_EXPECT_OK("the drain delivers",
-               wt_webtransport_buffered_drain_streams(&buffer, 4U, record_stream, &log, &delivered,
-                                                      &dropped));
+  WT_EXPECT_OK("the drain delivers", wt_webtransport_buffered_drain_streams(
+                                         &buffer, 4U, record_stream, &log, &delivered, &dropped));
   WT_EXPECT_U64("one stream", 1U, (uint64_t)delivered);
   WT_EXPECT_U64("nothing dropped", 0U, (uint64_t)dropped);
   WT_EXPECT_U64("with its ID", 8U, log.streams[0].stream_id);
@@ -108,8 +106,8 @@ static void test_a_stream_is_parked_and_delivered(void) {
                 (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
 
   WT_EXPECT_OK("the datagram drain delivers too",
-               wt_webtransport_buffered_drain_datagrams(&buffer, 1U, record_datagram, &log, &delivered,
-                                                        &dropped));
+               wt_webtransport_buffered_drain_datagrams(&buffer, 1U, record_datagram, &log,
+                                                        &delivered, &dropped));
   WT_EXPECT_U64("one datagram", 1U, (uint64_t)delivered);
   WT_EXPECT_U64("with its quarter ID", 1U, log.datagrams[0]);
   WT_EXPECT_BYTES("and its payload", (const uint8_t *)"dgram", log.datagram_bytes[0], 5U);
@@ -153,8 +151,8 @@ static void test_arrival_order_and_the_other_session(void) {
   WT_EXPECT_INT("with each one's direction", 0, log.streams[1].unidirectional);
 
   WT_EXPECT_OK("the datagram drain resolves its own",
-               wt_webtransport_buffered_drain_datagrams(&buffer, 1U, record_datagram, &log, &delivered,
-                                                        &dropped));
+               wt_webtransport_buffered_drain_datagrams(&buffer, 1U, record_datagram, &log,
+                                                        &delivered, &dropped));
   WT_EXPECT_U64("delivering ours", 1U, (uint64_t)delivered);
   WT_EXPECT_U64("and dropping the other session's", 1U, (uint64_t)dropped);
   WT_EXPECT_U64("which is the one that was ours", 1U, log.datagrams[0]);
@@ -172,12 +170,12 @@ static void test_a_stream_in_pieces_appends_in_order(void) {
   /* A stream arrives in three frames, as a peer's stream does. The pieces must come back as one
    * stream with its bytes in order -- the alternative, a stream per frame, would deliver a message
    * in pieces the session never asked for. */
-  WT_EXPECT_OK("the first piece parks",
-               wt_webtransport_buffered_park_stream(&buffer, 8U, 4U, 1, (const uint8_t *)"one", 3U));
-  WT_EXPECT_OK("the second appends",
-               wt_webtransport_buffered_park_stream(&buffer, 8U, 4U, 1, (const uint8_t *)"two", 3U));
-  WT_EXPECT_OK("and the third",
-               wt_webtransport_buffered_park_stream(&buffer, 8U, 4U, 1, (const uint8_t *)"three", 5U));
+  WT_EXPECT_OK("the first piece parks", wt_webtransport_buffered_park_stream(
+                                            &buffer, 8U, 4U, 1, (const uint8_t *)"one", 3U));
+  WT_EXPECT_OK("the second appends", wt_webtransport_buffered_park_stream(
+                                         &buffer, 8U, 4U, 1, (const uint8_t *)"two", 3U));
+  WT_EXPECT_OK("and the third", wt_webtransport_buffered_park_stream(&buffer, 8U, 4U, 1,
+                                                                     (const uint8_t *)"three", 5U));
   WT_EXPECT_U64("as ONE parked stream", 1U,
                 (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
   WT_EXPECT_U64("holding every byte", 11U, (uint64_t)buffer.streams[0].length);
@@ -204,9 +202,9 @@ static void test_the_stream_bound_is_a_rejection(void) {
   /* Fill the hold exactly: the bound is "more than this is rejected", not "this many is rejected". */
   for (index = 0U; index < WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX; index++) {
     uint64_t stream_id = 8U + (uint64_t)index * 4U;
-    WT_EXPECT_OK("a stream under the bound parks",
-                 wt_webtransport_buffered_park_stream(&buffer, stream_id, 4U, 1,
-                                                      (const uint8_t *)"x", 1U));
+    WT_EXPECT_OK(
+        "a stream under the bound parks",
+        wt_webtransport_buffered_park_stream(&buffer, stream_id, 4U, 1, (const uint8_t *)"x", 1U));
   }
   WT_EXPECT_U64("the hold is full", (uint64_t)WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX,
                 (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
@@ -214,12 +212,12 @@ static void test_the_stream_bound_is_a_rejection(void) {
   /* One more: section 4.6's MUST. The status is the caller's instruction to send a reset carrying
    * WT_BUFFERED_STREAM_REJECTED, and the stream's ID is recorded so the caller does not have to be
    * told it twice. */
-  WT_EXPECT_STATUS("the stream over the bound is rejected", WT_ERR_LIMIT,
-                   wt_webtransport_buffered_park_stream(&buffer, 40U, 4U, 1, (const uint8_t *)"y", 1U));
+  WT_EXPECT_STATUS(
+      "the stream over the bound is rejected", WT_ERR_LIMIT,
+      wt_webtransport_buffered_park_stream(&buffer, 40U, 4U, 1, (const uint8_t *)"y", 1U));
   WT_EXPECT_U64("and the code for it is the one the section names", UINT64_C(0x3994bd84),
                 WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED);
-  WT_EXPECT_U64("the rejection is counted", 1U,
-                wt_webtransport_buffered_streams_rejected(&buffer));
+  WT_EXPECT_U64("the rejection is counted", 1U, wt_webtransport_buffered_streams_rejected(&buffer));
   WT_EXPECT_U64("and the rejected stream is named", 40U,
                 wt_webtransport_buffered_last_rejected_stream_id(&buffer));
   WT_EXPECT_U64("while the hold keeps what it had", (uint64_t)WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX,
@@ -256,14 +254,13 @@ static void test_a_stream_larger_than_the_hold_is_rejected(void) {
   WT_EXPECT_OK("a piece that fits parks",
                wt_webtransport_buffered_park_stream(&buffer, 12U, 4U, 1, large,
                                                     WT_WEBTRANSPORT_BUFFERED_STREAM_BYTES_MAX));
-  WT_EXPECT_U64("held to the bound", 1U,
-                (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
-  WT_EXPECT_STATUS("the next byte is a rejection", WT_ERR_LIMIT,
-                   wt_webtransport_buffered_park_stream(&buffer, 12U, 4U, 1, (const uint8_t *)"z", 1U));
+  WT_EXPECT_U64("held to the bound", 1U, (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
+  WT_EXPECT_STATUS(
+      "the next byte is a rejection", WT_ERR_LIMIT,
+      wt_webtransport_buffered_park_stream(&buffer, 12U, 4U, 1, (const uint8_t *)"z", 1U));
   WT_EXPECT_U64("the stream is not held any more", 0U,
                 (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
-  WT_EXPECT_U64("and it is named", 12U,
-                wt_webtransport_buffered_last_rejected_stream_id(&buffer));
+  WT_EXPECT_U64("and it is named", 12U, wt_webtransport_buffered_last_rejected_stream_id(&buffer));
 
   /* A zero-length piece of a stream is a legal frame and must not be a rejection. */
   wt_webtransport_buffered_init(&buffer);
@@ -322,14 +319,13 @@ static void test_the_drain_stops_at_a_failing_callback(void) {
    * session that just failed. What was parked is still resolved: the reference point exists now,
    * so a second drain has nothing to do. */
   WT_EXPECT_STATUS("the drain returns the refusal", WT_ERR_STATE,
-                   wt_webtransport_buffered_drain_streams(&buffer, 4U, record_stream, &log, &delivered,
-                                                          &dropped));
+                   wt_webtransport_buffered_drain_streams(&buffer, 4U, record_stream, &log,
+                                                          &delivered, &dropped));
   WT_EXPECT_U64("one delivery got through", 1U, (uint64_t)delivered);
   WT_EXPECT_U64("and nothing is left parked", 0U,
                 (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
-  WT_EXPECT_OK("and is a no-op",
-               wt_webtransport_buffered_drain_streams(&buffer, 4U, record_stream, &log, &delivered,
-                                                      &dropped));
+  WT_EXPECT_OK("and is a no-op", wt_webtransport_buffered_drain_streams(
+                                     &buffer, 4U, record_stream, &log, &delivered, &dropped));
   WT_EXPECT_U64("with no deliveries", 0U, (uint64_t)delivered);
   WT_EXPECT_U64("and no drops", 0U, (uint64_t)dropped);
 }
@@ -344,8 +340,9 @@ static void test_a_null_drain_only_resolves(void) {
                wt_webtransport_buffered_park_stream(&buffer, 8U, 4U, 1, (const uint8_t *)"a", 1U));
   /* A caller with nothing to do with the bytes still has to resolve them, or the buffer fills and
    * every later stream is rejected. A NULL callback says "deliver nowhere". */
-  WT_EXPECT_OK("a drain with no callback resolves it",
-               wt_webtransport_buffered_drain_streams(&buffer, 4U, NULL, NULL, &delivered, &dropped));
+  WT_EXPECT_OK(
+      "a drain with no callback resolves it",
+      wt_webtransport_buffered_drain_streams(&buffer, 4U, NULL, NULL, &delivered, &dropped));
   WT_EXPECT_U64("counting it delivered", 1U, (uint64_t)delivered);
   WT_EXPECT_U64("and holding nothing", 0U,
                 (uint64_t)wt_webtransport_buffered_stream_count(&buffer));
@@ -354,8 +351,7 @@ static void test_a_null_drain_only_resolves(void) {
   WT_EXPECT_U64("a null buffer has no streams", 0U,
                 (uint64_t)wt_webtransport_buffered_stream_count(NULL));
   WT_EXPECT_U64("no rejections", 0U, wt_webtransport_buffered_streams_rejected(NULL));
-  WT_EXPECT_U64("and no dropped datagrams", 0U,
-                wt_webtransport_buffered_datagrams_dropped(NULL));
+  WT_EXPECT_U64("and no dropped datagrams", 0U, wt_webtransport_buffered_datagrams_dropped(NULL));
   WT_EXPECT_U64("and names no rejected stream", 0U,
                 wt_webtransport_buffered_last_rejected_stream_id(NULL));
   wt_webtransport_buffered_init(NULL); /* must not crash */

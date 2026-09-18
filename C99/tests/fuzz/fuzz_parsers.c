@@ -43,8 +43,8 @@
 #define FUZZ_MAX_LENGTH 16384U
 
 static const char *const k_families[] = {
-    "quic-varint",     "quic-frames",  "transport-parameters", "http3-frames",
-    "qpack",           "capsules",     "webtransport-prefix",  "http3-settings-goaway",
+    "quic-varint", "quic-frames", "transport-parameters", "http3-frames",
+    "qpack",       "capsules",    "webtransport-prefix",  "http3-settings-goaway",
 };
 
 /* QUIC varints: the sized form is what the frame decoder uses, so both are driven. A varint parser is where an
@@ -84,7 +84,8 @@ static void fuzz_transport_parameters(const uint8_t *data, size_t size) {
   {
     const uint8_t *value = NULL;
     size_t value_length = 0U;
-    (void)wt_quic_transport_parameters_get(&params, WT_QUIC_TP_INITIAL_MAX_DATA, &value, &value_length);
+    (void)wt_quic_transport_parameters_get(&params, WT_QUIC_TP_INITIAL_MAX_DATA, &value,
+                                           &value_length);
   }
 }
 
@@ -185,15 +186,32 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   }
 
   switch (selector) {
-    case 0U: fuzz_varints(data + 1, size - 1U); break;
-    case 1U: fuzz_quic_frames(data + 1, size - 1U); break;
-    case 2U: fuzz_transport_parameters(data + 1, size - 1U); break;
-    case 3U: fuzz_http3_frames(data + 1, size - 1U); break;
-    case 4U: fuzz_qpack(data + 1, size - 1U); break;
-    case 5U: fuzz_capsules(data + 1, size - 1U); break;
-    case 6U: fuzz_webtransport_prefix(data + 1, size - 1U); break;
-    case 7U: fuzz_http3_settings_goaway(data + 1, size - 1U); break;
-    default: break;
+    case 0U:
+      fuzz_varints(data + 1, size - 1U);
+      break;
+    case 1U:
+      fuzz_quic_frames(data + 1, size - 1U);
+      break;
+    case 2U:
+      fuzz_transport_parameters(data + 1, size - 1U);
+      break;
+    case 3U:
+      fuzz_http3_frames(data + 1, size - 1U);
+      break;
+    case 4U:
+      fuzz_qpack(data + 1, size - 1U);
+      break;
+    case 5U:
+      fuzz_capsules(data + 1, size - 1U);
+      break;
+    case 6U:
+      fuzz_webtransport_prefix(data + 1, size - 1U);
+      break;
+    case 7U:
+      fuzz_http3_settings_goaway(data + 1, size - 1U);
+      break;
+    default:
+      break;
   }
   return 0;
 }

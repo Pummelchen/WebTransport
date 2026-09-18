@@ -63,14 +63,7 @@ private func runInitialPayloadReceiveBound() async throws {
             let first = try await inbound.receive(maximumBytes: 1)
             #expect(first.count == 1, "receive(maximumBytes: 1) returned \(first.count) bytes")
 
-            var received = first
-            while received.count < payload.count {
-                let chunk = try await inbound.receive(maximumBytes: 64 * 1024)
-                if chunk.isEmpty {
-                    break
-                }
-                received.append(chunk)
-            }
+            let received = try await drain(inbound, startingWith: first, expected: payload.count)
             #expect(received == payload)
 
             try await clientSession.close()
@@ -82,4 +75,21 @@ private func runInitialPayloadReceiveBound() async throws {
         }
     }
     throw lastError ?? QUICCodecError.malformed("initial-payload receive bound exchange failed")
+}
+
+/// Reads until the accumulated bytes reach `expected`, or the peer stops sending.
+private func drain(
+    _ inbound: WebTransportBidirectionalStream,
+    startingWith first: Data,
+    expected: Int
+) async throws -> Data {
+    var received = first
+    while received.count < expected {
+        let chunk = try await inbound.receive(maximumBytes: 64 * 1024)
+        if chunk.isEmpty {
+            break
+        }
+        received.append(chunk)
+    }
+    return received
 }

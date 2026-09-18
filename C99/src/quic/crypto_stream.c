@@ -77,13 +77,13 @@ wt_status_t wt_quic_crypto_recv_insert(wt_quic_crypto_recv_t *recv, uint64_t off
   return WT_OK;
 }
 
-size_t wt_quic_crypto_recv_available(const wt_quic_crypto_recv_t *recv,
-                                     const uint8_t **out_data) {
+size_t wt_quic_crypto_recv_available(const wt_quic_crypto_recv_t *recv, const uint8_t **out_data) {
   size_t available = 0U;
 
   if (out_data != NULL) *out_data = NULL;
   if (recv == NULL) return 0U;
-  while (available < recv->length && byte_arrived(recv, available)) available++;
+  while (available < recv->length && byte_arrived(recv, available))
+    available++;
   if (out_data != NULL && available != 0U) *out_data = recv->data;
   return available;
 }

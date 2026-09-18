@@ -32,7 +32,8 @@ static void test_a_generated_identity_can_be_pinned(void) {
   WT_EXPECT_U64("the identity carries one certificate", 1U, (uint64_t)identity.certificate_count);
   WT_EXPECT_TRUE("which is the generated one", identity.certificate[0] == self.certificate);
   WT_EXPECT_U64("with the scheme an ECDSA P-256 key uses",
-                (uint64_t)WT_TLS_SIGNATURE_ECDSA_SECP256R1_SHA256, (uint64_t)identity.signature_scheme);
+                (uint64_t)WT_TLS_SIGNATURE_ECDSA_SECP256R1_SHA256,
+                (uint64_t)identity.signature_scheme);
   WT_EXPECT_TRUE("and the private key beside it", identity.private_key == self.private_key);
 
   /* The pin the generator returned is what a client uses, and the trust layer is the judge. */

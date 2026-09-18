@@ -83,8 +83,10 @@ static unsigned run_corpus(const char *directory) {
   }
   while ((entry = readdir(dir)) != NULL) {
     char path[1024];
-    if (entry->d_name[0] == '.') continue; /* "." and "..", and a hidden file is not a corpus entry */
-    if (snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name) >= (int)sizeof(path)) continue;
+    if (entry->d_name[0] == '.')
+      continue; /* "." and "..", and a hidden file is not a corpus entry */
+    if (snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name) >= (int)sizeof(path))
+      continue;
     files += run_file(path);
   }
   (void)closedir(dir);
@@ -128,7 +130,8 @@ int main(int argc, char **argv) {
     size_t length = (size_t)(next_random(&state) % (uint64_t)MAX_INPUT);
     size_t byte;
 
-    if (length == 0U) length = 1U; /* the harness ignores an empty input; a run should not be wasted */
+    if (length == 0U)
+      length = 1U; /* the harness ignores an empty input; a run should not be wasted */
     for (byte = 0U; byte < length; byte++) {
       input[byte] = (uint8_t)(next_random(&state) >> 24);
     }

@@ -76,12 +76,10 @@ typedef struct wt_tls_handshake_header {
  * after it: a header whose length disagrees with the buffer is a fabricated frame, and
  * a caller that wanted to walk several messages in one buffer has to slice them
  * itself. On success the cursor is positioned at the body. */
-wt_status_t wt_tls_handshake_header_parse(wt_cursor_t *cursor,
-                                          wt_tls_handshake_header_t *out);
+wt_status_t wt_tls_handshake_header_parse(wt_cursor_t *cursor, wt_tls_handshake_header_t *out);
 
 /* Write a header. `body_len` must fit three octets. */
-wt_status_t wt_tls_handshake_header_encode(wt_writer_t *w, uint8_t type,
-                                           size_t body_len);
+wt_status_t wt_tls_handshake_header_encode(wt_writer_t *w, uint8_t type, size_t body_len);
 
 /* The length of the handshake message at the start of `buffer`, header included, or 0 when the
  * buffer does not hold a whole one.
@@ -117,8 +115,7 @@ wt_status_t wt_tls_client_hello_parse(const uint8_t *message, size_t len,
 
 /* Re-encode a parsed ClientHello, header included. Byte for byte, including
  * extensions this implementation does not know. */
-wt_status_t wt_tls_client_hello_encode(const wt_tls_client_hello_t *hello,
-                                       wt_writer_t *w);
+wt_status_t wt_tls_client_hello_encode(const wt_tls_client_hello_t *hello, wt_writer_t *w);
 
 /* What our client offers. The extensions are the ones a QUIC client must send, in the
  * order RFC 8446 and RFC 9001 expect them, with `transport_parameters` the encoded
@@ -148,9 +145,8 @@ typedef struct wt_tls_client_hello_params {
  * WT_ERR_LIMIT if it does not fit, WT_ERR_INVALID_ARGUMENT for a NULL or out-of-range
  * parameter. The whole message is measured before anything is written, so a refusal
  * leaves no partial message behind. */
-wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params,
-                                      uint8_t *out, size_t capacity,
-                                      size_t *out_len);
+wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params, uint8_t *out,
+                                      size_t capacity, size_t *out_len);
 
 /* ----------------------------------------------------- EncryptedExtensions
  *
@@ -161,11 +157,10 @@ wt_status_t wt_tls_client_hello_build(const wt_tls_client_hello_params_t *params
  */
 wt_status_t wt_tls_encrypted_extensions_parse(const uint8_t *message, size_t len,
                                               wt_tls_extension_list_t *out);
-wt_status_t wt_tls_encrypted_extensions_encode(
-    const wt_tls_extension_list_t *extensions, wt_writer_t *w);
-wt_status_t wt_tls_encrypted_extensions_build(
-    const wt_tls_extension_list_t *extensions, uint8_t *out, size_t capacity,
-    size_t *out_len);
+wt_status_t wt_tls_encrypted_extensions_encode(const wt_tls_extension_list_t *extensions,
+                                               wt_writer_t *w);
+wt_status_t wt_tls_encrypted_extensions_build(const wt_tls_extension_list_t *extensions,
+                                              uint8_t *out, size_t capacity, size_t *out_len);
 
 /* ------------------------------------------- Certificate, CertificateVerify, Finished
  *
@@ -200,10 +195,8 @@ typedef struct wt_tls_certificate {
   size_t count;
 } wt_tls_certificate_t;
 
-wt_status_t wt_tls_certificate_parse(const uint8_t *message, size_t len,
-                                     wt_tls_certificate_t *out);
-wt_status_t wt_tls_certificate_encode(const wt_tls_certificate_t *certificate,
-                                      wt_writer_t *w);
+wt_status_t wt_tls_certificate_parse(const uint8_t *message, size_t len, wt_tls_certificate_t *out);
+wt_status_t wt_tls_certificate_encode(const wt_tls_certificate_t *certificate, wt_writer_t *w);
 
 /* What our side sends. A client with no certificate to offer sends an empty chain with an
  * empty context, which is what RFC 8446 section 4.4.2 requires rather than an omission. */
@@ -214,8 +207,8 @@ typedef struct wt_tls_certificate_params {
   size_t count;
 } wt_tls_certificate_params_t;
 
-wt_status_t wt_tls_certificate_build(const wt_tls_certificate_params_t *params,
-                                     uint8_t *out, size_t capacity, size_t *out_len);
+wt_status_t wt_tls_certificate_build(const wt_tls_certificate_params_t *params, uint8_t *out,
+                                     size_t capacity, size_t *out_len);
 
 /* CertificateVerify: the signature over the transcript, and the scheme that produced it
  * (RFC 8446 section 4.4.3). The signature is checked against the transcript and the
@@ -226,21 +219,20 @@ typedef struct wt_tls_certificate_verify {
   size_t signature_len;
 } wt_tls_certificate_verify_t;
 
-wt_status_t wt_tls_certificate_verify_parse(
-    const uint8_t *message, size_t len, wt_tls_certificate_verify_t *out);
-wt_status_t wt_tls_certificate_verify_encode(
-    const wt_tls_certificate_verify_t *certificate_verify, wt_writer_t *w);
-wt_status_t wt_tls_certificate_verify_build(uint16_t scheme,
-                                            const uint8_t *signature,
-                                            size_t signature_len, uint8_t *out,
-                                            size_t capacity, size_t *out_len);
+wt_status_t wt_tls_certificate_verify_parse(const uint8_t *message, size_t len,
+                                            wt_tls_certificate_verify_t *out);
+wt_status_t wt_tls_certificate_verify_encode(const wt_tls_certificate_verify_t *certificate_verify,
+                                             wt_writer_t *w);
+wt_status_t wt_tls_certificate_verify_build(uint16_t scheme, const uint8_t *signature,
+                                            size_t signature_len, uint8_t *out, size_t capacity,
+                                            size_t *out_len);
 
 /* Finished: a body of exactly Hash.length bytes, with nothing else in it (RFC 8446
  * section 4.4.4). */
 wt_status_t wt_tls_finished_parse(const uint8_t *message, size_t len,
                                   uint8_t out[WT_TLS13_FINISHED_LEN]);
-wt_status_t wt_tls_finished_build(const uint8_t verify_data[WT_TLS13_FINISHED_LEN],
-                                  uint8_t *out, size_t capacity, size_t *out_len);
+wt_status_t wt_tls_finished_build(const uint8_t verify_data[WT_TLS13_FINISHED_LEN], uint8_t *out,
+                                  size_t capacity, size_t *out_len);
 
 /* ---------------------------------------------------------------- ServerHello */
 
@@ -256,8 +248,7 @@ typedef struct wt_tls_server_hello {
 
 wt_status_t wt_tls_server_hello_parse(const uint8_t *message, size_t len,
                                       wt_tls_server_hello_t *out);
-wt_status_t wt_tls_server_hello_encode(const wt_tls_server_hello_t *hello,
-                                       wt_writer_t *w);
+wt_status_t wt_tls_server_hello_encode(const wt_tls_server_hello_t *hello, wt_writer_t *w);
 
 typedef struct wt_tls_server_hello_params {
   const uint8_t *random; /* WT_TLS_RANDOM_LEN bytes */
@@ -269,9 +260,8 @@ typedef struct wt_tls_server_hello_params {
   uint16_t supported_version;
 } wt_tls_server_hello_params_t;
 
-wt_status_t wt_tls_server_hello_build(const wt_tls_server_hello_params_t *params,
-                                      uint8_t *out, size_t capacity,
-                                      size_t *out_len);
+wt_status_t wt_tls_server_hello_build(const wt_tls_server_hello_params_t *params, uint8_t *out,
+                                      size_t capacity, size_t *out_len);
 
 #ifdef __cplusplus
 }

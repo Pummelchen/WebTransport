@@ -130,8 +130,7 @@ typedef wt_status_t (*wt_http3_open_stream_fn)(void *context, int bidirectional,
 typedef wt_status_t (*wt_http3_send_stream_fn)(void *context, uint64_t stream_id,
                                                const uint8_t *data, size_t length, int fin,
                                                uint64_t now);
-typedef wt_status_t (*wt_http3_send_datagram_fn)(void *context, const uint8_t *data,
-                                                 size_t length);
+typedef wt_status_t (*wt_http3_send_datagram_fn)(void *context, const uint8_t *data, size_t length);
 
 typedef struct wt_http3_driver_transport {
   /* Open a stream this endpoint initiates, and say what ID it got. */
@@ -222,7 +221,8 @@ void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_
  * cannot be negotiated: the peer refuses the extended CONNECT with H3_MESSAGE_ERROR before any SETTINGS exchange,
  * which is how four of the five third-party peers rejected the draft-16 token (F-02b). Only the two values above
  * are meaningful; any other value sends the draft-16 token (see `wt_webtransport_upgrade_token_value`). */
-void wt_http3_driver_set_upgrade_token(wt_http3_driver_t *driver, wt_webtransport_upgrade_token_t token);
+void wt_http3_driver_set_upgrade_token(wt_http3_driver_t *driver,
+                                       wt_webtransport_upgrade_token_t token);
 
 /* END THE SESSION'S DATA STREAMS: draft-ietf-webtrans-http3-16 section 6's reset, for every WebTransport stream
  * this driver remembers.
@@ -260,13 +260,10 @@ int wt_http3_driver_session_ended(const wt_http3_driver_t *driver);
  *
  * `out_prefix_consumed` reports how many of THIS frame's bytes went to the prefix, which is
  * what a caller replaying buffered bytes needs. */
-wt_status_t wt_http3_driver_on_uni_stream_data(wt_http3_driver_t *driver, uint64_t stream_id,
-                                               uint64_t offset, const uint8_t *data, size_t length,
-                                               wt_http3_endpoint_stream_kind_t *out_kind,
-                                               const uint8_t **out_payload,
-                                               size_t *out_payload_length,
-                                               size_t *out_prefix_consumed,
-                                               wt_http3_error_t *out_error);
+wt_status_t wt_http3_driver_on_uni_stream_data(
+    wt_http3_driver_t *driver, uint64_t stream_id, uint64_t offset, const uint8_t *data,
+    size_t length, wt_http3_endpoint_stream_kind_t *out_kind, const uint8_t **out_payload,
+    size_t *out_payload_length, size_t *out_prefix_consumed, wt_http3_error_t *out_error);
 
 /* A peer's unidirectional stream ended: the endpoint is told so its rules apply (a control
  * stream ending is the error itself), and any half-received prefix is dropped -- a stream
@@ -307,7 +304,7 @@ typedef wt_status_t (*wt_http3_frame_sink_fn)(void *context, uint64_t stream_id,
  * driver does not interpret them -- it hands them over, because what they mean is the
  * session layer's business and buffering them is a bound that layer owns. */
 typedef wt_status_t (*wt_http3_stream_data_fn)(void *context, uint64_t stream_id,
-                                              const uint8_t *data, size_t length, int fin);
+                                               const uint8_t *data, size_t length, int fin);
 typedef wt_status_t (*wt_http3_datagram_fn)(void *context, const uint8_t *data, size_t length);
 
 typedef struct wt_http3_driver_sink {
@@ -412,8 +409,9 @@ wt_status_t wt_http3_driver_open_request(wt_http3_driver_t *driver,
  * offset was never recorded). A caller that wants a different order can still use the pieces. */
 wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
                                           const wt_http3_driver_transport_t *transport,
-                                          const wt_http3_settings_t *settings, const char *authority,
-                                          const char *path, uint64_t peer_max_entries, uint64_t now,
+                                          const wt_http3_settings_t *settings,
+                                          const char *authority, const char *path,
+                                          uint64_t peer_max_entries, uint64_t now,
                                           uint64_t *out_stream_id, wt_http3_error_t *out_error);
 
 /* Send a request, a response or a trailer on a stream this endpoint owns, as a HEADERS frame.
@@ -425,7 +423,8 @@ wt_status_t wt_http3_driver_start_session(wt_http3_driver_t *driver,
  * response). WT_ERR_STATE when there is nothing retained, which is a caller that asked at the wrong time rather
  * than a peer that did something. */
 wt_status_t wt_http3_driver_resend_request(wt_http3_driver_t *driver,
-                                           const wt_http3_driver_transport_t *transport, uint64_t now);
+                                           const wt_http3_driver_transport_t *transport,
+                                           uint64_t now);
 
 wt_status_t wt_http3_driver_send_message(wt_http3_driver_t *driver,
                                          const wt_http3_driver_transport_t *transport,
@@ -468,8 +467,8 @@ int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t str
  * WT_OK and `*out_session_id` when the stream is remembered and its prefix named a session; WT_ERR_STATE when
  * the stream is remembered but this endpoint wrote the prefix itself and no session ID has been set
  * (`wt_http3_driver_set_session_id`); WT_ERR_CLOSED when the stream is not a remembered data stream at all. */
-wt_status_t wt_http3_driver_data_stream_session_id(const wt_http3_driver_t *driver, uint64_t stream_id,
-                                                   uint64_t *out_session_id);
+wt_status_t wt_http3_driver_data_stream_session_id(const wt_http3_driver_t *driver,
+                                                   uint64_t stream_id, uint64_t *out_session_id);
 
 /* REJECT one WebTransport data stream with `error_code`: section 4.6's answer to a stream that arrives while its
  * session is unknown and cannot be buffered any longer.
@@ -506,13 +505,14 @@ wt_status_t wt_http3_driver_reject_data_stream(wt_http3_driver_t *driver, uint64
 wt_status_t wt_http3_driver_open_session_stream(wt_http3_driver_t *driver,
                                                 const wt_http3_driver_transport_t *transport,
                                                 const wt_http3_settings_t *settings, uint64_t now,
-                                                uint64_t *out_stream_id, wt_http3_error_t *out_error);
+                                                uint64_t *out_stream_id,
+                                                wt_http3_error_t *out_error);
 
 wt_status_t wt_http3_driver_send_session_request(wt_http3_driver_t *driver,
                                                  const wt_http3_driver_transport_t *transport,
                                                  uint64_t stream_id, const char *authority,
-                                                 const char *path, uint64_t peer_max_entries, uint64_t now,
-                                                 wt_http3_error_t *out_error);
+                                                 const char *path, uint64_t peer_max_entries,
+                                                 uint64_t now, wt_http3_error_t *out_error);
 
 /* Say that a stream is a WebTransport CONNECT stream, so that once its single HEADERS frame has passed, the DATA
  * frames that arrive on it are read as the SESSION's capsules (RFC 9114 section 4.4, RFC 9297 section 3.2).
@@ -538,8 +538,8 @@ int wt_http3_driver_is_capsule_stream(const wt_http3_driver_t *driver, uint64_t 
  * stream, because a second response is not a status an HTTP/3 peer can be given. */
 wt_status_t wt_http3_driver_send_response(wt_http3_driver_t *driver,
                                           const wt_http3_driver_transport_t *transport,
-                                          uint64_t stream_id, uint32_t status, uint64_t peer_max_entries,
-                                          int fin, uint64_t now);
+                                          uint64_t stream_id, uint32_t status,
+                                          uint64_t peer_max_entries, int fin, uint64_t now);
 
 /* Send a datagram: the payload is the session's, and this layer passes it through. */
 wt_status_t wt_http3_driver_send_datagram(wt_http3_driver_t *driver,
@@ -570,8 +570,9 @@ void wt_http3_driver_quic_transport(wt_quic_connection_t *connection,
  *
  * Sending a second control stream is refused by the endpoint's own one-per-connection rule
  * (WT_ERR_STATE), so this is safe to call on a session that may already have started one. */
-wt_status_t wt_http3_driver_start_control(wt_http3_driver_t *driver, const wt_http3_settings_t *settings,
-                                          uint8_t *scratch, size_t scratch_capacity, wt_writer_t *w);
+wt_status_t wt_http3_driver_start_control(wt_http3_driver_t *driver,
+                                          const wt_http3_settings_t *settings, uint8_t *scratch,
+                                          size_t scratch_capacity, wt_writer_t *w);
 
 /* Start one of this endpoint's QPACK streams: the type prefix alone, because what follows on
  * it is the QPACK layer's to write. `encoder` selects the encoder stream (0x02) or the

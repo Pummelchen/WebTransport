@@ -113,17 +113,17 @@ typedef struct wt_quic_stream {
   wt_quic_recv_state_t recv_state;
 
   /* Sending. */
-  uint64_t send_offset;      /* the next offset to write at */
-  uint64_t send_acked;       /* the cumulative offset the peer has acknowledged */
-  uint64_t final_size;       /* set when a FIN is sent: the stream's size on this side */
+  uint64_t send_offset; /* the next offset to write at */
+  uint64_t send_acked;  /* the cumulative offset the peer has acknowledged */
+  uint64_t final_size;  /* set when a FIN is sent: the stream's size on this side */
   int has_final_size;
   int fin_sent;
   uint64_t peer_max_stream_data;
 
   /* Receiving. */
-  uint64_t recv_offset;      /* the next offset to deliver, in order */
-  uint64_t recv_highest;     /* the highest offset the peer has written */
-  uint64_t recv_final_size;  /* the size the peer claimed, from a FIN or a RESET_STREAM */
+  uint64_t recv_offset;     /* the next offset to deliver, in order */
+  uint64_t recv_highest;    /* the highest offset the peer has written */
+  uint64_t recv_final_size; /* the size the peer claimed, from a FIN or a RESET_STREAM */
   int has_recv_final_size;
   uint64_t max_stream_data;
   uint64_t window;
@@ -162,8 +162,7 @@ wt_status_t wt_quic_stream_on_ack(wt_quic_stream_t *stream, uint64_t acknowledge
 /* A RESET_STREAM was sent: the send half is finished and the final size is whatever was sent. */
 wt_status_t wt_quic_stream_on_reset_sent(wt_quic_stream_t *stream, uint64_t error_code);
 /* A RESET_STREAM was received. Its final size must agree with anything already known. */
-wt_status_t wt_quic_stream_on_reset_received(wt_quic_stream_t *stream,
-                                             uint64_t error_code,
+wt_status_t wt_quic_stream_on_reset_received(wt_quic_stream_t *stream, uint64_t error_code,
                                              uint64_t final_size);
 /* A RESET_STREAM_AT was received (the reliable-stream-reset extension): the stream ends exactly as a RESET_STREAM
  * ends it, and `reliable_size` bytes of it were committed to. Three of that extension's rules live here because
@@ -178,18 +177,15 @@ wt_status_t wt_quic_stream_on_reset_received(wt_quic_stream_t *stream,
 wt_status_t wt_quic_stream_on_reset_at_received(wt_quic_stream_t *stream, uint64_t error_code,
                                                 uint64_t final_size, uint64_t reliable_size);
 /* A STOP_SENDING was received: the peer wants this endpoint to stop sending. */
-wt_status_t wt_quic_stream_on_stop_sending(wt_quic_stream_t *stream,
-                                           uint64_t error_code);
+wt_status_t wt_quic_stream_on_stop_sending(wt_quic_stream_t *stream, uint64_t error_code);
 /* The peer raised this stream's limit. */
-wt_status_t wt_quic_stream_on_max_stream_data(wt_quic_stream_t *stream,
-                                              uint64_t new_max);
+wt_status_t wt_quic_stream_on_max_stream_data(wt_quic_stream_t *stream, uint64_t new_max);
 
 /* How many more bytes may be sent on this stream, which is the smaller of the stream's own
  * allowance and the connection's. */
-uint64_t wt_quic_stream_send_allowance(const wt_quic_stream_t *stream,
-                                       const wt_quic_flow_t *flow);
-int wt_quic_stream_can_send(const wt_quic_stream_t *stream,
-                            const wt_quic_flow_t *flow, uint64_t length);
+uint64_t wt_quic_stream_send_allowance(const wt_quic_stream_t *stream, const wt_quic_flow_t *flow);
+int wt_quic_stream_can_send(const wt_quic_stream_t *stream, const wt_quic_flow_t *flow,
+                            uint64_t length);
 
 /* Stream data arrived at `offset`. `fin` says the frame carried the end of the stream.
  *
@@ -204,9 +200,8 @@ int wt_quic_stream_can_send(const wt_quic_stream_t *stream,
  *
  * `in_order` is set when the frame's offset is the next one to deliver, which is what a caller needs
  * to know without keeping its own copy of the offset. */
-wt_status_t wt_quic_stream_on_data(wt_quic_stream_t *stream, wt_quic_flow_t *flow,
-                                   uint64_t offset, uint64_t length, int fin,
-                                   uint64_t *out_credit, int *in_order);
+wt_status_t wt_quic_stream_on_data(wt_quic_stream_t *stream, wt_quic_flow_t *flow, uint64_t offset,
+                                   uint64_t length, int fin, uint64_t *out_credit, int *in_order);
 
 /* The application took `length` bytes of delivered data. */
 wt_status_t wt_quic_stream_on_data_read(wt_quic_stream_t *stream, uint64_t length);
@@ -221,8 +216,7 @@ wt_status_t wt_quic_stream_on_reset_read(wt_quic_stream_t *stream);
 /* Whether this endpoint should extend the stream's limit, and the value to advertise. */
 int wt_quic_stream_should_extend(const wt_quic_stream_t *stream);
 uint64_t wt_quic_stream_next_max_stream_data(const wt_quic_stream_t *stream);
-void wt_quic_stream_on_max_stream_data_sent(wt_quic_stream_t *stream,
-                                            uint64_t new_max);
+void wt_quic_stream_on_max_stream_data_sent(wt_quic_stream_t *stream, uint64_t new_max);
 
 /* Names for diagnostics. */
 const char *wt_quic_send_state_name(wt_quic_send_state_t state);
@@ -285,6 +279,7 @@ wt_status_t wt_quic_stream_table_close(wt_quic_stream_table_t *table, uint64_t s
 wt_quic_stream_t *wt_quic_stream_table_at(wt_quic_stream_table_t *table, size_t index);
 size_t wt_quic_stream_table_count(const wt_quic_stream_table_t *table);
 uint64_t wt_quic_stream_table_opened_by_us(const wt_quic_stream_table_t *table, int bidirectional);
-uint64_t wt_quic_stream_table_opened_by_peer(const wt_quic_stream_table_t *table, int bidirectional);
+uint64_t wt_quic_stream_table_opened_by_peer(const wt_quic_stream_table_t *table,
+                                             int bidirectional);
 
 #endif /* WEBTRANSPORT_QUIC_STREAM_H */

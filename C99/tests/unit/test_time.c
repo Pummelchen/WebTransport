@@ -28,8 +28,8 @@ static void test_a_large_counter_converts_without_wrapping(void) {
   size_t i;
 
   /* The exact quotient without ever forming the overflowing product: 10^6 / 10^7 is 1/10, so it is counter/10. */
-  WT_EXPECT_U64("a counter past the old wrap converts to the exact value", counter / (frequency / 1000000U),
-                previous);
+  WT_EXPECT_U64("a counter past the old wrap converts to the exact value",
+                counter / (frequency / 1000000U), previous);
 
   /* And it keeps increasing across the region the old form wrapped in. */
   for (i = 0U; i < 64U; i++) {
@@ -40,9 +40,10 @@ static void test_a_large_counter_converts_without_wrapping(void) {
 
   /* The property the wrap broke, stated directly: a later counter must convert to a later time even across the
    * threshold. */
-  WT_EXPECT_TRUE("a counter past the wrap is later than one before it",
-                 wt_time_counter_to_micros(counter, frequency) >
-                     wt_time_counter_to_micros(counter - (frequency / 1000000U) * 1000000U, frequency));
+  WT_EXPECT_TRUE(
+      "a counter past the wrap is later than one before it",
+      wt_time_counter_to_micros(counter, frequency) >
+          wt_time_counter_to_micros(counter - (frequency / 1000000U) * 1000000U, frequency));
 
   /* A zero frequency is the "API failed" case, answered with zero rather than a division by zero. */
   WT_EXPECT_U64("a zero frequency converts to zero", 0U, wt_time_counter_to_micros(UINT64_MAX, 0U));
@@ -86,18 +87,14 @@ int main(void) {
     uint64_t start = wt_now_micros();
     WT_EXPECT_INT("a zero interval has passed immediately", 1,
                   wt_deadline_passed(start, 0U, start));
-    WT_EXPECT_U64("with nothing remaining", 0U,
-                  wt_deadline_remaining(start, 0U, start));
+    WT_EXPECT_U64("with nothing remaining", 0U, wt_deadline_remaining(start, 0U, start));
   }
 
   /* Exactly at the deadline counts as passed. Half-open, so that a caller's
    * loop terminates on the boundary rather than one tick later. */
-  WT_EXPECT_INT("exactly at the deadline has passed", 1,
-                wt_deadline_passed(100U, 50U, 150U));
-  WT_EXPECT_INT("a tick before it has not", 0,
-                wt_deadline_passed(100U, 50U, 149U));
-  WT_EXPECT_U64("remaining at a tick before", 1U,
-                wt_deadline_remaining(100U, 50U, 149U));
+  WT_EXPECT_INT("exactly at the deadline has passed", 1, wt_deadline_passed(100U, 50U, 150U));
+  WT_EXPECT_INT("a tick before it has not", 0, wt_deadline_passed(100U, 50U, 149U));
+  WT_EXPECT_U64("remaining at a tick before", 1U, wt_deadline_remaining(100U, 50U, 149U));
 
   /* The counter wrapping is the case the subtraction exists for: a deadline
    * near the top of the range must not read as long expired when the clock has
@@ -108,14 +105,11 @@ int main(void) {
     uint64_t now = start + 50U; /* still before the deadline */
     WT_EXPECT_INT("a deadline near the top of the counter has not passed", 0,
                   wt_deadline_passed(start, 200U, now));
-    WT_EXPECT_U64("and has the right interval left", 150U,
-                  wt_deadline_remaining(start, 200U, now));
+    WT_EXPECT_U64("and has the right interval left", 150U, wt_deadline_remaining(start, 200U, now));
     /* And past it, with now wrapped to a small value. */
     now = start + 300U;
-    WT_EXPECT_INT("and passes once the interval elapses", 1,
-                  wt_deadline_passed(start, 200U, now));
-    WT_EXPECT_U64("with nothing remaining", 0U,
-                  wt_deadline_remaining(start, 200U, now));
+    WT_EXPECT_INT("and passes once the interval elapses", 1, wt_deadline_passed(start, 200U, now));
+    WT_EXPECT_U64("with nothing remaining", 0U, wt_deadline_remaining(start, 200U, now));
   }
 
   test_a_large_counter_converts_without_wrapping();

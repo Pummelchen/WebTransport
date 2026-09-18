@@ -43,10 +43,7 @@ extern "C" {
 
 /* The two families this layer carries. Deliberately not a copy of the platform's constants: the value
  * is this library's, and the socket layer is the only thing that translates it. */
-typedef enum wt_udp_family {
-  WT_UDP_IPV4 = 0,
-  WT_UDP_IPV6 = 1
-} wt_udp_family_t;
+typedef enum wt_udp_family { WT_UDP_IPV4 = 0, WT_UDP_IPV6 = 1 } wt_udp_family_t;
 
 /* An address as the wire carries it: a family, sixteen bytes (four used for IPv4, all sixteen for
  * IPv6, both in network order), a port in host order, and an IPv6 scope id for a link-local address.

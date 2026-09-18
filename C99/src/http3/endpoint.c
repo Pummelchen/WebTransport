@@ -117,13 +117,31 @@ wt_status_t wt_http3_endpoint_on_request_stream(wt_http3_endpoint_t *endpoint, u
 
 wt_status_t wt_http3_endpoint_set_decoder_capacity(wt_http3_endpoint_t *endpoint, size_t capacity) {
   if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (endpoint->decoder_capacity_set != 0 && endpoint->decoder_table.capacity == capacity) {
-    /* The same capacity twice is not a reconfiguration, and treating it as one would let a
-     * caller silently discard the peer's insertions. */
-    return WT_OK;
+  /* The capacity the peer may fill this endpoint's decoder table with, which is the number the
+   * caller advertised in SETTINGS_QPACK_MAX_TABLE_CAPACITY. It is the caller's decision -- what
+   * this endpoint's SETTINGS say is the layer above's, as `write_prefix` records -- and this is
+   * where the endpoint is told what was advertised, because the encoder stream cannot be read
+   * without it: the capacity bounds every insert and is what `MaxEntries`, and therefore every
+   * dynamic reference in a field section, is derived from.
+   *
+   * AUD-0027 refused a non-zero capacity here, because nothing applied the encoder stream and a
+   * table that could never be filled would make every dynamic reference from a peer fail with a
+   * decompression error that blamed the peer. Both halves now exist:
+   * `wt_http3_endpoint_on_qpack_encoder_bytes` fills the table and
+   * `wt_http3_endpoint_write_qpack_decoder_acks` acknowledges it. */
+  if (endpoint->decoder_capacity_set != 0) {
+    if (endpoint->decoder_table.capacity == capacity) {
+      /* The same capacity twice is not a reconfiguration, and treating it as one would let a
+       * caller silently discard the peer's insertions. */
+      return WT_OK;
+    }
+    /* A different capacity after the fact is a reconfiguration this endpoint does not perform:
+     * the peer has been inserting against the old one. */
+    return WT_ERR_STATE;
   }
   wt_qpack_dynamic_init(&endpoint->decoder_table, capacity);
   endpoint->decoder_insert_count = 0U;
+  endpoint->decoder_acked_insert_count = 0U;
   endpoint->decoder_capacity_set = 1;
   return WT_OK;
 }
@@ -162,15 +180,14 @@ wt_status_t wt_http3_endpoint_on_request_headers(wt_http3_endpoint_t *endpoint, 
      *
      * The ordering rule is the request machine's, applied exactly as any other frame's: a
      * HEADERS frame after the trailer is as invalid here as anywhere. */
-    status = wt_http3_endpoint_on_request_frame(endpoint, stream_id, WT_HTTP3_FRAME_HEADERS,
-                                                out_error);
+    status =
+        wt_http3_endpoint_on_request_frame(endpoint, stream_id, WT_HTTP3_FRAME_HEADERS, out_error);
     if (status != WT_OK) return status;
 
-    status = wt_http3_message_decode(out_message, WT_HTTP3_HEADER_REQUEST, payload, length,
-                                     &endpoint->decoder_table,
-                                     wt_qpack_max_entries(endpoint->decoder_table.capacity),
-                                     endpoint->decoder_insert_count, scratch, scratch_capacity,
-                                     out_error);
+    status = wt_http3_message_decode(
+        out_message, WT_HTTP3_HEADER_REQUEST, payload, length, &endpoint->decoder_table,
+        wt_qpack_max_entries(endpoint->decoder_table.capacity), endpoint->decoder_insert_count,
+        scratch, scratch_capacity, out_error);
     if (status != WT_OK) return status;
 
     if (before != WT_HTTP3_REQUEST_EXPECT_HEADERS) {
@@ -246,11 +263,10 @@ wt_status_t wt_http3_endpoint_on_response_headers(wt_http3_endpoint_t *endpoint,
    * error as survivable and waited for another response would be wrong about the protocol, not about this
    * flag. */
   request->response_seen = 1;
-  return wt_http3_message_decode(out_message, WT_HTTP3_HEADER_RESPONSE, payload, length,
-                                 &endpoint->decoder_table,
-                                 wt_qpack_max_entries(endpoint->decoder_table.capacity),
-                                 endpoint->decoder_insert_count, scratch, scratch_capacity,
-                                 out_error);
+  return wt_http3_message_decode(
+      out_message, WT_HTTP3_HEADER_RESPONSE, payload, length, &endpoint->decoder_table,
+      wt_qpack_max_entries(endpoint->decoder_table.capacity), endpoint->decoder_insert_count,
+      scratch, scratch_capacity, out_error);
 }
 
 wt_status_t wt_http3_endpoint_on_request_frame(wt_http3_endpoint_t *endpoint, uint64_t stream_id,
@@ -388,8 +404,8 @@ size_t wt_http3_endpoint_stream_count(const wt_http3_endpoint_t *endpoint) {
   return endpoint->stream_count;
 }
 
-wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(
-    const wt_http3_endpoint_t *endpoint, uint64_t stream_id) {
+wt_http3_endpoint_stream_kind_t wt_http3_endpoint_stream_kind(const wt_http3_endpoint_t *endpoint,
+                                                              uint64_t stream_id) {
   size_t i;
 
   if (endpoint == NULL) return WT_HTTP3_ENDPOINT_STREAM_UNKNOWN;
@@ -552,5 +568,89 @@ wt_status_t wt_http3_endpoint_on_uni_stream_end(wt_http3_endpoint_t *endpoint, u
     return WT_ERR_PROTOCOL;
   }
   forget_stream(endpoint, stream_id);
+  return WT_OK;
+}
+
+wt_status_t wt_http3_endpoint_on_qpack_encoder_bytes(wt_http3_endpoint_t *endpoint,
+                                                     const uint8_t *bytes, size_t length,
+                                                     size_t *out_consumed,
+                                                     uint64_t *out_insert_count,
+                                                     wt_http3_error_t *out_error) {
+  wt_qpack_encoder_stream_t stream;
+  wt_cursor_t cursor;
+  size_t available = 0U;
+  size_t consumed = 0U;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (out_consumed != NULL) *out_consumed = 0U;
+  if (out_insert_count != NULL) *out_insert_count = 0U;
+  if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (bytes == NULL && length != 0U) return WT_ERR_INVALID_ARGUMENT;
+
+  /* RFC 9204 section 4.2: the encoder stream is the peer's, and it is opened once. Instructions
+   * delivered before it was opened are not a table update. */
+  if (endpoint->peer_qpack_encoder_seen == 0) {
+    return refuse(WT_ERR_PROTOCOL, WT_HTTP3_STREAM_CREATION_ERROR, out_error);
+  }
+  /* A peer may not insert into a table this endpoint never granted: the capacity in SETTINGS is
+   * the grant, and it is what bounds every instruction. */
+  if (endpoint->decoder_capacity_set == 0) {
+    return refuse(WT_ERR_PROTOCOL, (wt_http3_error_t)WT_QPACK_ENCODER_STREAM_ERROR, out_error);
+  }
+
+  wt_qpack_encoder_stream_init(&stream, &endpoint->decoder_table, endpoint->decoder_table.capacity);
+  cursor = wt_cursor_init(bytes, length);
+  (void)wt_cursor_rest(&cursor, &available);
+
+  /* Whole instructions only. WT_ERR_TRUNCATED is not an error here: an instruction may span two
+   * chunks of the stream, so the tail is left to the caller, which passes it again with the next
+   * chunk. That is why the count is reported instead of this endpoint buffering the bytes. */
+  while (available > 0U) {
+    size_t before = available;
+    wt_qpack_error_t qpack_error = WT_QPACK_ERROR_NONE;
+    wt_status_t status = wt_qpack_encoder_stream_apply(&stream, &cursor, &qpack_error);
+
+    if (status == WT_ERR_TRUNCATED) break;
+    if (status != WT_OK) {
+      /* What was applied before the bad instruction stands: the connection is over, but the
+       * caller can still see how much of its chunk was good. */
+      if (out_consumed != NULL) *out_consumed = consumed;
+      return refuse(WT_ERR_PROTOCOL, (wt_http3_error_t)WT_QPACK_ENCODER_STREAM_ERROR, out_error);
+    }
+    (void)wt_cursor_rest(&cursor, &available);
+    consumed += before - available;
+  }
+
+  /* Read the count from the table rather than maintaining a second one: two counters that can
+   * disagree is one more thing for a later change to get wrong. */
+  endpoint->decoder_insert_count = endpoint->decoder_table.insert_count;
+  if (out_consumed != NULL) *out_consumed = consumed;
+  if (out_insert_count != NULL) *out_insert_count = endpoint->decoder_insert_count;
+  return WT_OK;
+}
+
+wt_status_t wt_http3_endpoint_write_qpack_decoder_acks(wt_http3_endpoint_t *endpoint,
+                                                       uint64_t section_stream_id,
+                                                       int acknowledge_section, wt_writer_t *w) {
+  if (endpoint == NULL || w == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (endpoint->decoder_capacity_set == 0) return WT_ERR_STATE;
+
+  /* An Increment rather than a total, because that is what the instruction carries: sending the
+   * running total twice would count the peer's insertions twice and let it evict entries a
+   * section still references. */
+  if (endpoint->decoder_insert_count > endpoint->decoder_acked_insert_count) {
+    uint64_t increment = endpoint->decoder_insert_count - endpoint->decoder_acked_insert_count;
+    wt_status_t status = wt_qpack_decoder_stream_write_insert_count_increment(w, increment);
+    if (status != WT_OK) return status;
+    endpoint->decoder_acked_insert_count = endpoint->decoder_insert_count;
+  }
+
+  /* RFC 9204 section 4.4.1: acknowledging the section is what releases the peer's reference to
+   * the entries it named. The caller decides, because it is the section's own Required Insert
+   * Count that decides -- and a Section Acknowledgment for a section that referenced nothing is
+   * itself a decoder-stream error, so this cannot be sent unconditionally. */
+  if (acknowledge_section != 0) {
+    return wt_qpack_decoder_stream_write_section_acknowledgement(w, section_stream_id);
+  }
   return WT_OK;
 }

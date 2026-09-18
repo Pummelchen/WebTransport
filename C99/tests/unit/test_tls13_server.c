@@ -60,8 +60,8 @@ static int load_fixtures(wt_test_fixtures_t *fixtures) {
   fixtures->leaf_len = read_fixture("leaf.der", fixtures->leaf, sizeof(fixtures->leaf));
   fixtures->ca_bundle_len =
       read_fixture("ca.pem", fixtures->ca_bundle, sizeof(fixtures->ca_bundle));
-  fixtures->private_key_len = read_fixture("leaf-key.der", fixtures->private_key,
-                                           sizeof(fixtures->private_key));
+  fixtures->private_key_len =
+      read_fixture("leaf-key.der", fixtures->private_key, sizeof(fixtures->private_key));
   return fixtures->leaf_len != 0U && fixtures->ca_bundle_len != 0U &&
          fixtures->private_key_len != 0U;
 }
@@ -70,8 +70,7 @@ static int load_fixtures(wt_test_fixtures_t *fixtures) {
  * are opaque bytes that must survive the handshake unchanged. */
 static const uint8_t WT_TEST_PARAMETERS[] = {0x01U, 0x02U, 0x03U, 0x04U, 0x05U};
 
-static void client_config(wt_tls_client_config_t *config,
-                          const wt_test_fixtures_t *fixtures) {
+static void client_config(wt_tls_client_config_t *config, const wt_test_fixtures_t *fixtures) {
   static const char *const alpn_h3[] = {"h3"};
   memset(config, 0, sizeof(*config));
   config->host_name = "example.com";
@@ -86,8 +85,7 @@ static void client_config(wt_tls_client_config_t *config,
   config->trust.host_name = "example.com";
 }
 
-static void server_config(wt_tls_server_config_t *config,
-                          const wt_test_fixtures_t *fixtures,
+static void server_config(wt_tls_server_config_t *config, const wt_test_fixtures_t *fixtures,
                           wt_tls_server_identity_t *identity) {
   memset(identity, 0, sizeof(*identity));
   identity->certificate[0] = fixtures->leaf;
@@ -138,20 +136,17 @@ static void test_handshake_between_halves(const wt_test_fixtures_t *fixtures) {
 
   /* The client starts, and the server consumes what it sent. */
   WT_EXPECT_OK("the client starts",
-               wt_tls_client_begin_built(&client, &client_cfg, client_hello,
-                                         sizeof(client_hello), &client_hello_len));
+               wt_tls_client_begin_built(&client, &client_cfg, client_hello, sizeof(client_hello),
+                                         &client_hello_len));
   WT_EXPECT_OK("the server starts", wt_tls_server_begin(&server, &server_cfg));
   WT_EXPECT_OK("and accepts the ClientHello",
-               wt_tls_server_receive(&server, client_hello, client_hello_len,
-                                     server_hello, sizeof(server_hello),
-                                     &server_hello_len));
+               wt_tls_server_receive(&server, client_hello, client_hello_len, server_hello,
+                                     sizeof(server_hello), &server_hello_len));
   WT_EXPECT_TRUE("answering with a ServerHello", server_hello_len > 0U);
-  WT_EXPECT_U64("and waits for the client's Finished",
-                (uint64_t)WT_TLS_SERVER_WAIT_CLIENT_FINISHED,
+  WT_EXPECT_U64("and waits for the client's Finished", (uint64_t)WT_TLS_SERVER_WAIT_CLIENT_FINISHED,
                 (uint64_t)wt_tls_server_state(&server));
   WT_EXPECT_STATUS("with no application secrets yet", WT_ERR_STATE,
-                   wt_tls_server_application_secrets(&server, server_read,
-                                                     server_write));
+                   wt_tls_server_application_secrets(&server, server_read, server_write));
 
   /* The rest of the flight, which the caller sends under handshake keys. */
   WT_EXPECT_OK("the server builds its flight",
@@ -167,9 +162,8 @@ static void test_handshake_between_halves(const wt_test_fixtures_t *fixtures) {
 
   /* The client consumes the ServerHello and the rest, in order. */
   WT_EXPECT_OK("the client accepts the ServerHello",
-               wt_tls_client_receive(&client, server_hello, server_hello_len,
-                                     client_finished, sizeof(client_finished),
-                                     &client_finished_len));
+               wt_tls_client_receive(&client, server_hello, server_hello_len, client_finished,
+                                     sizeof(client_finished), &client_finished_len));
   WT_EXPECT_U64("nothing is sent yet", 0U, (uint64_t)client_finished_len);
   {
     /* The flight is four messages and a CRYPTO stream is their concatenation, so it is walked
@@ -181,9 +175,8 @@ static void test_handshake_between_halves(const wt_test_fixtures_t *fixtures) {
       WT_EXPECT_TRUE("a flight message is whole", message_len != 0U);
       if (message_len == 0U) break;
       WT_EXPECT_OK("and the client accepts it",
-                   wt_tls_client_receive(&client, flight + at, message_len,
-                                         client_finished, sizeof(client_finished),
-                                         &client_finished_len));
+                   wt_tls_client_receive(&client, flight + at, message_len, client_finished,
+                                         sizeof(client_finished), &client_finished_len));
       at += message_len;
       messages++;
     }
@@ -205,8 +198,8 @@ static void test_handshake_between_halves(const wt_test_fixtures_t *fixtures) {
                 (uint64_t)sizeof(WT_TEST_PARAMETERS), (uint64_t)parameters_len);
   WT_EXPECT_BYTES("byte for byte", WT_TEST_PARAMETERS, parameters, parameters_len);
   parameters = wt_tls_server_transport_parameters(&server, &parameters_len);
-  WT_EXPECT_U64("and the server has the client's",
-                (uint64_t)sizeof(WT_TEST_PARAMETERS), (uint64_t)parameters_len);
+  WT_EXPECT_U64("and the server has the client's", (uint64_t)sizeof(WT_TEST_PARAMETERS),
+                (uint64_t)parameters_len);
   WT_EXPECT_BYTES("byte for byte", WT_TEST_PARAMETERS, parameters, parameters_len);
 
   /* The secrets. The client's read secret must be the server's write secret, and the other way
@@ -216,17 +209,16 @@ static void test_handshake_between_halves(const wt_test_fixtures_t *fixtures) {
                wt_tls_client_handshake_secrets(&client, client_read, client_write));
   WT_EXPECT_OK("the server's handshake secrets",
                wt_tls_server_handshake_secrets(&server, server_read, server_write));
-  WT_EXPECT_BYTES("the client reads with what the server writes", server_write,
-                  client_read, WT_TLS13_SECRET_LEN);
+  WT_EXPECT_BYTES("the client reads with what the server writes", server_write, client_read,
+                  WT_TLS13_SECRET_LEN);
   WT_EXPECT_BYTES("and writes with what the server reads", server_read, client_write,
                   WT_TLS13_SECRET_LEN);
 
   /* The client's Finished ends the handshake on the server side, and the application secrets
    * appear on both ends at the same moment. */
   WT_EXPECT_OK("the server accepts the client's Finished",
-               wt_tls_server_receive(&server, client_finished, client_finished_len,
-                                     server_hello, sizeof(server_hello),
-                                     &server_hello_len));
+               wt_tls_server_receive(&server, client_finished, client_finished_len, server_hello,
+                                     sizeof(server_hello), &server_hello_len));
   WT_EXPECT_U64("and is connected", (uint64_t)WT_TLS_SERVER_CONNECTED,
                 (uint64_t)wt_tls_server_state(&server));
   WT_EXPECT_U64("sending nothing in reply", 0U, (uint64_t)server_hello_len);
@@ -234,8 +226,8 @@ static void test_handshake_between_halves(const wt_test_fixtures_t *fixtures) {
                wt_tls_client_application_secrets(&client, client_read, client_write));
   WT_EXPECT_OK("the server's application secrets",
                wt_tls_server_application_secrets(&server, server_read, server_write));
-  WT_EXPECT_BYTES("the client reads with what the server writes for application data",
-                  server_write, client_read, WT_TLS13_SECRET_LEN);
+  WT_EXPECT_BYTES("the client reads with what the server writes for application data", server_write,
+                  client_read, WT_TLS13_SECRET_LEN);
   WT_EXPECT_BYTES("and writes with what the server reads", server_read, client_write,
                   WT_TLS13_SECRET_LEN);
   /* And the application secrets are not the handshake ones, which would make the epochs the
@@ -269,13 +261,12 @@ static void test_server_gates(const wt_test_fixtures_t *fixtures) {
   memset(&client, 0, sizeof(client));
   memset(&server, 0, sizeof(server));
   WT_EXPECT_OK("the baseline hello builds",
-               wt_tls_client_begin_built(&client, &client_cfg, client_hello,
-                                         sizeof(client_hello), &client_hello_len));
+               wt_tls_client_begin_built(&client, &client_cfg, client_hello, sizeof(client_hello),
+                                         &client_hello_len));
   WT_EXPECT_OK("the server starts", wt_tls_server_begin(&server, &server_cfg));
   WT_EXPECT_OK("and accepts it",
-               wt_tls_server_receive(&server, client_hello, client_hello_len,
-                                     server_hello, sizeof(server_hello),
-                                     &server_hello_len));
+               wt_tls_server_receive(&server, client_hello, client_hello_len, server_hello,
+                                     sizeof(server_hello), &server_hello_len));
   WT_EXPECT_OK("and its flight builds",
                wt_tls_server_flight(&server, flight, sizeof(flight), &flight_len));
   wt_tls_client_clear(&client);
@@ -289,8 +280,8 @@ static void test_server_gates(const wt_test_fixtures_t *fixtures) {
     WT_EXPECT_OK("the server starts again", wt_tls_server_begin(&server, &server_cfg));
     /* A ServerHello where a ClientHello belongs. */
     WT_EXPECT_STATUS("a message that is not a ClientHello is refused", WT_ERR_STATE,
-                     wt_tls_server_receive(&server, server_hello, server_hello_len,
-                                           hello, sizeof(hello), &hello_len));
+                     wt_tls_server_receive(&server, server_hello, server_hello_len, hello,
+                                           sizeof(hello), &hello_len));
     WT_EXPECT_U64("and the machine has failed", (uint64_t)WT_TLS_SERVER_FAILED,
                   (uint64_t)wt_tls_server_state(&server));
     wt_tls_server_clear(&server);
@@ -304,13 +295,12 @@ static void test_server_gates(const wt_test_fixtures_t *fixtures) {
     memset(&client, 0, sizeof(client));
     memset(&server, 0, sizeof(server));
     WT_EXPECT_OK("a hello offering h2 builds",
-                 wt_tls_client_begin_built(&client, &config, client_hello,
-                                           sizeof(client_hello), &client_hello_len));
+                 wt_tls_client_begin_built(&client, &config, client_hello, sizeof(client_hello),
+                                           &client_hello_len));
     WT_EXPECT_OK("the server starts", wt_tls_server_begin(&server, &server_cfg));
     WT_EXPECT_STATUS("a client that does not offer h3 is refused", WT_ERR_TLS,
-                     wt_tls_server_receive(&server, client_hello, client_hello_len,
-                                           server_hello, sizeof(server_hello),
-                                           &server_hello_len));
+                     wt_tls_server_receive(&server, client_hello, client_hello_len, server_hello,
+                                           sizeof(server_hello), &server_hello_len));
     wt_tls_client_clear(&client);
     wt_tls_server_clear(&server);
   }
@@ -324,13 +314,12 @@ static void test_server_gates(const wt_test_fixtures_t *fixtures) {
     memset(&client, 0, sizeof(client));
     memset(&server, 0, sizeof(server));
     WT_EXPECT_OK("a hello with no transport parameters builds",
-                 wt_tls_client_begin_built(&client, &config, client_hello,
-                                           sizeof(client_hello), &client_hello_len));
+                 wt_tls_client_begin_built(&client, &config, client_hello, sizeof(client_hello),
+                                           &client_hello_len));
     WT_EXPECT_OK("the server starts", wt_tls_server_begin(&server, &server_cfg));
     WT_EXPECT_STATUS("a client with no transport parameters is refused", WT_ERR_TLS,
-                     wt_tls_server_receive(&server, client_hello, client_hello_len,
-                                           server_hello, sizeof(server_hello),
-                                           &server_hello_len));
+                     wt_tls_server_receive(&server, client_hello, client_hello_len, server_hello,
+                                           sizeof(server_hello), &server_hello_len));
     wt_tls_client_clear(&client);
     wt_tls_server_clear(&server);
   }
@@ -343,18 +332,17 @@ static void test_server_gates(const wt_test_fixtures_t *fixtures) {
     memset(&client, 0, sizeof(client));
     memset(&server, 0, sizeof(server));
     WT_EXPECT_OK("a hello builds",
-                 wt_tls_client_begin_built(&client, &client_cfg, client_hello,
-                                           sizeof(client_hello), &client_hello_len));
+                 wt_tls_client_begin_built(&client, &client_cfg, client_hello, sizeof(client_hello),
+                                           &client_hello_len));
     WT_EXPECT_OK("the server starts", wt_tls_server_begin(&server, &server_cfg));
     WT_EXPECT_OK("and accepts the hello",
-                 wt_tls_server_receive(&server, client_hello, client_hello_len,
-                                       server_hello, sizeof(server_hello),
-                                       &server_hello_len));
+                 wt_tls_server_receive(&server, client_hello, client_hello_len, server_hello,
+                                       sizeof(server_hello), &server_hello_len));
     WT_EXPECT_OK("and builds its flight",
                  wt_tls_server_flight(&server, flight, sizeof(flight), &flight_len));
     WT_EXPECT_OK("the client accepts the ServerHello",
-                 wt_tls_client_receive(&client, server_hello, server_hello_len,
-                                       finished, sizeof(finished), &finished_len));
+                 wt_tls_client_receive(&client, server_hello, server_hello_len, finished,
+                                       sizeof(finished), &finished_len));
     {
       size_t at = 0U;
       while (at < flight_len) {
@@ -377,8 +365,7 @@ static void test_server_gates(const wt_test_fixtures_t *fixtures) {
       uint8_t read_secret[WT_TLS13_SECRET_LEN];
       uint8_t write_secret[WT_TLS13_SECRET_LEN];
       WT_EXPECT_STATUS("and no application secrets appear", WT_ERR_STATE,
-                       wt_tls_server_application_secrets(&server, read_secret,
-                                                         write_secret));
+                       wt_tls_server_application_secrets(&server, read_secret, write_secret));
     }
     wt_tls_client_clear(&client);
     wt_tls_server_clear(&server);
@@ -390,8 +377,8 @@ static void test_server_gates(const wt_test_fixtures_t *fixtures) {
     wt_tls_server_config_t bad = server_cfg;
     bad.identity = NULL;
     memset(&server, 0, sizeof(server));
-    WT_EXPECT_STATUS("a server with no identity is a caller error",
-                     WT_ERR_INVALID_ARGUMENT, wt_tls_server_begin(&server, &bad));
+    WT_EXPECT_STATUS("a server with no identity is a caller error", WT_ERR_INVALID_ARGUMENT,
+                     wt_tls_server_begin(&server, &bad));
     {
       wt_tls_server_identity_t empty;
       memset(&empty, 0, sizeof(empty));
@@ -439,13 +426,12 @@ static void test_client_refuses_unknown_issuer(const wt_test_fixtures_t *fixture
   identity.certificate_len[0] = unknown_len;
 
   WT_EXPECT_OK("the client starts",
-               wt_tls_client_begin_built(&client, &client_cfg, client_hello,
-                                         sizeof(client_hello), &client_hello_len));
+               wt_tls_client_begin_built(&client, &client_cfg, client_hello, sizeof(client_hello),
+                                         &client_hello_len));
   WT_EXPECT_OK("the server starts", wt_tls_server_begin(&server, &server_cfg));
   WT_EXPECT_OK("and accepts the ClientHello",
-               wt_tls_server_receive(&server, client_hello, client_hello_len,
-                                     server_hello, sizeof(server_hello),
-                                     &server_hello_len));
+               wt_tls_server_receive(&server, client_hello, client_hello_len, server_hello,
+                                     sizeof(server_hello), &server_hello_len));
   WT_EXPECT_OK("and builds its flight",
                wt_tls_server_flight(&server, flight, sizeof(flight), &flight_len));
   WT_EXPECT_OK("the client accepts the ServerHello",
@@ -463,8 +449,8 @@ static void test_client_refuses_unknown_issuer(const wt_test_fixtures_t *fixture
       WT_EXPECT_TRUE("a flight message is whole", message_len != 0U);
       if (message_len == 0U) break;
       type = flight[at];
-      status = wt_tls_client_receive(&client, flight + at, message_len, scratch,
-                                     sizeof(scratch), &scratch_len);
+      status = wt_tls_client_receive(&client, flight + at, message_len, scratch, sizeof(scratch),
+                                     &scratch_len);
       if (type == WT_TLS_HANDSHAKE_CERTIFICATE) {
         refused = (status == WT_ERR_TRUST);
         /* The handshake is over at that point, so the messages after it are not read: a failed
@@ -478,8 +464,8 @@ static void test_client_refuses_unknown_issuer(const wt_test_fixtures_t *fixture
     if (at + wt_tls_handshake_message_len(flight + at, flight_len - at) < flight_len) {
       size_t next = at + wt_tls_handshake_message_len(flight + at, flight_len - at);
       WT_EXPECT_STATUS("and refuses the messages after it", WT_ERR_STATE,
-                       wt_tls_client_receive(&client, flight + next, flight_len - next,
-                                             scratch, sizeof(scratch), &scratch_len));
+                       wt_tls_client_receive(&client, flight + next, flight_len - next, scratch,
+                                             sizeof(scratch), &scratch_len));
     }
     WT_EXPECT_U64("and its handshake has failed", (uint64_t)WT_TLS_CLIENT_FAILED,
                   (uint64_t)wt_tls_client_state(&client));

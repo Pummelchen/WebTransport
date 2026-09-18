@@ -19,10 +19,10 @@
 
 #include "webtransport/crypto/crypto.h"
 
+#include <openssl/core_names.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
-#include <openssl/core_names.h>
 #include <openssl/params.h>
 #include <openssl/rand.h>
 
@@ -48,8 +48,8 @@ typedef struct wt_openssl_sha256_ctx {
  * aligned to uint64_t and is at least as large as a pointer. The assertion is
  * about the assumption, so that a future backend that stores the EVP_MD_CTX by
  * value fails here rather than in a caller. */
-typedef char wt_sha256_ctx_fits
-    [sizeof(wt_openssl_sha256_ctx_t) <= sizeof(wt_sha256_ctx_t) ? 1 : -1];
+typedef char
+    wt_sha256_ctx_fits[sizeof(wt_openssl_sha256_ctx_t) <= sizeof(wt_sha256_ctx_t) ? 1 : -1];
 
 /* OpenSSL's OSSL_PARAM_construct_octet_string takes a `void *` although it only
  * reads the bytes it is given, and its digest name parameter takes a `char *`
@@ -157,8 +157,7 @@ wt_status_t wt_sha256_init(wt_sha256_ctx_t *ctx) {
   return WT_OK;
 }
 
-wt_status_t wt_sha256_update(wt_sha256_ctx_t *ctx, const void *data,
-                             size_t len) {
+wt_status_t wt_sha256_update(wt_sha256_ctx_t *ctx, const void *data, size_t len) {
   wt_openssl_sha256_ctx_t *impl;
   if (ctx == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (len != 0U && data == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -198,8 +197,7 @@ wt_status_t wt_sha256_final(wt_sha256_ctx_t *ctx, uint8_t out[WT_SHA256_LEN]) {
   return (written == WT_SHA256_LEN) ? WT_OK : WT_ERR_UNSUPPORTED;
 }
 
-wt_status_t wt_sha256(const void *data, size_t len,
-                      uint8_t out[WT_SHA256_LEN]) {
+wt_status_t wt_sha256(const void *data, size_t len, uint8_t out[WT_SHA256_LEN]) {
   unsigned int written = 0U;
   if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (len != 0U && data == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -209,8 +207,7 @@ wt_status_t wt_sha256(const void *data, size_t len,
   return (written == WT_SHA256_LEN) ? WT_OK : WT_ERR_UNSUPPORTED;
 }
 
-wt_status_t wt_sha256_snapshot(const wt_sha256_ctx_t *ctx,
-                               uint8_t out[WT_SHA256_LEN]) {
+wt_status_t wt_sha256_snapshot(const wt_sha256_ctx_t *ctx, uint8_t out[WT_SHA256_LEN]) {
   const wt_openssl_sha256_ctx_t *impl;
   EVP_MD_CTX *copy;
   unsigned int written = 0U;
@@ -227,8 +224,7 @@ wt_status_t wt_sha256_snapshot(const wt_sha256_ctx_t *ctx,
    * a caller-visible one. */
   copy = EVP_MD_CTX_new();
   if (copy == NULL) return WT_ERR_OUT_OF_MEMORY;
-  ok = EVP_MD_CTX_copy_ex(copy, impl->ctx) == 1 &&
-       EVP_DigestFinal_ex(copy, out, &written) == 1 &&
+  ok = EVP_MD_CTX_copy_ex(copy, impl->ctx) == 1 && EVP_DigestFinal_ex(copy, out, &written) == 1 &&
        written == WT_SHA256_LEN;
   EVP_MD_CTX_free(copy);
   if (!ok) {
@@ -244,11 +240,10 @@ wt_status_t wt_sha256_snapshot(const wt_sha256_ctx_t *ctx,
  * message is T(n-1) | info | n and `info` is the caller's length; writing it with
  * the streaming MAC means no buffer has to be allocated for it, and no caller's
  * length has to be bounded. */
-static wt_status_t wt_hmac_sha256_parts(const uint8_t *key, size_t key_len,
-                                       const uint8_t *first, size_t first_len,
-                                       const uint8_t *second, size_t second_len,
-                                       const uint8_t *third, size_t third_len,
-                                       uint8_t out[WT_SHA256_LEN]) {
+static wt_status_t wt_hmac_sha256_parts(const uint8_t *key, size_t key_len, const uint8_t *first,
+                                        size_t first_len, const uint8_t *second, size_t second_len,
+                                        const uint8_t *third, size_t third_len,
+                                        uint8_t out[WT_SHA256_LEN]) {
   EVP_MAC *mac;
   EVP_MAC_CTX *ctx;
   OSSL_PARAM params[2];
@@ -267,9 +262,8 @@ static wt_status_t wt_hmac_sha256_parts(const uint8_t *key, size_t key_len,
   EVP_MAC_free(mac);
   if (ctx == NULL) return WT_ERR_OUT_OF_MEMORY;
 
-  params[0] = OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST,
-                                               wt_openssl_param_name("SHA256"),
-                                               0);
+  params[0] =
+      OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST, wt_openssl_param_name("SHA256"), 0);
   params[1] = OSSL_PARAM_construct_end();
   ok = EVP_MAC_init(ctx, key, key_len, params) == 1 &&
        (first_len == 0U || EVP_MAC_update(ctx, first, first_len) == 1) &&
@@ -284,8 +278,7 @@ static wt_status_t wt_hmac_sha256_parts(const uint8_t *key, size_t key_len,
   return WT_OK;
 }
 
-wt_status_t wt_hmac_sha256(const uint8_t *key, size_t key_len,
-                           const uint8_t *data, size_t data_len,
+wt_status_t wt_hmac_sha256(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len,
                            uint8_t out[WT_SHA256_LEN]) {
   /* The one-shot OpenSSL HMAC, which handles a key longer than the block size
    * the way RFC 2104 requires. RFC 4231's vectors, including the 131-byte key,
@@ -294,16 +287,14 @@ wt_status_t wt_hmac_sha256(const uint8_t *key, size_t key_len,
   if (out == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (key == NULL && key_len != 0U) return WT_ERR_INVALID_ARGUMENT;
   if (data == NULL && data_len != 0U) return WT_ERR_INVALID_ARGUMENT;
-  if (HMAC(EVP_sha256(), key, (int)key_len, data, data_len, out, &written) ==
-      NULL) {
+  if (HMAC(EVP_sha256(), key, (int)key_len, data, data_len, out, &written) == NULL) {
     return WT_ERR_UNSUPPORTED;
   }
   return (written == WT_SHA256_LEN) ? WT_OK : WT_ERR_UNSUPPORTED;
 }
 
-wt_status_t wt_hkdf_extract_sha256(const uint8_t *salt, size_t salt_len,
-                                   const uint8_t *ikm, size_t ikm_len,
-                                   uint8_t out[WT_SHA256_LEN]) {
+wt_status_t wt_hkdf_extract_sha256(const uint8_t *salt, size_t salt_len, const uint8_t *ikm,
+                                   size_t ikm_len, uint8_t out[WT_SHA256_LEN]) {
   /* RFC 5869 section 2.2 defines extract as HMAC with the salt as the key, and
    * an absent salt as HashLen zero bytes. Writing it as the HMAC it is avoids
    * two things at once: a dependency on OpenSSL's HKDF interface, which has
@@ -321,9 +312,8 @@ wt_status_t wt_hkdf_extract_sha256(const uint8_t *salt, size_t salt_len,
   return wt_hmac_sha256(salt, salt_len, ikm, ikm_len, out);
 }
 
-wt_status_t wt_hkdf_expand_sha256(const uint8_t *prk, size_t prk_len,
-                                  const uint8_t *info, size_t info_len,
-                                  uint8_t *out, size_t out_len) {
+wt_status_t wt_hkdf_expand_sha256(const uint8_t *prk, size_t prk_len, const uint8_t *info,
+                                  size_t info_len, uint8_t *out, size_t out_len) {
   /* RFC 5869 section 2.3, written as the HMAC chain it is:
    *
    *   T(0) = empty
@@ -354,9 +344,9 @@ wt_status_t wt_hkdf_expand_sha256(const uint8_t *prk, size_t prk_len,
   while (done < out_len) {
     uint8_t counter_byte = (uint8_t)counter;
     size_t take;
-    wt_status_t status = wt_hmac_sha256_parts(
-        prk, prk_len, block, (counter == 1U) ? 0U : sizeof(block), info,
-        info_len, &counter_byte, 1U, block);
+    wt_status_t status =
+        wt_hmac_sha256_parts(prk, prk_len, block, (counter == 1U) ? 0U : sizeof(block), info,
+                             info_len, &counter_byte, 1U, block);
     if (status != WT_OK) {
       wt_secure_zero(block, sizeof(block));
       return status;
@@ -371,10 +361,8 @@ wt_status_t wt_hkdf_expand_sha256(const uint8_t *prk, size_t prk_len,
   return WT_OK;
 }
 
-wt_status_t wt_hkdf_expand_label_sha256(const uint8_t *secret,
-                                        size_t secret_len, const char *label,
-                                        const uint8_t *context,
-                                        size_t context_len, uint8_t *out,
+wt_status_t wt_hkdf_expand_label_sha256(const uint8_t *secret, size_t secret_len, const char *label,
+                                        const uint8_t *context, size_t context_len, uint8_t *out,
                                         size_t out_len) {
   /* RFC 8446 section 7.1:
    *
@@ -420,11 +408,9 @@ wt_status_t wt_hkdf_expand_label_sha256(const uint8_t *secret,
 
 /* ------------------------------------------------------------------ AEAD */
 
-static wt_status_t wt_aead_run(wt_aead_t aead, int encrypt, const uint8_t *key,
-                               const uint8_t *iv, const uint8_t *aad,
-                               size_t aad_len, const uint8_t *in, size_t len,
-                               const uint8_t *tag, uint8_t *out,
-                               uint8_t out_tag[WT_AEAD_TAG_LEN]) {
+static wt_status_t wt_aead_run(wt_aead_t aead, int encrypt, const uint8_t *key, const uint8_t *iv,
+                               const uint8_t *aad, size_t aad_len, const uint8_t *in, size_t len,
+                               const uint8_t *tag, uint8_t *out, uint8_t out_tag[WT_AEAD_TAG_LEN]) {
   const EVP_CIPHER *cipher = wt_aead_cipher(aead);
   EVP_CIPHER_CTX *ctx;
   /* Finalisation writes nothing for either of these AEADs -- neither has padding
@@ -446,8 +432,7 @@ static wt_status_t wt_aead_run(wt_aead_t aead, int encrypt, const uint8_t *key,
   if (ctx == NULL) return WT_ERR_OUT_OF_MEMORY;
 
   if (EVP_CipherInit_ex(ctx, cipher, NULL, NULL, NULL, encrypt) != 1) goto done;
-  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, WT_AEAD_IV_LEN, NULL) !=
-      1) {
+  if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, WT_AEAD_IV_LEN, NULL) != 1) {
     goto done;
   }
   if (EVP_CipherInit_ex(ctx, NULL, NULL, key, iv, encrypt) != 1) goto done;
@@ -461,8 +446,7 @@ static wt_status_t wt_aead_run(wt_aead_t aead, int encrypt, const uint8_t *key,
     /* Finalisation authenticates nothing on this path: it flushes the last
      * partial block and the tag is read out afterwards. */
     if (EVP_CipherFinal_ex(ctx, tail, &written) != 1) goto done;
-    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, WT_AEAD_TAG_LEN,
-                            out_tag) != 1) {
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_GET_TAG, WT_AEAD_TAG_LEN, out_tag) != 1) {
       goto done;
     }
     status = WT_OK;
@@ -493,22 +477,19 @@ done:
   return status;
 }
 
-wt_status_t wt_aead_seal(wt_aead_t aead, const uint8_t *key, const uint8_t *iv,
-                         const uint8_t *aad, size_t aad_len,
-                         const uint8_t *plain, size_t len, uint8_t *out,
+wt_status_t wt_aead_seal(wt_aead_t aead, const uint8_t *key, const uint8_t *iv, const uint8_t *aad,
+                         size_t aad_len, const uint8_t *plain, size_t len, uint8_t *out,
                          uint8_t tag[WT_AEAD_TAG_LEN]) {
   /* `tag` is an output only on this path; it fills the input slot as well so
    * that there is one NULL check for both directions, in wt_aead_run. */
   return wt_aead_run(aead, 1, key, iv, aad, aad_len, plain, len, tag, out, tag);
 }
 
-wt_status_t wt_aead_open(wt_aead_t aead, const uint8_t *key, const uint8_t *iv,
-                         const uint8_t *aad, size_t aad_len,
-                         const uint8_t *cipher, size_t len,
+wt_status_t wt_aead_open(wt_aead_t aead, const uint8_t *key, const uint8_t *iv, const uint8_t *aad,
+                         size_t aad_len, const uint8_t *cipher, size_t len,
                          const uint8_t tag[WT_AEAD_TAG_LEN], uint8_t *out) {
   uint8_t unused[WT_AEAD_TAG_LEN];
-  wt_status_t status = wt_aead_run(aead, 0, key, iv, aad, aad_len, cipher, len,
-                                   tag, out, unused);
+  wt_status_t status = wt_aead_run(aead, 0, key, iv, aad, aad_len, cipher, len, tag, out, unused);
   wt_secure_zero(unused, sizeof(unused));
   /* A failed open leaves whatever the cipher produced in `out` before it
    * discovered the tag was wrong. Clearing it here is what makes the return
@@ -519,8 +500,8 @@ wt_status_t wt_aead_open(wt_aead_t aead, const uint8_t *key, const uint8_t *iv,
 
 /* ------------------------------------------------- header protection parts */
 
-wt_status_t wt_aes128_ecb_encrypt_block(const uint8_t key[16],
-                                        const uint8_t in[16], uint8_t out[16]) {
+wt_status_t wt_aes128_ecb_encrypt_block(const uint8_t key[16], const uint8_t in[16],
+                                        uint8_t out[16]) {
   EVP_CIPHER_CTX *ctx;
   int written = 0;
   int ok;
@@ -540,9 +521,8 @@ wt_status_t wt_aes128_ecb_encrypt_block(const uint8_t key[16],
   return ok ? WT_OK : WT_ERR_UNSUPPORTED;
 }
 
-wt_status_t wt_chacha20_xor(const uint8_t key[32], const uint8_t nonce[12],
-                            uint32_t counter, const uint8_t *in, size_t len,
-                            uint8_t *out) {
+wt_status_t wt_chacha20_xor(const uint8_t key[32], const uint8_t nonce[12], uint32_t counter,
+                            const uint8_t *in, size_t len, uint8_t *out) {
   EVP_CIPHER_CTX *ctx;
   uint8_t counter_bytes[16];
   int written = 0;

@@ -74,8 +74,9 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
   WT_EXPECT_OK("the client advertises WebTransport",
                wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
   WT_EXPECT_OK("the client starts a session",
-               wt_http3_driver_start_session(&client.driver, &client_transport, &settings, "example.com",
-                                             "/chat", 0U, pair.now, &request_stream_id, &h3_error));
+               wt_http3_driver_start_session(&client.driver, &client_transport, &settings,
+                                             "example.com", "/chat", 0U, pair.now,
+                                             &request_stream_id, &h3_error));
   client.request_stream_id = request_stream_id;
   server.request_stream_id = request_stream_id;
   rounds = pump_pair(&pair, 400U, connect_arrived);
@@ -89,14 +90,14 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
   for (index = 0U; index < WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX; index++) {
     uint8_t payload = (uint8_t)('a' + index);
     WT_EXPECT_OK("an early stream opens",
-                 wt_http3_driver_open_data_stream(&client.driver, &client_transport, 1, &payload, 1U, 0,
-                                                  pair.now, &early[index]));
+                 wt_http3_driver_open_data_stream(&client.driver, &client_transport, 1, &payload,
+                                                  1U, 0, pair.now, &early[index]));
   }
   {
     uint8_t payload = (uint8_t)('z');
     WT_EXPECT_OK("and one over the endpoint's hold",
-                 wt_http3_driver_open_data_stream(&client.driver, &client_transport, 1, &payload, 1U, 0,
-                                                  pair.now, &over));
+                 wt_http3_driver_open_data_stream(&client.driver, &client_transport, 1, &payload,
+                                                  1U, 0, pair.now, &over));
   }
   {
     size_t wanted = WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX + 1U;
@@ -108,7 +109,8 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
       pair.now += 1000U;
     }
   }
-  WT_EXPECT_U64("every early stream's byte arrives", (uint64_t)(WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX + 1U),
+  WT_EXPECT_U64("every early stream's byte arrives",
+                (uint64_t)(WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX + 1U),
                 (uint64_t)server.stream_bytes);
 
   /* The driver knows which session each stream names, which is what a caller needs to decide whether it can be
@@ -126,8 +128,8 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
   for (index = 0U; index < WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX; index++) {
     uint8_t payload = (uint8_t)('a' + index);
     WT_EXPECT_OK("an early stream parks",
-                 wt_webtransport_buffered_park_stream(&parked, early[index], request_stream_id, 1, &payload,
-                                                      1U));
+                 wt_webtransport_buffered_park_stream(&parked, early[index], request_stream_id, 1,
+                                                      &payload, 1U));
   }
   WT_EXPECT_U64("all of them are held", (uint64_t)WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX,
                 (uint64_t)wt_webtransport_buffered_stream_count(&parked));
@@ -136,23 +138,23 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
    * the section's, and the stream is named. */
   {
     uint8_t payload = (uint8_t)('z');
-    WT_EXPECT_STATUS("the stream over the bound is rejected", WT_ERR_LIMIT,
-                     wt_webtransport_buffered_park_stream(&parked, over, request_stream_id, 1, &payload, 1U));
+    WT_EXPECT_STATUS(
+        "the stream over the bound is rejected", WT_ERR_LIMIT,
+        wt_webtransport_buffered_park_stream(&parked, over, request_stream_id, 1, &payload, 1U));
   }
   WT_EXPECT_U64("with the code the section names", UINT64_C(0x3994bd84),
                 WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED);
   WT_EXPECT_U64("counted", 1U, wt_webtransport_buffered_streams_rejected(&parked));
-  WT_EXPECT_U64("and named", over,
-                wt_webtransport_buffered_last_rejected_stream_id(&parked));
+  WT_EXPECT_U64("and named", over, wt_webtransport_buffered_last_rejected_stream_id(&parked));
 
   /* The reset the rejection asks for, through the driver, which knows what it may commit to. */
   WT_EXPECT_OK("the rejected stream is reset with that code",
-               wt_http3_driver_reject_data_stream(&server.driver, over,
-                                                  WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED, pair.now));
-  WT_EXPECT_STATUS("and forgotten, so a second rejection is CLOSED", WT_ERR_CLOSED,
-                   wt_http3_driver_reject_data_stream(&server.driver, over,
-                                                      WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED,
-                                                      pair.now));
+               wt_http3_driver_reject_data_stream(
+                   &server.driver, over, WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED, pair.now));
+  WT_EXPECT_STATUS(
+      "and forgotten, so a second rejection is CLOSED", WT_ERR_CLOSED,
+      wt_http3_driver_reject_data_stream(&server.driver, over,
+                                         WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED, pair.now));
   {
     for (rounds = 0U; rounds < 400U && client.stops == 0U; rounds++) {
       (void)wt_udp_wait(&pair.server_socket, 2000U);
@@ -165,9 +167,10 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
   /* The stream is the CLIENT's unidirectional one, so this endpoint has no send half on it and the section's
    * "and/or" is the STOP_SENDING: the frames are exactly the halves the stream has. */
   WT_EXPECT_U64("the peer was told to stop sending", 1U, (uint64_t)client.stops);
-  WT_EXPECT_U64("carrying WT_BUFFERED_STREAM_REJECTED", WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED,
-                client.last_stop_code);
-  WT_EXPECT_U64("and no reset was sent, because there is nothing to reset", 0U, (uint64_t)client.resets);
+  WT_EXPECT_U64("carrying WT_BUFFERED_STREAM_REJECTED",
+                WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED, client.last_stop_code);
+  WT_EXPECT_U64("and no reset was sent, because there is nothing to reset", 0U,
+                (uint64_t)client.resets);
 
   /* The other half of the section's "and/or": a BIDIRECTIONAL early stream HAS a send half here, so the same
    * rejection is a RESET_STREAM as well. */
@@ -176,8 +179,8 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
     uint8_t payload = (uint8_t)'q';
     size_t wanted = (size_t)WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX + 2U;
     WT_EXPECT_OK("a bidirectional early stream opens",
-                 wt_http3_driver_open_data_stream(&client.driver, &client_transport, 0, &payload, 1U, 0,
-                                                  pair.now, &early_bidi));
+                 wt_http3_driver_open_data_stream(&client.driver, &client_transport, 0, &payload,
+                                                  1U, 0, pair.now, &early_bidi));
     for (rounds = 0U; rounds < 400U && server.stream_bytes < wanted; rounds++) {
       (void)wt_udp_wait(&pair.server_socket, 2000U);
       (void)wt_udp_wait(&pair.client_socket, 2000U);
@@ -205,17 +208,18 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
         pair.now += 1000U;
       }
     }
-    WT_EXPECT_U64("the peer saw the reset a bidirectional stream allows", 1U, (uint64_t)client.resets);
-    WT_EXPECT_U64("carrying WT_BUFFERED_STREAM_REJECTED", WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED,
-                  client.last_reset_code);
+    WT_EXPECT_U64("the peer saw the reset a bidirectional stream allows", 1U,
+                  (uint64_t)client.resets);
+    WT_EXPECT_U64("carrying WT_BUFFERED_STREAM_REJECTED",
+                  WT_WEBTRANSPORT_ERROR_BUFFERED_STREAM_REJECTED, client.last_reset_code);
     WT_EXPECT_U64("and was told to stop sending as well", 2U, (uint64_t)client.stops);
   }
 
   /* Now the server accepts, which is the moment the parked streams can be associated: they are delivered in
    * arrival order, with the bytes they carried. */
   WT_EXPECT_OK("the server accepts the session",
-               wt_http3_driver_send_response(&server.driver, &server_transport, request_stream_id, 200U, 0U,
-                                             0, pair.now));
+               wt_http3_driver_send_response(&server.driver, &server_transport, request_stream_id,
+                                             200U, 0U, 0, pair.now));
   {
     for (rounds = 0U; rounds < 400U && client.section_complete == 0; rounds++) {
       (void)wt_udp_wait(&pair.server_socket, 2000U);
@@ -230,16 +234,15 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
   WT_EXPECT_U64("a parked stream names the session the server accepted", request_stream_id,
                 parked.streams[0].session_id);
 
-  WT_EXPECT_OK("the parked streams resolve",
-               wt_webtransport_buffered_drain_streams(&parked, request_stream_id, record_early_stream,
-                                                      &delivery, &delivered, &dropped));
+  WT_EXPECT_OK("the parked streams resolve", wt_webtransport_buffered_drain_streams(
+                                                 &parked, request_stream_id, record_early_stream,
+                                                 &delivery, &delivered, &dropped));
   WT_EXPECT_U64("all of them delivered", (uint64_t)WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX,
                 (uint64_t)delivered);
   WT_EXPECT_U64("nothing dropped", 0U, (uint64_t)dropped);
   WT_EXPECT_U64("in arrival order", early[0], delivery.stream_ids[0]);
   WT_EXPECT_U64("the second is the second parked", early[1], delivery.stream_ids[1]);
-  WT_EXPECT_U64("and the last is the last parked",
-                early[WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX - 1U],
+  WT_EXPECT_U64("and the last is the last parked", early[WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX - 1U],
                 delivery.stream_ids[WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX - 1U]);
   WT_EXPECT_U64("with the bytes each stream carried", (uint64_t)'a', (uint64_t)delivery.bytes[0]);
   WT_EXPECT_U64("in order too", (uint64_t)('a' + WT_WEBTRANSPORT_BUFFERED_STREAMS_MAX - 1U),

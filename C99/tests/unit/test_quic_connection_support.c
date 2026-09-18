@@ -10,10 +10,10 @@ const uint8_t k_server_scid[4] = {0x0aU, 0x0bU, 0x0cU, 0x0dU};
 const uint8_t k_retry_odcid[8] = {0xaaU, 0xbbU, 0xccU, 0xddU, 0xeeU, 0xffU, 0x01U, 0x02U};
 
 const uint8_t k_retry_scid[10] = {0x11U, 0x12U, 0x13U, 0x14U, 0x15U,
-                                        0x16U, 0x17U, 0x18U, 0x19U, 0x1aU};
+                                  0x16U, 0x17U, 0x18U, 0x19U, 0x1aU};
 
 const uint8_t k_retry_token[12] = {0xdeU, 0xadU, 0xbeU, 0xefU, 0x00U, 0x01U,
-                                          0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U};
+                                   0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U};
 
 wt_status_t record_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
   fs_witness_t *witness = context;
@@ -36,7 +36,8 @@ wt_status_t record_frame(void *context, wt_quic_space_t space, const wt_quic_fra
   }
   /* The path frames carry eight bytes, and a test that wants to compare them with what it sent has to copy them:
    * the frame's view is into the decrypted packet buffer, which the next receive overwrites (WT-172). */
-  if (frame->kind == WT_QUIC_FRAME_KIND_PATH_CHALLENGE || frame->kind == WT_QUIC_FRAME_KIND_PATH_RESPONSE) {
+  if (frame->kind == WT_QUIC_FRAME_KIND_PATH_CHALLENGE ||
+      frame->kind == WT_QUIC_FRAME_KIND_PATH_RESPONSE) {
     const uint8_t *payload = frame->kind == WT_QUIC_FRAME_KIND_PATH_CHALLENGE
                                  ? frame->as.path_challenge.data
                                  : frame->as.path_response.data;
@@ -63,24 +64,22 @@ void open_pair(wt_udp_family_t family, connection_pair_t *pair) {
   memset(pair, 0, sizeof(*pair));
 
   WT_EXPECT_OK("the client socket opens", wt_udp_socket_open(&pair->client_socket, family));
-  WT_EXPECT_OK("and binds loopback",
-               wt_udp_bind_loopback(&pair->client_socket, 0U, &port));
+  WT_EXPECT_OK("and binds loopback", wt_udp_bind_loopback(&pair->client_socket, 0U, &port));
   wt_udp_address_loopback(family, &pair->client_address);
   pair->client_address.port = port;
   WT_EXPECT_OK("the server socket opens", wt_udp_socket_open(&pair->server_socket, family));
-  WT_EXPECT_OK("and binds loopback",
-               wt_udp_bind_loopback(&pair->server_socket, 0U, &port));
+  WT_EXPECT_OK("and binds loopback", wt_udp_bind_loopback(&pair->server_socket, 0U, &port));
   wt_udp_address_loopback(family, &pair->server_address);
   pair->server_address.port = port;
 
   /* The Initial keys of RFC 9001 section 5.2, from the salt and the destination connection ID. */
   WT_EXPECT_OK("the Initial secret derives",
-               wt_quic_initial_secret(wt_quic_initial_salt_v1, sizeof(wt_quic_initial_salt_v1), k_dcid,
-                                      sizeof(k_dcid), initial_secret));
+               wt_quic_initial_secret(wt_quic_initial_salt_v1, sizeof(wt_quic_initial_salt_v1),
+                                      k_dcid, sizeof(k_dcid), initial_secret));
   WT_EXPECT_OK("the client's keys derive",
                wt_quic_initial_packet_keys(initial_secret, 0, WT_AEAD_AES_128_GCM, &client_send));
-  WT_EXPECT_OK("and the server's",
-               wt_quic_initial_packet_keys(initial_secret, 1, WT_AEAD_AES_128_GCM, &client_receive));
+  WT_EXPECT_OK("and the server's", wt_quic_initial_packet_keys(
+                                       initial_secret, 1, WT_AEAD_AES_128_GCM, &client_receive));
 
   memset(&client_config, 0, sizeof(client_config));
   client_config.role = WT_QUIC_ROLE_CLIENT;
@@ -120,19 +119,23 @@ void open_pair(wt_udp_family_t family, connection_pair_t *pair) {
   WT_EXPECT_OK("the server initialises", wt_quic_connection_init(&pair->server, &server_config));
   /* Stream data is only accepted once this endpoint has granted room for it. */
   pair->server.config.local_max_stream_data = 1024U;
-  WT_EXPECT_OK("the client borrows its socket",
-               wt_quic_connection_attach(&pair->client, &pair->client_socket, &pair->server_address));
-  WT_EXPECT_OK("the server borrows its socket",
-               wt_quic_connection_attach(&pair->server, &pair->server_socket, &pair->client_address));
+  WT_EXPECT_OK(
+      "the client borrows its socket",
+      wt_quic_connection_attach(&pair->client, &pair->client_socket, &pair->server_address));
+  WT_EXPECT_OK(
+      "the server borrows its socket",
+      wt_quic_connection_attach(&pair->server, &pair->server_socket, &pair->client_address));
 
   WT_EXPECT_OK("the client holds its send keys",
                wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_INITIAL, 0, &client_send));
-  WT_EXPECT_OK("and the server's as its receive keys",
-               wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_INITIAL, 1, &client_receive));
+  WT_EXPECT_OK(
+      "and the server's as its receive keys",
+      wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_INITIAL, 1, &client_receive));
   WT_EXPECT_OK("the server holds the client's send keys",
                wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_INITIAL, 1, &client_send));
-  WT_EXPECT_OK("and its own as its send keys",
-               wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_INITIAL, 0, &client_receive));
+  WT_EXPECT_OK(
+      "and its own as its send keys",
+      wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_INITIAL, 0, &client_receive));
 
   wt_quic_connection_set_handlers(&pair->client, record_frame, &pair->client_witness, record_lost,
                                   &pair->client_witness);
@@ -163,8 +166,8 @@ void close_pair(connection_pair_t *pair) {
 /* Send a short-header application packet carrying exactly these bytes. A frame the ENCODER refuses to
  * produce -- because it would refuse to decode it -- can only be tested this way. */
 void send_raw_payload_with_dcid(const connection_pair_t *pair, const uint8_t *payload,
-                                       size_t payload_length, const uint8_t *dcid, size_t dcid_length,
-                                       const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
+                                size_t payload_length, const uint8_t *dcid, size_t dcid_length,
+                                const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
   uint8_t datagram[256];
   size_t datagram_len = 0U;
   wt_quic_packet_build_t build;
@@ -186,13 +189,14 @@ void send_raw_payload_with_dcid(const connection_pair_t *pair, const uint8_t *pa
 }
 
 void send_raw_payload_to(const connection_pair_t *pair, const uint8_t *payload,
-                                size_t payload_length, const wt_quic_packet_keys_t *keys,
-                                uint64_t packet_number) {
-  send_raw_payload_with_dcid(pair, payload, payload_length, k_dcid, sizeof(k_dcid), keys, packet_number);
+                         size_t payload_length, const wt_quic_packet_keys_t *keys,
+                         uint64_t packet_number) {
+  send_raw_payload_with_dcid(pair, payload, payload_length, k_dcid, sizeof(k_dcid), keys,
+                             packet_number);
 }
 
 void send_frame_to(const connection_pair_t *pair, const wt_quic_frame_t *frame,
-                          const wt_quic_packet_keys_t *keys, uint64_t packet_number, uint64_t now) {
+                   const wt_quic_packet_keys_t *keys, uint64_t packet_number, uint64_t now) {
   uint8_t payload[128];
   wt_writer_t w = wt_writer_init(payload, sizeof(payload));
 
@@ -217,7 +221,7 @@ void record_stream_loss(void *context, const wt_quic_tx_frame_t *frame) {
 /* RFC 9000 section 19.15: a NEW_CONNECTION_ID from the peer is stored, bounded by what this endpoint
  * advertised it would store, and the section's own errors are raised rather than ignored. */
 void send_application_frame(const connection_pair_t *pair, const wt_quic_frame_t *frame,
-                                   const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
+                            const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
   uint8_t payload[128];
   uint8_t datagram[256];
   wt_writer_t w = wt_writer_init(payload, sizeof(payload));
@@ -237,15 +241,17 @@ void send_application_frame(const connection_pair_t *pair, const wt_quic_frame_t
   build.payload = payload;
   build.payload_len = len;
   build.keys = keys;
-  WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
-  WT_EXPECT_OK("and is sent", wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
+  WT_EXPECT_OK("the packet builds",
+               wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("and is sent",
+               wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
 }
 
 /* The same injection as `send_application_frame`, but a long-header Initial packet built short: it is
  * what RFC 9000 section 14.1 says a server must discard, and it has to be hand-built because this
  * library's own send path now pads every client Initial. */
 void send_short_initial_frame(const connection_pair_t *pair, const wt_quic_frame_t *frame,
-                                     const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
+                              const wt_quic_packet_keys_t *keys, uint64_t packet_number) {
   uint8_t payload[128];
   uint8_t datagram[256];
   wt_writer_t w = wt_writer_init(payload, sizeof(payload));
@@ -268,8 +274,10 @@ void send_short_initial_frame(const connection_pair_t *pair, const wt_quic_frame
   build.payload = payload;
   build.payload_len = len;
   build.keys = keys;
-  WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
-  WT_EXPECT_TRUE("and is below the Initial minimum", datagram_len < WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE);
+  WT_EXPECT_OK("the packet builds",
+               wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_TRUE("and is below the Initial minimum",
+                 datagram_len < WT_QUIC_MIN_INITIAL_DATAGRAM_SIZE);
   WT_EXPECT_OK("and is sent",
                wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
 }
@@ -284,7 +292,8 @@ wt_status_t refuse_frame(void *context, wt_quic_space_t space, const wt_quic_fra
 }
 
 /* A handler that names its code, so the close the peer is told about is the handler's rather than a generic one. */
-wt_status_t refuse_frame_with_code(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
+wt_status_t refuse_frame_with_code(void *context, wt_quic_space_t space,
+                                   const wt_quic_frame_t *frame) {
   wt_quic_connection_t *connection = context;
   (void)space;
   connection->close_code = (uint64_t)WT_QUIC_STREAM_STATE_ERROR;
@@ -300,7 +309,8 @@ wt_status_t refuse_frame_with_code(void *context, wt_quic_space_t space, const w
  * code -- H3_FRAME_ERROR for a frame that ends part way through, H3_SETTINGS_ERROR for a bad setting. A handler
  * that could only return a status closed the TRANSPORT with INTERNAL_ERROR instead: a different frame, a
  * different code, and a peer that cannot tell which rule it broke. */
-wt_status_t refuse_with_h3_error(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
+wt_status_t refuse_with_h3_error(void *context, wt_quic_space_t space,
+                                 const wt_quic_frame_t *frame) {
   wt_quic_connection_t *connection = context;
   (void)space;
   (void)frame;
@@ -313,7 +323,8 @@ wt_status_t record_reset_at(void *context, const wt_quic_frame_t *frame) {
   reset_at_witness_t *witness = context;
   witness->walked++;
   witness->last_kind = (uint64_t)frame->kind;
-  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM) witness->last_length = (uint64_t)frame->as.stream.length;
+  if (frame->kind == WT_QUIC_FRAME_KIND_STREAM)
+    witness->last_length = (uint64_t)frame->as.stream.length;
   if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM_AT) {
     witness->seen++;
     witness->id = frame->as.reset_stream_at.id;
@@ -331,7 +342,8 @@ void install_application_keys(connection_pair_t *pair, uint8_t base) {
   uint8_t secret[WT_SHA256_LEN];
   size_t i;
 
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(base + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(base + i);
   WT_EXPECT_OK("application keys derive",
                wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("the client sends with them",
@@ -343,12 +355,14 @@ void install_application_keys(connection_pair_t *pair, uint8_t base) {
 /* Hand one datagram to one side of the pair the way a peer's packet arrives: through its own socket, which is
  * what makes the destination connection ID check part of what is being tested. `to_server` picks the side. */
 void deliver_to(connection_pair_t *pair, int to_server, const uint8_t *packet, size_t length,
-                       uint64_t now) {
+                uint64_t now) {
   if (to_server != 0) {
-    WT_EXPECT_OK("the packet is sent", wt_udp_send(&pair->client_socket, &pair->server_address, packet, length));
+    WT_EXPECT_OK("the packet is sent",
+                 wt_udp_send(&pair->client_socket, &pair->server_address, packet, length));
     receive_on(&pair->server, &pair->server_socket, now);
   } else {
-    WT_EXPECT_OK("the packet is sent", wt_udp_send(&pair->server_socket, &pair->client_address, packet, length));
+    WT_EXPECT_OK("the packet is sent",
+                 wt_udp_send(&pair->server_socket, &pair->client_address, packet, length));
     receive_on(&pair->client, &pair->client_socket, now);
   }
 }
@@ -390,8 +404,9 @@ void retry_client(connection_pair_t *pair) {
                wt_quic_initial_packet_keys(secret, 1, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("on the connection",
                wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_INITIAL, 1, &keys));
-  WT_EXPECT_OK("the client borrows its socket again",
-               wt_quic_connection_attach(&pair->client, &pair->client_socket, &pair->server_address));
+  WT_EXPECT_OK(
+      "the client borrows its socket again",
+      wt_quic_connection_attach(&pair->client, &pair->client_socket, &pair->server_address));
   wt_quic_connection_set_handlers(&pair->client, record_frame, &pair->client_witness, record_lost,
                                   &pair->client_witness);
 }
@@ -399,16 +414,16 @@ void retry_client(connection_pair_t *pair) {
 /* One Retry packet, tag included, as the wire carries it. `token_len` of zero is the malformed case the section
  * names, and `source`/`source_len` let a caller make the Source Connection ID equal to the client's own. */
 size_t build_retry(uint8_t *out, size_t capacity, const uint8_t *source, size_t source_len,
-                          const uint8_t *token, size_t token_len) {
+                   const uint8_t *token, size_t token_len) {
   uint8_t tag[WT_AEAD_TAG_LEN];
   wt_writer_t w = wt_writer_init(out, capacity);
   size_t written;
 
   /* The tag covers the ORIGINAL destination connection ID and the packet WITHOUT the tag, which is why the
    * packet is written with a placeholder first and the tag computed over that. */
-  WT_EXPECT_OK("the Retry encodes",
-               wt_quic_retry_packet_encode(&w, WT_QUIC_VERSION_1, k_retry_odcid, sizeof(k_retry_odcid),
-                                           source, source_len, token, token_len, tag));
+  WT_EXPECT_OK("the Retry encodes", wt_quic_retry_packet_encode(
+                                        &w, WT_QUIC_VERSION_1, k_retry_odcid, sizeof(k_retry_odcid),
+                                        source, source_len, token, token_len, tag));
   written = wt_writer_offset(&w);
   /* The range to authenticate is the packet WITHOUT the tag: the encoder wrote a placeholder there, so it stops
    * sixteen bytes short. Getting this wrong is the mistake the A.4 extractor's own docstring warns about, and it
@@ -418,8 +433,9 @@ size_t build_retry(uint8_t *out, size_t capacity, const uint8_t *source, size_t 
                                            written - WT_AEAD_TAG_LEN, tag));
   w = wt_writer_init(out, capacity);
   WT_EXPECT_OK("and the packet encodes with it",
-               wt_quic_retry_packet_encode(&w, WT_QUIC_VERSION_1, k_retry_odcid, sizeof(k_retry_odcid),
-                                           source, source_len, token, token_len, tag));
+               wt_quic_retry_packet_encode(&w, WT_QUIC_VERSION_1, k_retry_odcid,
+                                           sizeof(k_retry_odcid), source, source_len, token,
+                                           token_len, tag));
   return wt_writer_offset(&w);
 }
 
@@ -430,7 +446,8 @@ void arm_application(connection_pair_t *pair, uint8_t seed) {
   uint8_t secret[WT_SHA256_LEN];
   size_t i;
 
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(seed + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(seed + i);
   WT_EXPECT_OK("application keys derive",
                wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("the client sends with them",
@@ -457,7 +474,8 @@ void update_keys_keeping_hp(const wt_quic_packet_keys_t *current, wt_quic_packet
 /* One short-header packet built by hand, so a test can decide its packet number, its phase bit and WHEN it is
  * delivered -- which is what a reordered packet is. `keys` must be the SENDER's send keys for the phase. */
 size_t build_application_packet(const wt_quic_packet_keys_t *keys, uint64_t packet_number,
-                                       int key_phase, uint8_t *out, size_t capacity, size_t payload_offset) {
+                                int key_phase, uint8_t *out, size_t capacity,
+                                size_t payload_offset) {
   uint8_t payload[16];
   size_t payload_len = 0U;
   size_t length = 0U;
@@ -468,7 +486,8 @@ size_t build_application_packet(const wt_quic_packet_keys_t *keys, uint64_t pack
   payload[0] = 0x01U;
   payload_len = (payload_offset > sizeof(payload)) ? sizeof(payload) : payload_offset;
   if (payload_len < 4U) payload_len = 4U;
-  for (i = 1U; i < payload_len; i++) payload[i] = 0U;
+  for (i = 1U; i < payload_len; i++)
+    payload[i] = 0U;
 
   memset(&build, 0, sizeof(build));
   build.short_header = 1;
@@ -486,14 +505,14 @@ size_t build_application_packet(const wt_quic_packet_keys_t *keys, uint64_t pack
 }
 
 void deliver_to_peer(connection_pair_t *pair, int to_server, const uint8_t *packet, size_t length,
-                            uint64_t now) {
+                     uint64_t now) {
   if (to_server != 0) {
-    WT_EXPECT_OK("the packet is sent", wt_udp_send(&pair->client_socket, &pair->server_address, packet,
-                                                   length));
+    WT_EXPECT_OK("the packet is sent",
+                 wt_udp_send(&pair->client_socket, &pair->server_address, packet, length));
     receive_on(&pair->server, &pair->server_socket, now);
   } else {
-    WT_EXPECT_OK("the packet is sent", wt_udp_send(&pair->server_socket, &pair->client_address, packet,
-                                                   length));
+    WT_EXPECT_OK("the packet is sent",
+                 wt_udp_send(&pair->server_socket, &pair->client_address, packet, length));
     receive_on(&pair->client, &pair->client_socket, now);
   }
 }
@@ -503,8 +522,8 @@ void deliver_to_peer(connection_pair_t *pair, int to_server, const uint8_t *pack
  * helper; this is for the one case a real peer cannot produce on demand: a `retire_prior_to` above zero, which
  * the library's own issuer never writes. */
 void send_frame_from_side(connection_pair_t *pair, int to_client, const wt_quic_frame_t *frame,
-                                 const wt_quic_packet_keys_t *keys, uint64_t packet_number,
-                                 const uint8_t *dcid, size_t dcid_len) {
+                          const wt_quic_packet_keys_t *keys, uint64_t packet_number,
+                          const uint8_t *dcid, size_t dcid_len) {
   uint8_t payload[128];
   uint8_t datagram[256];
   wt_writer_t w = wt_writer_init(payload, sizeof(payload));
@@ -524,13 +543,14 @@ void send_frame_from_side(connection_pair_t *pair, int to_client, const wt_quic_
   build.payload = payload;
   build.payload_len = len;
   build.keys = keys;
-  WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("the packet builds",
+               wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
   if (to_client != 0) {
-    WT_EXPECT_OK("and is sent", wt_udp_send(&pair->server_socket, &pair->client_address, datagram,
-                                            datagram_len));
+    WT_EXPECT_OK("and is sent",
+                 wt_udp_send(&pair->server_socket, &pair->client_address, datagram, datagram_len));
   } else {
-    WT_EXPECT_OK("and is sent", wt_udp_send(&pair->client_socket, &pair->server_address, datagram,
-                                            datagram_len));
+    WT_EXPECT_OK("and is sent",
+                 wt_udp_send(&pair->client_socket, &pair->server_address, datagram, datagram_len));
   }
 }
 
@@ -555,7 +575,8 @@ void arm_for_connection_ids(connection_pair_t *pair, uint8_t seed) {
   wt_writer_t pw = wt_writer_init(encoded, sizeof(encoded));
   size_t i;
 
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(seed + i);
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(seed + i);
   WT_EXPECT_OK("keys", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
   WT_EXPECT_OK("the server writes",
                wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
@@ -567,11 +588,12 @@ void arm_for_connection_ids(connection_pair_t *pair, uint8_t seed) {
                wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
 
   wt_quic_transport_parameters_init(&params);
-  WT_EXPECT_OK("a peer limit of four connection IDs",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 4U));
+  WT_EXPECT_OK(
+      "a peer limit of four connection IDs",
+      wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 4U));
   WT_EXPECT_OK("which encodes", wt_quic_transport_parameters_encode(&pw, &params));
-  WT_EXPECT_OK("and is applied",
-               wt_quic_connection_set_peer_parameters(&pair->server, encoded, wt_writer_offset(&pw)));
+  WT_EXPECT_OK("and is applied", wt_quic_connection_set_peer_parameters(&pair->server, encoded,
+                                                                        wt_writer_offset(&pw)));
   /* And what THIS endpoint will store: the default of two counts the handshake's ID and leaves room for one
    * spare (RFC 9000 section 5.1.1), so a client that wants two spares says so. */
   pair->client.config.local_active_connection_id_limit = 4U;
@@ -594,18 +616,24 @@ void arm_path_pair(connection_pair_t *pair, uint8_t seed) {
   uint8_t secret[WT_SHA256_LEN];
   size_t i;
 
-  for (i = 0U; i < sizeof(secret); i++) secret[i] = (uint8_t)(seed + i);
-  WT_EXPECT_OK("path keys derive", wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
-  WT_EXPECT_OK("the client writes", wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
-  WT_EXPECT_OK("the client reads", wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
-  WT_EXPECT_OK("the server writes", wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
-  WT_EXPECT_OK("the server reads", wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  for (i = 0U; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(seed + i);
+  WT_EXPECT_OK("path keys derive",
+               wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, &keys));
+  WT_EXPECT_OK("the client writes",
+               wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the client reads",
+               wt_quic_connection_set_keys(&pair->client, WT_QUIC_SPACE_APPLICATION, 1, &keys));
+  WT_EXPECT_OK("the server writes",
+               wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_APPLICATION, 0, &keys));
+  WT_EXPECT_OK("the server reads",
+               wt_quic_connection_set_keys(&pair->server, WT_QUIC_SPACE_APPLICATION, 1, &keys));
   pair->client.handshake_confirmed = 1;
   pair->server.handshake_confirmed = 1;
 }
 
 const recorded_frame_t *witness_frame(const fs_witness_t *witness, wt_quic_frame_type_t kind,
-                                             unsigned occurrence) {
+                                      unsigned occurrence) {
   size_t index;
   unsigned seen = 0U;
 
@@ -621,8 +649,8 @@ const recorded_frame_t *witness_frame(const fs_witness_t *witness, wt_quic_frame
  * frame of a packet into a single `wt_quic_frame_t`, so a frame that does not set a union member inherits
  * whatever the previous frame in the same packet left there. */
 void send_two_frames_from_side(connection_pair_t *pair, const wt_quic_frame_t *first,
-                                      const wt_quic_frame_t *second, const wt_quic_packet_keys_t *keys,
-                                      uint64_t packet_number, const uint8_t *dcid, size_t dcid_len) {
+                               const wt_quic_frame_t *second, const wt_quic_packet_keys_t *keys,
+                               uint64_t packet_number, const uint8_t *dcid, size_t dcid_len) {
   uint8_t payload[128];
   uint8_t datagram[256];
   wt_writer_t w = wt_writer_init(payload, sizeof(payload));
@@ -641,8 +669,8 @@ void send_two_frames_from_side(connection_pair_t *pair, const wt_quic_frame_t *f
   build.payload = payload;
   build.payload_len = wt_writer_offset(&w);
   build.keys = keys;
-  WT_EXPECT_OK("the packet builds", wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+  WT_EXPECT_OK("the packet builds",
+               wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
   WT_EXPECT_OK("and is sent",
                wt_udp_send(&pair->server_socket, &pair->client_address, datagram, datagram_len));
 }
-

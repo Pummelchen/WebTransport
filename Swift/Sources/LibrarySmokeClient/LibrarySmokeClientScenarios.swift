@@ -73,9 +73,56 @@ extension LibrarySmokeRunner {
             requestStreamID: nextRequestStreamID()
         )
         let streamCount = max(2, min(config.iterations, 4))
+        let opened = try openInterleavedStreams(session: session, streamCount: streamCount)
+        let bidirectionalStreams = opened.bidirectional
+        let unidirectionalStreams = opened.unidirectional
+
+        try sendInterleavedPayloads(
+            bidirectionalStreams: bidirectionalStreams,
+            unidirectionalStreams: unidirectionalStreams
+        )
+
+        var expectedPayloads: [UInt64: Set<String>] = [:]
+        var observedPayloads: [UInt64: Set<String>] = [:]
+        for index in 0..<streamCount {
+            expectedPayloads[bidirectionalStreams[index], default: Set<String>()].insert("bidi-\(index)")
+            expectedPayloads[unidirectionalStreams[index], default: Set<String>()].insert("uni-\(index)")
+        }
+
+        for _ in 0..<(streamCount * 2) {
+            let response = try receive(expect: .streamEcho)
+            guard let streamID = response.streamID, let payload = response.payload,
+                let text = String(data: payload, encoding: .utf8)
+            else {
+                throw Error.runtime("interleaved stream response missing stream/payload")
+            }
+            observedPayloads[streamID, default: Set<String>()].insert(text)
+        }
+
+        try verifyEchoes(
+            expected: expectedPayloads,
+            observed: observedPayloads,
+            streams: bidirectionalStreams,
+            label: "bidi"
+        )
+        try verifyEchoes(
+            expected: expectedPayloads,
+            observed: observedPayloads,
+            streams: unidirectionalStreams,
+            label: "uni"
+        )
+
+        print("client: interleaved stream scenario passed")
+    }
+
+    /// Opens `streamCount` bidirectional and as many unidirectional streams, and waits for
+    /// each to be acknowledged before opening the next.
+    private mutating func openInterleavedStreams(
+        session: WebTransportSession,
+        streamCount: Int
+    ) throws -> (bidirectional: [UInt64], unidirectional: [UInt64]) {
         var bidirectionalStreams: [UInt64] = []
         var unidirectionalStreams: [UInt64] = []
-
         for _ in 0..<streamCount {
             let bidiID = nextBidirectionalStreamID()
             let bidiPrefix = try manager.openBidirectionalStream(streamID: bidiID, sessionID: session.id)
@@ -105,8 +152,15 @@ extension LibrarySmokeRunner {
             _ = try receive(expect: .streamOpenAck)
             unidirectionalStreams.append(uniID)
         }
+        return (bidirectionalStreams, unidirectionalStreams)
+    }
 
-        for index in 0..<streamCount {
+    /// Sends one payload per stream, alternating directions so the echoes interleave.
+    private mutating func sendInterleavedPayloads(
+        bidirectionalStreams: [UInt64],
+        unidirectionalStreams: [UInt64]
+    ) throws {
+        for index in 0..<bidirectionalStreams.count {
             try send(
                 Phase11Envelope(
                     scenario: .echoStreams,
@@ -124,43 +178,23 @@ extension LibrarySmokeRunner {
                 )
             )
         }
+    }
 
-        var expectedPayloads: [UInt64: Set<String>] = [:]
-        var observedPayloads: [UInt64: Set<String>] = [:]
-        for index in 0..<streamCount {
-            expectedPayloads[bidirectionalStreams[index], default: Set<String>()].insert("bidi-\(index)")
-            expectedPayloads[unidirectionalStreams[index], default: Set<String>()].insert("uni-\(index)")
-        }
-
-        for _ in 0..<(streamCount * 2) {
-            let response = try receive(expect: .streamEcho)
-            guard let streamID = response.streamID, let payload = response.payload,
-                let text = String(data: payload, encoding: .utf8)
-            else {
-                throw Error.runtime("interleaved stream response missing stream/payload")
-            }
-            observedPayloads[streamID, default: Set<String>()].insert(text)
-        }
-
-        for index in 0..<streamCount {
-            let streamID = bidirectionalStreams[index]
-            let expected = expectedPayloads[streamID] ?? []
-            let observed = observedPayloads[streamID] ?? []
-            if expected != observed {
-                throw Error.runtime("bidi interleaved echo mismatch at index \(index)")
+    /// Every stream's expected payload set must equal what came back, or the interleaving is
+    /// not deterministic.
+    private func verifyEchoes(
+        expected: [UInt64: Set<String>],
+        observed: [UInt64: Set<String>],
+        streams: [UInt64],
+        label: String
+    ) throws {
+        for (index, streamID) in streams.enumerated() {
+            let expectedForStream = expected[streamID] ?? []
+            let observedForStream = observed[streamID] ?? []
+            if expectedForStream != observedForStream {
+                throw Error.runtime("\(label) interleaved echo mismatch at index \(index)")
             }
         }
-
-        for index in 0..<streamCount {
-            let streamID = unidirectionalStreams[index]
-            let expected = expectedPayloads[streamID] ?? []
-            let observed = observedPayloads[streamID] ?? []
-            if expected != observed {
-                throw Error.runtime("uni interleaved echo mismatch at index \(index)")
-            }
-        }
-
-        print("client: interleaved stream scenario passed")
     }
 
     mutating func runStreamIdentityAndDuplicateOpenScenario() throws {
@@ -220,7 +254,7 @@ extension LibrarySmokeRunner {
     }
 
     mutating func runDatagramIntegrityScenario() throws {
-        let _ = try establishAcceptedSession(
+        _ = try establishAcceptedSession(
             authority: "example.com",
             path: "/wt",
             requestStreamID: nextRequestStreamID()
@@ -513,7 +547,35 @@ extension LibrarySmokeRunner {
             path: "/wt",
             requestStreamID: nextRequestStreamID()
         )
+        try verifyDatagramFlowControl(session: session)
 
+        _ = try manager.receiveFlowControlCapsule(
+            sessionID: session.id,
+            bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 1))
+        )
+        // The limit is expected to be refused; the catch is the recovery path rather than a
+        // failure, which is why the two blocks are separate helpers and not one.
+        let streamID: UInt64
+        do {
+            streamID = try verifyStreamLimitRefusal(session: session)
+        } catch {
+            streamID = try recoverAfterStreamLimit(session: session)
+        }
+        try verifyMaxDataLift(session: session, streamID: streamID)
+
+        // Allow another stream after an update to unlimited.
+        _ = try manager.receiveFlowControlCapsule(
+            sessionID: session.id,
+            bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 3))
+        )
+        let recoveryStream = nextBidirectionalStreamID()
+        _ = try manager.openBidirectionalStream(streamID: recoveryStream, sessionID: session.id)
+
+        print("client: flow-control capsule scenario passed")
+    }
+
+    /// `max_data` caps the datagram size, and the cap is what makes the oversized send fail.
+    private mutating func verifyDatagramFlowControl(session: WebTransportSession) throws {
         let maxDataCapsule = try WebTransportFlowCapsuleCodec.serialize(.maxData(limit: 64))
         _ = try manager.receiveFlowControlCapsule(sessionID: session.id, bytes: maxDataCapsule)
 
@@ -540,69 +602,75 @@ extension LibrarySmokeRunner {
         guard echoed.payload == payload else {
             throw Error.runtime("flow control datagram check failed")
         }
+    }
 
-        let maxStreamsCapsule = try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 1))
-        _ = try manager.receiveFlowControlCapsule(sessionID: session.id, bytes: maxStreamsCapsule)
+    /// Opens the first stream under the limit and confirms the second is refused, with a
+    /// STREAMS_BLOCKED capsule queued for it.
+    private mutating func verifyStreamLimitRefusal(session: WebTransportSession) throws -> UInt64 {
+        let firstStream = nextBidirectionalStreamID()
+        let firstPrefix = try manager.openBidirectionalStream(streamID: firstStream, sessionID: session.id)
+        try send(
+            Phase11Envelope(
+                scenario: .echoStreams,
+                kind: .streamOpen,
+                streamID: firstStream,
+                streamKind: .bidirectional,
+                payload: firstPrefix
+            )
+        )
+        _ = try receive(expect: .streamOpenAck)
 
-        var streamID: UInt64
+        let secondStream = nextBidirectionalStreamID()
         do {
-            let firstStream = nextBidirectionalStreamID()
-            let firstPrefix = try manager.openBidirectionalStream(streamID: firstStream, sessionID: session.id)
-            try send(
-                Phase11Envelope(
-                    scenario: .echoStreams,
-                    kind: .streamOpen,
-                    streamID: firstStream,
-                    streamKind: .bidirectional,
-                    payload: firstPrefix
-                )
-            )
-            _ = try receive(expect: .streamOpenAck)
-
-            let secondStream = nextBidirectionalStreamID()
-            do {
-                _ = try manager.openBidirectionalStream(streamID: secondStream, sessionID: session.id)
-                throw Error.runtime("second stream unexpectedly opened under stream limit")
-            } catch {
-                guard let queued = try manager.popFlowControlCapsule(sessionID: session.id) else {
-                    throw Error.runtime("expected blocked stream flow capsule")
-                }
-                let parsed = try WebTransportFlowCapsuleCodec.parse(queued)
-                if case .streamsBlockedBidi(let limit) = parsed.capsule {
-                    guard limit > 0 else {
-                        throw Error.runtime("invalid streamsBlockedBidi limit \(limit)")
-                    }
-                }
-            }
-
-            streamID = firstStream
+            _ = try manager.openBidirectionalStream(streamID: secondStream, sessionID: session.id)
+            throw Error.runtime("second stream unexpectedly opened under stream limit")
         } catch {
-            if let queued = try manager.popFlowControlCapsule(sessionID: session.id) {
-                let parsed = try WebTransportFlowCapsuleCodec.parse(queued)
-                if case .streamsBlockedBidi(let limit) = parsed.capsule {
-                    guard limit > 0 else {
-                        throw Error.runtime("invalid streamsBlockedBidi limit \(limit)")
-                    }
+            guard let queued = try manager.popFlowControlCapsule(sessionID: session.id) else {
+                throw Error.runtime("expected blocked stream flow capsule")
+            }
+            let parsed = try WebTransportFlowCapsuleCodec.parse(queued)
+            if case .streamsBlockedBidi(let limit) = parsed.capsule {
+                guard limit > 0 else {
+                    throw Error.runtime("invalid streamsBlockedBidi limit \(limit)")
                 }
             }
+        }
+        return firstStream
+    }
 
-            let liftedStreamCapsule = try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 3))
-            _ = try manager.receiveFlowControlCapsule(sessionID: session.id, bytes: liftedStreamCapsule)
-
-            streamID = nextBidirectionalStreamID()
-            let recoveryPrefix = try manager.openBidirectionalStream(streamID: streamID, sessionID: session.id)
-            try send(
-                Phase11Envelope(
-                    scenario: .echoStreams,
-                    kind: .streamOpen,
-                    streamID: streamID,
-                    streamKind: .bidirectional,
-                    payload: recoveryPrefix
-                )
-            )
-            _ = try receive(expect: .streamOpenAck)
+    /// The recovery path when the limit was hit before the first stream opened: lift it and
+    /// open one. A missing queued capsule is tolerated here, which is what distinguishes this
+    /// from the refusal check above.
+    private mutating func recoverAfterStreamLimit(session: WebTransportSession) throws -> UInt64 {
+        if let queued = try manager.popFlowControlCapsule(sessionID: session.id) {
+            let parsed = try WebTransportFlowCapsuleCodec.parse(queued)
+            if case .streamsBlockedBidi(let limit) = parsed.capsule {
+                guard limit > 0 else {
+                    throw Error.runtime("invalid streamsBlockedBidi limit \(limit)")
+                }
+            }
         }
 
+        let liftedStreamCapsule = try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 3))
+        _ = try manager.receiveFlowControlCapsule(sessionID: session.id, bytes: liftedStreamCapsule)
+
+        let streamID = nextBidirectionalStreamID()
+        let recoveryPrefix = try manager.openBidirectionalStream(streamID: streamID, sessionID: session.id)
+        try send(
+            Phase11Envelope(
+                scenario: .echoStreams,
+                kind: .streamOpen,
+                streamID: streamID,
+                streamKind: .bidirectional,
+                payload: recoveryPrefix
+            )
+        )
+        _ = try receive(expect: .streamOpenAck)
+        return streamID
+    }
+
+    /// `max_data` rejects an oversized inbound stream payload, and raising it accepts one.
+    private mutating func verifyMaxDataLift(session: WebTransportSession, streamID: UInt64) throws {
         do {
             try manager.receiveStreamPayload(streamID: streamID, payload: Data(repeating: 0x77, count: 128))
             throw Error.runtime("local flow-control maxData should reject oversized inbound stream payload")
@@ -646,14 +714,6 @@ extension LibrarySmokeRunner {
         guard streamEcho.payload == liftPayload else {
             throw Error.runtime("stream data should be accepted after maxData raised")
         }
-
-        // Allow another stream after an update to unlimited.
-        let unlimitedStreamsCapsule = try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 3))
-        _ = try manager.receiveFlowControlCapsule(sessionID: session.id, bytes: unlimitedStreamsCapsule)
-        let recoveryStream = nextBidirectionalStreamID()
-        _ = try manager.openBidirectionalStream(streamID: recoveryStream, sessionID: session.id)
-
-        print("client: flow-control capsule scenario passed")
     }
 
     mutating func runDuplicateSessionRequestScenario() throws {

@@ -85,7 +85,8 @@ void scenario_detail_set(char *detail, size_t size, const char *text);
  * WT_CLI_RESULT_FAILED when any of it fails, with `detail` naming which step; WT_CLI_RESULT_UNSUPPORTED when the
  * machine has no loopback for the family asked for. On failure the pair is already torn down, so a caller only
  * closes it on success. */
-wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail, size_t detail_size);
+wt_cli_result_t scenario_pair_open(scenario_pair_t *pair, int ipv6, char *detail,
+                                   size_t detail_size);
 
 /* Pump both sides once. The sockets are WAITED on first: a non-blocking receive finds nothing until the packet has
  * arrived, and a loop that spun faster than loopback would finish before the first Initial packet did. */

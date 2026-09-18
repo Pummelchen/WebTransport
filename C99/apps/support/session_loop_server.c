@@ -135,8 +135,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
         size_t destination_length = 0U;
         const uint8_t *source = NULL;
         size_t source_length = 0U;
-        if (wt_quic_long_header_connection_ids(initial_header, available, &destination, &destination_length,
-                                               &source, &source_length) == WT_OK &&
+        if (wt_quic_long_header_connection_ids(initial_header, available, &destination,
+                                               &destination_length, &source,
+                                               &source_length) == WT_OK &&
             destination_length > 0U) {
           loop.peer = candidate;
           client_destination_id = destination;
@@ -174,9 +175,9 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
       wt_udp_close(&loop.socket);
       return WT_ERR_UNSUPPORTED;
     }
-    if (wt_runtime_server_retry_build(&retry, initial_header, initial_available, &loop.peer, loop.now,
-                                      retry_datagram, sizeof(retry_datagram), &retry_length,
-                                      &sent) != WT_OK ||
+    if (wt_runtime_server_retry_build(&retry, initial_header, initial_available, &loop.peer,
+                                      loop.now, retry_datagram, sizeof(retry_datagram),
+                                      &retry_length, &sent) != WT_OK ||
         sent == 0) {
       /* `sent == 0` means the first datagram was not an Initial without a token, which cannot be true here: the
        * peek above only accepted one that named both connection IDs. Reporting a state error rather than
@@ -209,12 +210,13 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
       size_t datagram_length = 0U;
       size_t available = 0U;
       wt_udp_address_t candidate;
-      if (wt_udp_peek(&loop.socket, answered, sizeof(answered), &datagram_length, &available, &candidate) ==
-          WT_OK) {
+      if (wt_udp_peek(&loop.socket, answered, sizeof(answered), &datagram_length, &available,
+                      &candidate) == WT_OK) {
         int accepted = 0;
         (void)candidate;
         if (wt_runtime_server_retry_accept(&retry, answered, available, &loop.peer, loop.now,
-                                           original_destination_buffer, sizeof(original_destination_buffer),
+                                           original_destination_buffer,
+                                           sizeof(original_destination_buffer),
                                            &original_destination_id_length, &accepted) == WT_OK &&
             accepted != 0) {
           original_destination_id = original_destination_buffer;
@@ -226,7 +228,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
         /* A peek does not consume, and the Initial the listener peeked BEFORE the Retry -- and any retransmission
          * of it -- is still in the queue: without this the loop reads the same stale datagram until it times out,
          * which is exactly what the first version of this flow did while the client's answer waited behind it. */
-        (void)wt_udp_receive(&loop.socket, answered, sizeof(answered), &datagram_length, &candidate);
+        (void)wt_udp_receive(&loop.socket, answered, sizeof(answered), &datagram_length,
+                             &candidate);
       }
       (void)wt_udp_wait(&loop.socket, WT_LOOP_WAIT_MICROS * 10U);
     }
@@ -238,17 +241,18 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     }
   }
 
-  parameters_len = build_parameters(parameters, sizeof(parameters), 1, local_connection_id,
-                                   local_connection_id_length,
-                                   retried != 0 ? original_destination_id : client_destination_id,
-                                   retried != 0 ? original_destination_id_length : client_destination_id_length,
-                                   retried, retry_source_id, retry_source_id_length);
+  parameters_len = build_parameters(
+      parameters, sizeof(parameters), 1, local_connection_id, local_connection_id_length,
+      retried != 0 ? original_destination_id : client_destination_id,
+      retried != 0 ? original_destination_id_length : client_destination_id_length, retried,
+      retry_source_id, retry_source_id_length);
   if (parameters_len == 0U) {
     wt_udp_close(&loop.socket);
     return WT_ERR_LIMIT;
   }
 
-  connection_config(&connection, WT_QUIC_ROLE_SERVER, local_connection_id, local_connection_id_length);
+  connection_config(&connection, WT_QUIC_ROLE_SERVER, local_connection_id,
+                    local_connection_id_length);
   /* Its own Source Connection ID is the one it chose; the client's is the one it answers. */
   connection.peer_connection_id = client_source_id;
   connection.peer_connection_id_length = client_source_id_length;
@@ -265,16 +269,14 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
      * section 5.2), which is the one the peek above read -- not this server's own ID, which is what it was. A
      * server that retried has TWO IDs in play and starts through the form that takes both, because the one the
      * client's FIRST Initial carried is what the transport parameters must name (WT-168). */
-    wt_status_t status =
-        retried != 0
-            ? wt_runtime_session_start_server_retried(&loop.session, &loop.socket, &loop.peer,
-                                                      local_connection_id, local_connection_id_length,
-                                                      original_destination_id,
-                                                      original_destination_id_length, &connection, &tls,
-                                                      loop.now)
-            : wt_runtime_session_start_server(&loop.session, &loop.socket, &loop.peer,
-                                              client_destination_id, client_destination_id_length,
-                                              &connection, &tls, loop.now);
+    wt_status_t status = retried != 0
+                             ? wt_runtime_session_start_server_retried(
+                                   &loop.session, &loop.socket, &loop.peer, local_connection_id,
+                                   local_connection_id_length, original_destination_id,
+                                   original_destination_id_length, &connection, &tls, loop.now)
+                             : wt_runtime_session_start_server(
+                                   &loop.session, &loop.socket, &loop.peer, client_destination_id,
+                                   client_destination_id_length, &connection, &tls, loop.now);
     wt_udp_address_t bound;
     if (status != WT_OK) {
       wt_udp_close(&loop.socket);
@@ -300,7 +302,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   /* Bound so that a refusal with an HTTP/3 error reaches the peer as an application close (WT-159). */
   wt_http3_driver_bind_connection(&loop.side.driver, &loop.session.connection);
 
-  for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0 && loop_is_closed(&loop) == 0;
+  for (round = 0U;
+       round < deadline_rounds && handshake_ready(&loop) == 0 && loop_is_closed(&loop) == 0;
        round++) {
     pump_once(&loop);
   }
@@ -329,7 +332,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     /* Section 5.1's LOCAL half: the set above advertises flow control, and the capsule gate keeps that fact
      * so each grant is decided against both ends (WT-252). */
     wt_capsule_stream_set_flow_advertised(&loop.side.capsules, &settings);
-    status = wt_http3_driver_start_own_streams(&loop.side.driver, &loop.transport, &settings, loop.now);
+    status =
+        wt_http3_driver_start_own_streams(&loop.side.driver, &loop.transport, &settings, loop.now);
     if (status != WT_OK) {
       record_oracle(&loop, out);
       wt_runtime_session_clear(&loop.session);
@@ -339,7 +343,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
 
   /* The CONNECT, its section assembled from the driver's pieces, and the draft-16 decision. */
-  for (round = 0U; round < deadline_rounds && loop.side.section_complete == 0 && loop_is_closed(&loop) == 0;
+  for (round = 0U;
+       round < deadline_rounds && loop.side.section_complete == 0 && loop_is_closed(&loop) == 0;
        round++) {
     /* The sink must know which stream carries the exchange before the section arrives. A client's first
      * bidirectional stream is stream 0 (RFC 9000 section 2.1), and this tool serves one session, so that is the
@@ -377,8 +382,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   }
   {
     wt_status_t status = wt_http3_endpoint_on_request_headers(
-        &loop.side.endpoint, loop.side.request_stream_id, loop.side.section, loop.side.section_length,
-        scratch, sizeof(scratch), &request, &h3_error);
+        &loop.side.endpoint, loop.side.request_stream_id, loop.side.section,
+        loop.side.section_length, scratch, sizeof(scratch), &request, &h3_error);
     if (status != WT_OK) {
       record_oracle(&loop, out);
       wt_runtime_session_clear(&loop.session);
@@ -391,7 +396,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   policy.path = config->path;
   policy.wt_enabled = 1;
   {
-    wt_status_t validated = wt_webtransport_session_request_validate(&request, &policy, &decision, &h3_error);
+    wt_status_t validated =
+        wt_webtransport_session_request_validate(&request, &policy, &decision, &h3_error);
     /* The four pseudo-headers a WebTransport CONNECT is made of, in one line, for the report. */
     {
       size_t used = 0U;
@@ -412,7 +418,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
       for (part = 0U; part < 4U; part++) {
         size_t index;
         if (part != 0U && used + 1U < sizeof(out->request_line)) out->request_line[used++] = ' ';
-        for (index = 0U; index < parts[part].length && used + 1U < sizeof(out->request_line); index++) {
+        for (index = 0U; index < parts[part].length && used + 1U < sizeof(out->request_line);
+             index++) {
           uint8_t byte = parts[part].bytes[index];
           out->request_line[used++] = (byte >= 0x20U && byte < 0x7fU) ? (char)byte : '?';
         }
@@ -425,13 +432,15 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
      * report came to say 404, with no error beside it, for a session the same report calls accepted and
      * established. Zero for an acceptance: there was no answer to send, and a script that switches on this
      * number must not read a refusal out of an accepted session (WT-190). */
-    out->request_status = decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT ? 0U : (uint64_t)decision.status;
+    out->request_status =
+        decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT ? 0U : (uint64_t)decision.status;
     out->h3_error = (uint64_t)h3_error;
     if (validated == WT_OK && decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT) {
       /* The decision is kept and the exchange continues below. The request stream becomes a CAPSULE stream here,
        * which is the earliest moment this endpoint can know it is one: the request's HEADERS frame has just been
        * read, so the peer's capsules begin after it (WT-164). */
-      if (wt_http3_driver_mark_capsule_stream(&loop.side.driver, loop.side.request_stream_id, 0) != WT_OK) {
+      if (wt_http3_driver_mark_capsule_stream(&loop.side.driver, loop.side.request_stream_id, 0) !=
+          WT_OK) {
         record_oracle(&loop, out);
         wt_runtime_session_clear(&loop.session);
         wt_udp_close(&loop.socket);
@@ -451,9 +460,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   out->status = 200U;
 
   {
-    wt_status_t status = wt_http3_driver_send_response(&loop.side.driver, &loop.transport,
-                                                       loop.side.request_stream_id, 200U, 0U, 0,
-                                                       loop.now);
+    wt_status_t status = wt_http3_driver_send_response(
+        &loop.side.driver, &loop.transport, loop.side.request_stream_id, 200U, 0U, 0, loop.now);
     if (status != WT_OK) {
       record_oracle(&loop, out);
       wt_runtime_session_clear(&loop.session);
@@ -464,7 +472,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   /* The client's message, and then this side's own answer so that a caller sees both directions. */
   {
     unsigned waited;
-    for (waited = 0U; waited < 400U && loop.side.data_bytes == 0U; waited++) pump_once(&loop);
+    for (waited = 0U; waited < 400U && loop.side.data_bytes == 0U; waited++)
+      pump_once(&loop);
     out->received_bytes = loop.side.data_bytes;
     out->received_datagram = loop.side.data_was_datagram;
   }
@@ -476,7 +485,8 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
       wt_udp_close(&loop.socket);
       return status;
     }
-    for (round = 0U; round < 100U; round++) pump_once(&loop);
+    for (round = 0U; round < 100U; round++)
+      pump_once(&loop);
   }
 
   record_oracle(&loop, out);

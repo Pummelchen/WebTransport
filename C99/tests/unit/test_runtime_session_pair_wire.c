@@ -42,13 +42,14 @@ void test_a_refusal_reaches_the_peer_as_an_application_close(void) {
   frame.as.stream.length = sizeof(k_truncated);
   frame.as.stream.fin = 1;
   WT_EXPECT_OK("the truncated frame is sent",
-               wt_quic_connection_send_frame(&pair.client.connection, WT_QUIC_SPACE_APPLICATION, &frame, 1,
-                                             pair.now));
+               wt_quic_connection_send_frame(&pair.client.connection, WT_QUIC_SPACE_APPLICATION,
+                                             &frame, 1, pair.now));
 
   /* A few rounds: the frame crosses, the server refuses, and its close crosses back. */
   (void)pump_pair(&pair, 20U, NULL);
   {
-    const wt_quic_close_state_t *close_state = wt_quic_connection_close_state(&pair.server.connection);
+    const wt_quic_close_state_t *close_state =
+        wt_quic_connection_close_state(&pair.server.connection);
     WT_EXPECT_U64("the server closed the connection", (uint64_t)WT_QUIC_CLOSE_APPLICATION,
                   (uint64_t)close_state->kind);
     WT_EXPECT_U64("with H3_FRAME_ERROR", (uint64_t)WT_HTTP3_FRAME_ERROR, close_state->error_code);
@@ -98,16 +99,19 @@ void test_a_reliable_stream_reset_crosses_the_connection(void) {
                 pair.client.connection.peer_limits.reset_stream_at != 0 &&
                     pair.server.connection.peer_limits.reset_stream_at != 0);
 
-  WT_EXPECT_OK("a stream opens", wt_quic_connection_open_stream(&pair.client.connection, 1, &stream_id));
+  WT_EXPECT_OK("a stream opens",
+               wt_quic_connection_open_stream(&pair.client.connection, 1, &stream_id));
   WT_EXPECT_OK("four bytes are sent",
                wt_quic_connection_send_stream(&pair.client.connection, stream_id, 0U,
                                               (const uint8_t *)"abcd", 4U, 0, pair.now));
   /* Recording the send is the caller's, exactly as the HTTP/3 transport adapter does it, and it is what makes the
    * final size four rather than zero. */
-  WT_EXPECT_OK("and recorded", wt_quic_stream_on_data_sent(wt_quic_connection_stream(&pair.client.connection,
-                                                                                     stream_id), 4U));
-  WT_EXPECT_OK("a commitment of four bytes of it is sent",
-               wt_quic_connection_reset_stream_at(&pair.client.connection, stream_id, 0x0bU, 4U, pair.now));
+  WT_EXPECT_OK("and recorded",
+               wt_quic_stream_on_data_sent(
+                   wt_quic_connection_stream(&pair.client.connection, stream_id), 4U));
+  WT_EXPECT_OK(
+      "a commitment of four bytes of it is sent",
+      wt_quic_connection_reset_stream_at(&pair.client.connection, stream_id, 0x0bU, 4U, pair.now));
 
   (void)pump_pair(&pair, 20U, NULL);
   /* The peer read the packets and its driver saw frames -- asserted because the SEND half's effect is local and

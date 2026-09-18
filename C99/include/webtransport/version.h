@@ -33,7 +33,7 @@ extern "C" {
 /* Incremented only when a public structure's layout, a function's signature, or
  * a documented constant's value changes in a way that a caller compiled against
  * an earlier header would get wrong. */
-#define WT_ABI_VERSION 1
+#define WT_ABI_VERSION 2
 
 /* "MAJOR.MINOR.PATCH" from the macros above. Static storage; never freed. No
  * literal here to go stale -- the string is stringified from them. */

@@ -26,8 +26,7 @@ static void test_drain_and_close(void) {
    * type 0x78ae needs a four-byte varint; the zero length needs one. */
   w = wt_writer_init(bytes, sizeof(bytes));
   WT_EXPECT_OK("a drain writes", wt_webtransport_drain_session_write(&w));
-  WT_EXPECT_U64("as a four-byte type and a zero length", 5U,
-                (uint64_t)wt_writer_offset(&w));
+  WT_EXPECT_U64("as a four-byte type and a zero length", 5U, (uint64_t)wt_writer_offset(&w));
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("and decodes", wt_webtransport_capsule_decode(&c, 64U, &capsule, &error));
   WT_EXPECT_U64("as a drain capsule", WT_CAPSULE_DRAIN_SESSION, capsule.type);
@@ -40,16 +39,15 @@ static void test_drain_and_close(void) {
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("and decodes", wt_webtransport_capsule_decode(&c, 64U, &capsule, &error));
   WT_EXPECT_U64("as a close capsule", WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION, capsule.type);
-  WT_EXPECT_OK("whose value parses",
-               wt_webtransport_close_session_parse(&capsule, &code, &reason, &reason_length, &error));
+  WT_EXPECT_OK("whose value parses", wt_webtransport_close_session_parse(&capsule, &code, &reason,
+                                                                         &reason_length, &error));
   WT_EXPECT_U64("with the error code", 0x01020304U, (uint64_t)code);
   WT_EXPECT_U64("and the reason length", 3U, (uint64_t)reason_length);
   WT_EXPECT_BYTES("and the reason", (const uint8_t *)"bye", reason, 3U);
 
   /* A close with no reason is legal: the code is what ends the session. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a bare close writes",
-               wt_webtransport_close_session_write(&w, 0U, NULL, 0U));
+  WT_EXPECT_OK("a bare close writes", wt_webtransport_close_session_write(&w, 0U, NULL, 0U));
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_OK("and decodes", wt_webtransport_capsule_decode(&c, 64U, &capsule, &error));
   WT_EXPECT_OK("whose value parses",
@@ -68,11 +66,11 @@ static void test_the_close_reason_is_utf8(void) {
   wt_http3_error_t error = WT_HTTP3_NO_ERROR;
   uint32_t code = 0U;
   size_t reason_length = 0U;
-  static const uint8_t good[] = {0x62U, 0x79U, 0x65U, 0xe2U, 0x82U, 0xacU};      /* "bye" + EURO SIGN */
-  static const uint8_t overlong[] = {0xc0U, 0xafU};                              /* '/' in two bytes */
+  static const uint8_t good[] = {0x62U, 0x79U, 0x65U, 0xe2U, 0x82U, 0xacU}; /* "bye" + EURO SIGN */
+  static const uint8_t overlong[] = {0xc0U, 0xafU};                         /* '/' in two bytes */
   static const uint8_t lone_continuation[] = {0x80U};
-  static const uint8_t surrogate[] = {0xedU, 0xa0U, 0x80U};                      /* U+D800 */
-  static const uint8_t too_high[] = {0xf4U, 0x90U, 0x80U, 0x80U};                /* U+110000 */
+  static const uint8_t surrogate[] = {0xedU, 0xa0U, 0x80U};       /* U+D800 */
+  static const uint8_t too_high[] = {0xf4U, 0x90U, 0x80U, 0x80U}; /* U+110000 */
   static const uint8_t truncated[] = {0xe2U, 0x82U};
 
   w = wt_writer_init(bytes, sizeof(bytes));
@@ -85,7 +83,8 @@ static void test_the_close_reason_is_utf8(void) {
   WT_EXPECT_U64("with its length", (uint64_t)sizeof(good), (uint64_t)reason_length);
 
   {
-    static const uint8_t *const invalid[] = {overlong, lone_continuation, surrogate, too_high, truncated};
+    static const uint8_t *const invalid[] = {overlong, lone_continuation, surrogate, too_high,
+                                             truncated};
     static const size_t lengths[] = {sizeof(overlong), sizeof(lone_continuation), sizeof(surrogate),
                                      sizeof(too_high), sizeof(truncated)};
     size_t i;
@@ -97,8 +96,9 @@ static void test_the_close_reason_is_utf8(void) {
       WT_EXPECT_OK("and decodes as a capsule",
                    wt_webtransport_capsule_decode(&c, 64U, &capsule, &error));
       error = WT_HTTP3_NO_ERROR;
-      WT_EXPECT_STATUS("but its reason is refused", WT_ERR_PROTOCOL,
-                       wt_webtransport_close_session_parse(&capsule, &code, NULL, &reason_length, &error));
+      WT_EXPECT_STATUS(
+          "but its reason is refused", WT_ERR_PROTOCOL,
+          wt_webtransport_close_session_parse(&capsule, &code, NULL, &reason_length, &error));
       WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
     }
   }
@@ -128,8 +128,7 @@ static void test_close_edges(void) {
   /* One byte longer is refused at the writer, so this build cannot send what its own
    * reader would refuse. */
   WT_EXPECT_STATUS("one byte more is refused", WT_ERR_LIMIT,
-                   wt_webtransport_close_session_write(&w, 7U, reason,
-                                                       sizeof(reason) + 1U));
+                   wt_webtransport_close_session_write(&w, 7U, reason, sizeof(reason) + 1U));
 
   /* A value shorter than the mandatory four-byte code. */
   {
@@ -139,9 +138,9 @@ static void test_close_edges(void) {
     hand_made.value = short_value;
     hand_made.value_length = sizeof(short_value);
     hand_made.bytes_consumed = 0U;
-    WT_EXPECT_STATUS("a value with no room for the code is refused", WT_ERR_PROTOCOL,
-                     wt_webtransport_close_session_parse(&hand_made, &code, NULL, &reason_length,
-                                                         &error));
+    WT_EXPECT_STATUS(
+        "a value with no room for the code is refused", WT_ERR_PROTOCOL,
+        wt_webtransport_close_session_parse(&hand_made, &code, NULL, &reason_length, &error));
     WT_EXPECT_U64("as a message error", WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
   }
 
@@ -152,9 +151,9 @@ static void test_close_edges(void) {
     drain.value = NULL;
     drain.value_length = 0U;
     drain.bytes_consumed = 0U;
-    WT_EXPECT_STATUS("the drain capsule is not a close", WT_ERR_INVALID_ARGUMENT,
-                     wt_webtransport_close_session_parse(&drain, &code, NULL, &reason_length,
-                                                         &error));
+    WT_EXPECT_STATUS(
+        "the drain capsule is not a close", WT_ERR_INVALID_ARGUMENT,
+        wt_webtransport_close_session_parse(&drain, &code, NULL, &reason_length, &error));
   }
 
   /* A value the caller says is present but has no buffer: the parser is public and must refuse it before it
@@ -166,9 +165,9 @@ static void test_close_edges(void) {
     null_value.value = NULL;
     null_value.value_length = 4U;
     null_value.bytes_consumed = 0U;
-    WT_EXPECT_STATUS("a NULL value is refused", WT_ERR_INVALID_ARGUMENT,
-                     wt_webtransport_close_session_parse(&null_value, &code, NULL, &reason_length,
-                                                         &error));
+    WT_EXPECT_STATUS(
+        "a NULL value is refused", WT_ERR_INVALID_ARGUMENT,
+        wt_webtransport_close_session_parse(&null_value, &code, NULL, &reason_length, &error));
   }
 }
 
@@ -224,10 +223,69 @@ static void test_incomplete_unknown_and_bounds(void) {
   }
 }
 
+/* AUD-0025. The header states this contract outright -- "Anything but exactly one varint is
+ * H3_MESSAGE_ERROR: a flow-control value that is not a number is not a limit" -- and no test
+ * exercised it: line coverage showed both `parse_one`'s and `parse_two`'s refusals unexecuted, as
+ * was the over-long close reason. A flow-control capsule is peer input, so these are the paths a
+ * malformed capsule from a peer takes, and the refusals could have been deleted with CI green. */
+static void test_flow_control_values_must_be_exactly_one_varint(void) {
+  wt_webtransport_capsule_t capsule;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  uint64_t value = 0U;
+  uint64_t stream_id = 0U;
+  static const uint8_t trailing[] = {0x01U, 0x02U};             /* one varint, then junk */
+  static const uint8_t truncated[] = {0x40U};                   /* a two-byte varint, one byte */
+  static const uint8_t one_varint[] = {0x01U};                  /* the second is missing */
+  static const uint8_t three_varints[] = {0x01U, 0x02U, 0x03U}; /* one too many */
+
+  capsule.type = WT_CAPSULE_MAX_DATA;
+  capsule.value = trailing;
+  capsule.value_length = sizeof(trailing);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a flow-control value with trailing bytes is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_data_parse(&capsule, &value, &error));
+  WT_EXPECT_U64("  as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+
+  capsule.value = truncated;
+  capsule.value_length = sizeof(truncated);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a value that is not a whole varint is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_data_parse(&capsule, &value, &error));
+
+  capsule.type = WT_CAPSULE_MAX_STREAM_DATA;
+  capsule.value = one_varint;
+  capsule.value_length = sizeof(one_varint);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a two-varint capsule carrying one is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_stream_data_parse(&capsule, &stream_id, &value, &error));
+
+  capsule.value = three_varints;
+  capsule.value_length = sizeof(three_varints);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("and one carrying three is refused too", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_stream_data_parse(&capsule, &stream_id, &value, &error));
+
+  /* A close reason past the bound is malformed rather than merely large, so it is a message error and
+   * not the excessive-load limit this endpoint imposes on itself. Zero bytes are valid UTF-8, so the
+   * length check is what refuses this and not the well-formedness one after it. */
+  {
+    static uint8_t long_reason[4U + WT_CAPSULE_CLOSE_MAX_REASON + 1U];
+    uint32_t code = 0U;
+    capsule.type = WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION;
+    capsule.value = long_reason;
+    capsule.value_length = sizeof(long_reason);
+    error = WT_HTTP3_NO_ERROR;
+    WT_EXPECT_STATUS("a close reason past the bound is refused", WT_ERR_PROTOCOL,
+                     wt_webtransport_close_session_parse(&capsule, &code, NULL, NULL, &error));
+    WT_EXPECT_U64("  as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  }
+}
+
 int main(void) {
   test_the_close_reason_is_utf8();
   test_drain_and_close();
   test_close_edges();
   test_incomplete_unknown_and_bounds();
+  test_flow_control_values_must_be_exactly_one_varint();
   WT_TEST_MAIN_END("wt_webtransport_capsule");
 }

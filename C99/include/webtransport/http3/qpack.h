@@ -97,7 +97,7 @@ wt_status_t wt_qpack_string_encode(wt_writer_t *w, const uint8_t *bytes, size_t 
  * than anything about the peer. `wt_qpack_string_encode` is this with `huffman`
  * clear. */
 wt_status_t wt_qpack_string_encode_coded(wt_writer_t *w, const uint8_t *bytes, size_t length,
-                                        int huffman, uint8_t *scratch, size_t scratch_capacity);
+                                         int huffman, uint8_t *scratch, size_t scratch_capacity);
 
 /* Decode a Huffman-coded string (RFC 7541 appendix B, which RFC 9204 section
  * 4.1.2 adopts). The code comes from the RFC table generated into the source tree.
@@ -180,12 +180,12 @@ wt_status_t wt_qpack_field_line_encode(wt_writer_t *w, const wt_qpack_field_line
 /* Write one with the line's own H bits honoured, Huffman-coding the strings into the
  * caller's scratch as `wt_qpack_string_encode_coded` does. */
 wt_status_t wt_qpack_field_line_encode_coded(wt_writer_t *w, const wt_qpack_field_line_t *line,
-                                            uint8_t *scratch, size_t scratch_capacity);
+                                             uint8_t *scratch, size_t scratch_capacity);
 
 /* The name of a static-referencing line, from the static table or from the line
  * itself. WT_ERR_STATE for the kinds that need the dynamic table or a base. */
-wt_status_t wt_qpack_field_line_static_name(const wt_qpack_field_line_t *line, const char **out_name,
-                                            size_t *out_length);
+wt_status_t wt_qpack_field_line_static_name(const wt_qpack_field_line_t *line,
+                                            const char **out_name, size_t *out_length);
 
 /* -------------------------------------------- RFC 9204 section 3.2's dynamic table */
 
@@ -289,11 +289,12 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
  * not read back. */
 wt_status_t wt_qpack_encoder_stream_write_capacity(wt_writer_t *w, size_t capacity);
 wt_status_t wt_qpack_encoder_stream_write_insert_name_reference(wt_writer_t *w, int from_static,
-                                                               uint64_t index, const uint8_t *value,
-                                                               size_t value_length);
+                                                                uint64_t index,
+                                                                const uint8_t *value,
+                                                                size_t value_length);
 wt_status_t wt_qpack_encoder_stream_write_insert_literal(wt_writer_t *w, const uint8_t *name,
-                                                        size_t name_length, const uint8_t *value,
-                                                        size_t value_length);
+                                                         size_t name_length, const uint8_t *value,
+                                                         size_t value_length);
 wt_status_t wt_qpack_encoder_stream_write_duplicate(wt_writer_t *w, uint64_t relative_index);
 
 /* --------------------------------------- RFC 9204 section 4.4's decoder stream */
@@ -327,12 +328,12 @@ wt_status_t wt_qpack_decoder_stream_apply(wt_qpack_decoder_stream_t *stream,
                                           wt_qpack_error_t *out_error);
 
 wt_status_t wt_qpack_decoder_stream_write_section_acknowledgement(wt_writer_t *w,
-                                                                 uint64_t section_id);
+                                                                  uint64_t section_id);
 wt_status_t wt_qpack_decoder_stream_write_stream_cancellation(wt_writer_t *w, uint64_t stream_id);
 /* Refuses a zero increment, which section 4.4.3 makes an error rather than a
  * no-op. */
 wt_status_t wt_qpack_decoder_stream_write_insert_count_increment(wt_writer_t *w,
-                                                                uint64_t increment);
+                                                                 uint64_t increment);
 
 /* --------------------------------------- RFC 9204 section 4.5.1's header prefix */
 
@@ -426,8 +427,8 @@ typedef struct wt_qpack_field_section_decoder {
  * has received. WT_ERR_AGAIN means blocked: the section is well formed but needs
  * insertions that have not arrived. */
 wt_status_t wt_qpack_field_section_begin(wt_qpack_field_section_decoder_t *decoder,
-                                         const wt_qpack_dynamic_table_t *table, uint64_t max_entries,
-                                         const uint8_t *bytes, size_t length,
+                                         const wt_qpack_dynamic_table_t *table,
+                                         uint64_t max_entries, const uint8_t *bytes, size_t length,
                                          uint64_t known_insert_count, wt_qpack_error_t *out_error);
 
 /* The next field, or WT_ERR_CLOSED when the section is finished. */
@@ -442,9 +443,9 @@ wt_status_t wt_qpack_field_section_decoder_next(wt_qpack_field_section_decoder_t
  * and it is what the caller passes in. Strings are coded into `scratch` when the line
  * asks for it. */
 wt_status_t wt_qpack_field_section_encode(wt_writer_t *w, const wt_qpack_header_prefix_t *prefix,
-                                         uint64_t max_entries,
-                                         const wt_qpack_field_line_t *lines, size_t line_count,
-                                         uint8_t *scratch, size_t scratch_capacity);
+                                          uint64_t max_entries, const wt_qpack_field_line_t *lines,
+                                          size_t line_count, uint8_t *scratch,
+                                          size_t scratch_capacity);
 
 /* ------------------------------------- RFC 9204 section 2.1.1's encoder bookkeeping */
 
@@ -484,8 +485,8 @@ void wt_qpack_encoder_state_init(wt_qpack_encoder_state_t *state, wt_qpack_dynam
  * Base is the same, so the most recent entry is dynamic index 0 (section 3.2.5). A
  * second outstanding section on the same stream replaces the first: a stream carries
  * one field section at a time. */
-wt_status_t wt_qpack_encoder_state_begin_section(wt_qpack_encoder_state_t *state, uint64_t stream_id,
-                                                 int references_dynamic,
+wt_status_t wt_qpack_encoder_state_begin_section(wt_qpack_encoder_state_t *state,
+                                                 uint64_t stream_id, int references_dynamic,
                                                  wt_qpack_header_prefix_t *out_prefix);
 
 /* A Section Acknowledgement: that stream's section is decoded and may be forgotten. */

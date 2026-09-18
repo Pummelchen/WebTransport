@@ -61,13 +61,15 @@ wt_status_t wt_webtransport_capsule_decode(wt_cursor_t *c, size_t max_length,
                                            wt_webtransport_capsule_t *out,
                                            wt_http3_error_t *out_error);
 
-wt_status_t wt_webtransport_capsule_encode(wt_writer_t *w, const wt_webtransport_capsule_t *capsule);
+wt_status_t wt_webtransport_capsule_encode(wt_writer_t *w,
+                                           const wt_webtransport_capsule_t *capsule);
 
 /* The close capsule's value: a four-byte error code and a reason. */
 wt_status_t wt_webtransport_close_session_write(wt_writer_t *w, uint32_t error_code,
                                                 const uint8_t *reason, size_t reason_length);
 wt_status_t wt_webtransport_close_session_parse(const wt_webtransport_capsule_t *capsule,
-                                                uint32_t *out_error_code, const uint8_t **out_reason,
+                                                uint32_t *out_error_code,
+                                                const uint8_t **out_reason,
                                                 size_t *out_reason_length,
                                                 wt_http3_error_t *out_error);
 
@@ -102,7 +104,7 @@ wt_status_t wt_webtransport_data_blocked_write(wt_writer_t *w, uint64_t maximum)
 wt_status_t wt_webtransport_stream_data_blocked_write(wt_writer_t *w, uint64_t stream_id,
                                                       uint64_t maximum);
 wt_status_t wt_webtransport_streams_blocked_write(wt_writer_t *w, int bidirectional,
-                                                 uint64_t maximum);
+                                                  uint64_t maximum);
 
 /* Parse the one-varint capsules. Anything but exactly one varint is
  * H3_MESSAGE_ERROR: a flow-control value that is not a number is not a limit. */
@@ -140,8 +142,8 @@ typedef struct wt_webtransport_flow_limits {
 } wt_webtransport_flow_limits_t;
 
 void wt_webtransport_flow_limits_init(wt_webtransport_flow_limits_t *limits);
-wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limits, uint64_t maximum,
-                                             uint64_t *out_error);
+wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limits,
+                                             uint64_t maximum, uint64_t *out_error);
 wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *limits,
                                                 int bidirectional, uint64_t maximum,
                                                 uint64_t *out_error);

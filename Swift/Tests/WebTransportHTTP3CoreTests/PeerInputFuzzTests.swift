@@ -30,10 +30,10 @@ private struct SplitMix64: RandomNumberGenerator {
     init(seed: UInt64) { self.state = seed }
     mutating func next() -> UInt64 {
         state &+= 0x9E37_79B9_7F4A_7C15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        return z ^ (z >> 31)
+        var hash = state
+        hash = (hash ^ (hash >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        hash = (hash ^ (hash >> 27)) &* 0x94D0_49BB_1331_11EB
+        return hash ^ (hash >> 31)
     }
 }
 
@@ -75,15 +75,15 @@ private struct FuzzCorpus {
         var out = [UInt8](seed)
         switch Int.random(in: 0..<6, using: &generator) {
         case 0:  // bit flip
-            let i = Int.random(in: 0..<out.count, using: &generator)
-            out[i] ^= UInt8(1 << Int.random(in: 0..<8, using: &generator))
+            let index = Int.random(in: 0..<out.count, using: &generator)
+            out[index] ^= UInt8(1 << Int.random(in: 0..<8, using: &generator))
         case 1:  // truncate — exercises every "read past end" path
             out = Array(out.prefix(Int.random(in: 0..<out.count, using: &generator)))
         case 2:  // extend with noise
             out.append(contentsOf: [UInt8](bytes(count: Int.random(in: 1...64, using: &generator))))
         case 3:  // byte overwrite with a boundary value
-            let i = Int.random(in: 0..<out.count, using: &generator)
-            out[i] =
+            let index = Int.random(in: 0..<out.count, using: &generator)
+            out[index] =
                 [0x00, 0x01, 0x3f, 0x40, 0x7f, 0x80, 0xbf, 0xc0, 0xff]
                 .randomElement(using: &generator) ?? 0xff
         case 4:  // splice against fresh noise

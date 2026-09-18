@@ -73,16 +73,27 @@ public enum QPACKHuffman {
             var node = root
             for shift in stride(from: Int(entry.bitCount) - 1, through: 0, by: -1) {
                 let bit = (entry.code >> UInt32(shift)) & 0x01
+                // The child is taken through an `if let` branch rather than assigned and
+                // then force-unwrapped: the previous shape asserted "the assignment above
+                // definitely happened", which is true but is an invariant a later edit can
+                // break silently. Creating the node in the branch it is missing from makes
+                // the non-optional binding the compiler's job.
                 if bit == 0 {
-                    if node.zero == nil {
-                        node.zero = HuffmanNode()
+                    if let existing = node.zero {
+                        node = existing
+                    } else {
+                        let created = HuffmanNode()
+                        node.zero = created
+                        node = created
                     }
-                    node = node.zero!
                 } else {
-                    if node.one == nil {
-                        node.one = HuffmanNode()
+                    if let existing = node.one {
+                        node = existing
+                    } else {
+                        let created = HuffmanNode()
+                        node.one = created
+                        node = created
                     }
-                    node = node.one!
                 }
             }
             node.symbol = symbol

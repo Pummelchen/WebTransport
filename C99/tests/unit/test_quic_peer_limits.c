@@ -57,11 +57,10 @@ static size_t build_parameters(uint8_t *out, size_t capacity) {
   WT_EXPECT_OK("initial_max_streams_uni", wt_quic_transport_parameters_add_integer(
                                               &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 9U));
   WT_EXPECT_OK("active_connection_id_limit",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT,
-                                                        11U));
-  WT_EXPECT_OK("max_datagram_frame_size",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE,
-                                                        1200U));
+               wt_quic_transport_parameters_add_integer(
+                   &params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, 11U));
+  WT_EXPECT_OK("max_datagram_frame_size", wt_quic_transport_parameters_add_integer(
+                                              &params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U));
   WT_EXPECT_OK("the list encodes", wt_quic_transport_parameters_encode(&w, &params));
   return wt_writer_offset(&w);
 }
@@ -92,8 +91,8 @@ static void test_limits(void) {
   size_t length;
 
   init_connection(&connection, 30000000U);
-  WT_EXPECT_INT("no parameters have been parsed yet",
-                0, wt_quic_connection_peer_limits(&connection)->set);
+  WT_EXPECT_INT("no parameters have been parsed yet", 0,
+                wt_quic_connection_peer_limits(&connection)->set);
 
   length = build_parameters(encoded, sizeof(encoded));
   WT_EXPECT_TRUE("the parameter list has bytes", length > 0U);
@@ -106,17 +105,16 @@ static void test_limits(void) {
                 limits->max_idle_timeout);
   WT_EXPECT_U64("the payload size", 1452U, limits->max_udp_payload_size);
   WT_EXPECT_U64("the connection's data limit", 100000U, limits->initial_max_data);
-  WT_EXPECT_U64("the bidi-local stream limit", 200000U,
-                limits->initial_max_stream_data_bidi_local);
+  WT_EXPECT_U64("the bidi-local stream limit", 200000U, limits->initial_max_stream_data_bidi_local);
   WT_EXPECT_U64("the bidi-remote stream limit", 300000U,
                 limits->initial_max_stream_data_bidi_remote);
-  WT_EXPECT_U64("the unidirectional stream limit", 400000U,
-                limits->initial_max_stream_data_uni);
+  WT_EXPECT_U64("the unidirectional stream limit", 400000U, limits->initial_max_stream_data_uni);
   WT_EXPECT_U64("the bidirectional stream count", 7U, limits->initial_max_streams_bidi);
   WT_EXPECT_U64("the unidirectional stream count", 9U, limits->initial_max_streams_uni);
   WT_EXPECT_U64("the connection ID limit", 11U, limits->active_connection_id_limit);
   WT_EXPECT_U64("and the datagram size", 1200U, limits->max_datagram_frame_size);
-  WT_EXPECT_INT("and the reliable-stream-reset flag, which presence alone sets", 1, limits->reset_stream_at);
+  WT_EXPECT_INT("and the reliable-stream-reset flag, which presence alone sets", 1,
+                limits->reset_stream_at);
 
   /* A limit is what it is, not what the encoder happened to write: the same values through a real
    * round trip of the codec are what the test above read back. */
@@ -124,10 +122,11 @@ static void test_limits(void) {
     wt_quic_transport_parameters_t decoded;
     wt_quic_error_t error = WT_QUIC_NO_ERROR;
     uint64_t value = 0U;
-    WT_EXPECT_OK("the bytes decode", wt_quic_transport_parameters_decode(encoded, length, &decoded,
-                                                                        &error));
-    WT_EXPECT_OK("and max_idle_timeout reads back",
-                 wt_quic_transport_parameters_integer(&decoded, WT_QUIC_TP_MAX_IDLE_TIMEOUT, &value));
+    WT_EXPECT_OK("the bytes decode",
+                 wt_quic_transport_parameters_decode(encoded, length, &decoded, &error));
+    WT_EXPECT_OK(
+        "and max_idle_timeout reads back",
+        wt_quic_transport_parameters_integer(&decoded, WT_QUIC_TP_MAX_IDLE_TIMEOUT, &value));
     WT_EXPECT_U64("as the value that was written, in the wire's own milliseconds", 7000U, value);
   }
 
@@ -135,7 +134,8 @@ static void test_limits(void) {
    * connection's own timer must arm for it. */
   {
     uint64_t delay = 0U;
-    WT_EXPECT_OK("the idle timer is armed", wt_quic_connection_next_timeout(&connection, 0U, &delay));
+    WT_EXPECT_OK("the idle timer is armed",
+                 wt_quic_connection_next_timeout(&connection, 0U, &delay));
     WT_EXPECT_U64("for the smaller of the two idle timeouts", 7000000U, delay);
   }
 }
@@ -162,7 +162,8 @@ static void test_a_huge_idle_timeout_saturates(void) {
   WT_EXPECT_OK("the connection reads it",
                wt_quic_connection_set_peer_parameters(&connection, encoded, length));
   limits = wt_quic_connection_peer_limits(&connection);
-  WT_EXPECT_U64("and the limit saturates rather than wrapping", UINT64_MAX, limits->max_idle_timeout);
+  WT_EXPECT_U64("and the limit saturates rather than wrapping", UINT64_MAX,
+                limits->max_idle_timeout);
 }
 
 /* The defaults: an empty list grants no flow control, allows the two connection IDs, and leaves the
@@ -187,10 +188,11 @@ static void test_defaults(void) {
   /* The field holds the PEER's value, which is zero when it sent none; the effective timeout is the
    * minimum of the two, which is this endpoint's own here. */
   WT_EXPECT_U64("with no idle timeout from the peer", 0U, limits->max_idle_timeout);
-  WT_EXPECT_INT("and no reliable-stream-reset flag, which a peer that says nothing has not advertised", 0,
-                limits->reset_stream_at);
-  WT_EXPECT_OK("so its timer arms for its own", wt_quic_connection_next_timeout(&connection, 0U,
-                                                                               &delay));
+  WT_EXPECT_INT(
+      "and no reliable-stream-reset flag, which a peer that says nothing has not advertised", 0,
+      limits->reset_stream_at);
+  WT_EXPECT_OK("so its timer arms for its own",
+               wt_quic_connection_next_timeout(&connection, 0U, &delay));
   WT_EXPECT_U64("which is thirty seconds", 30000000U, delay);
 
   /* The other way round: a peer that limits the idle timeout against a connection that does not. */
@@ -203,17 +205,16 @@ static void test_defaults(void) {
     wt_quic_transport_parameters_init(&params);
     /* 4000 on the wire is four SECONDS (RFC 9000 section 18.2 counts milliseconds), which is 4,000,000
      * microseconds -- the number the assertion below wants, written as the peer would write it. */
-    WT_EXPECT_OK("the peer's idle timeout",
-                 wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_IDLE_TIMEOUT,
-                                                          4000U));
+    WT_EXPECT_OK("the peer's idle timeout", wt_quic_transport_parameters_add_integer(
+                                                &params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 4000U));
     w = wt_writer_init(encoded, sizeof(encoded));
     WT_EXPECT_OK("encodes", wt_quic_transport_parameters_encode(&w, &params));
     length = wt_writer_offset(&w);
     WT_EXPECT_OK("and parses",
                  wt_quic_connection_set_peer_parameters(&connection, encoded, length));
   }
-  WT_EXPECT_OK("the timer arms for the peer's", wt_quic_connection_next_timeout(&connection, 0U,
-                                                                               &delay));
+  WT_EXPECT_OK("the timer arms for the peer's",
+               wt_quic_connection_next_timeout(&connection, 0U, &delay));
   WT_EXPECT_U64("which is four seconds", 4000000U, delay);
 }
 
@@ -229,9 +230,9 @@ static void test_malformed(void) {
 
   /* A max_udp_payload_size below 1200 is a TRANSPORT_PARAMETER_ERROR (section 18.2). */
   wt_quic_transport_parameters_init(&params);
-  WT_EXPECT_OK("a small payload size is encodable",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE,
-                                                        1000U));
+  WT_EXPECT_OK(
+      "a small payload size is encodable",
+      wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE, 1000U));
   w = wt_writer_init(encoded, sizeof(encoded));
   WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
   length = wt_writer_offset(&w);

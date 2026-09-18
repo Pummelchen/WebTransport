@@ -86,8 +86,7 @@ void wt_quic_loss_init(wt_quic_loss_t *loss);
 
 /* Record a packet that was sent. WT_ERR_LIMIT when the list is full, which is the caller's signal
  * to detect losses first; nothing is recorded in that case. */
-wt_status_t wt_quic_loss_on_sent(wt_quic_loss_t *loss,
-                                 const wt_quic_sent_packet_t *packet);
+wt_status_t wt_quic_loss_on_sent(wt_quic_loss_t *loss, const wt_quic_sent_packet_t *packet);
 
 /* Record that a packet was acknowledged and remove it.
  *
@@ -142,8 +141,7 @@ size_t wt_quic_loss_discard_space(wt_quic_loss_t *loss, uint8_t packet_number_sp
  * for; `max_ack_delay` is the peer's delay for this space, which is zero outside the Application
  * space. */
 wt_status_t wt_quic_loss_pto(const wt_quic_loss_t *loss, uint8_t packet_number_space,
-                             const wt_quic_rtt_t *rtt, uint64_t max_ack_delay,
-                             uint64_t *out_time);
+                             const wt_quic_rtt_t *rtt, uint64_t max_ack_delay, uint64_t *out_time);
 
 /* Record that the probe timeout fired: the backoff doubles, and the caller is expected to send a
  * probe (RFC 9002 section 6.2.4). The doubling is bounded so that a long-lived connection whose

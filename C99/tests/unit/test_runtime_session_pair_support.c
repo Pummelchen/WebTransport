@@ -49,21 +49,19 @@ static void build_parameters(uint8_t *out, size_t capacity, int is_server) {
   /* Datagram support is ADVERTISED, not assumed: a peer may only send a DATAGRAM frame when this endpoint's
    * parameters said it would accept one, so the same match-the-advertisement rule as the flow-control grants
    * applies here (WT-110's lesson, in a different parameter). */
-  WT_EXPECT_OK("max_datagram_frame_size",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE,
-                                                        1200U));
+  WT_EXPECT_OK("max_datagram_frame_size", wt_quic_transport_parameters_add_integer(
+                                              &params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U));
   /* The reliable-stream-reset extension, which draft-16 section 3.1 requires of BOTH roles and which a
    * WebTransport stream needs: its session prefix is the first thing on the stream. */
-  WT_EXPECT_OK("reset_stream_at",
-               wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
+  WT_EXPECT_OK("reset_stream_at", wt_quic_transport_parameters_add_bytes(
+                                      &params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));
   /* RFC 9000 section 7.3: both roles name the Source Connection ID they use, and the server also names the
    * Destination Connection ID the client's first Initial carried. This pair uses one connection ID for
    * everything, so both values are the same bytes -- which is the point: the NAMES differ per role even when the
    * values do not. */
-  WT_EXPECT_OK("initial_source_connection_id",
-               wt_quic_transport_parameters_add_bytes(&params,
-                                                      WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
-                                                      k_connection_id, sizeof(k_connection_id)));
+  WT_EXPECT_OK("initial_source_connection_id", wt_quic_transport_parameters_add_bytes(
+                                                   &params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                                   k_connection_id, sizeof(k_connection_id)));
   if (is_server != 0) {
     WT_EXPECT_OK("original_destination_connection_id",
                  wt_quic_transport_parameters_add_bytes(
@@ -96,7 +94,8 @@ static size_t read_fixture(const char *name, uint8_t *out, size_t capacity) {
 static int load_fixtures(fixtures_t *fixtures) {
   memset(fixtures, 0, sizeof(*fixtures));
   fixtures->leaf_len = read_fixture("leaf.der", fixtures->leaf, sizeof(fixtures->leaf));
-  fixtures->ca_bundle_len = read_fixture("ca.pem", fixtures->ca_bundle, sizeof(fixtures->ca_bundle));
+  fixtures->ca_bundle_len =
+      read_fixture("ca.pem", fixtures->ca_bundle, sizeof(fixtures->ca_bundle));
   fixtures->private_key_len =
       read_fixture("leaf-key.der", fixtures->private_key, sizeof(fixtures->private_key));
   return fixtures->leaf_len != 0U && fixtures->ca_bundle_len != 0U &&
@@ -104,7 +103,7 @@ static int load_fixtures(fixtures_t *fixtures) {
 }
 
 static wt_status_t side_on_frame_payload(void *context_side, uint64_t stream_id, uint64_t type,
-                                        const uint8_t *payload, size_t length, int last);
+                                         const uint8_t *payload, size_t length, int last);
 static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const uint8_t *data,
                                        size_t length, int fin);
 static wt_status_t side_on_datagram(void *context, const uint8_t *data, size_t length);
@@ -140,7 +139,7 @@ static void connection_config(wt_quic_connection_config_t *config, wt_quic_role_
 /* Arm both endpoints: sockets, configurations, an identity for the server, and a trust store for the client
  * so that the handshake is AUTHENTICATED rather than bypassed. */
 void arm_pair_to(pair_t *pair, const wt_udp_address_t *client_peer,
-                        const wt_udp_address_t *server_peer) {
+                 const wt_udp_address_t *server_peer) {
   static const char *const alpn_h3[] = {"h3"};
 
   WT_EXPECT_TRUE("the trust fixtures load", load_fixtures(&pair->fixtures));
@@ -183,16 +182,14 @@ void arm_pair_to(pair_t *pair, const wt_udp_address_t *client_peer,
   pair->server_tls.transport_parameters = g_server_parameters;
   pair->server_tls.transport_parameters_len = g_server_parameters_len;
 
-  WT_EXPECT_OK("the server arms",
-               wt_runtime_session_start_server(&pair->server, &pair->server_socket,
-                                               server_peer, k_connection_id,
-                                               sizeof(k_connection_id), &pair->server_connection,
-                                               &pair->server_tls, pair->now));
-  WT_EXPECT_OK("the client arms",
-               wt_runtime_session_start_client(&pair->client, &pair->client_socket,
-                                               client_peer, k_connection_id,
-                                               sizeof(k_connection_id), &pair->client_connection,
-                                               &pair->client_tls, pair->now));
+  WT_EXPECT_OK("the server arms", wt_runtime_session_start_server(
+                                      &pair->server, &pair->server_socket, server_peer,
+                                      k_connection_id, sizeof(k_connection_id),
+                                      &pair->server_connection, &pair->server_tls, pair->now));
+  WT_EXPECT_OK("the client arms", wt_runtime_session_start_client(
+                                      &pair->client, &pair->client_socket, client_peer,
+                                      k_connection_id, sizeof(k_connection_id),
+                                      &pair->client_connection, &pair->client_tls, pair->now));
   /* What the parameters above advertise, in force on both sides: the same numbers, one place. */
   WT_EXPECT_OK("the server's advertised limits are in force",
                wt_runtime_session_advertise(&pair->server, 100000U, 4096U, 8U, 8U));
@@ -237,7 +234,7 @@ unsigned pump_pair(pair_t *pair, unsigned rounds, int (*done)(const pair_t *)) {
 /* ---- the sinks ------------------------------------------------------------------------------- */
 
 static wt_status_t side_on_frame_payload(void *context_side, uint64_t stream_id, uint64_t type,
-                                        const uint8_t *payload, size_t length, int last) {
+                                         const uint8_t *payload, size_t length, int last) {
   http3_side_t *side = context_side;
 
   if (type == WT_HTTP3_FRAME_HEADERS && stream_id == side->request_stream_id) {
@@ -258,7 +255,8 @@ static wt_status_t side_on_frame_payload(void *context_side, uint64_t stream_id,
 wt_status_t side_on_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame) {
   http3_side_t *side = context;
   side->frames_seen++;
-  if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM || frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM_AT) {
+  if (frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM ||
+      frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM_AT) {
     side->resets++;
     side->last_reset_code = frame->kind == WT_QUIC_FRAME_KIND_RESET_STREAM
                                 ? frame->as.reset_stream.application_error_code

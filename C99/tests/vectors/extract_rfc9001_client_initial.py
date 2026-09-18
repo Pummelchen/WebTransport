@@ -62,9 +62,7 @@ def extract(rfc_text: str) -> bytes:
     # RFC gives, not assumed.
     frame_length = 4 + 241
     if len(payload) != frame_length:
-        raise SystemExit(
-            f"expected the printed block to be {frame_length} bytes, got {len(payload)}"
-        )
+        raise SystemExit(f"expected the printed block to be {frame_length} bytes, got {len(payload)}")
     padding = 1162 - frame_length
     payload = payload + bytes(padding)
 

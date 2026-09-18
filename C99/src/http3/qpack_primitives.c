@@ -107,7 +107,7 @@ wt_status_t wt_qpack_string_decode(wt_cursor_t *c, const uint8_t **out_bytes, si
 }
 
 wt_status_t wt_qpack_string_encode_coded(wt_writer_t *w, const uint8_t *bytes, size_t length,
-                                        int huffman, uint8_t *scratch, size_t scratch_capacity) {
+                                         int huffman, uint8_t *scratch, size_t scratch_capacity) {
   const uint8_t *wire = bytes;
   size_t wire_length = length;
 

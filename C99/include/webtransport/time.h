@@ -37,8 +37,7 @@ uint64_t wt_now_millis(void);
  * covers 584,000 years, so the wrap this avoids is theoretical; the reason to
  * write it this way anyway is that it is the same length and it cannot be got
  * wrong. */
-int wt_deadline_passed(uint64_t start_micros, uint64_t interval_micros,
-                       uint64_t now_micros);
+int wt_deadline_passed(uint64_t start_micros, uint64_t interval_micros, uint64_t now_micros);
 
 /* Microseconds left before `start + interval`, or 0 when it has passed. */
 uint64_t wt_deadline_remaining(uint64_t start_micros, uint64_t interval_micros,

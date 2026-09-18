@@ -28,7 +28,8 @@ size_t wt_tls_key_share_key_len(uint16_t group) {
 static int all_zero(const uint8_t *bytes, size_t len) {
   uint8_t accumulator = 0U;
   size_t i;
-  for (i = 0U; i < len; i++) accumulator = (uint8_t)(accumulator | bytes[i]);
+  for (i = 0U; i < len; i++)
+    accumulator = (uint8_t)(accumulator | bytes[i]);
   return accumulator == 0U;
 }
 
@@ -45,11 +46,9 @@ static wt_status_t x25519_derive(const uint8_t scalar[WT_TLS_X25519_KEY_LEN],
   size_t out_len = WT_TLS_X25519_KEY_LEN;
   wt_status_t status = WT_ERR_UNSUPPORTED;
 
-  mine = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, scalar,
-                                      WT_TLS_X25519_KEY_LEN);
+  mine = EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, NULL, scalar, WT_TLS_X25519_KEY_LEN);
   if (mine == NULL) goto done;
-  theirs = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, u_coordinate,
-                                       WT_TLS_X25519_KEY_LEN);
+  theirs = EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, NULL, u_coordinate, WT_TLS_X25519_KEY_LEN);
   if (theirs == NULL) goto done;
   ctx = EVP_PKEY_CTX_new(mine, NULL);
   if (ctx == NULL) {
@@ -86,9 +85,9 @@ wt_status_t wt_tls_x25519(const uint8_t scalar[WT_TLS_X25519_KEY_LEN],
   return x25519_derive(scalar, u_coordinate, out);
 }
 
-wt_status_t wt_tls_key_share_public_key(
-    uint16_t group, const uint8_t private_key[WT_TLS_X25519_KEY_LEN],
-    uint8_t public_key[WT_TLS_X25519_KEY_LEN]) {
+wt_status_t wt_tls_key_share_public_key(uint16_t group,
+                                        const uint8_t private_key[WT_TLS_X25519_KEY_LEN],
+                                        uint8_t public_key[WT_TLS_X25519_KEY_LEN]) {
   static const uint8_t base_point[WT_TLS_X25519_KEY_LEN] = {9U};
   if (!wt_tls_key_share_supported(group)) return WT_ERR_UNSUPPORTED;
   if (private_key == NULL || public_key == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -97,8 +96,7 @@ wt_status_t wt_tls_key_share_public_key(
   return x25519_derive(private_key, base_point, public_key);
 }
 
-wt_status_t wt_tls_key_share_generate(uint16_t group,
-                                      uint8_t private_key[WT_TLS_X25519_KEY_LEN],
+wt_status_t wt_tls_key_share_generate(uint16_t group, uint8_t private_key[WT_TLS_X25519_KEY_LEN],
                                       uint8_t public_key[WT_TLS_X25519_KEY_LEN]) {
   EVP_PKEY_CTX *ctx = NULL;
   EVP_PKEY *key = NULL;
@@ -134,10 +132,10 @@ done:
   return status;
 }
 
-wt_status_t wt_tls_key_share_shared_secret(
-    uint16_t group, const uint8_t private_key[WT_TLS_X25519_KEY_LEN],
-    const uint8_t *peer_public, size_t peer_public_len,
-    uint8_t out[WT_TLS_X25519_KEY_LEN]) {
+wt_status_t wt_tls_key_share_shared_secret(uint16_t group,
+                                           const uint8_t private_key[WT_TLS_X25519_KEY_LEN],
+                                           const uint8_t *peer_public, size_t peer_public_len,
+                                           uint8_t out[WT_TLS_X25519_KEY_LEN]) {
   wt_status_t status;
 
   if (!wt_tls_key_share_supported(group)) return WT_ERR_UNSUPPORTED;

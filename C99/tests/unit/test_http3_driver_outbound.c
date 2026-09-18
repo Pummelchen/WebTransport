@@ -32,7 +32,8 @@ void test_starting_our_own_streams(void) {
                wt_http3_driver_start_control(&driver, &settings, scratch, sizeof(scratch), &w));
   length = wt_writer_offset(&w);
   WT_EXPECT_TRUE("with bytes", length > 0U);
-  WT_EXPECT_U64("the first byte being the control type", WT_HTTP3_STREAM_CONTROL, (uint64_t)wire[0]);
+  WT_EXPECT_U64("the first byte being the control type", WT_HTTP3_STREAM_CONTROL,
+                (uint64_t)wire[0]);
 
   cursor = wt_cursor_init(wire + 1U, length - 1U);
   WT_EXPECT_OK("and the rest decoding as a frame", wt_http3_frame_decode(&cursor, &frame, &error));
@@ -285,4 +286,3 @@ void test_the_quic_transport_forwards(void) {
                    transport.send_datagram(transport.context, (const uint8_t *)"x", 1U));
   wt_quic_connection_clear(&connection);
 }
-

@@ -345,17 +345,27 @@ set(WT_PUBLIC_HEADERS
 
 # The sanitizer flags are added to every target when the option is on, including
 # the tests and the apps, so that a run either has them everywhere or nowhere.
-# -fno-sanitize=function is required: clang's `undefined` includes it, and it
-# fires on the vtable type-punning inside the vendored crypto this library will
-# link, which is not a defect in this code. The Darwin symbolizer is disabled at
-# run time by the test script for the same reason.
+# The Darwin symbolizer is disabled at run time by the test script for the same
+# reason.
 set(WT_SANITIZER_FLAGS "")
 if(WEBTRANSPORT_C99_SANITIZE)
   if(MSVC)
     message(FATAL_ERROR "WEBTRANSPORT_C99_SANITIZE is not supported with MSVC; use clang or gcc")
   endif()
-  set(WT_SANITIZER_FLAGS -fsanitize=address,undefined -fno-sanitize=function
-                         -fno-omit-frame-pointer)
+  set(WT_SANITIZER_FLAGS -fsanitize=address,undefined -fno-omit-frame-pointer)
+  # Clang's `undefined` includes the indirect-call check, which fires on the
+  # vtable type-punning inside the vendored crypto this library links. That is
+  # not a defect in this code, so it is turned off -- but the flag that turns it
+  # off is clang-only, and GNU C rejects it outright:
+  #
+  #   cc: error: unrecognized argument to '-fno-sanitize=' option: 'function'
+  #
+  # Passing it unconditionally made this configuration unbuildable with gcc,
+  # which the MSVC message above has always offered as an option. GNU C has no
+  # such check to turn off, so there is nothing to substitute for it there.
+  if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    list(APPEND WT_SANITIZER_FLAGS -fno-sanitize=function)
+  endif()
 endif()
 
 # One function that configures a library target identically, so the static and

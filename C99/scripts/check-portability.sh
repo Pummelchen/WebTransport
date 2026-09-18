@@ -20,7 +20,19 @@ doc="$root/docs/PORTABILITY.md"
 # of them drifts. The list used to hold nine names while the library also called
 # inet_ntop, setsockopt, getsockopt, socket and bind, so those five could never fail
 # the check (F-26).
-posix_names="close fcntl O_NONBLOCK poll errno recvmsg sendmsg MSG_PEEK MSG_TRUNC sendto recvfrom snprintf inet_pton inet_ntop setsockopt getsockopt socket bind"
+#
+# THE LIST IS THE LIMIT, AND IT IS A HAND-MAINTAINED ONE. This check cannot see a
+# platform-only call whose name nobody has added here: `getpid()` -- a POSIX call MSVC
+# does not have -- passes it, which was demonstrated rather than assumed (AUD-0019).
+# What catches that case is the Windows half of the matrix: `msvc`, `clang-cl` and
+# `windows-native` in c99-ci.yml all configure, build and ctest the library, so a call
+# that does not exist on Windows fails the build. This check keeps the DOCUMENT honest;
+# those builds are what keep the CODE honest. Saying so here is the point -- a reader
+# who took the old success line ("every POSIX-only name the library uses is in the
+# inventory") for a universal claim was reading a stronger statement than the mechanism
+# could make. Widening this list is cheap and was done again here: the library was
+# calling `htons`, `ntohs` and `clock_gettime` without any of them being checked.
+posix_names="close fcntl O_NONBLOCK poll errno recvmsg sendmsg MSG_PEEK MSG_TRUNC sendto recvfrom snprintf inet_pton inet_ntop setsockopt getsockopt socket bind htons ntohs clock_gettime"
 missing=0
 for name in $posix_names; do
   # Where the name is USED, in the library and the apps (a test may use it freely; the library is what ships).
@@ -36,4 +48,6 @@ if [ "$missing" -ne 0 ]; then
   echo "portability: $missing POSIX-only name(s) missing from the inventory"
   exit 1
 fi
-echo "portability: every POSIX-only name the library uses is in the inventory"
+echo "portability: every name on the checker's list that the library uses is in the inventory"
+echo "portability: a POSIX-only name NOT on that list is caught by the Windows builds, which compile"
+echo "portability: the library for MSVC, clang-cl and MSYS2 (c99-ci.yml); this check covers the list."

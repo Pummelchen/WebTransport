@@ -49,8 +49,10 @@ void test_a_connection_frame_is_routed(void) {
   prefix_length = wt_quic_varint_encode(WT_WEBTRANSPORT_STREAM_UNI, prefix, sizeof(prefix));
   /* The session ID is part of the draft's prefix, so a frame that stops after the type is TRUNCATED rather
    * than a stream whose payload begins with its own session ID. */
-  prefix_length += wt_quic_varint_encode(0U, prefix + prefix_length, sizeof(prefix) - prefix_length);
-  for (i = 0U; i < sizeof(body); i++) body[i] = (uint8_t)(0x10U + i);
+  prefix_length +=
+      wt_quic_varint_encode(0U, prefix + prefix_length, sizeof(prefix) - prefix_length);
+  for (i = 0U; i < sizeof(body); i++)
+    body[i] = (uint8_t)(0x10U + i);
   frame.kind = WT_QUIC_FRAME_KIND_STREAM;
   frame.as.stream.id = 2U; /* client-initiated unidirectional: low bit clear */
   frame.as.stream.offset = 0U;
@@ -59,8 +61,9 @@ void test_a_connection_frame_is_routed(void) {
   frame.as.stream.has_length = 1;
   frame.as.stream.data = prefix;
   frame.as.stream.length = prefix_length;
-  WT_EXPECT_OK("the prefix frame is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_OK(
+      "the prefix frame is routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
   WT_EXPECT_U64("delivering nothing to the session yet", 0U, (uint64_t)log.session.streams);
   WT_EXPECT_U64("and nothing to the frame sink", 0U, (uint64_t)log.frames.frames);
 
@@ -68,8 +71,9 @@ void test_a_connection_frame_is_routed(void) {
   frame.as.stream.has_offset = 1;
   frame.as.stream.data = body;
   frame.as.stream.length = sizeof(body);
-  WT_EXPECT_OK("the data frame is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_OK(
+      "the data frame is routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
   WT_EXPECT_U64("handing the session its bytes", 1U, (uint64_t)log.session.streams);
   WT_EXPECT_U64("all of them", (uint64_t)sizeof(body), (uint64_t)log.session.stream_bytes);
   WT_EXPECT_U64("for that stream", 2U, log.session.last_stream_id);
@@ -95,9 +99,9 @@ void test_a_connection_frame_is_routed(void) {
     frame.as.stream.has_length = 1;
     frame.as.stream.data = control;
     frame.as.stream.length = 1U + wt_writer_offset(&cw);
-    WT_EXPECT_OK("the control stream's first frame is routed",
-                 wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink,
-                                               64U));
+    WT_EXPECT_OK(
+        "the control stream's first frame is routed",
+        wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
     WT_EXPECT_U64("to the frame sink", 1U, (uint64_t)log.frames.frames);
     WT_EXPECT_U64("as SETTINGS", WT_HTTP3_FRAME_SETTINGS, log.frames.last_type);
     WT_EXPECT_U64("and not to the session", 1U, (uint64_t)log.session.streams);
@@ -107,8 +111,8 @@ void test_a_connection_frame_is_routed(void) {
   frame.kind = WT_QUIC_FRAME_KIND_DATAGRAM;
   frame.as.datagram.data = body;
   frame.as.datagram.length = 4U;
-  WT_EXPECT_OK("a datagram is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_OK("a datagram is routed", wt_http3_driver_on_quic_frame(
+                                           &driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
   WT_EXPECT_U64("as one datagram", 1U, (uint64_t)log.session.datagrams);
   WT_EXPECT_U64("of its four bytes", 4U, (uint64_t)log.session.datagram_bytes);
 
@@ -116,14 +120,16 @@ void test_a_connection_frame_is_routed(void) {
    * to the connection's own stream state. */
   frame.kind = WT_QUIC_FRAME_KIND_STREAM;
   frame.as.stream.id = 3U; /* server-initiated: ours, so not routed */
-  WT_EXPECT_OK("our own stream's frame is ignored",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_OK(
+      "our own stream's frame is ignored",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
   WT_EXPECT_U64("reaching neither sink", 1U, (uint64_t)log.session.streams);
 
   /* A frame kind this layer has no interest in is ignored rather than refused. */
   frame.kind = WT_QUIC_FRAME_KIND_PING;
-  WT_EXPECT_OK("a ping is not ours to route",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
+  WT_EXPECT_OK(
+      "a ping is not ours to route",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 64U));
 }
 
 /* The bidirectional-stream classifier, on its own: the routing that uses it is a separate step because that is
@@ -159,8 +165,8 @@ void test_the_bidi_classifier(void) {
     wt_writer_u8(&rw, 0x00U);
     wt_writer_u8(&rw, 0x80U);
     WT_EXPECT_OK("a request stream classifies as a request",
-                 wt_http3_driver_classify_bidi_start(request, wt_writer_offset(&rw), &kind, &session_id,
-                                                     &consumed));
+                 wt_http3_driver_classify_bidi_start(request, wt_writer_offset(&rw), &kind,
+                                                     &session_id, &consumed));
     WT_EXPECT_INT("as the request kind", (int)WT_HTTP3_BIDI_START_REQUEST, (int)kind);
     WT_EXPECT_U64("with nothing consumed", 0U, (uint64_t)consumed);
   }
@@ -212,8 +218,9 @@ void test_a_bidi_stream_is_routed_by_its_prefix(void) {
   frame.as.stream.data = wire;
   frame.as.stream.length = wire_length;
 
-  WT_EXPECT_OK("a WebTransport stream is routed",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
+  WT_EXPECT_OK(
+      "a WebTransport stream is routed",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
   WT_EXPECT_U64("the session is handed the bytes", 1U, (uint64_t)session.streams);
   WT_EXPECT_U64("after the prefix, and only those", 5U, (uint64_t)session.stream_bytes);
   WT_EXPECT_U64("for the stream they arrived on", 0U, session.last_stream_id);
@@ -236,8 +243,9 @@ void test_a_bidi_stream_is_routed_by_its_prefix(void) {
     wt_http3_driver_init(&other, &other_endpoint);
     wt_http3_driver_set_session_id(&other, 12U);
     frame.as.stream.id = 4U;
-    WT_EXPECT_STATUS("a stream for another session is refused", WT_ERR_PROTOCOL,
-                     wt_http3_driver_on_quic_frame(&other, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
+    WT_EXPECT_STATUS(
+        "a stream for another session is refused", WT_ERR_PROTOCOL,
+        wt_http3_driver_on_quic_frame(&other, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
     WT_EXPECT_U64("and reaches the session never", 1U, (uint64_t)session.streams);
   }
 
@@ -252,7 +260,8 @@ void test_a_bidi_stream_is_routed_by_its_prefix(void) {
     frame.as.stream.data = request;
     frame.as.stream.length = wt_writer_offset(&rw);
     (void)wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U);
-    WT_EXPECT_U64("a request stream does not reach the session as data", 1U, (uint64_t)session.streams);
+    WT_EXPECT_U64("a request stream does not reach the session as data", 1U,
+                  (uint64_t)session.streams);
     /* And the endpoint tracks it as a request stream, which is what makes it a request rather than nothing. */
     WT_EXPECT_OK("while the endpoint tracks it as a request",
                  wt_http3_endpoint_request_state(&endpoint, 8U, &state));
@@ -292,15 +301,17 @@ void test_a_bidirectional_prefix_split_across_frames(void) {
   frame.as.stream.has_length = 1;
   frame.as.stream.data = wire;
   frame.as.stream.length = 1U; /* inside the two-byte type: nothing is decided yet */
-  WT_EXPECT_OK("the first piece is held",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
+  WT_EXPECT_OK(
+      "the first piece is held",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
   WT_EXPECT_U64("with nothing delivered", 0U, (uint64_t)session.streams);
   WT_EXPECT_U64("and the stream waiting", 1U, (uint64_t)wt_http3_driver_pending_count(&driver));
   frame.as.stream.offset = 1U;
   frame.as.stream.data = wire + 1;
   frame.as.stream.length = wire_length - 1U;
-  WT_EXPECT_OK("the rest completes the prefix",
-               wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
+  WT_EXPECT_OK(
+      "the rest completes the prefix",
+      wt_http3_driver_on_quic_frame(&driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink, 4096U));
   WT_EXPECT_U64("and the session has the payload", 5U, (uint64_t)session.stream_bytes);
   WT_EXPECT_U64("delivered once", 1U, (uint64_t)session.streams);
   WT_EXPECT_U64("with nothing left waiting", 0U, (uint64_t)wt_http3_driver_pending_count(&driver));
@@ -325,14 +336,14 @@ void test_a_bidirectional_prefix_split_across_frames(void) {
     frame.as.stream.data = request;
     frame.as.stream.length = 2U;
     WT_EXPECT_OK("half a request prefix is held",
-                 wt_http3_driver_on_quic_frame(&request_driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink,
-                                               4096U));
+                 wt_http3_driver_on_quic_frame(&request_driver, WT_QUIC_SPACE_APPLICATION, &frame,
+                                               &sink, 4096U));
     frame.as.stream.offset = 2U;
     frame.as.stream.data = request + 2;
     frame.as.stream.length = wt_writer_offset(&rw) - 2U;
     WT_EXPECT_OK("and its rest goes to the request path",
-                 wt_http3_driver_on_quic_frame(&request_driver, WT_QUIC_SPACE_APPLICATION, &frame, &sink,
-                                               4096U));
+                 wt_http3_driver_on_quic_frame(&request_driver, WT_QUIC_SPACE_APPLICATION, &frame,
+                                               &sink, 4096U));
     WT_EXPECT_OK("which tracks the stream",
                  wt_http3_endpoint_request_state(&request_endpoint, 4U, &state));
     WT_EXPECT_TRUE("with the frames it was given applied",
@@ -413,8 +424,8 @@ void test_a_duplicate_settings_identifier_is_refused(void) {
   wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
   wt_http3_driver_init(&driver, &endpoint);
   wire[0] = (uint8_t)WT_HTTP3_STREAM_CONTROL;
-  frame_length = encode_settings_frame(frame_bytes, sizeof(frame_bytes), ok_payload,
-                                       sizeof(ok_payload));
+  frame_length =
+      encode_settings_frame(frame_bytes, sizeof(frame_bytes), ok_payload, sizeof(ok_payload));
   WT_EXPECT_TRUE("the valid SETTINGS frame encodes", frame_length > 0U);
   memcpy(wire + 1U, frame_bytes, frame_length);
   WT_EXPECT_OK("a valid SETTINGS payload is accepted",
@@ -450,8 +461,9 @@ void test_a_duplicate_settings_identifier_is_refused(void) {
   memcpy(wire + 1U, frame_bytes, frame_length);
   WT_EXPECT_OK("the first half is accepted",
                route_stream_frame(&driver, &sink, 2U, 0U, wire, 1U + 2U + 2U, 0));
-  WT_EXPECT_STATUS("the duplicate in the second half is refused", WT_ERR_PROTOCOL,
-                   route_stream_frame(&driver, &sink, 2U, 1U + 2U + 2U, wire + 1U + 2U + 2U, 2U, 0));
+  WT_EXPECT_STATUS(
+      "the duplicate in the second half is refused", WT_ERR_PROTOCOL,
+      route_stream_frame(&driver, &sink, 2U, 1U + 2U + 2U, wire + 1U + 2U + 2U, 2U, 0));
   WT_EXPECT_U64("with H3_SETTINGS_ERROR", WT_HTTP3_SETTINGS_ERROR,
                 (uint64_t)wt_http3_driver_last_error(&driver));
 
@@ -461,15 +473,14 @@ void test_a_duplicate_settings_identifier_is_refused(void) {
   wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
   wt_http3_driver_init(&driver, &endpoint);
   wire[0] = (uint8_t)WT_HTTP3_STREAM_CONTROL;
-  frame_length = encode_settings_frame(frame_bytes, sizeof(frame_bytes), ok_payload,
-                                       sizeof(ok_payload));
+  frame_length =
+      encode_settings_frame(frame_bytes, sizeof(frame_bytes), ok_payload, sizeof(ok_payload));
   memcpy(wire + 1U, frame_bytes, frame_length);
   WT_EXPECT_OK("the first SETTINGS is accepted",
                route_stream_frame(&driver, &sink, 2U, 0U, wire, 1U + frame_length, 0));
-  WT_EXPECT_STATUS("a second SETTINGS frame is refused", WT_ERR_PROTOCOL,
-                   route_stream_frame(&driver, &sink, 2U, 1U + frame_length, wire + 1U,
-                                      frame_length, 0));
+  WT_EXPECT_STATUS(
+      "a second SETTINGS frame is refused", WT_ERR_PROTOCOL,
+      route_stream_frame(&driver, &sink, 2U, 1U + frame_length, wire + 1U, frame_length, 0));
   WT_EXPECT_U64("as a frame unexpected", WT_HTTP3_FRAME_UNEXPECTED,
                 (uint64_t)wt_http3_driver_last_error(&driver));
 }
-

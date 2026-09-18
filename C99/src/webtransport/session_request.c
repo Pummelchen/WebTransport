@@ -122,9 +122,10 @@ wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is
   return WT_OK;
 }
 
-wt_status_t wt_webtransport_session_request_validate(
-    const wt_http3_message_t *message, const wt_webtransport_request_policy_t *policy,
-    wt_webtransport_session_request_t *out, wt_http3_error_t *out_error) {
+wt_status_t wt_webtransport_session_request_validate(const wt_http3_message_t *message,
+                                                     const wt_webtransport_request_policy_t *policy,
+                                                     wt_webtransport_session_request_t *out,
+                                                     wt_http3_error_t *out_error) {
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
   if (message == NULL || policy == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
 
@@ -147,7 +148,8 @@ wt_status_t wt_webtransport_session_request_validate(
    * interop peers send the older one. Accepting both is what "interoperable" has to mean at a server. */
   if (message->protocol_length == 0U ||
       !(token_is(message->protocol, message->protocol_length, WT_WEBTRANSPORT_PROTOCOL_TOKEN) ||
-        token_is(message->protocol, message->protocol_length, WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY))) {
+        token_is(message->protocol, message->protocol_length,
+                 WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY))) {
     out->outcome = WT_WEBTRANSPORT_REQUEST_NOT_WEBTRANSPORT;
     return WT_OK;
   }
@@ -197,10 +199,9 @@ wt_status_t wt_webtransport_session_request_validate(
   return WT_OK;
 }
 
-wt_status_t wt_webtransport_session_request_negotiate(wt_webtransport_session_request_t *decision,
-                                                      const wt_webtransport_protocol_list_t *offered,
-                                                      const wt_webtransport_protocol_list_t *supported,
-                                                      int require_selection) {
+wt_status_t wt_webtransport_session_request_negotiate(
+    wt_webtransport_session_request_t *decision, const wt_webtransport_protocol_list_t *offered,
+    const wt_webtransport_protocol_list_t *supported, int require_selection) {
   wt_webtransport_protocol_token_t selected;
   wt_status_t status;
 
@@ -231,9 +232,10 @@ wt_status_t wt_webtransport_session_request_negotiate(wt_webtransport_session_re
   return WT_OK;
 }
 
-wt_status_t wt_webtransport_session_response_selected_protocol(
-    const uint8_t *value, size_t length, const wt_webtransport_protocol_list_t *offered,
-    wt_webtransport_protocol_token_t *out) {
+wt_status_t
+wt_webtransport_session_response_selected_protocol(const uint8_t *value, size_t length,
+                                                   const wt_webtransport_protocol_list_t *offered,
+                                                   wt_webtransport_protocol_token_t *out) {
   wt_webtransport_protocol_token_t selected;
   size_t index;
   wt_status_t status;

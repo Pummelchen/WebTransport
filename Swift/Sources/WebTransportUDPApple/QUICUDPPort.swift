@@ -39,10 +39,11 @@ public enum QUICUDPError: Error, Equatable, CustomStringConvertible, Sendable {
 /// Low-level loopback UDP helper used by QUIC runtime tests and local packet
 /// probes. It intentionally accepts only `localhost`, `127.0.0.1`, and `::1`;
 /// production remote networking is handled by `WebTransportNetworkRuntime`.
-// SAFETY: The file descriptor is immutable after bind and closed exactly once in
-// `deinit`. Receive calls are serialized with `receiveLock`, which also guards the
-// reused receive buffer and its allocation count; send calls use `sendto` on the
-// immutable descriptor and do not mutate shared Swift state.
+///
+/// - Important: The file descriptor is immutable after bind and closed exactly once in
+///   `deinit`. Receive calls are serialized with `receiveLock`, which also guards the
+///   reused receive buffer and its allocation count; send calls use `sendto` on the
+///   immutable descriptor and do not mutate shared Swift state.
 public final class QUICUDPPort: @unchecked Sendable {
     private static let maximumUDPDatagramBytes = 65_535
 
@@ -84,18 +85,18 @@ public final class QUICUDPPort: @unchecked Sendable {
 
     public init(bindHost: String = "127.0.0.1", bindPort: UInt16 = 0) throws {
         let bindAddress = try Self.loopbackAddress(host: bindHost, port: bindPort)
-        let fd = socket(bindAddress.family, SOCK_DGRAM, IPPROTO_UDP)
-        guard fd >= 0 else {
+        let descriptor = socket(bindAddress.family, SOCK_DGRAM, IPPROTO_UDP)
+        guard descriptor >= 0 else {
             throw QUICUDPError.posix(operation: "socket", code: errno)
         }
 
         var reuse: Int32 = 1
         do {
-            try Self.applySocketOption(fd, level: SOL_SOCKET, name: SO_REUSEADDR, value: &reuse)
+            try Self.applySocketOption(descriptor, level: SOL_SOCKET, name: SO_REUSEADDR, value: &reuse)
         } catch {
             // The descriptor is not stored yet, so this initializer owns closing it
             // on every failure path, exactly as the bind and getsockname guards do.
-            close(fd)
+            close(descriptor)
             throw error
         }
 
@@ -105,12 +106,12 @@ public final class QUICUDPPort: @unchecked Sendable {
         // length matches the initialized address family.
         let bindResult = withUnsafePointer(to: &address) { pointer in
             unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                unsafe Darwin.bind(fd, sockaddrPointer, bindAddress.length)
+                unsafe Darwin.bind(descriptor, sockaddrPointer, bindAddress.length)
             }
         }
         guard bindResult == 0 else {
             let code = errno
-            close(fd)
+            close(descriptor)
             throw QUICUDPError.posix(operation: "bind", code: code)
         }
 
@@ -120,16 +121,16 @@ public final class QUICUDPPort: @unchecked Sendable {
         // boundLength advertises its full writable capacity for getsockname.
         let nameResult = withUnsafeMutablePointer(to: &boundAddress) { pointer in
             unsafe pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                unsafe getsockname(fd, sockaddrPointer, &boundLength)
+                unsafe getsockname(descriptor, sockaddrPointer, &boundLength)
             }
         }
         guard nameResult == 0 else {
             let code = errno
-            close(fd)
+            close(descriptor)
             throw QUICUDPError.posix(operation: "getsockname", code: code)
         }
 
-        self.descriptor = fd
+        self.descriptor = descriptor
         self.localEndpoint = try Self.endpoint(from: boundAddress)
     }
 
@@ -171,6 +172,24 @@ public final class QUICUDPPort: @unchecked Sendable {
         }
     }
 
+    /// Waits for the descriptor to become readable.
+    ///
+    /// A zero result is the timeout the caller asked for; anything else non-positive is the
+    /// platform's error. Kept apart from `receive` because the receive path is dominated by
+    /// the `recvmsg` safety argument, and mixing the two hides the poll's own contract.
+    private func waitForReadable(timeoutMilliseconds: Int32) throws {
+        // `fd:` is the POSIX `pollfd` field name, not this type's renamed property.
+        var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+        // SAFETY: poll receives one initialized pollfd for the declared count.
+        let pollResult = unsafe Darwin.poll(&pollDescriptor, 1, timeoutMilliseconds)
+        guard pollResult > 0 else {
+            if pollResult == 0 {
+                throw QUICUDPError.timeout
+            }
+            throw QUICUDPError.posix(operation: "poll", code: errno)
+        }
+    }
+
     public func receive(maximumBytes: Int = 65_535, timeoutMilliseconds: Int32 = 1_000) throws -> (Data, QUICUDPEndpoint) {
         guard maximumBytes > 0 && maximumBytes <= Self.maximumUDPDatagramBytes else {
             throw QUICUDPError.invalidReceiveConfiguration("maximumBytes must be in 1...\(Self.maximumUDPDatagramBytes)")
@@ -182,15 +201,7 @@ public final class QUICUDPPort: @unchecked Sendable {
         receiveLock.lock()
         defer { receiveLock.unlock() }
 
-        var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-        // SAFETY: poll receives one initialized pollfd for the declared count.
-        let pollResult = unsafe Darwin.poll(&pollDescriptor, 1, timeoutMilliseconds)
-        guard pollResult > 0 else {
-            if pollResult == 0 {
-                throw QUICUDPError.timeout
-            }
-            throw QUICUDPError.posix(operation: "poll", code: errno)
-        }
+        try waitForReadable(timeoutMilliseconds: timeoutMilliseconds)
 
         var storage = sockaddr_storage()
         if receiveBuffer.count < maximumBytes {
@@ -351,6 +362,10 @@ public final class QUICUDPPort: @unchecked Sendable {
 
     private static func string(from nulTerminatedBuffer: [CChar]) -> String {
         let bytes = nulTerminatedBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
-        return String(decoding: bytes, as: UTF8.self)
+        // Failable, not lossy: `String(decoding:as:)` silently replaces invalid sequences
+        // with U+FFFD, which would turn a truncated or mis-encoded interface name into a
+        // plausible-looking wrong one. The platform supplies this buffer, so an empty string
+        // is the honest answer to "not text" rather than a mangled one.
+        return String(bytes: bytes, encoding: .utf8) ?? ""
     }
 }

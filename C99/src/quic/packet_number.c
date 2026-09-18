@@ -9,8 +9,7 @@ uint64_t wt_quic_packet_number_window(size_t byte_count) {
   return (uint64_t)1U << (byte_count * 8U);
 }
 
-size_t wt_quic_packet_number_size(uint64_t packet_number,
-                                  uint64_t largest_acknowledged) {
+size_t wt_quic_packet_number_size(uint64_t packet_number, uint64_t largest_acknowledged) {
   uint64_t delta;
   size_t byte_count;
 
@@ -34,8 +33,7 @@ size_t wt_quic_packet_number_size(uint64_t packet_number,
   return 0U;
 }
 
-size_t wt_quic_packet_number_encode(uint64_t packet_number, size_t byte_count,
-                                    uint8_t out[4]) {
+size_t wt_quic_packet_number_encode(uint64_t packet_number, size_t byte_count, uint8_t out[4]) {
   if (out == NULL || byte_count == 0U || byte_count > 4U) return 0U;
   switch (byte_count) {
     case 1U:
@@ -92,8 +90,7 @@ uint64_t wt_quic_packet_number_decode(uint64_t truncated, size_t byte_count,
    * guard is against the largest packet number QUIC can *carry* plus one, and
    * writing it with the maximum instead is off by one at the very top of the
    * range -- exactly where the guard exists to matter. */
-  if (candidate + half <= expected &&
-      candidate < (UINT64_C(1) << 62) - window) {
+  if (candidate + half <= expected && candidate < (UINT64_C(1) << 62) - window) {
     candidate += window;
   } else if (candidate > expected + half && candidate >= window) {
     candidate -= window;

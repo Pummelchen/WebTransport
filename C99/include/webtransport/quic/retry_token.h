@@ -63,8 +63,9 @@ extern "C" {
  * connection ID is (RFC 9000 section 17.2). WT_ERR_LIMIT when `capacity` cannot hold the token. */
 wt_status_t wt_quic_retry_token_build(const uint8_t secret[WT_QUIC_RETRY_TOKEN_SECRET_LEN],
                                       const uint8_t *address, size_t address_length,
-                                      const uint8_t *original_destination_id, size_t original_length,
-                                      uint64_t now, uint8_t *out, size_t capacity, size_t *out_length);
+                                      const uint8_t *original_destination_id,
+                                      size_t original_length, uint64_t now, uint8_t *out,
+                                      size_t capacity, size_t *out_length);
 
 /* Validate a token a client echoed, for the address the packet came from and the server's current `now`.
  *
@@ -84,10 +85,10 @@ wt_status_t wt_quic_retry_token_build(const uint8_t secret[WT_QUIC_RETRY_TOKEN_S
  *   - WT_ERR_INVALID_ARGUMENT and WT_ERR_LIMIT -- the CALLER's own mistakes (a null pointer, an address length
  *     outside the form, an output buffer too small), which are bugs rather than attacks. */
 wt_status_t wt_quic_retry_token_validate(const uint8_t secret[WT_QUIC_RETRY_TOKEN_SECRET_LEN],
-                                         const uint8_t *address, size_t address_length, uint64_t now,
-                                         uint64_t max_age, const uint8_t *token, size_t token_length,
-                                         uint8_t *out_original, size_t capacity,
-                                         size_t *out_original_length);
+                                         const uint8_t *address, size_t address_length,
+                                         uint64_t now, uint64_t max_age, const uint8_t *token,
+                                         size_t token_length, uint8_t *out_original,
+                                         size_t capacity, size_t *out_original_length);
 
 #ifdef __cplusplus
 }

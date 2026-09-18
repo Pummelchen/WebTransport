@@ -49,8 +49,7 @@ extern "C" {
  * `packet_overhead` is everything in the packet that is not the payload: the header, the packet
  * number, the length fields and the tag. Returns 0 when no payload fits. */
 uint64_t wt_quic_datagram_max_payload(uint64_t peer_max_datagram_frame_size,
-                                      uint64_t max_packet_size,
-                                      uint64_t packet_overhead);
+                                      uint64_t max_packet_size, uint64_t packet_overhead);
 
 typedef struct wt_quic_datagram {
   uint8_t data[WT_QUIC_DATAGRAM_MAX];
@@ -79,9 +78,8 @@ void wt_quic_datagram_queue_init(wt_quic_datagram_queue_t *queue);
  * caller error rather than a peer's: the caller should not have read it. A full queue discards the
  * datagram and reports WT_OK with `*out_discarded` set, because a datagram that was never guaranteed
  * to arrive is not an error when it does not. */
-wt_status_t wt_quic_datagram_queue_push(wt_quic_datagram_queue_t *queue,
-                                        const uint8_t *data, size_t length,
-                                        uint64_t received_at, int *out_discarded);
+wt_status_t wt_quic_datagram_queue_push(wt_quic_datagram_queue_t *queue, const uint8_t *data,
+                                        size_t length, uint64_t received_at, int *out_discarded);
 
 /* Take the oldest datagram out. WT_ERR_AGAIN when there is none, which is the ordinary case for a
  * queue that is read whenever the application asks rather than when something arrives. */

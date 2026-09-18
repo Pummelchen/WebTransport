@@ -42,7 +42,23 @@ private struct DeterministicRNG {
 
 private enum FuzzFrameGenerator {
     static func makeRandomFrame(using rng: inout DeterministicRNG, index: Int) throws -> QUICFrame {
-        switch rng.nextInt(upperExclusive: 14) {
+        // The kind is drawn once, here, so the cases below consume the generator in the same
+        // order they always did -- the fuzz corpus depends on that order, not just on the
+        // values.
+        let kind = rng.nextInt(upperExclusive: 14)
+        if kind <= 6 {
+            return try makeTransportFrame(kind: kind, rng: &rng, index: index)
+        }
+        return try makeFlowControlFrame(kind: kind, rng: &rng, index: index)
+    }
+
+    /// Kinds 0...6.
+    private static func makeTransportFrame(
+        kind: Int,
+        rng: inout DeterministicRNG,
+        index: Int
+    ) throws -> QUICFrame {
+        switch kind {
         case 0:
             return .padding
         case 1:
@@ -80,6 +96,19 @@ private enum FuzzFrameGenerator {
                 finalSize: finalSize,
                 reliableSize: rng.nextUInt64(upperInclusive: finalSize)
             )
+        default:
+            // Unreachable: `makeRandomFrame` routes only 0...6 here.
+            throw QUICCodecError.malformed("unreachable frame kind \(kind)")
+        }
+    }
+
+    /// Kinds 7...13, where 13 is the length-prefixed datagram.
+    private static func makeFlowControlFrame(
+        kind: Int,
+        rng: inout DeterministicRNG,
+        index: Int
+    ) throws -> QUICFrame {
+        switch kind {
         case 7:
             return .stopSending(
                 id: UInt64(index * 4),
@@ -108,8 +137,7 @@ private enum FuzzFrameGenerator {
                 maximum: rng.nextUInt64(upperInclusive: 64)
             )
         default:
-            let length = rng.nextInt(upperExclusive: 32)
-            return .datagram(rng.nextData(length: length))
+            return .datagram(rng.nextData(length: rng.nextInt(upperExclusive: 32)))
         }
     }
 

@@ -4,8 +4,7 @@
 
 #include <string.h>
 
-wt_status_t wt_quic_connection_ids_init(wt_quic_connection_id_store_t *store,
-                                        uint64_t peer_limit,
+wt_status_t wt_quic_connection_ids_init(wt_quic_connection_id_store_t *store, uint64_t peer_limit,
                                         uint64_t local_limit) {
   if (store == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* RFC 9000 section 18.2: active_connection_id_limit is at least 2. A peer that
@@ -24,8 +23,8 @@ wt_status_t wt_quic_connection_ids_init(wt_quic_connection_id_store_t *store,
   return WT_OK;
 }
 
-static wt_quic_connection_id_t *wt_quic_cid_find_sequence(
-    wt_quic_connection_id_store_t *store, uint64_t sequence) {
+static wt_quic_connection_id_t *wt_quic_cid_find_sequence(wt_quic_connection_id_store_t *store,
+                                                          uint64_t sequence) {
   size_t i;
   for (i = 0U; i < store->count; i++) {
     if (store->entries[i].sequence == sequence) return &store->entries[i];
@@ -33,8 +32,7 @@ static wt_quic_connection_id_t *wt_quic_cid_find_sequence(
   return NULL;
 }
 
-size_t wt_quic_connection_ids_active(
-    const wt_quic_connection_id_store_t *store) {
+size_t wt_quic_connection_ids_active(const wt_quic_connection_id_store_t *store) {
   size_t i;
   size_t active = 0U;
   if (store == NULL) return 0U;
@@ -44,8 +42,7 @@ size_t wt_quic_connection_ids_active(
   return active;
 }
 
-uint64_t wt_quic_connection_ids_issueable(
-    const wt_quic_connection_id_store_t *store) {
+uint64_t wt_quic_connection_ids_issueable(const wt_quic_connection_id_store_t *store) {
   uint64_t issued = 0U;
   size_t i;
   if (store == NULL) return 0U;
@@ -58,9 +55,9 @@ uint64_t wt_quic_connection_ids_issueable(
   return store->peer_limit - issued;
 }
 
-wt_status_t wt_quic_connection_ids_add_issued(
-    wt_quic_connection_id_store_t *store, const uint8_t *id, size_t id_len,
-    uint64_t *out_sequence) {
+wt_status_t wt_quic_connection_ids_add_issued(wt_quic_connection_id_store_t *store,
+                                              const uint8_t *id, size_t id_len,
+                                              uint64_t *out_sequence) {
   wt_quic_connection_id_t *entry;
 
   if (store == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -87,8 +84,7 @@ wt_status_t wt_quic_connection_ids_add_issued(
 /* Retire every entry below `sequence` and move the store's threshold up. Called
  * for the `retire_prior_to` of a NEW_CONNECTION_ID, which is a promise that the
  * peer has already stopped using everything below it. */
-static void wt_quic_cid_retire_below(wt_quic_connection_id_store_t *store,
-                                     uint64_t sequence) {
+static void wt_quic_cid_retire_below(wt_quic_connection_id_store_t *store, uint64_t sequence) {
   size_t i;
   if (sequence > store->retire_prior_to) store->retire_prior_to = sequence;
   for (i = 0U; i < store->count; i++) {
@@ -98,10 +94,9 @@ static void wt_quic_cid_retire_below(wt_quic_connection_id_store_t *store,
   }
 }
 
-wt_status_t wt_quic_connection_ids_add_peer(
-    wt_quic_connection_id_store_t *store, uint64_t sequence,
-    uint64_t retire_prior_to, const uint8_t *id, size_t id_len,
-    wt_quic_error_t *out_error) {
+wt_status_t wt_quic_connection_ids_add_peer(wt_quic_connection_id_store_t *store, uint64_t sequence,
+                                            uint64_t retire_prior_to, const uint8_t *id,
+                                            size_t id_len, wt_quic_error_t *out_error) {
   if (store == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (id_len > WT_QUIC_MAX_CONNECTION_ID_LENGTH) {
     if (out_error != NULL) *out_error = WT_QUIC_PROTOCOL_VIOLATION;
@@ -147,9 +142,8 @@ wt_status_t wt_quic_connection_ids_add_peer(
   return WT_OK;
 }
 
-wt_status_t wt_quic_connection_ids_retire(
-    wt_quic_connection_id_store_t *store, uint64_t sequence,
-    wt_quic_error_t *out_error) {
+wt_status_t wt_quic_connection_ids_retire(wt_quic_connection_id_store_t *store, uint64_t sequence,
+                                          wt_quic_error_t *out_error) {
   wt_quic_connection_id_t *entry;
   if (store == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* RFC 9000 section 19.16: "An endpoint cannot send this frame if it was
@@ -171,9 +165,9 @@ wt_status_t wt_quic_connection_ids_retire(
   return WT_OK;
 }
 
-wt_status_t wt_quic_connection_ids_find(
-    const wt_quic_connection_id_store_t *store, const uint8_t *id, size_t id_len,
-    size_t *out_index, int *out_retired) {
+wt_status_t wt_quic_connection_ids_find(const wt_quic_connection_id_store_t *store,
+                                        const uint8_t *id, size_t id_len, size_t *out_index,
+                                        int *out_retired) {
   size_t i;
   if (store == NULL || out_index == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (id_len > WT_QUIC_MAX_CONNECTION_ID_LENGTH) return WT_ERR_INVALID_ARGUMENT;

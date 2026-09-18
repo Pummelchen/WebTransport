@@ -39,8 +39,7 @@ typedef enum wt_log_level {
   WT_LOG_DEBUG = 3
 } wt_log_level_t;
 
-typedef void (*wt_log_fn)(void *context, wt_log_level_t level,
-                          const char *message);
+typedef void (*wt_log_fn)(void *context, wt_log_level_t level, const char *message);
 
 typedef struct wt_logger {
   void *context;
@@ -59,8 +58,7 @@ wt_logger_t wt_logger_to(wt_log_fn fn, void *context, wt_log_level_t level);
 /* Emit `message`, which must be a NUL-terminated string, if the logger's level
  * admits it. `message` is never NULL when this returns. Safe on a NULL logger or
  * one with no callback: nothing happens. */
-void wt_log_emit(const wt_logger_t *logger, wt_log_level_t level,
-                 const char *message);
+void wt_log_emit(const wt_logger_t *logger, wt_log_level_t level, const char *message);
 
 /* Whether a message at `level` would reach the callback. For a caller that would
  * otherwise build a string to throw it away. */

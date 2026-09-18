@@ -37,8 +37,8 @@ static void forget(wt_qpack_encoder_state_t *state, wt_qpack_outstanding_section
   state->outstanding_count--;
 }
 
-wt_status_t wt_qpack_encoder_state_begin_section(wt_qpack_encoder_state_t *state, uint64_t stream_id,
-                                                 int references_dynamic,
+wt_status_t wt_qpack_encoder_state_begin_section(wt_qpack_encoder_state_t *state,
+                                                 uint64_t stream_id, int references_dynamic,
                                                  wt_qpack_header_prefix_t *out_prefix) {
   size_t i;
 

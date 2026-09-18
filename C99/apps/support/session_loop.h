@@ -28,7 +28,7 @@ typedef struct wt_loop_config {
   const char *authority;
   const char *path;
   uint64_t timeout_ms;
-  int datagram;  /* 0: a WebTransport stream carries the message; 1: a datagram */
+  int datagram; /* 0: a WebTransport stream carries the message; 1: a datagram */
   /* SERVER only: validate the client's address with a Retry before starting a session on it (RFC 9000 section
    * 8.1.2, WT-168). Off by default, because a Retry costs the client a round trip and is a policy about a
    * listener's exposure rather than something a protocol requires. */
@@ -59,21 +59,23 @@ typedef struct wt_loop_config {
  * returned before recording why. One number a JSON reader can switch on, and the HTTP/3 error beside it when the
  * RESPONSE ITSELF was refused, which is the failure no status can express. */
 typedef enum wt_loop_response_outcome {
-  WT_LOOP_RESPONSE_NONE = 0,        /* no response was decoded */
-  WT_LOOP_RESPONSE_ACCEPTED = 1,    /* a 2xx response: the session is established */
-  WT_LOOP_RESPONSE_NOT_ACCEPTED = 2,/* a status that is not 2xx, which this client will not treat as a session */
-  WT_LOOP_RESPONSE_REFUSED = 3      /* the HTTP/3 layer refused the response; `h3_error` names the rule */
+  WT_LOOP_RESPONSE_NONE = 0,     /* no response was decoded */
+  WT_LOOP_RESPONSE_ACCEPTED = 1, /* a 2xx response: the session is established */
+  WT_LOOP_RESPONSE_NOT_ACCEPTED =
+      2, /* a status that is not 2xx, which this client will not treat as a session */
+  WT_LOOP_RESPONSE_REFUSED =
+      3 /* the HTTP/3 layer refused the response; `h3_error` names the rule */
 } wt_loop_response_outcome_t;
 
 typedef struct wt_loop_result {
   int established;
   int connect_accepted;
-  uint32_t status;         /* the response's :status, 0 when none arrived */
-  size_t received_bytes;   /* what the peer sent, in either mode */
+  uint32_t status;       /* the response's :status, 0 when none arrived */
+  size_t received_bytes; /* what the peer sent, in either mode */
   int received_datagram;
   /* Whether the message went out BEFORE the CONNECT (WT-189), so a report says which order the run used. */
   int early_stream_sent;
-  uint16_t bound_port;     /* the server's actual port, which the caller may need to print or use */
+  uint16_t bound_port; /* the server's actual port, which the caller may need to print or use */
   /* The first error the runtime recorded while RECEIVING, and how many there were. The status a failed run
    * returns is the tool's own ("timeout"), which says the handshake did not finish and nothing about why; this
    * is the layer that knows -- and without it a peer that answers with something this endpoint rejects looks

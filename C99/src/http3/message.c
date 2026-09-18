@@ -5,7 +5,8 @@
 #include <string.h>
 
 /* A pseudo-header's value, remembered as a view into whatever holds it. */
-static void remember(const wt_qpack_resolved_field_t *field, const uint8_t **out, size_t *out_length) {
+static void remember(const wt_qpack_resolved_field_t *field, const uint8_t **out,
+                     size_t *out_length) {
   *out = field->value;
   *out_length = field->value_length;
 }
@@ -50,7 +51,8 @@ static int name_is(const wt_qpack_resolved_field_t *field, const char *text) {
  * static-analysis step failed on while Apple's clang said nothing. No field has an empty name (RFC 9110
  * section 5.1 makes a field name a non-empty token and the header validator refuses one), so "not this field"
  * is the honest answer for that shape. */
-static int field_name_is(const wt_qpack_resolved_field_t *field, const uint8_t *name, size_t name_length) {
+static int field_name_is(const wt_qpack_resolved_field_t *field, const uint8_t *name,
+                         size_t name_length) {
   if (name == NULL) return 0;
   return field->name_length == name_length && memcmp(field->name, name, name_length) == 0;
 }

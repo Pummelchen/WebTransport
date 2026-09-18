@@ -20,8 +20,7 @@ static void *wt_default_alloc(void *context, size_t size) {
   return malloc(size);
 }
 
-static void *wt_default_realloc(void *context, void *ptr, size_t old_size,
-                                size_t new_size) {
+static void *wt_default_realloc(void *context, void *ptr, size_t old_size, size_t new_size) {
   (void)context;
   (void)old_size;
   if (new_size == 0U) new_size = WT_ALLOC_MINIMUM;
@@ -64,7 +63,9 @@ static wt_allocator_t wt_allocator_resolve(const wt_allocator_t *a) {
  * require, and it has to be substituted in the FREE path too -- an allocator is entitled to subtract the size it
  * is told, so a block allocated as one byte and freed as zero is a block it reports as still live. That asymmetry
  * is what an audit's strict allocator and this tree's own counting allocator both showed. */
-static size_t wt_requested_size(size_t size) { return size == 0U ? 1U : size; }
+static size_t wt_requested_size(size_t size) {
+  return size == 0U ? 1U : size;
+}
 
 void *wt_alloc(const wt_allocator_t *a, size_t size) {
   wt_allocator_t resolved = wt_allocator_resolve(a);
@@ -111,8 +112,7 @@ void *wt_calloc_array(const wt_allocator_t *a, size_t count, size_t elem_size,
   return block;
 }
 
-void *wt_realloc(const wt_allocator_t *a, void *ptr, size_t old_size,
-                 size_t new_size) {
+void *wt_realloc(const wt_allocator_t *a, void *ptr, size_t old_size, size_t new_size) {
   wt_allocator_t resolved = wt_allocator_resolve(a);
   if (ptr == NULL) return resolved.alloc(resolved.context, wt_requested_size(new_size));
   return resolved.realloc(resolved.context, ptr, old_size, new_size);

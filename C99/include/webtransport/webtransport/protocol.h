@@ -74,7 +74,8 @@ wt_status_t wt_webtransport_protocol_decode_item(const uint8_t *value, size_t le
                                                  wt_webtransport_protocol_token_t *out);
 
 /* A list of them, separated by `, ` as RFC 8941 writes a list, which is what the request carries. */
-wt_status_t wt_webtransport_protocol_encode_list(wt_writer_t *w, const wt_webtransport_protocol_list_t *list);
+wt_status_t wt_webtransport_protocol_encode_list(wt_writer_t *w,
+                                                 const wt_webtransport_protocol_list_t *list);
 wt_status_t wt_webtransport_protocol_decode_list(const uint8_t *value, size_t length,
                                                  wt_webtransport_protocol_list_t *out);
 

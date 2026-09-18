@@ -113,78 +113,96 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
         let port = try WebTransportProcessSupport.parseListeningPort(from: line)
 
         let count = 2
-        let maxConcurrentClients = 2
-        let launchGate = DispatchSemaphore(value: maxConcurrentClients)
-        final class ConcurrentCapture: @unchecked Sendable {
-            private(set) var results: [ProcessResult] = []
-            private(set) var errors: [String] = []
-            private(set) var connectedCount = 0
-            private let lock = NSLock()
-
-            func addResult(_ result: ProcessResult, connected: Bool, message: String) {
-                lock.lock()
-                defer { lock.unlock() }
-                results.append(result)
-                if connected {
-                    connectedCount += 1
-                } else if !message.isEmpty {
-                    errors.append(message)
-                }
-            }
-
-            func addError(_ message: String) {
-                lock.lock()
-                defer { lock.unlock() }
-                errors.append(message)
-            }
-        }
         let capture = ConcurrentCapture()
-
-        let group = DispatchGroup()
-        for index in 0..<count {
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async {
-                launchGate.wait()
-                do {
-                    var result = try WebTransportProcessSupport.run(
-                        client,
-                        [
-                            "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)",
-                            "--timeout-ms", "25000",
-                        ],
-                        timeout: 30
-                    )
-                    var attempts = 1
-                    while !result.stdout.contains("connected") && attempts < 4 {
-                        attempts += 1
-                        Thread.sleep(forTimeInterval: 0.12)
-                        result = try WebTransportProcessSupport.run(
-                            client,
-                            [
-                                "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message",
-                                "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "25000",
-                            ],
-                            timeout: 30
-                        )
-                    }
-                    let message =
-                        result.stdout.contains("connected")
-                        ? ""
-                        : "non-connected client #\(index) after \(attempts) attempts: exit=\(result.exitCode) stdout=\(result.stdout) stderr=\(result.stderr)"
-                    capture.addResult(result, connected: result.stdout.contains("connected"), message: message)
-                } catch {
-                    capture.addError("client process #\(index) failed: \(error.localizedDescription)")
-                }
-                launchGate.signal()
-                group.leave()
-            }
-        }
-        let done = group.wait(timeout: .now() + 180)
+        let done = runConcurrentClients(
+            client: client,
+            port: port,
+            count: count,
+            maxConcurrentClients: 2,
+            capture: capture
+        )
         let failures = capture.errors.filter { !$0.isEmpty }
         #expect(done == .success, Comment(rawValue: failures.joined(separator: "\n")))
         #expect(capture.connectedCount == count, Comment(rawValue: failures.joined(separator: "\n")))
         #expect(failures.isEmpty)
         #expect(capture.results.count == count, Comment(rawValue: failures.joined(separator: "\n")))
+    }
+}
+
+/// Runs `count` clients against one server, at most `maxConcurrentClients` at a time, retrying
+/// each until it reports "connected" or four attempts are spent.
+private func runConcurrentClients(
+    client: URL,
+    port: UInt16,
+    count: Int,
+    maxConcurrentClients: Int,
+    capture: ConcurrentCapture
+) -> DispatchTimeoutResult {
+    let launchGate = DispatchSemaphore(value: maxConcurrentClients)
+    let group = DispatchGroup()
+    for index in 0..<count {
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            launchGate.wait()
+            do {
+                var result = try WebTransportProcessSupport.run(
+                    client,
+                    [
+                        "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)",
+                        "--timeout-ms", "25000",
+                    ],
+                    timeout: 30
+                )
+                var attempts = 1
+                while !result.stdout.contains("connected") && attempts < 4 {
+                    attempts += 1
+                    Thread.sleep(forTimeInterval: 0.12)
+                    result = try WebTransportProcessSupport.run(
+                        client,
+                        [
+                            "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message",
+                            "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "25000",
+                        ],
+                        timeout: 30
+                    )
+                }
+                let message =
+                    result.stdout.contains("connected")
+                    ? ""
+                    : "non-connected client #\(index) after \(attempts) attempts: exit=\(result.exitCode) stdout=\(result.stdout) stderr=\(result.stderr)"
+                capture.addResult(result, connected: result.stdout.contains("connected"), message: message)
+            } catch {
+                capture.addError("client process #\(index) failed: \(error.localizedDescription)")
+            }
+            launchGate.signal()
+            group.leave()
+        }
+    }
+    return group.wait(timeout: .now() + 180)
+}
+
+/// Collects the results of concurrently run client processes.
+private final class ConcurrentCapture: @unchecked Sendable {
+    private(set) var results: [ProcessResult] = []
+    private(set) var errors: [String] = []
+    private(set) var connectedCount = 0
+    private let lock = NSLock()
+
+    func addResult(_ result: ProcessResult, connected: Bool, message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        results.append(result)
+        if connected {
+            connectedCount += 1
+        } else if !message.isEmpty {
+            errors.append(message)
+        }
+    }
+
+    func addError(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        errors.append(message)
     }
 }
 
@@ -246,43 +264,25 @@ func webTransportExternalInteropHookRunsWhenConfigured() throws {
             return
         }
         let client = try WebTransportProcessSupport.productURL("WebTransportClient", configuration: "debug")
-        let transport = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRANSPORT"] ?? "packet"
-        let authority = environment["WEBTRANSPORT_EXTERNAL_INTEROP_AUTHORITY"] ?? endpoint.split(separator: ":").first.map(String.init) ?? "localhost"
-        let path = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PATH"] ?? "/"
-        let origin = environment["WEBTRANSPORT_EXTERNAL_INTEROP_ORIGIN"] ?? "https://\(authority)"
-        let wtProtocol = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PROTOCOL"] ?? "none"
-        let trust = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRUST"] ?? "system"
-        let message = environment["WEBTRANSPORT_EXTERNAL_INTEROP_MESSAGE"] ?? "external-interop"
-        let timeoutMilliseconds = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TIMEOUT_MS"] ?? "5000"
-        let result = try WebTransportProcessSupport.run(
-            client,
-            [
-                "--connect", endpoint,
-                "--transport", transport,
-                "--authority", authority,
-                "--path", path,
-                "--origin", origin,
-                "--protocol", wtProtocol,
-                "--trust", trust,
-                "--message", message,
-                "--timeout-ms", timeoutMilliseconds,
-            ],
-            timeout: 10
-        )
+        let settings = ExternalInteropSettings(environment: environment, endpoint: endpoint)
+        let result = try WebTransportProcessSupport.run(client, settings.clientArguments, timeout: 10)
         #expect(result.exitCode == 0)
         #expect(result.stdout.contains("connected"))
-        #expect(result.stdout.contains(message))
+        #expect(result.stdout.contains(settings.message))
         try WebTransportProcessSupport.writeExternalInteropProof(
-            implementation: environment["WEBTRANSPORT_EXTERNAL_INTEROP_IMPLEMENTATION"] ?? "configured independent WebTransport endpoint",
-            endpoint: endpoint,
-            authority: authority,
-            path: path,
-            origin: origin,
-            wtProtocol: wtProtocol,
-            transport: transport,
-            trust: trust,
-            message: message,
-            timeoutMilliseconds: timeoutMilliseconds,
+            WebTransportProcessSupport.ExternalInteropProofRequest(
+                implementation: environment["WEBTRANSPORT_EXTERNAL_INTEROP_IMPLEMENTATION"]
+                    ?? "configured independent WebTransport endpoint",
+                endpoint: settings.endpoint,
+                authority: settings.authority,
+                path: settings.path,
+                origin: settings.origin,
+                wtProtocol: settings.wtProtocol,
+                transport: settings.transport,
+                trust: settings.trust,
+                message: settings.message,
+                timeoutMilliseconds: settings.timeoutMilliseconds
+            ),
             result: result
         )
     }
@@ -322,4 +322,48 @@ func webTransportReleaseArtifactsAreExecutableAndScenarioCapable() throws {
 func webTransportAPISurfaceIsExercisedByPublicImports() throws {
     let script = WebTransportProcessSupport.packageDirectory.appendingPathComponent("check-api-compatibility.sh")
     #expect(FileManager.default.isExecutableFile(atPath: script.path))
+}
+
+/// The external-interop settings, read once from the environment.
+///
+/// Each has a default so the hook can be pointed at an endpoint by setting only the variables
+/// that differ from a plain packet session.
+private struct ExternalInteropSettings {
+    let endpoint: String
+    let transport: String
+    let authority: String
+    let path: String
+    let origin: String
+    let wtProtocol: String
+    let trust: String
+    let message: String
+    let timeoutMilliseconds: String
+
+    init(environment: [String: String], endpoint: String) {
+        self.endpoint = endpoint
+        transport = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRANSPORT"] ?? "packet"
+        authority =
+            environment["WEBTRANSPORT_EXTERNAL_INTEROP_AUTHORITY"]
+            ?? endpoint.split(separator: ":").first.map(String.init) ?? "localhost"
+        path = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PATH"] ?? "/"
+        origin = environment["WEBTRANSPORT_EXTERNAL_INTEROP_ORIGIN"] ?? "https://\(authority)"
+        wtProtocol = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PROTOCOL"] ?? "none"
+        trust = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRUST"] ?? "system"
+        message = environment["WEBTRANSPORT_EXTERNAL_INTEROP_MESSAGE"] ?? "external-interop"
+        timeoutMilliseconds = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TIMEOUT_MS"] ?? "5000"
+    }
+
+    var clientArguments: [String] {
+        [
+            "--connect", endpoint,
+            "--transport", transport,
+            "--authority", authority,
+            "--path", path,
+            "--origin", origin,
+            "--protocol", wtProtocol,
+            "--trust", trust,
+            "--message", message,
+            "--timeout-ms", timeoutMilliseconds,
+        ]
+    }
 }

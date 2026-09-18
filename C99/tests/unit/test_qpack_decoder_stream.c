@@ -67,12 +67,11 @@ static void test_what_a_decoder_may_not_say(void) {
 
   wt_qpack_decoder_stream_init(&stream);
   wt_qpack_dynamic_init(&table, 4096U);
-  WT_EXPECT_OK("the table has two entries",
-               wt_qpack_dynamic_insert(&table, (const uint8_t *)"a", 1U, (const uint8_t *)"1", 1U,
-                                       &index));
-  WT_EXPECT_OK("and the second",
-               wt_qpack_dynamic_insert(&table, (const uint8_t *)"b", 1U, (const uint8_t *)"2", 1U,
-                                       &index));
+  WT_EXPECT_OK(
+      "the table has two entries",
+      wt_qpack_dynamic_insert(&table, (const uint8_t *)"a", 1U, (const uint8_t *)"1", 1U, &index));
+  WT_EXPECT_OK("and the second", wt_qpack_dynamic_insert(&table, (const uint8_t *)"b", 1U,
+                                                         (const uint8_t *)"2", 1U, &index));
 
   /* Zero says nothing, and section 4.4.3 makes it an error rather than a no-op. */
   WT_EXPECT_STATUS("a zero increment cannot be written", WT_ERR_INVALID_ARGUMENT,

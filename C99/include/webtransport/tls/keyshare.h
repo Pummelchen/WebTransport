@@ -56,15 +56,14 @@ wt_status_t wt_tls_x25519(const uint8_t scalar[WT_TLS_X25519_KEY_LEN],
                           uint8_t out[WT_TLS_X25519_KEY_LEN]);
 
 /* Generate a key pair for a group, from the system's random source. */
-wt_status_t wt_tls_key_share_generate(uint16_t group,
-                                      uint8_t private_key[WT_TLS_X25519_KEY_LEN],
+wt_status_t wt_tls_key_share_generate(uint16_t group, uint8_t private_key[WT_TLS_X25519_KEY_LEN],
                                       uint8_t public_key[WT_TLS_X25519_KEY_LEN]);
 
 /* The public key a private key produces. RFC 7748 section 6.1 calls this X25519(a, 9),
  * and it is what a test needs to check a private key against a published public key. */
-wt_status_t wt_tls_key_share_public_key(
-    uint16_t group, const uint8_t private_key[WT_TLS_X25519_KEY_LEN],
-    uint8_t public_key[WT_TLS_X25519_KEY_LEN]);
+wt_status_t wt_tls_key_share_public_key(uint16_t group,
+                                        const uint8_t private_key[WT_TLS_X25519_KEY_LEN],
+                                        uint8_t public_key[WT_TLS_X25519_KEY_LEN]);
 
 /* The shared secret from our private key and a peer's public key.
  *
@@ -72,10 +71,10 @@ wt_status_t wt_tls_key_share_public_key(
  * WT_ERR_INVALID_ARGUMENT for a peer key whose length is not the group's;
  * WT_ERR_PROTOCOL for an all-zero secret, which is a handshake failure and not a
  * usable key. On failure nothing is written to `out`. */
-wt_status_t wt_tls_key_share_shared_secret(
-    uint16_t group, const uint8_t private_key[WT_TLS_X25519_KEY_LEN],
-    const uint8_t *peer_public, size_t peer_public_len,
-    uint8_t out[WT_TLS_X25519_KEY_LEN]);
+wt_status_t wt_tls_key_share_shared_secret(uint16_t group,
+                                           const uint8_t private_key[WT_TLS_X25519_KEY_LEN],
+                                           const uint8_t *peer_public, size_t peer_public_len,
+                                           uint8_t out[WT_TLS_X25519_KEY_LEN]);
 
 #ifdef __cplusplus
 }

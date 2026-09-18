@@ -54,7 +54,6 @@ typedef socklen_t wt_udp_ntop_length_t;
 
 #endif
 
-
 /* The datagram calls, which differ in more than a name: a platform's way of receiving one datagram WITH its
  * sender and its truncation flag. The structure is hoisted above both branches because it is the shape the two
  * sides share, and only the CALLS differ -- which is why the handle it names is defined above it.
@@ -113,7 +112,9 @@ static void wt_udp_platform_release(void) {
   if (wt_udp_platform_open_sockets == 0) (void)WSACleanup();
 }
 
-static int wt_udp_platform_close(wt_udp_handle_t handle) { return closesocket(handle); }
+static int wt_udp_platform_close(wt_udp_handle_t handle) {
+  return closesocket(handle);
+}
 
 static int wt_udp_platform_set_nonblocking(wt_udp_handle_t handle) {
   u_long one = 1UL;
@@ -131,10 +132,13 @@ static int wt_udp_platform_wait_readable(wt_udp_handle_t handle, int timeout_ms)
   return WSAPoll(&entry, 1UL, timeout_ms);
 }
 
-static int wt_udp_platform_last_error(void) { return (int)WSAGetLastError(); }
+static int wt_udp_platform_last_error(void) {
+  return (int)WSAGetLastError();
+}
 
-static int wt_udp_platform_send_message(wt_udp_handle_t handle, const struct sockaddr *to, int to_length,
-                                        const void *bytes, size_t length, size_t *out_written) {
+static int wt_udp_platform_send_message(wt_udp_handle_t handle, const struct sockaddr *to,
+                                        int to_length, const void *bytes, size_t length,
+                                        size_t *out_written) {
   int written = sendto(handle, (const char *)bytes, (int)length, 0, to, to_length);
   if (written == SOCKET_ERROR) return -1;
   if (out_written != NULL) *out_written = (size_t)written;
@@ -170,7 +174,8 @@ static int wt_udp_platform_send_message(wt_udp_handle_t handle, const struct soc
  * case rather than a hypothetical one, because the extension is optional.
  * `wt_udp_platform_recvfrom_message` below answers the call there; it is a FALLBACK and not the
  * implementation, and what it cannot do is written down beside it. */
-static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle, wt_udp_platform_message_t *message);
+static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle,
+                                            wt_udp_platform_message_t *message);
 
 /* Whether a handle is a live socket. The two failures this layer reads as "this provider has no usable
  * `WSARecvMsg`" -- an `WSAIoctl` that cannot name the extension, and a `WSARecvMsg` that answers
@@ -183,7 +188,8 @@ static int wt_udp_platform_handle_is_socket(wt_udp_handle_t handle) {
   return getsockopt(handle, SOL_SOCKET, SO_TYPE, (char *)&type, &length) == 0;
 }
 
-static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platform_message_t *message) {
+static int wt_udp_platform_receive_message(wt_udp_handle_t handle,
+                                           wt_udp_platform_message_t *message) {
   static LPFN_WSARECVMSG receive_message = NULL;
   /* Latched rather than re-probed per call: the extension belongs to the provider, so one refusal is the answer
    * for every socket this process opens. The two states are "not looked up yet" (a NULL pointer with `unusable`
@@ -197,8 +203,9 @@ static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platfo
   if (!unusable && receive_message == NULL) {
     GUID guid = WSAID_WSARECVMSG;
     DWORD bytes = 0;
-    if (WSAIoctl(handle, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, (DWORD)sizeof(guid), &receive_message,
-                 (DWORD)sizeof(receive_message), &bytes, NULL, NULL) == SOCKET_ERROR) {
+    if (WSAIoctl(handle, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, (DWORD)sizeof(guid),
+                 &receive_message, (DWORD)sizeof(receive_message), &bytes, NULL,
+                 NULL) == SOCKET_ERROR) {
       if (!wt_udp_platform_handle_is_socket(handle)) return -1;
       unusable = 1;
     }
@@ -221,7 +228,8 @@ static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platfo
   if (peek) msg.dwFlags = MSG_PEEK;
 
   if (receive_message(handle, &msg, &received, NULL, NULL) == 0) {
-    if (message->address_length != NULL && msg.namelen > 0) *message->address_length = (int)msg.namelen;
+    if (message->address_length != NULL && msg.namelen > 0)
+      *message->address_length = (int)msg.namelen;
     message->bytes_out = (size_t)received;
     message->flags_out = 0;
     /* The OUTPUT flag is authoritative, and that is what the guess it replaces could not be: a datagram that
@@ -234,7 +242,8 @@ static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platfo
    * sender is filled on that path. It is the same shape the fallback sees, and it is why the truncation is
    * REPORTED rather than inferred (`WT-199`). */
   if (WSAGetLastError() == WSAEMSGSIZE) {
-    if (message->address_length != NULL && msg.namelen > 0) *message->address_length = (int)msg.namelen;
+    if (message->address_length != NULL && msg.namelen > 0)
+      *message->address_length = (int)msg.namelen;
     message->flags_out = WT_UDP_PLATFORM_TRUNCATED;
     /* The datagram's own length is not reported, so the buffer's is the honest floor: it filled it. */
     message->bytes_out = message->capacity;
@@ -267,7 +276,8 @@ static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platfo
  * The third question is the one it cannot answer: a PEEK cannot see past the buffer, so `bytes_out` is what
  * was copied rather than the datagram's own length and `WT_UDP_PLATFORM_FULL_LENGTH` is not honoured. That is
  * the documented Windows peek limitation, which is unchanged by this fallback. */
-static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle, wt_udp_platform_message_t *message) {
+static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle,
+                                            wt_udp_platform_message_t *message) {
   struct sockaddr_storage ignored;
   struct sockaddr *from = (struct sockaddr *)(void *)message->address;
   int from_length = (int)sizeof(struct sockaddr_storage);
@@ -287,7 +297,8 @@ static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle, wt_udp_platf
   } else if (message->address_length != NULL) {
     from_length = (int)(*message->address_length);
   }
-  received = recvfrom(handle, (char *)message->bytes, (int)message->capacity, flags, from, &from_length);
+  received =
+      recvfrom(handle, (char *)message->bytes, (int)message->capacity, flags, from, &from_length);
   if (received == SOCKET_ERROR) {
     if (WSAGetLastError() != WSAEMSGSIZE) return -1;
     /* The datagram was longer than the buffer. It has been consumed unless this was a peek, and the sender is
@@ -309,7 +320,8 @@ static int wt_udp_platform_recvfrom_message(wt_udp_handle_t handle, wt_udp_platf
  * `const char *`. The cross-compile reported the incompatibility rather than letting it reach a compiler that
  * would have called it a warning. */
 static int wt_udp_platform_set_v6_only(wt_udp_handle_t handle, int on) {
-  return setsockopt(handle, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&on, (wt_udp_socklen_t)sizeof(on));
+  return setsockopt(handle, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&on,
+                    (wt_udp_socklen_t)sizeof(on));
 }
 
 /* The ADDRESS conversions, which are the last place the two platforms disagree about TYPES rather than about
@@ -422,7 +434,8 @@ static wt_status_t wt_udp_platform_status_of_error(int error) {
 /* The reverse: a printable address, for a log line. `inet_ntop` is the one name both platforms share, so this
  * exists only because `udp.c` must not include the header that declares it. Returns the text length, or 0 when
  * the family is not one this library carries. */
-static size_t wt_udp_platform_format_address(int domain, const uint8_t *bytes, char *out, size_t capacity) {
+static size_t wt_udp_platform_format_address(int domain, const uint8_t *bytes, char *out,
+                                             size_t capacity) {
   const char *written;
   size_t length;
   if (out == NULL || capacity == 0U) return 0U;
@@ -436,16 +449,20 @@ static size_t wt_udp_platform_format_address(int domain, const uint8_t *bytes, c
   return length;
 }
 
-
 #else
 
 /* The POSIX side has nothing to start or stop: the two calls exist so that `udp.c` names one lifetime on
  * both platforms, and a no-op that says why is better than an `#if` at the call site. */
-static int wt_udp_platform_acquire(void) { return 0; }
+static int wt_udp_platform_acquire(void) {
+  return 0;
+}
 
-static void wt_udp_platform_release(void) {}
+static void wt_udp_platform_release(void) {
+}
 
-static int wt_udp_platform_close(wt_udp_handle_t handle) { return close(handle); }
+static int wt_udp_platform_close(wt_udp_handle_t handle) {
+  return close(handle);
+}
 
 static int wt_udp_platform_set_nonblocking(wt_udp_handle_t handle) {
   int flags = fcntl(handle, F_GETFL, 0);
@@ -461,17 +478,21 @@ static int wt_udp_platform_wait_readable(wt_udp_handle_t handle, int timeout_ms)
   return poll(&entry, 1UL, timeout_ms);
 }
 
-static int wt_udp_platform_last_error(void) { return errno; }
+static int wt_udp_platform_last_error(void) {
+  return errno;
+}
 
-static int wt_udp_platform_send_message(wt_udp_handle_t handle, const struct sockaddr *to, int to_length,
-                                        const void *bytes, size_t length, size_t *out_written) {
+static int wt_udp_platform_send_message(wt_udp_handle_t handle, const struct sockaddr *to,
+                                        int to_length, const void *bytes, size_t length,
+                                        size_t *out_written) {
   ssize_t written = sendto(handle, bytes, length, 0, to, (socklen_t)to_length);
   if (written < 0) return -1;
   if (out_written != NULL) *out_written = (size_t)written;
   return 0;
 }
 
-static int wt_udp_platform_receive_message(wt_udp_handle_t handle, wt_udp_platform_message_t *message) {
+static int wt_udp_platform_receive_message(wt_udp_handle_t handle,
+                                           wt_udp_platform_message_t *message) {
   struct iovec iov;
   struct msghdr msg;
   int flags = 0;
@@ -629,7 +650,8 @@ static wt_status_t wt_udp_platform_status_of_error(int error) {
 /* The reverse: a printable address, for a log line. `inet_ntop` is the one name both platforms share, so this
  * exists only because `udp.c` must not include the header that declares it. Returns the text length, or 0 when
  * the family is not one this library carries. */
-static size_t wt_udp_platform_format_address(int domain, const uint8_t *bytes, char *out, size_t capacity) {
+static size_t wt_udp_platform_format_address(int domain, const uint8_t *bytes, char *out,
+                                             size_t capacity) {
   const char *written;
   size_t length;
   if (out == NULL || capacity == 0U) return 0U;
@@ -644,6 +666,5 @@ static size_t wt_udp_platform_format_address(int domain, const uint8_t *bytes, c
 }
 
 #endif
-
 
 #endif /* WEBTRANSPORT_RUNTIME_UDP_PLATFORM_H */

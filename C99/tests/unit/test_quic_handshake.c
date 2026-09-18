@@ -26,11 +26,11 @@
 
 #include "webtransport/quic/connection.h"
 #include "webtransport/quic/handshake.h"
-#include "webtransport/quic/transport_parameters.h"
-#include "webtransport/writer.h"
 #include "webtransport/quic/packet_io.h"
 #include "webtransport/quic/protection.h"
+#include "webtransport/quic/transport_parameters.h"
 #include "webtransport/runtime/udp.h"
+#include "webtransport/writer.h"
 
 #ifndef WT_TRUST_FIXTURE_DIR
 #error "WT_TRUST_FIXTURE_DIR must name the directory holding the trust fixtures"
@@ -71,9 +71,8 @@ static void build_test_parameters(void) {
                                                &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 4U));
   WT_EXPECT_OK("initial_max_streams_uni", wt_quic_transport_parameters_add_integer(
                                               &params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 4U));
-  WT_EXPECT_OK("max_datagram_frame_size",
-               wt_quic_transport_parameters_add_integer(&params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE,
-                                                        1200U));
+  WT_EXPECT_OK("max_datagram_frame_size", wt_quic_transport_parameters_add_integer(
+                                              &params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U));
   WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&w, &params));
   g_parameters_len = wt_writer_offset(&w);
   WT_EXPECT_TRUE("with bytes in them", g_parameters_len > 0U);
@@ -107,7 +106,8 @@ typedef struct fixtures {
 static int load_fixtures(fixtures_t *fixtures) {
   memset(fixtures, 0, sizeof(*fixtures));
   fixtures->leaf_len = read_fixture("leaf.der", fixtures->leaf, sizeof(fixtures->leaf));
-  fixtures->ca_bundle_len = read_fixture("ca.pem", fixtures->ca_bundle, sizeof(fixtures->ca_bundle));
+  fixtures->ca_bundle_len =
+      read_fixture("ca.pem", fixtures->ca_bundle, sizeof(fixtures->ca_bundle));
   fixtures->private_key_len =
       read_fixture("leaf-key.der", fixtures->private_key, sizeof(fixtures->private_key));
   return fixtures->leaf_len != 0U && fixtures->ca_bundle_len != 0U &&
@@ -206,7 +206,8 @@ static void open_endpoint(wt_udp_family_t family, endpoint_t *endpoint, endpoint
   if (peer != NULL) endpoint->peer = peer->address;
 
   connection_config(&config, role, endpoint);
-  WT_EXPECT_OK("the connection initialises", wt_quic_connection_init(&endpoint->connection, &config));
+  WT_EXPECT_OK("the connection initialises",
+               wt_quic_connection_init(&endpoint->connection, &config));
   endpoint->connection.config.local_max_stream_data = 512U;
   WT_EXPECT_OK("and borrows the socket",
                wt_quic_connection_attach(&endpoint->connection, &endpoint->socket,
@@ -360,8 +361,7 @@ static void test_handshake(wt_udp_family_t family) {
                wt_quic_handshake_start_client(&client.handshake, &client.connection, &client_tls));
   WT_EXPECT_INT("with the ClientHello waiting to be sent", 1,
                 wt_quic_handshake_pending(&client.handshake));
-  WT_EXPECT_U64("and the client in the waiting state",
-                (uint64_t)WT_QUIC_HANDSHAKE_CLIENT_WAITING,
+  WT_EXPECT_U64("and the client in the waiting state", (uint64_t)WT_QUIC_HANDSHAKE_CLIENT_WAITING,
                 (uint64_t)wt_quic_handshake_state(&client.handshake));
 
   run_until_connected(&client, &server);
@@ -397,8 +397,7 @@ static void test_handshake(wt_udp_family_t family) {
      * confirmed. What is left is the application level. */
     WT_EXPECT_INT("the client's Initial keys are gone", 0,
                   client.connection.has_keys_in[WT_QUIC_SPACE_INITIAL]);
-    WT_EXPECT_INT("in both directions", 0,
-                  client.connection.has_keys_out[WT_QUIC_SPACE_INITIAL]);
+    WT_EXPECT_INT("in both directions", 0, client.connection.has_keys_out[WT_QUIC_SPACE_INITIAL]);
     WT_EXPECT_INT("and so are its Handshake keys", 0,
                   client.connection.has_keys_in[WT_QUIC_SPACE_HANDSHAKE]);
     WT_EXPECT_INT("the server's too", 0, server.connection.has_keys_in[WT_QUIC_SPACE_INITIAL]);
@@ -406,16 +405,15 @@ static void test_handshake(wt_udp_family_t family) {
                   server.connection.has_keys_out[WT_QUIC_SPACE_HANDSHAKE]);
     WT_EXPECT_INT("with the application keys kept", 1,
                   client.connection.has_keys_out[WT_QUIC_SPACE_APPLICATION]);
-    WT_EXPECT_INT("on both ends", 1,
-                  server.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION]);
+    WT_EXPECT_INT("on both ends", 1, server.connection.has_keys_in[WT_QUIC_SPACE_APPLICATION]);
 
     /* The parameters the handshake carried become the limits each end obeys. */
-    WT_EXPECT_OK("the client parses the server's parameters",
-                 wt_quic_connection_set_peer_parameters(&client.connection, g_parameters,
-                                                        g_parameters_len));
-    WT_EXPECT_OK("and the server parses the client's",
-                 wt_quic_connection_set_peer_parameters(&server.connection, g_parameters,
-                                                        g_parameters_len));
+    WT_EXPECT_OK(
+        "the client parses the server's parameters",
+        wt_quic_connection_set_peer_parameters(&client.connection, g_parameters, g_parameters_len));
+    WT_EXPECT_OK(
+        "and the server parses the client's",
+        wt_quic_connection_set_peer_parameters(&server.connection, g_parameters, g_parameters_len));
     WT_EXPECT_U64("with the data limit they state", 100000U,
                   wt_quic_connection_peer_limits(&client.connection)->initial_max_data);
     WT_EXPECT_U64("and the stream count", 4U,
@@ -436,12 +434,12 @@ static void test_handshake(wt_udp_family_t family) {
 
       /* The server must grant the streams ITS OWN transport parameters advertised (four each way), or
        * the receive path is right to refuse a STREAM frame for one of them (RFC 9000 section 4.6). */
-      WT_EXPECT_OK("the server grants what it advertised",
-                   wt_quic_connection_set_max_streams(&server.connection, WT_QUIC_STREAM_BIDIRECTIONAL,
-                                                      4U));
+      WT_EXPECT_OK(
+          "the server grants what it advertised",
+          wt_quic_connection_set_max_streams(&server.connection, WT_QUIC_STREAM_BIDIRECTIONAL, 4U));
       WT_EXPECT_OK("in both directions",
-                   wt_quic_connection_set_max_streams(&server.connection, WT_QUIC_STREAM_UNIDIRECTIONAL,
-                                                      2U));
+                   wt_quic_connection_set_max_streams(&server.connection,
+                                                      WT_QUIC_STREAM_UNIDIRECTIONAL, 2U));
       WT_EXPECT_OK("the server grants connection-level room",
                    wt_quic_connection_set_max_data(&server.connection, 65536U));
       g_stream_length = 0U;
@@ -460,15 +458,15 @@ static void test_handshake(wt_udp_family_t family) {
 
       /* A stream number the peer did not grant is refused: the parameters above grant four
        * client-initiated bidirectional streams, so index four is one too many. */
-      WT_EXPECT_STATUS("a stream beyond the peer's grant is a limit", WT_ERR_LIMIT,
-                       wt_quic_connection_send_stream(&client.connection, 16U, 0U, k_stream, 1U, 0,
-                                                      now));
+      WT_EXPECT_STATUS(
+          "a stream beyond the peer's grant is a limit", WT_ERR_LIMIT,
+          wt_quic_connection_send_stream(&client.connection, 16U, 0U, k_stream, 1U, 0, now));
       /* Stream 3 is the SERVER's unidirectional stream: a unidirectional stream carries data one way,
        * and that way is the server's, so the client may not send on it. This end's own unidirectional
        * streams would be 2, 6, 10 (RFC 9000 section 2.1). */
-      WT_EXPECT_STATUS("a peer's unidirectional stream is not this end's to send on", WT_ERR_LIMIT,
-                       wt_quic_connection_send_stream(&client.connection, 3U, 0U, k_stream, 1U, 0,
-                                                      now));
+      WT_EXPECT_STATUS(
+          "a peer's unidirectional stream is not this end's to send on", WT_ERR_LIMIT,
+          wt_quic_connection_send_stream(&client.connection, 3U, 0U, k_stream, 1U, 0, now));
     }
 
     /* The limit this endpoint GRANTS the peer is the other direction from the one it obeys: it has to
@@ -506,21 +504,21 @@ static void test_handshake(wt_udp_family_t family) {
       /* The counts are already seeded above -- the receive path needs them there, because a STREAM
        * frame for a stream this endpoint granted arrives before this block runs -- so what is checked
        * here is the raising, which is what an application that has finished with streams does. */
-      WT_EXPECT_U64("which read back separately", 4U,
-                    wt_quic_connection_max_streams(&server.connection,
-                                                   WT_QUIC_STREAM_BIDIRECTIONAL));
-      WT_EXPECT_U64("as they should", 2U,
-                    wt_quic_connection_max_streams(&server.connection,
-                                                   WT_QUIC_STREAM_UNIDIRECTIONAL));
+      WT_EXPECT_U64(
+          "which read back separately", 4U,
+          wt_quic_connection_max_streams(&server.connection, WT_QUIC_STREAM_BIDIRECTIONAL));
+      WT_EXPECT_U64(
+          "as they should", 2U,
+          wt_quic_connection_max_streams(&server.connection, WT_QUIC_STREAM_UNIDIRECTIONAL));
       WT_EXPECT_STATUS("lowering one is refused", WT_ERR_LIMIT,
                        wt_quic_connection_send_max_streams(&server.connection,
                                                            WT_QUIC_STREAM_BIDIRECTIONAL, 3U, now));
       WT_EXPECT_OK("raising it is what accepting streams does",
                    wt_quic_connection_send_max_streams(&server.connection,
                                                        WT_QUIC_STREAM_BIDIRECTIONAL, 8U, now));
-      WT_EXPECT_U64("and is remembered", 8U,
-                    wt_quic_connection_max_streams(&server.connection,
-                                                   WT_QUIC_STREAM_BIDIRECTIONAL));
+      WT_EXPECT_U64(
+          "and is remembered", 8U,
+          wt_quic_connection_max_streams(&server.connection, WT_QUIC_STREAM_BIDIRECTIONAL));
       now += 1000U;
       g_now = now;
       WT_EXPECT_OK("the client reads the frame", pump(&client, now, &arrived));
@@ -551,10 +549,9 @@ static void test_handshake(wt_udp_family_t family) {
       g_now = now;
       WT_EXPECT_OK("the server reads a datagram", pump(&server, now, &arrived));
       WT_EXPECT_INT("which arrived", 1, arrived);
-      WT_EXPECT_OK("and is queued",
-                   wt_quic_connection_receive_datagram(&server.connection, received,
-                                                       sizeof(received), &received_len,
-                                                       &received_at));
+      WT_EXPECT_OK("and is queued", wt_quic_connection_receive_datagram(
+                                        &server.connection, received, sizeof(received),
+                                        &received_len, &received_at));
       WT_EXPECT_U64("whole", (uint64_t)sizeof(k_datagram), (uint64_t)received_len);
       WT_EXPECT_BYTES("byte for byte", k_datagram, received, sizeof(k_datagram));
       WT_EXPECT_U64("with the time it arrived", now, received_at);
@@ -574,8 +571,8 @@ static void test_handshake(wt_udp_family_t family) {
       wt_quic_frame_t ping = wt_quic_frame_make(WT_QUIC_FRAME_KIND_PING);
       uint64_t received_before = server.connection.packets_received;
       WT_EXPECT_OK("the client sends a 1-RTT frame",
-                   wt_quic_connection_send_frame(&client.connection, WT_QUIC_SPACE_APPLICATION, &ping,
-                                                 1, now));
+                   wt_quic_connection_send_frame(&client.connection, WT_QUIC_SPACE_APPLICATION,
+                                                 &ping, 1, now));
       now += 1000U;
       {
         int received = 0;
@@ -600,7 +597,8 @@ static void test_handshake(wt_udp_family_t family) {
 
       wt_quic_transport_parameters_init(&params);
       WT_EXPECT_OK("a mismatching initial_source_connection_id builds",
-                   wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                   wt_quic_transport_parameters_add_bytes(&params,
+                                                          WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
                                                           k_other_source, sizeof(k_other_source)));
       w = wt_writer_init(encoded, sizeof(encoded));
       WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
@@ -610,9 +608,10 @@ static void test_handshake(wt_udp_family_t family) {
                                                               wt_writer_offset(&w)));
 
       wt_quic_transport_parameters_init(&params);
-      WT_EXPECT_OK("the packets' own initial_source_connection_id builds",
-                   wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
-                                                          k_connection_id, sizeof(k_connection_id)));
+      WT_EXPECT_OK(
+          "the packets' own initial_source_connection_id builds",
+          wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                                 k_connection_id, sizeof(k_connection_id)));
       w = wt_writer_init(encoded, sizeof(encoded));
       WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
       WT_EXPECT_STATUS("and the value the packets carried is accepted", WT_OK,
@@ -623,7 +622,8 @@ static void test_handshake(wt_udp_family_t family) {
        * parameter must match that too. */
       wt_quic_transport_parameters_init(&params);
       WT_EXPECT_OK("a mismatching client initial_source_connection_id builds",
-                   wt_quic_transport_parameters_add_bytes(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                   wt_quic_transport_parameters_add_bytes(&params,
+                                                          WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
                                                           k_other_source, sizeof(k_other_source)));
       w = wt_writer_init(encoded, sizeof(encoded));
       WT_EXPECT_OK("and encodes", wt_quic_transport_parameters_encode(&w, &params));
@@ -665,8 +665,7 @@ static void test_driver_edges(void) {
 
   WT_EXPECT_OK("the handshake starts",
                wt_quic_handshake_start_client(&client.handshake, &client.connection, &client_tls));
-  WT_EXPECT_INT("with the ClientHello pending", 1,
-                wt_quic_handshake_pending(&client.handshake));
+  WT_EXPECT_INT("with the ClientHello pending", 1, wt_quic_handshake_pending(&client.handshake));
   WT_EXPECT_OK("which flushes", wt_quic_handshake_flush(&client.handshake, 1000U));
   WT_EXPECT_INT("leaving nothing pending", 0, wt_quic_handshake_pending(&client.handshake));
   WT_EXPECT_U64("and one packet on the wire", 1U, client.connection.packets_sent);

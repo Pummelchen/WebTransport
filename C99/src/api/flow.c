@@ -60,14 +60,14 @@ wt_status_t wt_session_flow_configure(wt_session_t *session, int enabled, uint64
     wt_session_set_error(session, status, error);
     return status;
   }
-  status = wt_webtransport_flow_on_max_streams(&session->limits, 1, initial_max_streams_bidi,
-                                              &error);
+  status =
+      wt_webtransport_flow_on_max_streams(&session->limits, 1, initial_max_streams_bidi, &error);
   if (status != WT_OK) {
     wt_session_set_error(session, status, error);
     return status;
   }
-  status = wt_webtransport_flow_on_max_streams(&session->limits, 0, initial_max_streams_uni,
-                                              &error);
+  status =
+      wt_webtransport_flow_on_max_streams(&session->limits, 0, initial_max_streams_uni, &error);
   if (status != WT_OK) {
     wt_session_set_error(session, status, error);
     return status;
@@ -92,17 +92,15 @@ wt_session_flow_state_t wt_session_flow_snapshot(const wt_session_t *session) {
   if (session == NULL) return state;
 
   state.enabled = session->flow_enabled;
-  state.max_data_state = wt_session_limit_state_of(session->flow_enabled,
-                                                   session->limits.max_data_set,
-                                                   session->limits.max_data);
+  state.max_data_state = wt_session_limit_state_of(
+      session->flow_enabled, session->limits.max_data_set, session->limits.max_data);
   state.max_data = session->limits.max_data;
   state.max_streams_bidi_state =
       wt_session_limit_state_of(session->flow_enabled, session->limits.max_streams_bidi_set,
                                 session->limits.max_streams_bidi);
   state.max_streams_bidi = session->limits.max_streams_bidi;
-  state.max_streams_uni_state =
-      wt_session_limit_state_of(session->flow_enabled, session->limits.max_streams_uni_set,
-                                session->limits.max_streams_uni);
+  state.max_streams_uni_state = wt_session_limit_state_of(
+      session->flow_enabled, session->limits.max_streams_uni_set, session->limits.max_streams_uni);
   state.max_streams_uni = session->limits.max_streams_uni;
   state.used_data = session->used_data;
   state.opened_streams_bidi = session->opened_streams_bidi;

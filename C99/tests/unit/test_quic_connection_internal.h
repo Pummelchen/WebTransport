@@ -16,8 +16,8 @@
 #include "webtransport/quic/connection.h"
 #include "webtransport/quic/packet.h"
 #include "webtransport/quic/packet_io.h"
-#include "webtransport/quic/transport_parameters.h"
 #include "webtransport/quic/protection.h"
+#include "webtransport/quic/transport_parameters.h"
 #include "webtransport/runtime/udp.h"
 
 /* What a handler was told, recorded rather than acted on: the frame bytes, the space and the count. */
@@ -103,8 +103,10 @@ void send_application_frame(const connection_pair_t *pair, const wt_quic_frame_t
 void send_short_initial_frame(const connection_pair_t *pair, const wt_quic_frame_t *frame,
                               const wt_quic_packet_keys_t *keys, uint64_t packet_number);
 wt_status_t refuse_frame(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);
-wt_status_t refuse_frame_with_code(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);
-wt_status_t refuse_with_h3_error(void *context, wt_quic_space_t space, const wt_quic_frame_t *frame);
+wt_status_t refuse_frame_with_code(void *context, wt_quic_space_t space,
+                                   const wt_quic_frame_t *frame);
+wt_status_t refuse_with_h3_error(void *context, wt_quic_space_t space,
+                                 const wt_quic_frame_t *frame);
 wt_status_t record_reset_at(void *context, const wt_quic_frame_t *frame);
 void install_application_keys(connection_pair_t *pair, uint8_t base);
 void deliver_to(connection_pair_t *pair, int to_server, const uint8_t *packet, size_t length,
@@ -115,7 +117,8 @@ size_t build_retry(uint8_t *out, size_t capacity, const uint8_t *source, size_t 
 void arm_application(connection_pair_t *pair, uint8_t seed);
 void update_keys_keeping_hp(const wt_quic_packet_keys_t *current, wt_quic_packet_keys_t *out);
 size_t build_application_packet(const wt_quic_packet_keys_t *keys, uint64_t packet_number,
-                                int key_phase, uint8_t *out, size_t capacity, size_t payload_offset);
+                                int key_phase, uint8_t *out, size_t capacity,
+                                size_t payload_offset);
 void deliver_to_peer(connection_pair_t *pair, int to_server, const uint8_t *packet, size_t length,
                      uint64_t now);
 void send_frame_from_side(connection_pair_t *pair, int to_client, const wt_quic_frame_t *frame,
@@ -134,6 +137,7 @@ void test_round_trip(wt_udp_family_t family);
 void test_short_packet_is_padded(wt_udp_family_t family);
 void test_packet_threshold_loss(void);
 void test_ack_for_unsent_packet(void);
+void test_a_malformed_ack_range_is_refused(void);
 void test_close_paths(void);
 void test_discards(void);
 void test_garbage(wt_udp_family_t family);
@@ -186,5 +190,6 @@ void test_a_path_challenge_is_echoed_immediately(void);
 void test_a_path_is_validated_by_its_own_response(void);
 void test_a_path_that_does_not_answer_is_given_up_on(void);
 void test_quic_space_names(void);
+void test_the_client_half_of_section_7_3(void);
 
 #endif /* WT_TEST_QUIC_CONNECTION_INTERNAL_H */

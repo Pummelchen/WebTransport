@@ -73,7 +73,8 @@ typedef struct http3_side {
 
 typedef struct pair {
   fixtures_t fixtures;
-  wt_tls_server_identity_t server_identity; /* kept alive for the whole pair: the handshake keeps the pointer */
+  wt_tls_server_identity_t
+      server_identity; /* kept alive for the whole pair: the handshake keeps the pointer */
   wt_udp_socket_t client_socket;
   wt_udp_socket_t server_socket;
   wt_udp_address_t client_address;

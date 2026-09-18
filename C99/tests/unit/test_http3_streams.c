@@ -117,11 +117,11 @@ static void test_stream_type_prefixes(void) {
 
   WT_EXPECT_OK("control is a kind", wt_http3_stream_kind_for_type(WT_HTTP3_STREAM_CONTROL, &kind));
   WT_EXPECT_INT("as control", (int)WT_HTTP3_STREAM_KIND_CONTROL, (int)kind);
-  WT_EXPECT_OK("QPACK encoder is", wt_http3_stream_kind_for_type(WT_HTTP3_STREAM_QPACK_ENCODER,
-                                                                 &kind));
+  WT_EXPECT_OK("QPACK encoder is",
+               wt_http3_stream_kind_for_type(WT_HTTP3_STREAM_QPACK_ENCODER, &kind));
   WT_EXPECT_INT("as one", (int)WT_HTTP3_STREAM_KIND_QPACK_ENCODER, (int)kind);
-  WT_EXPECT_OK("QPACK decoder is", wt_http3_stream_kind_for_type(WT_HTTP3_STREAM_QPACK_DECODER,
-                                                                 &kind));
+  WT_EXPECT_OK("QPACK decoder is",
+               wt_http3_stream_kind_for_type(WT_HTTP3_STREAM_QPACK_DECODER, &kind));
   WT_EXPECT_OK("push is", wt_http3_stream_kind_for_type(WT_HTTP3_STREAM_PUSH, &kind));
   WT_EXPECT_INT("as a push stream", (int)WT_HTTP3_STREAM_KIND_PUSH, (int)kind);
 

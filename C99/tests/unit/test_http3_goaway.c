@@ -49,17 +49,17 @@ static void test_payload_errors(void) {
 
   /* The frame carries one field. A second varint is a frame this endpoint cannot
    * interpret, and reading the first and ignoring the rest would accept it. */
-  WT_EXPECT_STATUS("a second field is refused", WT_ERR_PROTOCOL,
-                   wt_http3_goaway_decode_payload(two_varints, sizeof(two_varints), &decoded,
-                                                  &error));
+  WT_EXPECT_STATUS(
+      "a second field is refused", WT_ERR_PROTOCOL,
+      wt_http3_goaway_decode_payload(two_varints, sizeof(two_varints), &decoded, &error));
   WT_EXPECT_U64("as a frame error", WT_HTTP3_FRAME_ERROR, (uint64_t)error);
 
   /* And so is a trailing byte after a complete varint. */
   (void)wt_quic_writer_varint(&w, 0U);
   payload[wt_writer_offset(&w)] = 0x00U;
-  WT_EXPECT_STATUS("trailing bytes are refused", WT_ERR_PROTOCOL,
-                   wt_http3_goaway_decode_payload(payload, wt_writer_offset(&w) + 1U, &decoded,
-                                                  &error));
+  WT_EXPECT_STATUS(
+      "trailing bytes are refused", WT_ERR_PROTOCOL,
+      wt_http3_goaway_decode_payload(payload, wt_writer_offset(&w) + 1U, &decoded, &error));
   WT_EXPECT_U64("as a frame error", WT_HTTP3_FRAME_ERROR, (uint64_t)error);
 }
 
@@ -83,8 +83,9 @@ static void test_server_identifier_must_be_a_request_stream(void) {
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
 
     wt_http3_goaway_init(&goaway);
-    WT_EXPECT_STATUS("any other stream type is refused", WT_ERR_PROTOCOL,
-                     wt_http3_goaway_on_received(&goaway, WT_HTTP3_ROLE_SERVER, invalid[i], &error));
+    WT_EXPECT_STATUS(
+        "any other stream type is refused", WT_ERR_PROTOCOL,
+        wt_http3_goaway_on_received(&goaway, WT_HTTP3_ROLE_SERVER, invalid[i], &error));
     WT_EXPECT_U64("as an ID error", WT_HTTP3_ID_ERROR, (uint64_t)error);
     WT_EXPECT_INT("and nothing is recorded", 0, goaway.received);
   }
@@ -150,9 +151,9 @@ static void test_rejection_and_new_requests(void) {
   WT_EXPECT_OK("a GOAWAY at stream 8",
                wt_http3_goaway_on_received(&goaway, WT_HTTP3_ROLE_SERVER, 8U, &error));
   WT_EXPECT_INT("stops new requests", 0, wt_http3_goaway_allows_new_requests(&goaway));
-  WT_EXPECT_INT("leaves the streams below it alone", 0, wt_http3_goaway_rejects_stream(&goaway, 0U));
-  WT_EXPECT_INT("including the one just below", 0,
-                wt_http3_goaway_rejects_stream(&goaway, 4U));
+  WT_EXPECT_INT("leaves the streams below it alone", 0,
+                wt_http3_goaway_rejects_stream(&goaway, 0U));
+  WT_EXPECT_INT("including the one just below", 0, wt_http3_goaway_rejects_stream(&goaway, 4U));
   WT_EXPECT_INT("and rejects the identifier itself", 1,
                 wt_http3_goaway_rejects_stream(&goaway, 8U));
   WT_EXPECT_INT("and everything above", 1, wt_http3_goaway_rejects_stream(&goaway, 12U));
@@ -160,8 +161,8 @@ static void test_rejection_and_new_requests(void) {
   /* An identifier of zero is the "nothing was processed" case, which rejects
    * every request rather than none. */
   wt_http3_goaway_init(&goaway);
-  WT_EXPECT_OK("a GOAWAY at zero", wt_http3_goaway_on_received(&goaway, WT_HTTP3_ROLE_SERVER, 0U,
-                                                              &error));
+  WT_EXPECT_OK("a GOAWAY at zero",
+               wt_http3_goaway_on_received(&goaway, WT_HTTP3_ROLE_SERVER, 0U, &error));
   WT_EXPECT_INT("rejects the first stream", 1, wt_http3_goaway_rejects_stream(&goaway, 0U));
 }
 

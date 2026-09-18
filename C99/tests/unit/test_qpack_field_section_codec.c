@@ -61,31 +61,28 @@ static void test_whole_section(void) {
   WT_EXPECT_U64("with its required insert count", 1U, decoder.prefix.required_insert_count);
   WT_EXPECT_U64("and its base", 1U, decoder.prefix.base);
 
-  WT_EXPECT_OK("the first field reads",
-               wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &field,
-                                                   &error));
+  WT_EXPECT_OK("the first field reads", wt_qpack_field_section_decoder_next(
+                                            &decoder, scratch, sizeof(scratch), &field, &error));
   WT_EXPECT_BYTES("as :path", (const uint8_t *)":path", field.name, 5U);
   WT_EXPECT_BYTES("with its value", (const uint8_t *)"/", field.value, 1U);
   fields++;
 
-  WT_EXPECT_OK("the second field reads",
-               wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &field,
-                                                   &error));
+  WT_EXPECT_OK("the second field reads", wt_qpack_field_section_decoder_next(
+                                             &decoder, scratch, sizeof(scratch), &field, &error));
   WT_EXPECT_BYTES("as :method", (const uint8_t *)":method", field.name, 7U);
   WT_EXPECT_BYTES("with the decoded value", (const uint8_t *)"GET", field.value, 3U);
   fields++;
 
-  WT_EXPECT_OK("the third field reads",
-               wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &field,
-                                                   &error));
+  WT_EXPECT_OK("the third field reads", wt_qpack_field_section_decoder_next(
+                                            &decoder, scratch, sizeof(scratch), &field, &error));
   WT_EXPECT_BYTES("as the dynamic entry's name", (const uint8_t *)"x-dyn", field.name, 5U);
   WT_EXPECT_BYTES("and its value", (const uint8_t *)"dyn-value", field.value, 9U);
   fields++;
 
   WT_EXPECT_U64("which is all of them", 3U, (uint64_t)fields);
-  WT_EXPECT_STATUS("and then the section ends", WT_ERR_CLOSED,
-                   wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &field,
-                                                       &error));
+  WT_EXPECT_STATUS(
+      "and then the section ends", WT_ERR_CLOSED,
+      wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &field, &error));
 }
 
 static void test_blocked_and_truncated(void) {
@@ -129,9 +126,8 @@ static void test_blocked_and_truncated(void) {
   WT_EXPECT_OK("and then it begins",
                wt_qpack_field_section_begin(&decoder, &table, wt_qpack_max_entries(4096U), section,
                                             wt_writer_offset(&w), 4U, &error));
-  WT_EXPECT_OK("with its field readable",
-               wt_qpack_field_section_decoder_next(&decoder, scratch, sizeof(scratch), &field,
-                                                   &error));
+  WT_EXPECT_OK("with its field readable", wt_qpack_field_section_decoder_next(
+                                              &decoder, scratch, sizeof(scratch), &field, &error));
 
   /* A section that stops inside its prefix is incomplete rather than malformed. */
   WT_EXPECT_STATUS("a truncated section is incomplete", WT_ERR_TRUNCATED,

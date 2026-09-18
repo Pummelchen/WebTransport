@@ -121,9 +121,9 @@ typedef struct wt_quic_transport_parameters {
  *
  * An unknown identifier is kept, not refused: RFC 9000 section 7.4.2 requires it
  * to be ignored, and ignoring it means a caller can see it and choose. */
-wt_status_t wt_quic_transport_parameters_decode(
-    const uint8_t *data, size_t length, wt_quic_transport_parameters_t *out,
-    wt_quic_error_t *out_error);
+wt_status_t wt_quic_transport_parameters_decode(const uint8_t *data, size_t length,
+                                                wt_quic_transport_parameters_t *out,
+                                                wt_quic_error_t *out_error);
 
 /* Look a parameter up by identifier. Returns WT_OK and writes the value and its
  * length when the parameter is present, or WT_ERR_INVALID_ARGUMENT when it is
@@ -138,16 +138,16 @@ wt_status_t wt_quic_transport_parameters_decode(
  * endpoint could have advertised a zero-length original destination connection
  * ID, which RFC 9000 section 7.2 forbids, and the check would not have seen
  * it. */
-wt_status_t wt_quic_transport_parameters_get(
-    const wt_quic_transport_parameters_t *params, uint64_t id,
-    const uint8_t **out_value, size_t *out_length);
+wt_status_t wt_quic_transport_parameters_get(const wt_quic_transport_parameters_t *params,
+                                             uint64_t id, const uint8_t **out_value,
+                                             size_t *out_length);
 
 /* The same, for a parameter whose value is a varint. Returns WT_OK and the
  * value, WT_ERR_TRUNCATED when the value is not a varint, or
  * WT_ERR_INVALID_ARGUMENT when the parameter is absent -- absent and zero are
  * different answers, so they are different statuses. */
-wt_status_t wt_quic_transport_parameters_integer(
-    const wt_quic_transport_parameters_t *params, uint64_t id, uint64_t *out);
+wt_status_t wt_quic_transport_parameters_integer(const wt_quic_transport_parameters_t *params,
+                                                 uint64_t id, uint64_t *out);
 
 /* The rules of RFC 9000 section 18.2 that make a parameter an error rather than
  * something to ignore. Returns WT_OK, or WT_ERR_PROTOCOL with `out_error` set to
@@ -159,9 +159,9 @@ wt_status_t wt_quic_transport_parameters_integer(
  * server, and a server MUST treat receipt of one as TRANSPORT_PARAMETER_ERROR.
  * A caller that does not know the sending role passes 0, which leaves that one
  * rule out -- every other rule here is independent of who sent the list. */
-wt_status_t wt_quic_transport_parameters_check(
-    const wt_quic_transport_parameters_t *params, int peer_is_client,
-    wt_quic_error_t *out_error, uint64_t *out_offender);
+wt_status_t wt_quic_transport_parameters_check(const wt_quic_transport_parameters_t *params,
+                                               int peer_is_client, wt_quic_error_t *out_error,
+                                               uint64_t *out_offender);
 
 /* Encode a parameter list through a writer. The entries are written in the order
  * given, and a caller building one should use
@@ -171,8 +171,8 @@ wt_status_t wt_quic_transport_parameters_check(
  * A duplicate identifier is refused: a library that can emit a message it would
  * refuse to read has a defect, and RFC 9000 section 7.4 makes a duplicate a
  * connection error. */
-wt_status_t wt_quic_transport_parameters_encode(
-    wt_writer_t *w, const wt_quic_transport_parameters_t *params);
+wt_status_t wt_quic_transport_parameters_encode(wt_writer_t *w,
+                                                const wt_quic_transport_parameters_t *params);
 
 /* Build a parameter list. Empty it first with
  * `wt_quic_transport_parameters_init`. */
@@ -182,13 +182,13 @@ void wt_quic_transport_parameters_init(wt_quic_transport_parameters_t *params);
  * owns so the caller does not have to keep the bytes. Refuses a duplicate
  * identifier and a list that is full. Keeps the list sorted by identifier, so a
  * lookup is a binary search and a duplicate is found by the check. */
-wt_status_t wt_quic_transport_parameters_add_integer(
-    wt_quic_transport_parameters_t *params, uint64_t id, uint64_t value);
+wt_status_t wt_quic_transport_parameters_add_integer(wt_quic_transport_parameters_t *params,
+                                                     uint64_t id, uint64_t value);
 
 /* Add a byte-valued parameter, whose bytes must outlive the list. */
-wt_status_t wt_quic_transport_parameters_add_bytes(
-    wt_quic_transport_parameters_t *params, uint64_t id, const uint8_t *value,
-    size_t length);
+wt_status_t wt_quic_transport_parameters_add_bytes(wt_quic_transport_parameters_t *params,
+                                                   uint64_t id, const uint8_t *value,
+                                                   size_t length);
 
 /* The parameter list an endpoint MUST send (RFC 9000 section 7.3), built in ONE place so a caller cannot leave
  * a mandatory parameter out.
@@ -211,12 +211,10 @@ wt_status_t wt_quic_transport_parameters_add_bytes(
  * not retry and sends one is refused just the same ("if a server sends a Retry packet, ... the server MUST also
  * send the retry_source_connection_id transport parameter", and section 7.3 makes a present one without a Retry
  * a TRANSPORT_PARAMETER_ERROR on the client). */
-wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *params, int is_server,
-                                               const uint8_t *source_connection_id, size_t source_length,
-                                               const uint8_t *original_destination_connection_id,
-                                               size_t original_length, int retried,
-                                               const uint8_t *retry_source_connection_id,
-                                               size_t retry_source_length);
+wt_status_t wt_quic_transport_parameters_build(
+    wt_quic_transport_parameters_t *params, int is_server, const uint8_t *source_connection_id,
+    size_t source_length, const uint8_t *original_destination_connection_id, size_t original_length,
+    int retried, const uint8_t *retry_source_connection_id, size_t retry_source_length);
 
 /* A short stable name for the identifiers above, or "unknown". Never NULL. */
 const char *wt_quic_transport_parameter_name(uint64_t id);

@@ -53,7 +53,7 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   /* No Retry on this path (WT-168 is the round that will add one), so `retried` is 0 and the retry source is
    * absent -- which the builder refuses to accept the other way round. */
   parameters_len = build_parameters(parameters, sizeof(parameters), 0, k_connection_id,
-                                   sizeof(k_connection_id), NULL, 0U, 0, NULL, 0U);
+                                    sizeof(k_connection_id), NULL, 0U, 0, NULL, 0U);
   if (parameters_len == 0U) return WT_ERR_LIMIT;
 
   {
@@ -96,9 +96,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   }
 
   {
-    wt_status_t status = wt_runtime_session_start_client(&loop.session, &loop.socket, &peer,
-                                                         k_connection_id, sizeof(k_connection_id),
-                                                         &connection, &tls, loop.now);
+    wt_status_t status =
+        wt_runtime_session_start_client(&loop.session, &loop.socket, &peer, k_connection_id,
+                                        sizeof(k_connection_id), &connection, &tls, loop.now);
     if (status != WT_OK) {
       wt_udp_close(&loop.socket);
       return status;
@@ -147,7 +147,8 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   deadline_rounds = WT_LOOP_ROUNDS_FOR(config->timeout_ms);
   if (deadline_rounds > WT_LOOP_ROUNDS) deadline_rounds = WT_LOOP_ROUNDS;
 
-  for (round = 0U; round < deadline_rounds && handshake_ready(&loop) == 0 && loop_is_closed(&loop) == 0;
+  for (round = 0U;
+       round < deadline_rounds && handshake_ready(&loop) == 0 && loop_is_closed(&loop) == 0;
        round++) {
     pump_once(&loop);
   }
@@ -179,13 +180,14 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
    * cannot be negotiated: a peer written against a pre-rename draft knows only `webtransport` and refuses the
    * extended CONNECT with H3_MESSAGE_ERROR before any SETTINGS exchange. 0 is the draft-16 default, which is
    * what the library sends unless this is overridden (F-02b). */
-  wt_http3_driver_set_upgrade_token(&loop.side.driver, (wt_webtransport_upgrade_token_t)config->upgrade_token);
+  wt_http3_driver_set_upgrade_token(&loop.side.driver,
+                                    (wt_webtransport_upgrade_token_t)config->upgrade_token);
   /* The request stream is opened and the session ID is known, but the CONNECT has not been sent: this is the
    * window section 4.6 is about, and `--early-stream` is what puts a message in it (WT-189). */
   {
-    wt_status_t status = wt_http3_driver_open_session_stream(&loop.side.driver, &loop.transport, &settings,
-                                                             loop.now, &loop.side.request_stream_id,
-                                                             &h3_error);
+    wt_status_t status =
+        wt_http3_driver_open_session_stream(&loop.side.driver, &loop.transport, &settings, loop.now,
+                                            &loop.side.request_stream_id, &h3_error);
     if (status != WT_OK) {
       record_oracle(&loop, out);
       wt_runtime_session_clear(&loop.session);
@@ -204,9 +206,9 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->early_stream_sent = 1;
   }
   {
-    wt_status_t status = wt_http3_driver_send_session_request(&loop.side.driver, &loop.transport,
-                                                              loop.side.request_stream_id, config->authority,
-                                                              config->path, 0U, loop.now, &h3_error);
+    wt_status_t status = wt_http3_driver_send_session_request(
+        &loop.side.driver, &loop.transport, loop.side.request_stream_id, config->authority,
+        config->path, 0U, loop.now, &h3_error);
     if (status != WT_OK) {
       record_oracle(&loop, out);
       wt_runtime_session_clear(&loop.session);
@@ -214,7 +216,8 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
       return status;
     }
   }
-  for (round = 0U; round < deadline_rounds && loop.side.section_complete == 0 && loop_is_closed(&loop) == 0;
+  for (round = 0U;
+       round < deadline_rounds && loop.side.section_complete == 0 && loop_is_closed(&loop) == 0;
        round++) {
     pump_once(&loop);
   }
@@ -233,8 +236,8 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   }
   {
     wt_status_t status = wt_http3_endpoint_on_response_headers(
-        &loop.side.endpoint, loop.side.request_stream_id, loop.side.section, loop.side.section_length,
-        scratch, sizeof(scratch), &response, &h3_error);
+        &loop.side.endpoint, loop.side.request_stream_id, loop.side.section,
+        loop.side.section_length, scratch, sizeof(scratch), &response, &h3_error);
     if (status != WT_OK) {
       /* WHY the response did not become a session, which is the whole point of the field set (WT-155): before
        * this, a peer that answered a field section this layer refused and a peer that answered nothing both
@@ -246,7 +249,8 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
       wt_udp_close(&loop.socket);
       return status;
     }
-    out->connect_accepted = response.has_status != 0 && response.status >= 200U && response.status < 300U;
+    out->connect_accepted =
+        response.has_status != 0 && response.status >= 200U && response.status < 300U;
     out->response_outcome = out->connect_accepted != 0 ? (unsigned)WT_LOOP_RESPONSE_ACCEPTED
                                                        : (unsigned)WT_LOOP_RESPONSE_NOT_ACCEPTED;
     out->status = (uint32_t)response.status;
@@ -266,7 +270,8 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     }
   }
   /* Give the peer a moment to receive it and to answer with its own message where it has one. */
-  for (round = 0U; round < 200U && loop.side.data_bytes == 0U; round++) pump_once(&loop);
+  for (round = 0U; round < 200U && loop.side.data_bytes == 0U; round++)
+    pump_once(&loop);
   out->received_bytes = loop.side.data_bytes;
   out->received_datagram = loop.side.data_was_datagram;
 

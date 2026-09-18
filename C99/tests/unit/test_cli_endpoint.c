@@ -26,8 +26,7 @@ static void test_the_address_decides_the_family(void) {
   WT_EXPECT_U64("and nothing bound", 0U, (uint64_t)endpoint.bound_port);
   wt_cli_endpoint_close(&endpoint);
 
-  WT_EXPECT_OK("a bracketed IPv6 address parses",
-               wt_cli_endpoint_open(&endpoint, "[::1]:4433", 0));
+  WT_EXPECT_OK("a bracketed IPv6 address parses", wt_cli_endpoint_open(&endpoint, "[::1]:4433", 0));
   WT_EXPECT_INT("as IPv6", (int)WT_UDP_IPV6, (int)endpoint.address.family);
   WT_EXPECT_U64("with its port", 4433U, (uint64_t)endpoint.address.port);
   wt_cli_endpoint_close(&endpoint);
@@ -46,7 +45,8 @@ static void test_the_address_decides_the_family(void) {
                    wt_cli_endpoint_open(&endpoint, "localhost", 0));
   WT_EXPECT_STATUS("and an empty string too", WT_ERR_INVALID_ARGUMENT,
                    wt_cli_endpoint_open(&endpoint, "", 0));
-  WT_EXPECT_STATUS("as is a NULL", WT_ERR_INVALID_ARGUMENT, wt_cli_endpoint_open(&endpoint, NULL, 0));
+  WT_EXPECT_STATUS("as is a NULL", WT_ERR_INVALID_ARGUMENT,
+                   wt_cli_endpoint_open(&endpoint, NULL, 0));
 }
 
 static void test_a_listener_binds_and_says_what_it_got(void) {
@@ -73,7 +73,8 @@ static void test_a_listener_binds_and_says_what_it_got(void) {
     fclose(stream);
     WT_EXPECT_TRUE("the JSON names the family", strstr(buffer, "\"family\":\"ipv4\"") != NULL);
     WT_EXPECT_TRUE("and carries the bound port", strstr(buffer, "\"boundPort\":") != NULL);
-    WT_EXPECT_TRUE("with the address as given", strstr(buffer, "\"address\":\"127.0.0.1:0\"") != NULL);
+    WT_EXPECT_TRUE("with the address as given",
+                   strstr(buffer, "\"address\":\"127.0.0.1:0\"") != NULL);
   }
   wt_cli_endpoint_close(&endpoint);
   WT_EXPECT_INT("and closes", 0, endpoint.open);

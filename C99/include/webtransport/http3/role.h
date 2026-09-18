@@ -14,10 +14,7 @@
 extern "C" {
 #endif
 
-typedef enum wt_http3_role {
-  WT_HTTP3_ROLE_CLIENT = 0,
-  WT_HTTP3_ROLE_SERVER = 1
-} wt_http3_role_t;
+typedef enum wt_http3_role { WT_HTTP3_ROLE_CLIENT = 0, WT_HTTP3_ROLE_SERVER = 1 } wt_http3_role_t;
 
 #ifdef __cplusplus
 }

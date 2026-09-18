@@ -59,10 +59,10 @@ wt_status_t wt_session_create(const wt_session_config_t *config, const wt_alloca
   wt_webtransport_flow_limits_init(&session->limits);
   session->session_id = config->session_id;
   session->max_capsule_bytes = config->max_capsule_bytes;
-  session->max_datagram_bytes =
-      config->max_datagram_bytes == 0U ? (size_t)WT_SESSION_DATAGRAM_MAX
-                                                              : config->max_datagram_bytes;
-  session->max_streams = config->max_streams == 0U ? (size_t)WT_SESSION_STREAM_MAX : config->max_streams;
+  session->max_datagram_bytes = config->max_datagram_bytes == 0U ? (size_t)WT_SESSION_DATAGRAM_MAX
+                                                                 : config->max_datagram_bytes;
+  session->max_streams =
+      config->max_streams == 0U ? (size_t)WT_SESSION_STREAM_MAX : config->max_streams;
   memcpy(session->authority, config->authority, strlen(config->authority) + 1U);
   memcpy(session->path, config->path, strlen(config->path) + 1U);
   wt_session_set_error(session, WT_OK, 0U);
@@ -90,10 +90,14 @@ wt_session_state_t wt_session_state(const wt_session_t *session) {
    * compile error instead. The two enums are deliberately separate: this one is a
    * published contract, that one is an implementation detail. */
   switch (session->machine.state) {
-    case WT_WEBTRANSPORT_SESSION_ESTABLISHING: return WT_SESSION_ESTABLISHING;
-    case WT_WEBTRANSPORT_SESSION_ESTABLISHED: return WT_SESSION_ESTABLISHED;
-    case WT_WEBTRANSPORT_SESSION_DRAINING: return WT_SESSION_DRAINING;
-    case WT_WEBTRANSPORT_SESSION_CLOSED: return WT_SESSION_CLOSED;
+    case WT_WEBTRANSPORT_SESSION_ESTABLISHING:
+      return WT_SESSION_ESTABLISHING;
+    case WT_WEBTRANSPORT_SESSION_ESTABLISHED:
+      return WT_SESSION_ESTABLISHED;
+    case WT_WEBTRANSPORT_SESSION_DRAINING:
+      return WT_SESSION_DRAINING;
+    case WT_WEBTRANSPORT_SESSION_CLOSED:
+      return WT_SESSION_CLOSED;
   }
   return WT_SESSION_CLOSED;
 }
@@ -155,7 +159,8 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
     return status;
   }
 
-  if (capsule.type == WT_CAPSULE_MAX_STREAM_DATA || capsule.type == WT_CAPSULE_STREAM_DATA_BLOCKED) {
+  if (capsule.type == WT_CAPSULE_MAX_STREAM_DATA ||
+      capsule.type == WT_CAPSULE_STREAM_DATA_BLOCKED) {
     /* Draft-16 section 5.4 PROHIBITS these two: stream-level flow control is WebTransport's own, and a peer that
      * sends either is telling this endpoint about a limit it must not act on. Receipt is a session error of type
      * WT_FLOW_CONTROL_ERROR, and the first version let the session layer ignore them as unknown capsules -- a
@@ -250,7 +255,8 @@ wt_status_t wt_session_on_capsule(wt_session_t *session, const uint8_t *bytes, s
       return status;
     }
   }
-  if (capsule.type == WT_CAPSULE_STREAMS_BLOCKED_BIDI || capsule.type == WT_CAPSULE_STREAMS_BLOCKED_UNI) {
+  if (capsule.type == WT_CAPSULE_STREAMS_BLOCKED_BIDI ||
+      capsule.type == WT_CAPSULE_STREAMS_BLOCKED_UNI) {
     uint64_t maximum = 0U;
     status = wt_webtransport_streams_blocked_parse(&capsule, &maximum, &h3_error);
     if (status != WT_OK) {
@@ -315,7 +321,7 @@ wt_status_t wt_session_write_close(wt_session_t *session, uint32_t error_code, c
   *out_length = 0U;
   w = wt_http3_frame_data_writer(out, capacity);
   status = wt_webtransport_session_write_close(&session->machine, &w, error_code,
-                                              (const uint8_t *)reason, reason_length);
+                                               (const uint8_t *)reason, reason_length);
   if (status != WT_OK) {
     wt_session_set_error(session, status, 0U);
     return status;

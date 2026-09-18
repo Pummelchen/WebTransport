@@ -20,8 +20,7 @@
 /* A clock the tests advance by hand, in microseconds. */
 static const uint64_t WT_RTT_SAMPLE = 100000U; /* 100 ms */
 
-static wt_quic_sent_packet_t packet_at(uint64_t number, uint64_t time_sent,
-                                       int ack_eliciting) {
+static wt_quic_sent_packet_t packet_at(uint64_t number, uint64_t time_sent, int ack_eliciting) {
   wt_quic_sent_packet_t packet;
   memset(&packet, 0, sizeof(packet));
   packet.packet_number = number;
@@ -36,8 +35,7 @@ static wt_quic_sent_packet_t packet_at(uint64_t number, uint64_t time_sent,
 static void seed_rtt(wt_quic_rtt_t *rtt) {
   wt_quic_rtt_init(rtt);
   /* One sample, so the estimator is usable and the time threshold has a value. */
-  WT_EXPECT_OK("the estimator takes a sample",
-               wt_quic_rtt_update(rtt, WT_RTT_SAMPLE, 0U, 0U, 0));
+  WT_EXPECT_OK("the estimator takes a sample", wt_quic_rtt_update(rtt, WT_RTT_SAMPLE, 0U, 0U, 0));
   WT_EXPECT_U64("with a smoothed value of the sample", WT_RTT_SAMPLE, rtt->smoothed);
 }
 
@@ -84,11 +82,9 @@ static void test_sent_list(void) {
   /* A packet that is not in flight counts towards nothing. */
   packet = packet_at(2U, 3000U, 0);
   packet.in_flight = 0;
-  WT_EXPECT_OK("a packet that is not in flight is recorded",
-               wt_quic_loss_on_sent(&loss, &packet));
+  WT_EXPECT_OK("a packet that is not in flight is recorded", wt_quic_loss_on_sent(&loss, &packet));
   WT_EXPECT_U64("without adding bytes", 2400U, wt_quic_loss_bytes_in_flight(&loss));
-  WT_EXPECT_U64("or an ack-eliciting packet", 2U,
-                wt_quic_loss_ack_eliciting_in_flight(&loss));
+  WT_EXPECT_U64("or an ack-eliciting packet", 2U, wt_quic_loss_ack_eliciting_in_flight(&loss));
 
   /* The list has a bound, and being at it is an error rather than a silent drop. */
   {
@@ -97,8 +93,7 @@ static void test_sent_list(void) {
     wt_quic_loss_init(&full);
     for (i = 0U; i < WT_QUIC_SENT_PACKETS_MAX; i++) {
       packet = packet_at((uint64_t)i, 1000U + (uint64_t)i, 1);
-      WT_EXPECT_OK("a packet is recorded until the bound",
-                   wt_quic_loss_on_sent(&full, &packet));
+      WT_EXPECT_OK("a packet is recorded until the bound", wt_quic_loss_on_sent(&full, &packet));
     }
     packet = packet_at((uint64_t)WT_QUIC_SENT_PACKETS_MAX, 9000U, 1);
     WT_EXPECT_STATUS("and the next is refused rather than dropped", WT_ERR_LIMIT,
@@ -164,7 +159,7 @@ static void test_packet_threshold(void) {
   WT_EXPECT_U64("and the tags come back with them", 10U, log.tags[0]);
   WT_EXPECT_INT("in the order they were sent", 1,
                 log.packet_numbers[0] < log.packet_numbers[1] &&
-                        log.packet_numbers[1] < log.packet_numbers[2]);
+                    log.packet_numbers[1] < log.packet_numbers[2]);
   WT_EXPECT_U64("leaving six packets in flight", 6U, (uint64_t)wt_quic_loss_count(&loss));
   WT_EXPECT_U64("and the bytes of the lost ones gone from flight", 6U * 1200U,
                 wt_quic_loss_bytes_in_flight(&loss));
@@ -205,8 +200,7 @@ static void test_time_threshold(void) {
   WT_EXPECT_OK("detection one microsecond inside",
                wt_quic_loss_detect(&loss, 0U, &rtt, 1000000U + 112499U, 1U, log_lost, &log));
   WT_EXPECT_U64("declares nothing lost", 0U, (uint64_t)log.count);
-  WT_EXPECT_U64("and packet 0 is still in flight", 1U,
-                (uint64_t)wt_quic_loss_count(&loss));
+  WT_EXPECT_U64("and packet 0 is still in flight", 1U, (uint64_t)wt_quic_loss_count(&loss));
 
   /* The time at which it will be lost, which is what a connection arms its loss timer with. */
   WT_EXPECT_U64("the loss time is the send time plus the delay", 1000000U + 112500U,
@@ -282,8 +276,7 @@ static void test_acknowledgement(void) {
   /* A packet that was not ack-eliciting does not reset it: acknowledging a packet the peer did not
    * have to answer says nothing about whether it is still there. */
   packet = packet_at(2U, 7000U, 0);
-  WT_EXPECT_OK("a packet that needs no answer is sent",
-               wt_quic_loss_on_sent(&loss, &packet));
+  WT_EXPECT_OK("a packet that needs no answer is sent", wt_quic_loss_on_sent(&loss, &packet));
   wt_quic_loss_on_pto(&loss);
   WT_EXPECT_U64("the backoff is one", 1U, loss.pto_count);
   WT_EXPECT_OK("and it is acknowledged",
@@ -306,8 +299,7 @@ static void test_probe_timeout(void) {
 
   /* A packet that needs no answer does not arm it either. */
   packet = packet_at(0U, 1000U, 0);
-  WT_EXPECT_OK("a packet that needs no answer is sent",
-               wt_quic_loss_on_sent(&loss, &packet));
+  WT_EXPECT_OK("a packet that needs no answer is sent", wt_quic_loss_on_sent(&loss, &packet));
   WT_EXPECT_STATUS("which does not arm the probe timeout", WT_ERR_STATE,
                    wt_quic_loss_pto(&loss, 0U, &rtt, 0U, &pto));
 
@@ -333,8 +325,7 @@ static void test_probe_timeout(void) {
     wt_quic_loss_t space;
     wt_quic_loss_init(&space);
     packet = packet_at(0U, 0U, 1);
-    WT_EXPECT_OK("a packet in the application space",
-                 wt_quic_loss_on_sent(&space, &packet));
+    WT_EXPECT_OK("a packet in the application space", wt_quic_loss_on_sent(&space, &packet));
     WT_EXPECT_OK("the probe timeout with a delay",
                  wt_quic_loss_pto(&space, 0U, &rtt, 25000U, &pto));
     WT_EXPECT_U64("includes the delay", 300000U + 25000U, pto);
@@ -344,7 +335,8 @@ static void test_probe_timeout(void) {
    * the point where the arithmetic stops making sense. */
   {
     size_t i;
-    for (i = 0U; i < 64U; i++) wt_quic_loss_on_pto(&loss);
+    for (i = 0U; i < 64U; i++)
+      wt_quic_loss_on_pto(&loss);
     WT_EXPECT_TRUE("the backoff is bounded", loss.pto_count <= 16U);
     WT_EXPECT_OK("and the timeout still computes", wt_quic_loss_pto(&loss, 0U, &rtt, 0U, &pto));
     WT_EXPECT_TRUE("in the future", pto > first);

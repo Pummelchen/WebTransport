@@ -8,8 +8,8 @@
 #include "webtransport/api/flow.h"
 #include "webtransport/api/session.h"
 #include "webtransport/cursor.h"
-#include "webtransport/http3/driver.h"
 #include "webtransport/http3/control.h"
+#include "webtransport/http3/driver.h"
 #include "webtransport/http3/endpoint.h"
 #include "webtransport/http3/goaway.h"
 #include "webtransport/http3/role.h"
@@ -19,10 +19,10 @@
 #include "webtransport/http3/frame.h"
 
 #include "webtransport/quic/datagram.h"
-#include "webtransport/webtransport/capsule.h"
-#include "webtransport/webtransport/session_request.h"
-#include "webtransport/webtransport/session.h"
 #include "webtransport/quic/varint.h"
+#include "webtransport/webtransport/capsule.h"
+#include "webtransport/webtransport/session.h"
+#include "webtransport/webtransport/session_request.h"
 
 #define WT_MATRIX_MAX_CASES 12U
 
@@ -33,7 +33,8 @@ typedef struct matrix_row {
 } matrix_row_t;
 
 static void add(wt_cli_report_t *report, const char *name, int ok, const char *detail) {
-  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED, detail);
+  (void)wt_cli_report_add(report, name, ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
+                          detail);
 }
 
 /* Write one row and, at the end, the count. EVERY failing row is named, because "eleven of thirteen" is not
@@ -114,7 +115,8 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
   {
     wt_writer_t w = wt_writer_init(prefix, sizeof(prefix));
     int ok = wt_webtransport_stream_prefix_write(&w, 1, 2U) != WT_OK && wt_writer_offset(&w) == 0U;
-    rows[count].name = "a prefix for a stream that cannot be a session is refused and writes nothing";
+    rows[count].name =
+        "a prefix for a stream that cannot be a session is refused and writes nothing";
     rows[count].held = ok;
     count++;
   }
@@ -134,7 +136,8 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
     int ok = wt_webtransport_stream_prefix_write(&w, 0, 4U) == WT_OK && wt_writer_offset(&w) > 0U;
     if (ok) {
-      prefix[wt_writer_offset(&w) - 1U] = 0x02U; /* session 2: a client-initiated UNIDIRECTIONAL stream */
+      prefix[wt_writer_offset(&w) - 1U] =
+          0x02U; /* session 2: a client-initiated UNIDIRECTIONAL stream */
       c = wt_cursor_init(prefix, wt_writer_offset(&w));
       ok = wt_webtransport_stream_prefix_parse(&c, &direction, &session_id, &error) != WT_OK &&
            error == WT_HTTP3_ID_ERROR;
@@ -162,7 +165,8 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
     wt_cursor_t c = wt_cursor_init(half, sizeof(half));
     int direction = -1;
     uint64_t session_id = 0U;
-    int ok = wt_webtransport_stream_prefix_parse(&c, &direction, &session_id, NULL) == WT_ERR_TRUNCATED;
+    int ok =
+        wt_webtransport_stream_prefix_parse(&c, &direction, &session_id, NULL) == WT_ERR_TRUNCATED;
     rows[count].name = "half a prefix is a wait rather than a refusal";
     rows[count].held = ok;
     count++;
@@ -175,9 +179,10 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
     uint64_t session_id = 0U;
     size_t consumed = 0U;
     int ok = classified_length > 0U &&
-             wt_http3_driver_classify_bidi_start(classified_bytes, classified_length, &kind, &session_id,
-                                                 &consumed) == WT_OK &&
-             kind == WT_HTTP3_BIDI_START_WEBTRANSPORT && session_id == 4U && consumed == classified_length;
+             wt_http3_driver_classify_bidi_start(classified_bytes, classified_length, &kind,
+                                                 &session_id, &consumed) == WT_OK &&
+             kind == WT_HTTP3_BIDI_START_WEBTRANSPORT && session_id == 4U &&
+             consumed == classified_length;
     rows[count].name = "a WebTransport start is classified with its session and its length";
     rows[count].held = ok;
     count++;
@@ -190,8 +195,8 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
     wt_http3_bidi_start_kind_t kind = WT_HTTP3_BIDI_START_WEBTRANSPORT;
     uint64_t session_id = 0U;
     size_t consumed = 0U;
-    int ok = wt_http3_driver_classify_bidi_start(request_start, sizeof(request_start), &kind, &session_id,
-                                                 &consumed) == WT_OK &&
+    int ok = wt_http3_driver_classify_bidi_start(request_start, sizeof(request_start), &kind,
+                                                 &session_id, &consumed) == WT_OK &&
              kind == WT_HTTP3_BIDI_START_REQUEST && consumed == 0U;
     rows[count].name = "a request start is not classified as WebTransport";
     rows[count].held = ok;
@@ -204,8 +209,8 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
     wt_http3_bidi_start_kind_t kind = WT_HTTP3_BIDI_START_WEBTRANSPORT;
     uint64_t session_id = 0U;
     size_t consumed = 0U;
-    int ok = wt_http3_driver_classify_bidi_start(type_only, sizeof(type_only), &kind, &session_id, &consumed) ==
-             WT_ERR_TRUNCATED;
+    int ok = wt_http3_driver_classify_bidi_start(type_only, sizeof(type_only), &kind, &session_id,
+                                                 &consumed) == WT_ERR_TRUNCATED;
     rows[count].name = "the type byte alone decides nothing yet";
     rows[count].held = ok;
     count++;
@@ -217,9 +222,10 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
     wt_http3_bidi_start_kind_t kind = WT_HTTP3_BIDI_START_REQUEST;
     uint64_t session_id = 0U;
     size_t consumed = 0U;
-    int ok = wt_webtransport_stream_prefix_write(&w, 0, 64U) == WT_OK && wt_writer_offset(&w) > 1U &&
-             wt_http3_driver_classify_bidi_start(prefix, wt_writer_offset(&w) - 1U, &kind, &session_id,
-                                                 &consumed) == WT_ERR_TRUNCATED;
+    int ok = wt_webtransport_stream_prefix_write(&w, 0, 64U) == WT_OK &&
+             wt_writer_offset(&w) > 1U &&
+             wt_http3_driver_classify_bidi_start(prefix, wt_writer_offset(&w) - 1U, &kind,
+                                                 &session_id, &consumed) == WT_ERR_TRUNCATED;
     rows[count].name = "a session id split across the boundary is a wait";
     rows[count].held = ok;
     count++;
@@ -227,8 +233,10 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
 
   /* The predicate every direction test is built on. */
   {
-    int ok = wt_webtransport_is_session_stream_id(0U) == 1 && wt_webtransport_is_session_stream_id(4U) == 1 &&
-             wt_webtransport_is_session_stream_id(2U) == 0 && wt_webtransport_is_session_stream_id(3U) == 0;
+    int ok = wt_webtransport_is_session_stream_id(0U) == 1 &&
+             wt_webtransport_is_session_stream_id(4U) == 1 &&
+             wt_webtransport_is_session_stream_id(2U) == 0 &&
+             wt_webtransport_is_session_stream_id(3U) == 0;
     rows[count].name = "the session predicate is a statement about the stream type";
     rows[count].held = ok;
     count++;
@@ -238,10 +246,12 @@ void wt_scenario_matrix_run(wt_cli_report_t *report) {
 }
 
 /* One framed datagram, written the way a sender does it. */
-static size_t write_datagram_payload(uint8_t *out, size_t capacity, uint64_t quarter, const char *payload) {
+static size_t write_datagram_payload(uint8_t *out, size_t capacity, uint64_t quarter,
+                                     const char *payload) {
   wt_writer_t w = wt_writer_init(out, capacity);
   size_t length = strlen(payload);
-  if (wt_webtransport_datagram_write(&w, quarter, (const uint8_t *)payload, length) != WT_OK) return 0U;
+  if (wt_webtransport_datagram_write(&w, quarter, (const uint8_t *)payload, length) != WT_OK)
+    return 0U;
   return wt_writer_offset(&w);
 }
 
@@ -258,10 +268,11 @@ void wt_scenario_datagram_matrix(wt_cli_report_t *report) {
     size_t payload_length = 0U;
     uint64_t quarter = 0U;
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
-    int ok = (framed_length = write_datagram_payload(framed, sizeof(framed), 1U, "client-dgram")) > 0U &&
-             wt_webtransport_datagram_parse(framed, framed_length, &quarter, &payload, &payload_length,
-                                            &error) == WT_OK &&
-             quarter == 1U && payload_length == 12U && memcmp(payload, "client-dgram", 12U) == 0;
+    int ok =
+        (framed_length = write_datagram_payload(framed, sizeof(framed), 1U, "client-dgram")) > 0U &&
+        wt_webtransport_datagram_parse(framed, framed_length, &quarter, &payload, &payload_length,
+                                       &error) == WT_OK &&
+        quarter == 1U && payload_length == 12U && memcmp(payload, "client-dgram", 12U) == 0;
     rows[count].name = "a client datagram carries its quarter id and payload";
     rows[count].held = ok;
     count++;
@@ -271,10 +282,11 @@ void wt_scenario_datagram_matrix(wt_cli_report_t *report) {
     size_t payload_length = 0U;
     uint64_t quarter = 0U;
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
-    int ok = (framed_length = write_datagram_payload(framed, sizeof(framed), 0U, "server-dgram")) > 0U &&
-             wt_webtransport_datagram_parse(framed, framed_length, &quarter, &payload, &payload_length,
-                                            &error) == WT_OK &&
-             quarter == 0U && payload_length == 12U && memcmp(payload, "server-dgram", 12U) == 0;
+    int ok =
+        (framed_length = write_datagram_payload(framed, sizeof(framed), 0U, "server-dgram")) > 0U &&
+        wt_webtransport_datagram_parse(framed, framed_length, &quarter, &payload, &payload_length,
+                                       &error) == WT_OK &&
+        quarter == 0U && payload_length == 12U && memcmp(payload, "server-dgram", 12U) == 0;
     rows[count].name = "a server datagram carries its quarter id and payload";
     rows[count].held = ok;
     count++;
@@ -302,7 +314,8 @@ void wt_scenario_datagram_matrix(wt_cli_report_t *report) {
   {
     static const uint8_t partial[] = {0xffU};
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
-    int ok = wt_webtransport_datagram_parse(partial, sizeof(partial), NULL, NULL, NULL, &error) != WT_OK &&
+    int ok = wt_webtransport_datagram_parse(partial, sizeof(partial), NULL, NULL, NULL, &error) !=
+                 WT_OK &&
              error == WT_HTTP3_DATAGRAM_ERROR;
     rows[count].name = "a quarter id that did not all arrive is malformed";
     rows[count].held = ok;
@@ -318,8 +331,8 @@ void wt_scenario_datagram_matrix(wt_cli_report_t *report) {
     uint64_t owner = 0U;
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
     int ok = (framed_length = write_datagram_payload(framed, sizeof(framed), 2U, "unknown")) > 0U &&
-             wt_webtransport_datagram_parse(framed, framed_length, &quarter, &payload, &payload_length,
-                                            &error) == WT_OK;
+             wt_webtransport_datagram_parse(framed, framed_length, &quarter, &payload,
+                                            &payload_length, &error) == WT_OK;
     owner = wt_webtransport_session_id_from_quarter(quarter);
     ok = ok && owner != 0U && owner != 4U;
     rows[count].name = "a datagram naming a session that is not here has no owner";
@@ -381,7 +394,8 @@ void wt_scenario_goaway_close_drain_matrix(wt_cli_report_t *report) {
     int ok;
     wt_http3_goaway_init(&goaway);
     (void)wt_http3_goaway_on_received(&goaway, WT_HTTP3_ROLE_SERVER, 4U, &error);
-    ok = wt_http3_goaway_rejects_stream(&goaway, 0U) == 0 && wt_http3_goaway_rejects_stream(&goaway, 4U) == 1 &&
+    ok = wt_http3_goaway_rejects_stream(&goaway, 0U) == 0 &&
+         wt_http3_goaway_rejects_stream(&goaway, 4U) == 1 &&
          wt_http3_goaway_rejects_stream(&goaway, 8U) == 1 &&
          wt_http3_goaway_allows_new_requests(&goaway) == 0;
     rows[count].name = "a GOAWAY gates the streams at or above its identifier";
@@ -397,8 +411,8 @@ void wt_scenario_goaway_close_drain_matrix(wt_cli_report_t *report) {
     wt_webtransport_session_init(&session);
     (void)wt_webtransport_session_established(&session);
     ok = wt_webtransport_session_on_drain(&session, 0) == WT_OK &&
-         session.state == WT_WEBTRANSPORT_SESSION_DRAINING &&
-         session.drain_received == 1 && wt_webtransport_session_allows_new_streams(&session) == 0;
+         session.state == WT_WEBTRANSPORT_SESSION_DRAINING && session.drain_received == 1 &&
+         wt_webtransport_session_allows_new_streams(&session) == 0;
     rows[count].name = "a received drain stops new streams";
     rows[count].held = ok;
     count++;
@@ -453,7 +467,8 @@ void wt_scenario_goaway_close_drain_matrix(wt_cli_report_t *report) {
     (void)wt_webtransport_session_established(&session);
     (void)wt_webtransport_session_on_close(&session, 1, 22U);
     ok = session.state == WT_WEBTRANSPORT_SESSION_CLOSED && session.close_error_set == 1 &&
-         session.close_error_code == 22U && wt_webtransport_session_allows_new_streams(&session) == 0;
+         session.close_error_code == 22U &&
+         wt_webtransport_session_allows_new_streams(&session) == 0;
     rows[count].name = "a close ends the session with its own code";
     rows[count].held = ok;
     count++;
@@ -500,7 +515,8 @@ void wt_scenario_goaway_close_drain_matrix(wt_cli_report_t *report) {
     memset(&capsule, 0, sizeof(capsule));
     ok = ok && wt_webtransport_capsule_decode(&c, sizeof(bytes), &capsule, &error) == WT_OK &&
          capsule.type == WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION &&
-         wt_webtransport_close_session_parse(&capsule, &code, &read_reason, &read_length, &error) == WT_OK &&
+         wt_webtransport_close_session_parse(&capsule, &code, &read_reason, &read_length, &error) ==
+             WT_OK &&
          code == 22U && read_length == sizeof(reason) - 1U &&
          memcmp(read_reason, reason, sizeof(reason) - 1U) == 0;
     rows[count].name = "the close capsule carries its code and its reason";
@@ -526,7 +542,8 @@ void wt_scenario_goaway_close_drain_matrix(wt_cli_report_t *report) {
     count++;
   }
 
-  report_matrix(report, "interop-goaway-close-drain-matrix", "goaway, close and drain cases", rows, count);
+  report_matrix(report, "interop-goaway-close-drain-matrix", "goaway, close and drain cases", rows,
+                count);
 }
 
 /* A decoded extended CONNECT, so a policy case varies ONE field. */
@@ -561,8 +578,9 @@ void wt_scenario_connect_matrix(wt_cli_report_t *report) {
   {
     build_connect(&message, "/chat");
     error = WT_HTTP3_NO_ERROR;
-    int ok = wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
-             decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT;
+    int ok =
+        wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
+        decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT;
     rows[count].name = "a CONNECT for the authority and path this server serves is accepted";
     rows[count].held = ok;
     count++;
@@ -570,8 +588,9 @@ void wt_scenario_connect_matrix(wt_cli_report_t *report) {
   {
     build_connect(&message, "/other");
     error = WT_HTTP3_NO_ERROR;
-    int ok = wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
-             decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT && decision.status == 404U;
+    int ok =
+        wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
+        decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT && decision.status == 404U;
     rows[count].name = "another path is a 404, compared exactly";
     rows[count].held = ok;
     count++;
@@ -584,8 +603,9 @@ void wt_scenario_connect_matrix(wt_cli_report_t *report) {
     /* NOT_WEBTRANSPORT rather than REJECT: a CONNECT for somebody else's protocol is not a WebTransport
      * request this server turned down, it is not one at all -- and the two answers differ, because the first
      * is answered like any other request and the second is the draft's own refusal. */
-    int ok = wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
-             decision.outcome == WT_WEBTRANSPORT_REQUEST_NOT_WEBTRANSPORT;
+    int ok =
+        wt_webtransport_session_request_validate(&message, &policy, &decision, &error) == WT_OK &&
+        decision.outcome == WT_WEBTRANSPORT_REQUEST_NOT_WEBTRANSPORT;
     rows[count].name = "another protocol token is not a WebTransport request at all";
     rows[count].held = ok;
     count++;
@@ -598,9 +618,10 @@ void wt_scenario_connect_matrix(wt_cli_report_t *report) {
     disabled.wt_enabled = 0;
     build_connect(&message, "/chat");
     error = WT_HTTP3_NO_ERROR;
-    int ok = wt_http3_message_encode(&w, &message, 0U, &error) == WT_OK &&
-             wt_webtransport_session_request_validate(&message, &disabled, &decision, &error) == WT_OK &&
-             decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT;
+    int ok =
+        wt_http3_message_encode(&w, &message, 0U, &error) == WT_OK &&
+        wt_webtransport_session_request_validate(&message, &disabled, &decision, &error) == WT_OK &&
+        decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT;
     (void)scratch;
     rows[count].name = "a server that never advertised WT_ENABLED refuses the session";
     rows[count].held = ok;
@@ -615,7 +636,8 @@ void wt_scenario_connect_matrix(wt_cli_report_t *report) {
     wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
     int ok = wt_http3_endpoint_on_request_stream(&endpoint, 0U, &error) == WT_OK;
     error = WT_HTTP3_NO_ERROR;
-    ok = ok && wt_http3_endpoint_on_request_frame(&endpoint, 0U, WT_HTTP3_FRAME_DATA, &error) != WT_OK &&
+    ok = ok &&
+         wt_http3_endpoint_on_request_frame(&endpoint, 0U, WT_HTTP3_FRAME_DATA, &error) != WT_OK &&
          error == WT_HTTP3_FRAME_UNEXPECTED;
     rows[count].name = "DATA before HEADERS on a request stream is H3_FRAME_UNEXPECTED";
     rows[count].held = ok;
@@ -630,12 +652,14 @@ void wt_scenario_connect_matrix(wt_cli_report_t *report) {
     error = WT_HTTP3_NO_ERROR;
     build_connect(&message, "/chat");
     wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
-    int ok = wt_http3_message_encode(&w, &message, 0U, &error) == WT_OK &&
-             wt_http3_endpoint_on_request_stream(&endpoint, 4U, &error) == WT_OK &&
-             wt_http3_endpoint_on_request_headers(&endpoint, 4U, section, wt_writer_offset(&w), scratch,
-                                                  sizeof(scratch), &decoded, &error) == WT_OK;
+    int ok =
+        wt_http3_message_encode(&w, &message, 0U, &error) == WT_OK &&
+        wt_http3_endpoint_on_request_stream(&endpoint, 4U, &error) == WT_OK &&
+        wt_http3_endpoint_on_request_headers(&endpoint, 4U, section, wt_writer_offset(&w), scratch,
+                                             sizeof(scratch), &decoded, &error) == WT_OK;
     error = WT_HTTP3_NO_ERROR;
-    ok = ok && wt_http3_endpoint_on_request_frame(&endpoint, 4U, WT_HTTP3_FRAME_DATA, &error) == WT_OK;
+    ok = ok &&
+         wt_http3_endpoint_on_request_frame(&endpoint, 4U, WT_HTTP3_FRAME_DATA, &error) == WT_OK;
     {
       wt_http3_request_state_t state = WT_HTTP3_REQUEST_EXPECT_HEADERS;
       ok = ok && wt_http3_endpoint_request_state(&endpoint, 4U, &state) == WT_OK &&
@@ -661,7 +685,8 @@ void wt_scenario_connect_matrix(wt_cli_report_t *report) {
     wt_http3_endpoint_t endpoint;
     error = WT_HTTP3_NO_ERROR;
     wt_http3_endpoint_init(&endpoint, WT_HTTP3_ROLE_SERVER);
-    int ok = wt_http3_endpoint_on_request_frame(&endpoint, 12U, WT_HTTP3_FRAME_DATA, &error) != WT_OK;
+    int ok =
+        wt_http3_endpoint_on_request_frame(&endpoint, 12U, WT_HTTP3_FRAME_DATA, &error) != WT_OK;
     rows[count].name = "a frame on a request stream this endpoint never tracked is refused";
     rows[count].held = ok;
     count++;
@@ -695,7 +720,8 @@ void wt_scenario_malformed_flow_matrix(wt_cli_report_t *report) {
     wt_cursor_t c;
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
     int ok = wt_webtransport_capsule_encode(
-                 &w, &(wt_webtransport_capsule_t){WT_CAPSULE_MAX_DATA, value, sizeof(value), 0U}) == WT_OK;
+                 &w, &(wt_webtransport_capsule_t){WT_CAPSULE_MAX_DATA, value, sizeof(value), 0U}) ==
+             WT_OK;
     c = wt_cursor_init(bytes, wt_writer_offset(&w));
     memset(&capsule, 0, sizeof(capsule));
     ok = ok && wt_webtransport_capsule_decode(&c, 8U, &capsule, &error) == WT_ERR_LIMIT;
@@ -765,8 +791,8 @@ void wt_scenario_malformed_flow_matrix(wt_cli_report_t *report) {
     wt_http3_message_t message;
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
     memset(&message, 0, sizeof(message));
-    int ok = wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, section, sizeof(section), NULL, 0U, 0U,
-                                     scratch, sizeof(scratch), &error) != WT_OK;
+    int ok = wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, section, sizeof(section),
+                                     NULL, 0U, 0U, scratch, sizeof(scratch), &error) != WT_OK;
     rows[count].name = "a field section needing a table that was never advertised is refused";
     rows[count].held = ok;
     count++;
@@ -785,8 +811,8 @@ void wt_scenario_malformed_flow_matrix(wt_cli_report_t *report) {
     ok = ok && wt_session_flow_configure(session, 1, 4U, 1U, 0U) == WT_OK;
     {
       wt_session_flow_state_t state = wt_session_flow_snapshot(session);
-      ok = ok && state.enabled == 1 && state.max_data_state == WT_SESSION_LIMIT_LIMITED && state.max_data == 4U &&
-           state.used_data == 0U;
+      ok = ok && state.enabled == 1 && state.max_data_state == WT_SESSION_LIMIT_LIMITED &&
+           state.max_data == 4U && state.used_data == 0U;
     }
     ok = ok && wt_session_flow_record_data(session, 4U) == WT_OK;
     {
@@ -845,7 +871,8 @@ void wt_scenario_malformed_flow_matrix(wt_cli_report_t *report) {
     count++;
   }
 
-  report_matrix(report, "interop-malformed-flow-matrix", "malformed and flow-control cases", rows, count);
+  report_matrix(report, "interop-malformed-flow-matrix", "malformed and flow-control cases", rows,
+                count);
 }
 
 void wt_scenario_flow_control_matrix(wt_cli_report_t *report) {
@@ -860,8 +887,8 @@ void wt_scenario_flow_control_matrix(wt_cli_report_t *report) {
     uint64_t error = 0U;
     int ok;
     wt_webtransport_flow_limits_init(&limits);
-    ok = wt_webtransport_flow_on_max_data(&limits, 100U, &error) == WT_OK && limits.max_data_set == 1 &&
-         limits.max_data == 100U;
+    ok = wt_webtransport_flow_on_max_data(&limits, 100U, &error) == WT_OK &&
+         limits.max_data_set == 1 && limits.max_data == 100U;
     rows[count].name = "the first MAX_DATA capsule establishes the limit";
     rows[count].held = ok;
     count++;
@@ -899,7 +926,8 @@ void wt_scenario_flow_control_matrix(wt_cli_report_t *report) {
     wt_webtransport_flow_limits_init(&limits);
     (void)wt_webtransport_flow_on_max_data(&limits, 100U, &error);
     error = 0U;
-    ok = wt_webtransport_flow_on_max_data(&limits, 400U, &error) == WT_OK && limits.max_data == 400U;
+    ok =
+        wt_webtransport_flow_on_max_data(&limits, 400U, &error) == WT_OK && limits.max_data == 400U;
     rows[count].name = "an increased MAX_DATA is accepted";
     rows[count].held = ok;
     count++;

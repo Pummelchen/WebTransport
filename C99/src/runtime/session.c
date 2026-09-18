@@ -71,7 +71,8 @@ static wt_status_t provide_spare_connection_id(wt_runtime_session_t *session, ui
       session->spare_id_retires_seen = retires;
       session->spare_id_pending = 1U;
     }
-    if (session->spare_id_pending == 0U) return WT_OK; /* no request outstanding: nothing to answer */
+    if (session->spare_id_pending == 0U)
+      return WT_OK; /* no request outstanding: nothing to answer */
     if (session->spare_ids_replaced > 0U && now < session->spare_id_next_allowed) {
       if (session->spare_id_pending == 1U) {
         session->spare_id_refusals++;
@@ -83,8 +84,8 @@ static wt_status_t provide_spare_connection_id(wt_runtime_session_t *session, ui
     session->spare_id_pending = 0U;
   }
 
-  status = wt_quic_connection_issue_connection_id(connection, id, connection->local_connection_id_length, token,
-                                                  now);
+  status = wt_quic_connection_issue_connection_id(
+      connection, id, connection->local_connection_id_length, token, now);
   if (status == WT_OK) {
     session->spare_ids_issued++;
     if (session->spare_ids_issued > 1U) {
@@ -118,7 +119,8 @@ static void session_on_lost(void *context, const wt_quic_tx_frame_t *frame) {
 }
 
 wt_status_t wt_runtime_session_set_lost_frame_handler(wt_runtime_session_t *session,
-                                                      wt_runtime_lost_frame_fn handler, void *context) {
+                                                      wt_runtime_lost_frame_fn handler,
+                                                      void *context) {
   if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
   session->lost_handler = handler;
   session->lost_context = context;
@@ -154,13 +156,12 @@ static wt_status_t install_initial_keys(wt_runtime_session_t *session, const uin
   return status;
 }
 
-wt_status_t wt_runtime_session_start_client(wt_runtime_session_t *session,
-                                            const wt_udp_socket_t *socket,
-                                            const wt_udp_address_t *peer,
-                                            const uint8_t *initial_connection_id,
-                                            size_t initial_connection_id_length,
-                                            const wt_quic_connection_config_t *connection_config,
-                                            const wt_tls_client_config_t *tls_config, uint64_t now) {
+wt_status_t
+wt_runtime_session_start_client(wt_runtime_session_t *session, const wt_udp_socket_t *socket,
+                                const wt_udp_address_t *peer, const uint8_t *initial_connection_id,
+                                size_t initial_connection_id_length,
+                                const wt_quic_connection_config_t *connection_config,
+                                const wt_tls_client_config_t *tls_config, uint64_t now) {
   wt_status_t status;
 
   (void)now;
@@ -181,8 +182,8 @@ wt_status_t wt_runtime_session_start_client(wt_runtime_session_t *session,
    * recorded it: RFC 9000 section 7.3 has the server echo it back and the client CHECK it, and RFC 9001 section
    * 5.8 computes a Retry's integrity tag over it -- so an endpoint that does not keep it can validate neither.
    * Nothing noticed because no peer in this tree's tests ever retried or echoed it (WT-166). */
-  status = wt_quic_connection_set_original_destination_id(&session->connection, initial_connection_id,
-                                                          initial_connection_id_length);
+  status = wt_quic_connection_set_original_destination_id(
+      &session->connection, initial_connection_id, initial_connection_id_length);
   if (status != WT_OK) return status;
   status = install_initial_keys(session, initial_connection_id, initial_connection_id_length, 0);
   if (status != WT_OK) return status;
@@ -207,17 +208,20 @@ wt_status_t wt_runtime_session_start_client(wt_runtime_session_t *session,
  * until the client has adopted its own Source Connection ID. A server that did not retry has one ID for both and
  * calls `wt_runtime_session_start_server`; a server that DID retry has two, and calls
  * `wt_runtime_session_start_server_retried` (WT-168). */
-static wt_status_t start_server_with_ids(wt_runtime_session_t *session, const wt_udp_socket_t *socket,
-                                        const wt_udp_address_t *peer, const uint8_t *initial_connection_id,
-                                        size_t initial_connection_id_length,
-                                        const uint8_t *original_destination_connection_id,
-                                        size_t original_destination_connection_id_length,
-                                        const wt_quic_connection_config_t *connection_config,
-                                        const wt_tls_server_config_t *tls_config) {
+static wt_status_t start_server_with_ids(wt_runtime_session_t *session,
+                                         const wt_udp_socket_t *socket,
+                                         const wt_udp_address_t *peer,
+                                         const uint8_t *initial_connection_id,
+                                         size_t initial_connection_id_length,
+                                         const uint8_t *original_destination_connection_id,
+                                         size_t original_destination_connection_id_length,
+                                         const wt_quic_connection_config_t *connection_config,
+                                         const wt_tls_server_config_t *tls_config) {
   wt_status_t status;
 
   if (session == NULL || socket == NULL || peer == NULL || initial_connection_id == NULL ||
-      original_destination_connection_id == NULL || connection_config == NULL || tls_config == NULL) {
+      original_destination_connection_id == NULL || connection_config == NULL ||
+      tls_config == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
   memset(session, 0, sizeof(*session));
@@ -230,7 +234,8 @@ static wt_status_t start_server_with_ids(wt_runtime_session_t *session, const wt
   status = wt_quic_connection_attach(&session->connection, socket, peer);
   if (status != WT_OK) return status;
   status = wt_quic_connection_set_original_destination_id(
-      &session->connection, original_destination_connection_id, original_destination_connection_id_length);
+      &session->connection, original_destination_connection_id,
+      original_destination_connection_id_length);
   if (status != WT_OK) return status;
   status = install_initial_keys(session, initial_connection_id, initial_connection_id_length, 1);
   if (status != WT_OK) return status;
@@ -245,25 +250,25 @@ static wt_status_t start_server_with_ids(wt_runtime_session_t *session, const wt
   return WT_OK;
 }
 
-wt_status_t wt_runtime_session_start_server(wt_runtime_session_t *session,
-                                            const wt_udp_socket_t *socket,
-                                            const wt_udp_address_t *peer,
-                                            const uint8_t *initial_connection_id,
-                                            size_t initial_connection_id_length,
-                                            const wt_quic_connection_config_t *connection_config,
-                                            const wt_tls_server_config_t *tls_config, uint64_t now) {
+wt_status_t
+wt_runtime_session_start_server(wt_runtime_session_t *session, const wt_udp_socket_t *socket,
+                                const wt_udp_address_t *peer, const uint8_t *initial_connection_id,
+                                size_t initial_connection_id_length,
+                                const wt_quic_connection_config_t *connection_config,
+                                const wt_tls_server_config_t *tls_config, uint64_t now) {
   (void)now;
   /* One ID for both rules: a server that did not retry is addressed by the ID the client chose, and the Initial
    * keys come from that same ID. */
-  return start_server_with_ids(session, socket, peer, initial_connection_id, initial_connection_id_length,
-                              initial_connection_id, initial_connection_id_length, connection_config,
-                              tls_config);
+  return start_server_with_ids(session, socket, peer, initial_connection_id,
+                               initial_connection_id_length, initial_connection_id,
+                               initial_connection_id_length, connection_config, tls_config);
 }
 
 wt_status_t wt_runtime_session_start_server_retried(
     wt_runtime_session_t *session, const wt_udp_socket_t *socket, const wt_udp_address_t *peer,
     const uint8_t *initial_connection_id, size_t initial_connection_id_length,
-    const uint8_t *original_destination_connection_id, size_t original_destination_connection_id_length,
+    const uint8_t *original_destination_connection_id,
+    size_t original_destination_connection_id_length,
     const wt_quic_connection_config_t *connection_config, const wt_tls_server_config_t *tls_config,
     uint64_t now) {
   (void)now;
@@ -272,9 +277,10 @@ wt_status_t wt_runtime_session_start_server_retried(
    * Retry is what the transport parameters must name and what the client compares. Passing one value for both --
    * which is what `wt_runtime_session_start_server` does -- is how a server that retried would name the wrong
    * original destination and be refused. */
-  return start_server_with_ids(session, socket, peer, initial_connection_id, initial_connection_id_length,
-                              original_destination_connection_id, original_destination_connection_id_length,
-                              connection_config, tls_config);
+  return start_server_with_ids(session, socket, peer, initial_connection_id,
+                               initial_connection_id_length, original_destination_connection_id,
+                               original_destination_connection_id_length, connection_config,
+                               tls_config);
 }
 
 wt_status_t wt_runtime_session_advertise(wt_runtime_session_t *session, uint64_t initial_max_data,
@@ -323,9 +329,9 @@ static wt_status_t apply_peer_parameters(wt_runtime_session_t *session) {
   if (session->peer_parameters_applied != 0) return WT_OK;
   if (session->handshake.peer_parameters_len == 0U) return WT_OK;
   {
-    wt_status_t status = wt_quic_connection_set_peer_parameters(&session->connection,
-                                                                session->handshake.peer_parameters,
-                                                                session->handshake.peer_parameters_len);
+    wt_status_t status = wt_quic_connection_set_peer_parameters(
+        &session->connection, session->handshake.peer_parameters,
+        session->handshake.peer_parameters_len);
     if (status != WT_OK) return status;
   }
   session->peer_parameters_applied = 1;
@@ -371,7 +377,8 @@ wt_status_t wt_runtime_session_pump(wt_runtime_session_t *session, uint64_t now)
     const uint8_t *retry_source = NULL;
     size_t retry_source_length = 0U;
 
-    status = wt_quic_connection_retry(&session->connection, NULL, NULL, &retry_source, &retry_source_length);
+    status = wt_quic_connection_retry(&session->connection, NULL, NULL, &retry_source,
+                                      &retry_source_length);
     if (status != WT_OK) return status;
     status = install_initial_keys(session, retry_source, retry_source_length, 0);
     if (status != WT_OK) return status;

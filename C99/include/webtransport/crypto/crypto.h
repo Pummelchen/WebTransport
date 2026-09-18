@@ -85,13 +85,11 @@ wt_status_t wt_sha256(const void *data, size_t len, uint8_t out[WT_SHA256_LEN]);
  *
  * Returns WT_ERR_STATE for a context that was never initialised or has already
  * been finalised. */
-wt_status_t wt_sha256_snapshot(const wt_sha256_ctx_t *ctx,
-                               uint8_t out[WT_SHA256_LEN]);
+wt_status_t wt_sha256_snapshot(const wt_sha256_ctx_t *ctx, uint8_t out[WT_SHA256_LEN]);
 
 /* HMAC-SHA256 (RFC 2104), which is what HKDF and the TLS Finished MAC are built
  * from. */
-wt_status_t wt_hmac_sha256(const uint8_t *key, size_t key_len,
-                           const uint8_t *data, size_t data_len,
+wt_status_t wt_hmac_sha256(const uint8_t *key, size_t key_len, const uint8_t *data, size_t data_len,
                            uint8_t out[WT_SHA256_LEN]);
 
 /* HKDF (RFC 5869). `salt` may be NULL with `salt_len` 0, which HKDF defines as an
@@ -102,21 +100,17 @@ wt_status_t wt_hmac_sha256(const uint8_t *key, size_t key_len,
  * `wt_hkdf_expand_sha256` refuses `out_len` above 255 * 32 bytes, which is the
  * RFC's own bound; a longer output would wrap the one-byte block counter and
  * produce bytes that are not the RFC 5869 stream. */
-wt_status_t wt_hkdf_extract_sha256(const uint8_t *salt, size_t salt_len,
-                                   const uint8_t *ikm, size_t ikm_len,
-                                   uint8_t out[WT_SHA256_LEN]);
-wt_status_t wt_hkdf_expand_sha256(const uint8_t *prk, size_t prk_len,
-                                  const uint8_t *info, size_t info_len,
-                                  uint8_t *out, size_t out_len);
+wt_status_t wt_hkdf_extract_sha256(const uint8_t *salt, size_t salt_len, const uint8_t *ikm,
+                                   size_t ikm_len, uint8_t out[WT_SHA256_LEN]);
+wt_status_t wt_hkdf_expand_sha256(const uint8_t *prk, size_t prk_len, const uint8_t *info,
+                                  size_t info_len, uint8_t *out, size_t out_len);
 
 /* HKDF-Expand-Label (RFC 8446 section 7.1), which is the only way TLS 1.3 ever
  * calls HKDF-Expand: the label is prefixed with "tls13 " and the context is
  * length-prefixed, and both of those are places where a wrong choice produces
  * well-formed bytes. */
-wt_status_t wt_hkdf_expand_label_sha256(const uint8_t *secret,
-                                        size_t secret_len, const char *label,
-                                        const uint8_t *context,
-                                        size_t context_len, uint8_t *out,
+wt_status_t wt_hkdf_expand_label_sha256(const uint8_t *secret, size_t secret_len, const char *label,
+                                        const uint8_t *context, size_t context_len, uint8_t *out,
                                         size_t out_len);
 
 /* The AEADs QUIC defines. AES-128-GCM is mandatory and is the only one whose
@@ -124,10 +118,7 @@ wt_status_t wt_hkdf_expand_label_sha256(const uint8_t *secret,
  * optional for QUIC and is present because RFC 9001 publishes vectors for it and
  * because a header protection path that only ever ran AES would leave the
  * ChaCha20 code unexercised. */
-typedef enum wt_aead {
-  WT_AEAD_AES_128_GCM = 1,
-  WT_AEAD_CHACHA20_POLY1305 = 2
-} wt_aead_t;
+typedef enum wt_aead { WT_AEAD_AES_128_GCM = 1, WT_AEAD_CHACHA20_POLY1305 = 2 } wt_aead_t;
 
 /* The sizes each AEAD needs. `wt_aead_key_len` is 16 for AES-128-GCM and 32 for
  * ChaCha20-Poly1305, and it is also the header protection key length, because
@@ -142,9 +133,8 @@ size_t wt_aead_tag_len(wt_aead_t aead);
 
 /* Encrypt `len` bytes of `plain` into `out`, writing the tag to `tag`. `out` and
  * `plain` must not overlap. The tag is not included in `out`. */
-wt_status_t wt_aead_seal(wt_aead_t aead, const uint8_t *key, const uint8_t *iv,
-                         const uint8_t *aad, size_t aad_len,
-                         const uint8_t *plain, size_t len, uint8_t *out,
+wt_status_t wt_aead_seal(wt_aead_t aead, const uint8_t *key, const uint8_t *iv, const uint8_t *aad,
+                         size_t aad_len, const uint8_t *plain, size_t len, uint8_t *out,
                          uint8_t tag[WT_AEAD_TAG_LEN]);
 
 /* Decrypt `len` bytes of `cipher` into `out` and verify the peer's `tag` over
@@ -168,23 +158,21 @@ wt_status_t wt_aead_seal(wt_aead_t aead, const uint8_t *key, const uint8_t *iv,
  *
  * `out` and `cipher` may be the same buffer. On WT_ERR_AUTHENTICATION the return
  * value is the only usable output. */
-wt_status_t wt_aead_open(wt_aead_t aead, const uint8_t *key, const uint8_t *iv,
-                         const uint8_t *aad, size_t aad_len,
-                         const uint8_t *cipher, size_t len,
+wt_status_t wt_aead_open(wt_aead_t aead, const uint8_t *key, const uint8_t *iv, const uint8_t *aad,
+                         size_t aad_len, const uint8_t *cipher, size_t len,
                          const uint8_t tag[WT_AEAD_TAG_LEN], uint8_t *out);
 
 /* AES-128 block encryption, for QUIC's AES-based header protection (RFC 9001
  * section 5.4.1), which encrypts a 16-byte sample and keeps five bytes of it. */
-wt_status_t wt_aes128_ecb_encrypt_block(const uint8_t key[16],
-                                        const uint8_t in[16], uint8_t out[16]);
+wt_status_t wt_aes128_ecb_encrypt_block(const uint8_t key[16], const uint8_t in[16],
+                                        uint8_t out[16]);
 
 /* ChaCha20 keystream XOR (RFC 8439), for QUIC's ChaCha20 header protection
  * (RFC 9001 section 5.4.4), which needs the raw keystream over five zero bytes.
  * This is not the AEAD: ChaCha20-Poly1305's authentication is a separate
  * construction and is not built from this. */
-wt_status_t wt_chacha20_xor(const uint8_t key[32], const uint8_t nonce[12],
-                            uint32_t counter, const uint8_t *in, size_t len,
-                            uint8_t *out);
+wt_status_t wt_chacha20_xor(const uint8_t key[32], const uint8_t nonce[12], uint32_t counter,
+                            const uint8_t *in, size_t len, uint8_t *out);
 
 /* Constant-time comparison. Returns 1 when equal. A comparison that stopped at
  * the first differing byte would tell an attacker how much of a tag or a key it

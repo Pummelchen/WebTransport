@@ -57,8 +57,10 @@ NOISE = re.compile(r"^(Thomson|RFC 8448\b|\x0c|\[Page)")
 
 # A value line inside a step: an optional two-word name, an optional octet count,
 # and the hex, which may continue on the following lines.
-VALUE = re.compile(r"^\s+([A-Za-z][A-Za-z0-9 _-]*?)\s*"
-                   r"(?:\((\d+) octets?\))?\s*:\s*(.*)$")
+VALUE = re.compile(
+    r"^\s+([A-Za-z][A-Za-z0-9 _-]*?)\s*"
+    r"(?:\((\d+) octets?\))?\s*:\s*(.*)$"
+)
 
 # A step header: who did it, what they did, and the label they did it under.
 # Every kind of step the trace prints, not only the ones a vector comes from: a
@@ -100,13 +102,7 @@ def hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
 
 def hkdf_expand_label(secret: bytes, label: str, context: bytes, length: int) -> bytes:
     full = b"tls13 " + label.encode()
-    info = (
-        length.to_bytes(2, "big")
-        + bytes([len(full)])
-        + full
-        + bytes([len(context)])
-        + context
-    )
+    info = length.to_bytes(2, "big") + bytes([len(full)]) + full + bytes([len(context)]) + context
     return hkdf_expand(secret, info, length)
 
 
@@ -167,9 +163,7 @@ def read_value(lines: list[str], index: int) -> tuple[str, bytes, int]:
         probe += 1
     value = bytes.fromhex("".join(tokens).replace(" ", "")) if tokens else b""
     if len(value) != expected:
-        raise SystemExit(
-            f"line {index}: {name!r} says {expected} octets, read {len(value)}"
-        )
+        raise SystemExit(f"line {index}: {name!r} says {expected} octets, read {len(value)}")
     return name, value, probe
 
 
@@ -187,9 +181,7 @@ def parse_values(lines: list[str], at: int, limit: int) -> dict[str, bytes]:
 
 
 def parse_steps(lines: list[str]) -> list[dict]:
-    headers = [
-        (index, STEP.match(line)) for index, line in enumerate(lines) if STEP.match(line)
-    ]
+    headers = [(index, STEP.match(line)) for index, line in enumerate(lines) if STEP.match(line)]
     steps = []
     for position, (index, found) in enumerate(headers):
         limit = headers[position + 1][0] if position + 1 < len(headers) else len(lines)
@@ -208,9 +200,15 @@ def parse_steps(lines: list[str]) -> list[dict]:
     return steps
 
 
-def take(steps: list[dict], kind: str, label: str, qualifier: str | None = None,
-         actor: str = "server", occurrence: int = 1,
-         require: str | None = None) -> dict:
+def take(
+    steps: list[dict],
+    kind: str,
+    label: str,
+    qualifier: str | None = None,
+    actor: str = "server",
+    occurrence: int = 1,
+    require: str | None = None,
+) -> dict:
     """The `occurrence`-th step of its kind, in document order.
 
     A forward search rather than a dictionary keyed by label, because RFC 8448
@@ -263,32 +261,29 @@ def extract(rfc: str) -> dict[str, bytes]:
     check_chain(early, derived_for_handshake, handshake, "handshake")
     check_chain(handshake, derived_for_master, master, "master")
 
-    out["CLIENT_HANDSHAKE_SECRET"] = take(
-        steps, "derive secret", "tls13 c hs traffic", require="expanded"
-    )["values"]["expanded"]
-    out["SERVER_HANDSHAKE_SECRET"] = take(
-        steps, "derive secret", "tls13 s hs traffic", require="expanded"
-    )["values"]["expanded"]
-    out["HASH_AFTER_SERVER_HELLO"] = take(
-        steps, "derive secret", "tls13 c hs traffic", require="expanded"
-    )["values"]["hash"]
-
-    out["CLIENT_APPLICATION_SECRET"] = take(
-        steps, "derive secret", "tls13 c ap traffic", require="expanded"
-    )["values"]["expanded"]
-    out["SERVER_APPLICATION_SECRET"] = take(
-        steps, "derive secret", "tls13 s ap traffic", require="expanded"
-    )["values"]["expanded"]
-    out["EXPORTER_MASTER"] = take(steps, "derive secret", "tls13 exp master", require="expanded")["values"][
+    out["CLIENT_HANDSHAKE_SECRET"] = take(steps, "derive secret", "tls13 c hs traffic", require="expanded")["values"][
         "expanded"
     ]
-    out["HASH_AFTER_SERVER_FINISHED"] = take(
-        steps, "derive secret", "tls13 c ap traffic", require="expanded"
-    )["values"]["hash"]
+    out["SERVER_HANDSHAKE_SECRET"] = take(steps, "derive secret", "tls13 s hs traffic", require="expanded")["values"][
+        "expanded"
+    ]
+    out["HASH_AFTER_SERVER_HELLO"] = take(steps, "derive secret", "tls13 c hs traffic", require="expanded")["values"][
+        "hash"
+    ]
+
+    out["CLIENT_APPLICATION_SECRET"] = take(steps, "derive secret", "tls13 c ap traffic", require="expanded")["values"][
+        "expanded"
+    ]
+    out["SERVER_APPLICATION_SECRET"] = take(steps, "derive secret", "tls13 s ap traffic", require="expanded")["values"][
+        "expanded"
+    ]
+    out["EXPORTER_MASTER"] = take(steps, "derive secret", "tls13 exp master", require="expanded")["values"]["expanded"]
+    out["HASH_AFTER_SERVER_FINISHED"] = take(steps, "derive secret", "tls13 c ap traffic", require="expanded")[
+        "values"
+    ]["hash"]
     # The resumption master secret is the one derivation only the client prints in
     # full: the server's line says "(same as client)".
-    resumption = take(steps, "derive secret", "tls13 res master", actor="client",
-                      require="expanded")
+    resumption = take(steps, "derive secret", "tls13 res master", actor="client", require="expanded")
     out["RESUMPTION_MASTER"] = resumption["values"]["expanded"]
     out["HASH_AFTER_CLIENT_FINISHED"] = resumption["values"]["hash"]
 
@@ -296,10 +291,8 @@ def extract(rfc: str) -> dict[str, bytes]:
     # of the HKDF expansion (empty, because the label has none), not the transcript
     # the MAC is taken over, which is why the verify data is checked in transit
     # below rather than here.
-    server_finished = take(steps, "calculate finished", "tls13 finished",
-                           require="finished")
-    client_finished = take(steps, "calculate finished", "tls13 finished",
-                           actor="client", require="finished")
+    server_finished = take(steps, "calculate finished", "tls13 finished", require="finished")
+    client_finished = take(steps, "calculate finished", "tls13 finished", actor="client", require="finished")
     out["SERVER_FINISHED_KEY"] = server_finished["values"]["expanded"]
     out["SERVER_FINISHED"] = server_finished["values"]["finished"]
     out["CLIENT_FINISHED_KEY"] = client_finished["values"]["expanded"]
@@ -322,9 +315,7 @@ def extract(rfc: str) -> dict[str, bytes]:
     # The record traffic keys, one set per direction of each epoch.
     keys = [step for step in steps if "key expanded" in step["values"]]
     if len(keys) != len(KEY_SETS):
-        raise SystemExit(
-            f"expected {len(KEY_SETS)} traffic key steps, found {len(keys)}"
-        )
+        raise SystemExit(f"expected {len(KEY_SETS)} traffic key steps, found {len(keys)}")
     for key_name, iv_name, secret_name in KEY_SETS:
         # Which secret a key set belongs to is decided by the PRK the trace printed
         # beside it, not by the order the steps appear in: the order is the
@@ -332,9 +323,7 @@ def extract(rfc: str) -> dict[str, bytes]:
         # layout.
         matching = [step for step in keys if step["values"]["PRK"] == out[secret_name]]
         if len(matching) != 1:
-            raise SystemExit(
-                f"{len(matching)} traffic key steps use {secret_name}"
-            )
+            raise SystemExit(f"{len(matching)} traffic key steps use {secret_name}")
         out[key_name] = matching[0]["values"]["key expanded"]
         out[iv_name] = matching[0]["values"]["iv expanded"]
 
@@ -348,15 +337,13 @@ def extract(rfc: str) -> dict[str, bytes]:
     # test, where it is itself checked against RFC 7748's vectors; this file takes the
     # bytes and checks what it can without a curve implementation.
     for actor, prefix in (("client", "CLIENT_X25519"), ("server", "SERVER_X25519")):
-        step = take(steps, "create", "an ephemeral x25519 key pair", actor=actor,
-                    require="private key")
+        step = take(steps, "create", "an ephemeral x25519 key pair", actor=actor, require="private key")
         out[prefix + "_PRIVATE"] = step["values"]["private key"]
         out[prefix + "_PUBLIC"] = step["values"]["public key"]
     return out
 
 
-def take_message(lines: list[str], label: str, message_type: int,
-                 occurrence: int = 1) -> bytes:
+def take_message(lines: list[str], label: str, message_type: int, occurrence: int = 1) -> bytes:
     """A printed handshake message: `Label (N octets):` and its hex.
 
     The length in the label is checked against the message's own header as well as
@@ -375,14 +362,10 @@ def take_message(lines: list[str], label: str, message_type: int,
         if name != label:
             raise SystemExit(f"expected {label!r} at line {index}, found {name!r}")
         if message[0] != message_type:
-            raise SystemExit(
-                f"{label}: starts with {message[0]:#04x}, expected {message_type:#04x}"
-            )
+            raise SystemExit(f"{label}: starts with {message[0]:#04x}, expected {message_type:#04x}")
         declared = int.from_bytes(message[1:4], "big") + 4
         if declared != len(message):
-            raise SystemExit(
-                f"{label}: header says {declared} octets, extracted {len(message)}"
-            )
+            raise SystemExit(f"{label}: header says {declared} octets, extracted {len(message)}")
         return message
     raise SystemExit(f"no {label} message (occurrence {occurrence})")
 
@@ -395,9 +378,7 @@ def check_chain(before: dict, derived: dict, extract: dict, what: str) -> None:
     extract that consumes it, and the two must be the same bytes.
     """
     if derived["values"]["expanded"] != extract["values"]["salt"]:
-        raise SystemExit(
-            f'the "derived" step for {what} is not the salt of its extract'
-        )
+        raise SystemExit(f'the "derived" step for {what} is not the salt of its extract')
     if extract["kind"] != "extract secret":
         raise SystemExit(f"the {what} step after a derivation is not an extract")
 
@@ -412,8 +393,7 @@ def self_check(values: dict[str, bytes]) -> None:
     # shared secret. The derivations that connect them are checked in C, where the ladder
     # has RFC 7748's vectors behind it.
     keys = {}
-    for name in ("CLIENT_X25519_PRIVATE", "CLIENT_X25519_PUBLIC",
-                 "SERVER_X25519_PRIVATE", "SERVER_X25519_PUBLIC"):
+    for name in ("CLIENT_X25519_PRIVATE", "CLIENT_X25519_PUBLIC", "SERVER_X25519_PRIVATE", "SERVER_X25519_PUBLIC"):
         if len(values[name]) != 32:
             raise SystemExit(f"{name} is not 32 bytes")
         if values[name] in keys.values():
@@ -439,12 +419,29 @@ def self_check(values: dict[str, bytes]) -> None:
     transcript = b""
     points = (
         ("HASH_AFTER_SERVER_HELLO", ("CLIENT_HELLO", "SERVER_HELLO")),
-        ("HASH_AFTER_SERVER_FINISHED",
-         ("CLIENT_HELLO", "SERVER_HELLO", "ENCRYPTED_EXTENSIONS", "CERTIFICATE",
-          "CERTIFICATE_VERIFY", "SERVER_FINISHED_MESSAGE")),
-        ("HASH_AFTER_CLIENT_FINISHED",
-         ("CLIENT_HELLO", "SERVER_HELLO", "ENCRYPTED_EXTENSIONS", "CERTIFICATE",
-          "CERTIFICATE_VERIFY", "SERVER_FINISHED_MESSAGE", "CLIENT_FINISHED_MESSAGE")),
+        (
+            "HASH_AFTER_SERVER_FINISHED",
+            (
+                "CLIENT_HELLO",
+                "SERVER_HELLO",
+                "ENCRYPTED_EXTENSIONS",
+                "CERTIFICATE",
+                "CERTIFICATE_VERIFY",
+                "SERVER_FINISHED_MESSAGE",
+            ),
+        ),
+        (
+            "HASH_AFTER_CLIENT_FINISHED",
+            (
+                "CLIENT_HELLO",
+                "SERVER_HELLO",
+                "ENCRYPTED_EXTENSIONS",
+                "CERTIFICATE",
+                "CERTIFICATE_VERIFY",
+                "SERVER_FINISHED_MESSAGE",
+                "CLIENT_FINISHED_MESSAGE",
+            ),
+        ),
     )
     consumed = 0
     for name, order in points:
@@ -484,10 +481,8 @@ def self_check(values: dict[str, bytes]) -> None:
             raise SystemExit(f"{iv_name} does not re-derive")
 
     for key_name, data_name, secret_name, transcript_name in (
-        ("SERVER_FINISHED_KEY", "SERVER_FINISHED", "SERVER_HANDSHAKE_SECRET",
-         "SERVER_FINISHED_TRANSCRIPT"),
-        ("CLIENT_FINISHED_KEY", "CLIENT_FINISHED", "CLIENT_HANDSHAKE_SECRET",
-         "HASH_AFTER_SERVER_FINISHED"),
+        ("SERVER_FINISHED_KEY", "SERVER_FINISHED", "SERVER_HANDSHAKE_SECRET", "SERVER_FINISHED_TRANSCRIPT"),
+        ("CLIENT_FINISHED_KEY", "CLIENT_FINISHED", "CLIENT_HANDSHAKE_SECRET", "HASH_AFTER_SERVER_FINISHED"),
     ):
         if hkdf_expand_label(values[secret_name], "finished", b"", 32) != values[key_name]:
             raise SystemExit(f"{key_name} does not re-derive")
@@ -498,9 +493,13 @@ def self_check(values: dict[str, bytes]) -> None:
             through = hashlib.sha256(
                 b"".join(
                     values[name]
-                    for name in ("CLIENT_HELLO", "SERVER_HELLO",
-                                 "ENCRYPTED_EXTENSIONS", "CERTIFICATE",
-                                 "CERTIFICATE_VERIFY")
+                    for name in (
+                        "CLIENT_HELLO",
+                        "SERVER_HELLO",
+                        "ENCRYPTED_EXTENSIONS",
+                        "CERTIFICATE",
+                        "CERTIFICATE_VERIFY",
+                    )
                 )
             ).digest()
         else:
@@ -529,81 +528,113 @@ def render(values: dict[str, bytes]) -> str:
         )
 
     parts = [
-        c_array("ECDHE", values["ECDHE"],
-                "RFC 8448 section 3: the x25519 shared secret, the handshake extract's IKM."),
-        c_array("EMPTY_HASH", values["EMPTY_HASH"],
-                "SHA-256 of the empty string, the hash both \"derived\" steps use."),
-        c_array("DERIVED_FOR_HANDSHAKE", values["DERIVED_FOR_HANDSHAKE"],
-                "Derive-Secret(early_secret, \"derived\", \"\"), the handshake extract's salt."),
-        c_array("DERIVED_FOR_MASTER", values["DERIVED_FOR_MASTER"],
-                "Derive-Secret(handshake_secret, \"derived\", \"\"), the master extract's salt."),
-        c_array("EARLY_SECRET", values["EARLY_SECRET"],
-                "The Early Secret, HKDF-Extract of a zero PSK."),
-        c_array("HANDSHAKE_SECRET", values["HANDSHAKE_SECRET"],
-                "The Handshake Secret."),
+        c_array("ECDHE", values["ECDHE"], "RFC 8448 section 3: the x25519 shared secret, the handshake extract's IKM."),
+        c_array("EMPTY_HASH", values["EMPTY_HASH"], 'SHA-256 of the empty string, the hash both "derived" steps use.'),
+        c_array(
+            "DERIVED_FOR_HANDSHAKE",
+            values["DERIVED_FOR_HANDSHAKE"],
+            'Derive-Secret(early_secret, "derived", ""), the handshake extract\'s salt.',
+        ),
+        c_array(
+            "DERIVED_FOR_MASTER",
+            values["DERIVED_FOR_MASTER"],
+            'Derive-Secret(handshake_secret, "derived", ""), the master extract\'s salt.',
+        ),
+        c_array("EARLY_SECRET", values["EARLY_SECRET"], "The Early Secret, HKDF-Extract of a zero PSK."),
+        c_array("HANDSHAKE_SECRET", values["HANDSHAKE_SECRET"], "The Handshake Secret."),
         c_array("MASTER_SECRET", values["MASTER_SECRET"], "The Master Secret."),
-        c_array("CLIENT_HANDSHAKE_SECRET", values["CLIENT_HANDSHAKE_SECRET"],
-                "client_handshake_traffic_secret, from Hash(ClientHello..ServerHello)."),
-        c_array("SERVER_HANDSHAKE_SECRET", values["SERVER_HANDSHAKE_SECRET"],
-                "server_handshake_traffic_secret."),
-        c_array("CLIENT_APPLICATION_SECRET", values["CLIENT_APPLICATION_SECRET"],
-                "client_application_traffic_secret_0, from Hash(ClientHello..server Finished)."),
-        c_array("SERVER_APPLICATION_SECRET", values["SERVER_APPLICATION_SECRET"],
-                "server_application_traffic_secret_0."),
-        c_array("EXPORTER_MASTER", values["EXPORTER_MASTER"],
-                "exporter_master_secret."),
-        c_array("RESUMPTION_MASTER", values["RESUMPTION_MASTER"],
-                "resumption_master_secret, from Hash(ClientHello..client Finished)."),
-        c_array("SERVER_HANDSHAKE_KEY", values["SERVER_HANDSHAKE_KEY"],
-                "The server's handshake record key, HKDF-Expand-Label(secret, \"key\")."),
-        c_array("SERVER_HANDSHAKE_IV", values["SERVER_HANDSHAKE_IV"],
-                "The server's handshake record IV."),
-        c_array("SERVER_APPLICATION_KEY", values["SERVER_APPLICATION_KEY"],
-                "The server's application record key."),
-        c_array("SERVER_APPLICATION_IV", values["SERVER_APPLICATION_IV"],
-                "The server's application record IV."),
-        c_array("CLIENT_APPLICATION_KEY", values["CLIENT_APPLICATION_KEY"],
-                "The client's application record key."),
-        c_array("CLIENT_APPLICATION_IV", values["CLIENT_APPLICATION_IV"],
-                "The client's application record IV."),
-        c_array("CLIENT_HANDSHAKE_KEY", values["CLIENT_HANDSHAKE_KEY"],
-                "The client's handshake record key."),
-        c_array("CLIENT_HANDSHAKE_IV", values["CLIENT_HANDSHAKE_IV"],
-                "The client's handshake record IV."),
-        c_array("SERVER_FINISHED_KEY", values["SERVER_FINISHED_KEY"],
-                "The server's Finished key, HKDF-Expand-Label(secret, \"finished\")."),
-        c_array("SERVER_FINISHED", values["SERVER_FINISHED"],
-                "The server's Finished verify_data."),
-        c_array("CLIENT_FINISHED_KEY", values["CLIENT_FINISHED_KEY"],
-                "The client's Finished key."),
-        c_array("CLIENT_FINISHED", values["CLIENT_FINISHED"],
-                "The client's Finished verify_data."),
-        c_array("HASH_AFTER_SERVER_HELLO", values["HASH_AFTER_SERVER_HELLO"],
-                "Hash(ClientHello..ServerHello), the handshake secrets' transcript."),
-        c_array("HASH_AFTER_SERVER_FINISHED", values["HASH_AFTER_SERVER_FINISHED"],
-                "Hash(ClientHello..server Finished), the application secrets' transcript."),
-        c_array("HASH_AFTER_CLIENT_FINISHED", values["HASH_AFTER_CLIENT_FINISHED"],
-                "Hash(ClientHello..client Finished), the resumption secret's transcript."),
-        c_array("CLIENT_HELLO", values["CLIENT_HELLO"],
-                "RFC 8448: the ClientHello, the first message in the transcript."),
+        c_array(
+            "CLIENT_HANDSHAKE_SECRET",
+            values["CLIENT_HANDSHAKE_SECRET"],
+            "client_handshake_traffic_secret, from Hash(ClientHello..ServerHello).",
+        ),
+        c_array("SERVER_HANDSHAKE_SECRET", values["SERVER_HANDSHAKE_SECRET"], "server_handshake_traffic_secret."),
+        c_array(
+            "CLIENT_APPLICATION_SECRET",
+            values["CLIENT_APPLICATION_SECRET"],
+            "client_application_traffic_secret_0, from Hash(ClientHello..server Finished).",
+        ),
+        c_array(
+            "SERVER_APPLICATION_SECRET", values["SERVER_APPLICATION_SECRET"], "server_application_traffic_secret_0."
+        ),
+        c_array("EXPORTER_MASTER", values["EXPORTER_MASTER"], "exporter_master_secret."),
+        c_array(
+            "RESUMPTION_MASTER",
+            values["RESUMPTION_MASTER"],
+            "resumption_master_secret, from Hash(ClientHello..client Finished).",
+        ),
+        c_array(
+            "SERVER_HANDSHAKE_KEY",
+            values["SERVER_HANDSHAKE_KEY"],
+            'The server\'s handshake record key, HKDF-Expand-Label(secret, "key").',
+        ),
+        c_array("SERVER_HANDSHAKE_IV", values["SERVER_HANDSHAKE_IV"], "The server's handshake record IV."),
+        c_array("SERVER_APPLICATION_KEY", values["SERVER_APPLICATION_KEY"], "The server's application record key."),
+        c_array("SERVER_APPLICATION_IV", values["SERVER_APPLICATION_IV"], "The server's application record IV."),
+        c_array("CLIENT_APPLICATION_KEY", values["CLIENT_APPLICATION_KEY"], "The client's application record key."),
+        c_array("CLIENT_APPLICATION_IV", values["CLIENT_APPLICATION_IV"], "The client's application record IV."),
+        c_array("CLIENT_HANDSHAKE_KEY", values["CLIENT_HANDSHAKE_KEY"], "The client's handshake record key."),
+        c_array("CLIENT_HANDSHAKE_IV", values["CLIENT_HANDSHAKE_IV"], "The client's handshake record IV."),
+        c_array(
+            "SERVER_FINISHED_KEY",
+            values["SERVER_FINISHED_KEY"],
+            'The server\'s Finished key, HKDF-Expand-Label(secret, "finished").',
+        ),
+        c_array("SERVER_FINISHED", values["SERVER_FINISHED"], "The server's Finished verify_data."),
+        c_array("CLIENT_FINISHED_KEY", values["CLIENT_FINISHED_KEY"], "The client's Finished key."),
+        c_array("CLIENT_FINISHED", values["CLIENT_FINISHED"], "The client's Finished verify_data."),
+        c_array(
+            "HASH_AFTER_SERVER_HELLO",
+            values["HASH_AFTER_SERVER_HELLO"],
+            "Hash(ClientHello..ServerHello), the handshake secrets' transcript.",
+        ),
+        c_array(
+            "HASH_AFTER_SERVER_FINISHED",
+            values["HASH_AFTER_SERVER_FINISHED"],
+            "Hash(ClientHello..server Finished), the application secrets' transcript.",
+        ),
+        c_array(
+            "HASH_AFTER_CLIENT_FINISHED",
+            values["HASH_AFTER_CLIENT_FINISHED"],
+            "Hash(ClientHello..client Finished), the resumption secret's transcript.",
+        ),
+        c_array(
+            "CLIENT_HELLO", values["CLIENT_HELLO"], "RFC 8448: the ClientHello, the first message in the transcript."
+        ),
         c_array("SERVER_HELLO", values["SERVER_HELLO"], "The ServerHello."),
-        c_array("ENCRYPTED_EXTENSIONS", values["ENCRYPTED_EXTENSIONS"],
-                "The EncryptedExtensions."),
+        c_array("ENCRYPTED_EXTENSIONS", values["ENCRYPTED_EXTENSIONS"], "The EncryptedExtensions."),
         c_array("CERTIFICATE", values["CERTIFICATE"], "The server's Certificate."),
-        c_array("CERTIFICATE_VERIFY", values["CERTIFICATE_VERIFY"],
-                "The server's CertificateVerify."),
-        c_array("SERVER_FINISHED_MESSAGE", values["SERVER_FINISHED_MESSAGE"],
-                "The server's Finished message, header included."),
-        c_array("CLIENT_FINISHED_MESSAGE", values["CLIENT_FINISHED_MESSAGE"],
-                "The client's Finished message, header included."),
-        c_array("CLIENT_X25519_PRIVATE", values["CLIENT_X25519_PRIVATE"],
-                "RFC 8448 section 3: the client's ephemeral x25519 private key."),
-        c_array("CLIENT_X25519_PUBLIC", values["CLIENT_X25519_PUBLIC"],
-                "RFC 8448 section 3: X25519(client private, 9), sent in the ClientHello."),
-        c_array("SERVER_X25519_PRIVATE", values["SERVER_X25519_PRIVATE"],
-                "RFC 8448 section 3: the server's ephemeral x25519 private key."),
-        c_array("SERVER_X25519_PUBLIC", values["SERVER_X25519_PUBLIC"],
-                "RFC 8448 section 3: X25519(server private, 9), sent in the ServerHello."),
+        c_array("CERTIFICATE_VERIFY", values["CERTIFICATE_VERIFY"], "The server's CertificateVerify."),
+        c_array(
+            "SERVER_FINISHED_MESSAGE",
+            values["SERVER_FINISHED_MESSAGE"],
+            "The server's Finished message, header included.",
+        ),
+        c_array(
+            "CLIENT_FINISHED_MESSAGE",
+            values["CLIENT_FINISHED_MESSAGE"],
+            "The client's Finished message, header included.",
+        ),
+        c_array(
+            "CLIENT_X25519_PRIVATE",
+            values["CLIENT_X25519_PRIVATE"],
+            "RFC 8448 section 3: the client's ephemeral x25519 private key.",
+        ),
+        c_array(
+            "CLIENT_X25519_PUBLIC",
+            values["CLIENT_X25519_PUBLIC"],
+            "RFC 8448 section 3: X25519(client private, 9), sent in the ClientHello.",
+        ),
+        c_array(
+            "SERVER_X25519_PRIVATE",
+            values["SERVER_X25519_PRIVATE"],
+            "RFC 8448 section 3: the server's ephemeral x25519 private key.",
+        ),
+        c_array(
+            "SERVER_X25519_PUBLIC",
+            values["SERVER_X25519_PUBLIC"],
+            "RFC 8448 section 3: X25519(server private, 9), sent in the ServerHello.",
+        ),
     ]
     return (
         "/* Generated by tests/vectors/extract_rfc8448_keyschedule.py -- do not edit.\n"
@@ -619,9 +650,7 @@ def render(values: dict[str, bytes]) -> str:
         " */\n\n"
         "#ifndef WT_RFC8448_VECTORS_H\n"
         "#define WT_RFC8448_VECTORS_H\n\n"
-        "#include <stdint.h>\n\n"
-        + "\n".join(parts)
-        + "\n#endif /* WT_RFC8448_VECTORS_H */\n"
+        "#include <stdint.h>\n\n" + "\n".join(parts) + "\n#endif /* WT_RFC8448_VECTORS_H */\n"
     )
 
 

@@ -40,9 +40,10 @@ static wt_webtransport_buffered_stream_t *find_stream(wt_webtransport_buffered_t
   return NULL;
 }
 
-wt_status_t wt_webtransport_buffered_park_stream(wt_webtransport_buffered_t *buffer, uint64_t stream_id,
-                                                 uint64_t session_id, int unidirectional,
-                                                 const uint8_t *data, size_t length) {
+wt_status_t wt_webtransport_buffered_park_stream(wt_webtransport_buffered_t *buffer,
+                                                 uint64_t stream_id, uint64_t session_id,
+                                                 int unidirectional, const uint8_t *data,
+                                                 size_t length) {
   wt_webtransport_buffered_stream_t *parked;
 
   if (buffer == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -103,8 +104,8 @@ wt_status_t wt_webtransport_buffered_drain_streams(wt_webtransport_buffered_t *b
       continue;
     }
     if (deliver != NULL) {
-      wt_status_t status = deliver(context, parked->stream_id, parked->unidirectional, parked->bytes,
-                                   parked->length);
+      wt_status_t status = deliver(context, parked->stream_id, parked->unidirectional,
+                                   parked->bytes, parked->length);
       if (status != WT_OK) {
         /* The callback's refusal stops the drain: the caller is being told something about the
          * session, and the streams behind this one are not delivered into a failing session. They
@@ -168,7 +169,8 @@ wt_status_t wt_webtransport_buffered_drain_datagrams(wt_webtransport_buffered_t 
       continue;
     }
     if (deliver != NULL) {
-      wt_status_t status = deliver(context, parked->quarter_stream_id, parked->bytes, parked->length);
+      wt_status_t status =
+          deliver(context, parked->quarter_stream_id, parked->bytes, parked->length);
       if (status != WT_OK) {
         first_error = status;
         break;
@@ -199,6 +201,7 @@ uint64_t wt_webtransport_buffered_datagrams_dropped(const wt_webtransport_buffer
   return buffer != NULL ? buffer->datagrams_dropped : 0U;
 }
 
-uint64_t wt_webtransport_buffered_last_rejected_stream_id(const wt_webtransport_buffered_t *buffer) {
+uint64_t
+wt_webtransport_buffered_last_rejected_stream_id(const wt_webtransport_buffered_t *buffer) {
   return buffer != NULL ? buffer->last_rejected_stream_id : 0U;
 }

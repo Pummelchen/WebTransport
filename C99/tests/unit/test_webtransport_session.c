@@ -39,7 +39,8 @@ static wt_status_t observe_flow(void *context, const wt_webtransport_capsule_t *
     uint64_t maximum = 0U;
     /* The observer owns this capsule's rules, including what a malformed one means: a value that is not exactly
      * one varint is H3_MESSAGE_ERROR, and the walker passes that code on rather than inventing its own. */
-    if (wt_webtransport_max_data_parse(capsule, &maximum, out_error) != WT_OK) return WT_ERR_PROTOCOL;
+    if (wt_webtransport_max_data_parse(capsule, &maximum, out_error) != WT_OK)
+      return WT_ERR_PROTOCOL;
     log->maximum = maximum;
   }
   return WT_OK;
@@ -69,14 +70,17 @@ static void test_the_connect_streams_capsules_are_walked(void) {
                wt_webtransport_close_session_write(&w, 0x1234U, (const uint8_t *)"bye", 3U));
   cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
   WT_EXPECT_OK("the capsules are walked",
-               wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow, &log,
-                                                        &error));
-  WT_EXPECT_INT("the drain stopped new streams", 0, wt_webtransport_session_allows_new_streams(&session));
+               wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                        observe_flow, &log, &error));
+  WT_EXPECT_INT("the drain stopped new streams", 0,
+                wt_webtransport_session_allows_new_streams(&session));
   WT_EXPECT_INT("and came from the peer", 1, session.drain_received);
-  WT_EXPECT_U64("the observer was given only what the session does not own", 1U, (uint64_t)log.calls);
+  WT_EXPECT_U64("the observer was given only what the session does not own", 1U,
+                (uint64_t)log.calls);
   WT_EXPECT_U64("which is the flow-control grant", WT_CAPSULE_MAX_DATA, log.last_type);
   WT_EXPECT_U64("whose value reached the caller's account", 65536U, log.maximum);
-  WT_EXPECT_INT("the close ended the session", (int)WT_WEBTRANSPORT_SESSION_CLOSED, (int)session.state);
+  WT_EXPECT_INT("the close ended the session", (int)WT_WEBTRANSPORT_SESSION_CLOSED,
+                (int)session.state);
   WT_EXPECT_INT("with the peer's code", 1, session.close_error_set);
   WT_EXPECT_U64("as the code the capsule carried", 0x1234U, (uint64_t)session.close_error_code);
   WT_EXPECT_INT("and the cursor walked all of it", 1, wt_cursor_at_end(&cursor));
@@ -94,16 +98,16 @@ static void test_the_connect_streams_capsules_are_walked(void) {
 
     cursor = wt_cursor_init(buffer, partial);
     WT_EXPECT_STATUS("a capsule that has not fully arrived is a WAIT", WT_ERR_TRUNCATED,
-                     wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow,
-                                                              &log, &error));
+                     wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                              observe_flow, &log, &error));
     WT_EXPECT_U64("with nothing applied", 0U, (uint64_t)log.calls);
     WT_EXPECT_U64("and the cursor left on its first byte", (uint64_t)partial,
                   (uint64_t)wt_cursor_remaining(&cursor));
 
     cursor = wt_cursor_init(buffer, complete);
     WT_EXPECT_OK("and the completed bytes are walked",
-                 wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow, &log,
-                                                          &error));
+                 wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                          observe_flow, &log, &error));
     WT_EXPECT_U64("applying the grant now", 4096U, log.maximum);
     WT_EXPECT_INT("at the end of the buffer", 1, wt_cursor_at_end(&cursor));
   }
@@ -117,7 +121,8 @@ static void test_the_connect_streams_capsules_are_walked(void) {
     huge_length += wt_quic_varint_encode(63U, huge + huge_length, sizeof(huge) - huge_length);
     cursor = wt_cursor_init(huge, huge_length);
     WT_EXPECT_STATUS("a capsule past the caller's bound is refused", WT_ERR_LIMIT,
-                     wt_webtransport_session_on_capsule_bytes(&session, &cursor, 8U, observe_flow, &log, &error));
+                     wt_webtransport_session_on_capsule_bytes(&session, &cursor, 8U, observe_flow,
+                                                              &log, &error));
     WT_EXPECT_U64("as excessive load", (uint64_t)WT_HTTP3_EXCESSIVE_LOAD, (uint64_t)error);
   }
 
@@ -135,8 +140,8 @@ static void test_the_connect_streams_capsules_are_walked(void) {
     WT_EXPECT_OK("a malformed grant encodes", wt_webtransport_capsule_encode(&w, &malformed));
     cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
     WT_EXPECT_STATUS("and is refused by the walker's observer", WT_ERR_PROTOCOL,
-                     wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow,
-                                                              &log, &error));
+                     wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                              observe_flow, &log, &error));
     WT_EXPECT_U64("naming the rule it broke", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
   }
 
@@ -147,15 +152,16 @@ static void test_the_connect_streams_capsules_are_walked(void) {
     wt_webtransport_capsule_t unknown;
 
     memset(&unknown, 0, sizeof(unknown));
-    unknown.type = 0x2b603742U; /* the WT_MAX_SESSIONS SETTINGS identifier, which is not a capsule type */
+    unknown.type =
+        0x2b603742U; /* the WT_MAX_SESSIONS SETTINGS identifier, which is not a capsule type */
     unknown.value = k_value;
     unknown.value_length = sizeof(k_value);
     w = wt_writer_init(buffer, sizeof(buffer));
     WT_EXPECT_OK("an unknown capsule encodes", wt_webtransport_capsule_encode(&w, &unknown));
     cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
-    WT_EXPECT_OK("and is walked without an owner", wt_webtransport_session_on_capsule_bytes(&session, &cursor,
-                                                                                            sizeof(buffer), NULL,
-                                                                                            NULL, &error));
+    WT_EXPECT_OK("and is walked without an owner",
+                 wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), NULL,
+                                                          NULL, &error));
     WT_EXPECT_INT("past it", 1, wt_cursor_at_end(&cursor));
   }
 }
@@ -168,7 +174,8 @@ static void test_the_establishing_and_established_states(void) {
   wt_webtransport_session_init(&session);
   WT_EXPECT_INT("a new session is establishing", (int)WT_WEBTRANSPORT_SESSION_ESTABLISHING,
                 (int)session.state);
-  WT_EXPECT_INT("and carries no new streams", 0, wt_webtransport_session_allows_new_streams(&session));
+  WT_EXPECT_INT("and carries no new streams", 0,
+                wt_webtransport_session_allows_new_streams(&session));
   WT_EXPECT_STATUS("and cannot be closed before it exists", WT_ERR_STATE,
                    wt_webtransport_session_write_close(&session, &w, 0U, NULL, 0U));
 
@@ -266,11 +273,12 @@ static void test_a_capsule_after_the_close_is_refused(void) {
 
   /* The close arrives in one frame and ends the session. */
   w = wt_writer_init(buffer, sizeof(buffer));
-  WT_EXPECT_OK("the close capsule encodes", wt_webtransport_close_session_write(&w, 0x22U, NULL, 0U));
+  WT_EXPECT_OK("the close capsule encodes",
+               wt_webtransport_close_session_write(&w, 0x22U, NULL, 0U));
   cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
   WT_EXPECT_OK("and closes the session",
-               wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow, &log,
-                                                        &error));
+               wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                        observe_flow, &log, &error));
   WT_EXPECT_INT("which is now closed", (int)WT_WEBTRANSPORT_SESSION_CLOSED, (int)session.state);
 
   /* A LATER STREAM frame carries a flow-control grant. Nothing about it may be applied. */
@@ -279,8 +287,8 @@ static void test_a_capsule_after_the_close_is_refused(void) {
   grant_length = wt_writer_offset(&w);
   cursor = wt_cursor_init(buffer, grant_length);
   WT_EXPECT_STATUS("and the closed session refuses it", WT_ERR_PROTOCOL,
-                   wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow, &log,
-                                                            &error));
+                   wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                            observe_flow, &log, &error));
   WT_EXPECT_U64("naming a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
   WT_EXPECT_U64("with the observer never called", 0U, (uint64_t)log.calls);
   WT_EXPECT_U64("and the cursor left where it was", (uint64_t)grant_length,
@@ -289,8 +297,59 @@ static void test_a_capsule_after_the_close_is_refused(void) {
   /* An empty delivery is the ordinary FIN after the close, not a new capsule: it is not refused. */
   cursor = wt_cursor_init(buffer, 0U);
   WT_EXPECT_OK("an empty delivery after the close is still fine",
-               wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer), observe_flow, &log,
-                                                        &error));
+               wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                        observe_flow, &log, &error));
+}
+
+/* AUD-0032. Two refusals a previous audit added, neither of which had a test. The DRAIN capsule's
+ * value must be EMPTY -- the code says a value here "used to be ignored, which is a malformed
+ * capsule accepted in silence" -- and nothing may follow a CLOSE in the same delivery, where the
+ * code says "a peer could close the session and then send another grant, which the endpoint would
+ * honour". Both are peer input on the CONNECT stream, and the existing close test covers a capsule
+ * arriving in a LATER frame, which is a different branch. */
+static void test_a_malformed_drain_and_bytes_after_a_close(void) {
+  uint8_t buffer[64];
+  wt_webtransport_session_t session;
+  capsule_observer_t log;
+  wt_writer_t w;
+  wt_cursor_t cursor;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  memset(&log, 0, sizeof(log));
+
+  /* A DRAIN carrying one byte. `wt_webtransport_drain_session_write` cannot produce this, because
+   * it writes the empty value the draft requires, so the capsule is built here. */
+  wt_webtransport_session_init(&session);
+  WT_EXPECT_OK("a session establishes", wt_webtransport_session_established(&session));
+  w = wt_writer_init(buffer, sizeof(buffer));
+  WT_EXPECT_TRUE("a drain type writes", wt_quic_writer_varint(&w, WT_CAPSULE_DRAIN_SESSION) != 0U);
+  WT_EXPECT_TRUE("with a length of one", wt_quic_writer_varint(&w, 1U) != 0U);
+  wt_writer_u8(&w, 0x00U);
+  cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a drain capsule with a value is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                            observe_flow, &log, &error));
+  WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  WT_EXPECT_INT("and the drain is not applied", 0, session.drain_received);
+
+  /* A CLOSE followed by a grant in the SAME delivery: the close ends the session, and the bytes
+   * behind it are not capsules at all. */
+  wt_webtransport_session_init(&session);
+  WT_EXPECT_OK("a session establishes once more", wt_webtransport_session_established(&session));
+  log.calls = 0U;
+  w = wt_writer_init(buffer, sizeof(buffer));
+  WT_EXPECT_OK("the close capsule encodes",
+               wt_webtransport_close_session_write(&w, 0x33U, NULL, 0U));
+  WT_EXPECT_OK("and a grant follows it in the same buffer",
+               wt_webtransport_max_data_write(&w, 65536U));
+  cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("bytes after the close are refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                            observe_flow, &log, &error));
+  WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  WT_EXPECT_U64("and the grant behind the close is never applied", 0U, (uint64_t)log.calls);
 }
 
 int main(void) {
@@ -299,5 +358,6 @@ int main(void) {
   test_closing_and_the_first_code();
   test_the_connect_streams_capsules_are_walked();
   test_a_capsule_after_the_close_is_refused();
+  test_a_malformed_drain_and_bytes_after_a_close();
   WT_TEST_MAIN_END("wt_webtransport_session");
 }

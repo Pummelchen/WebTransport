@@ -27,8 +27,7 @@ static size_t find_packet(const wt_quic_loss_t *loss, uint8_t packet_number_spac
   return loss->count;
 }
 
-wt_status_t wt_quic_loss_on_sent(wt_quic_loss_t *loss,
-                                 const wt_quic_sent_packet_t *packet) {
+wt_status_t wt_quic_loss_on_sent(wt_quic_loss_t *loss, const wt_quic_sent_packet_t *packet) {
   if (loss == NULL || packet == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* A packet number is never reused (RFC 9000 section 12.3), so recording one twice is a caller
    * that has lost track of what it sent, and appending it again would double-count its bytes. */
@@ -50,16 +49,14 @@ wt_status_t wt_quic_loss_on_sent(wt_quic_loss_t *loss,
 static void remove_packet(wt_quic_loss_t *loss, size_t at) {
   const wt_quic_sent_packet_t *packet = &loss->sent[at];
   if (packet->in_flight) {
-    loss->bytes_in_flight -= (loss->bytes_in_flight >= packet->size)
-                                 ? packet->size
-                                 : loss->bytes_in_flight;
+    loss->bytes_in_flight -=
+        (loss->bytes_in_flight >= packet->size) ? packet->size : loss->bytes_in_flight;
   }
   if (packet->ack_eliciting && loss->ack_eliciting_in_flight > 0U) {
     loss->ack_eliciting_in_flight--;
   }
   if (at + 1U < loss->count) {
-    memmove(&loss->sent[at], &loss->sent[at + 1U],
-            (loss->count - at - 1U) * sizeof(loss->sent[0]));
+    memmove(&loss->sent[at], &loss->sent[at + 1U], (loss->count - at - 1U) * sizeof(loss->sent[0]));
   }
   loss->count--;
 }
@@ -161,8 +158,7 @@ wt_status_t wt_quic_loss_detect(wt_quic_loss_t *loss, uint8_t packet_number_spac
 }
 
 wt_status_t wt_quic_loss_pto(const wt_quic_loss_t *loss, uint8_t packet_number_space,
-                             const wt_quic_rtt_t *rtt, uint64_t max_ack_delay,
-                             uint64_t *out_time) {
+                             const wt_quic_rtt_t *rtt, uint64_t max_ack_delay, uint64_t *out_time) {
   uint64_t base_pto = 0U;
   uint64_t earliest = 0U;
   size_t i;

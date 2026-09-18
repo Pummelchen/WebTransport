@@ -31,8 +31,7 @@ static void test_windows(void) {
   WT_EXPECT_U64("the initial window for 200-byte datagrams", 2000U,
                 wt_quic_congestion_initial_window(200U));
   WT_EXPECT_U64("the minimum window", 2400U, wt_quic_congestion_minimum_window(1200U));
-  WT_EXPECT_U64("and for another datagram size", 3000U,
-                wt_quic_congestion_minimum_window(1500U));
+  WT_EXPECT_U64("and for another datagram size", 3000U, wt_quic_congestion_minimum_window(1500U));
 
   /* A connection starts in slow start, with a threshold of infinity. */
   {
@@ -43,12 +42,10 @@ static void test_windows(void) {
     WT_EXPECT_INT("and the connection is in slow start", 1,
                   wt_quic_congestion_in_slow_start(&congestion));
     WT_EXPECT_INT("and not in recovery", 0, wt_quic_congestion_in_recovery(&congestion));
-    WT_EXPECT_INT("a packet may be sent", 1,
-                  wt_quic_congestion_can_send(&congestion, 0U));
+    WT_EXPECT_INT("a packet may be sent", 1, wt_quic_congestion_can_send(&congestion, 0U));
     WT_EXPECT_INT("but not once the window is full", 0,
                   wt_quic_congestion_can_send(&congestion, 12000U));
-    WT_EXPECT_INT("while one byte less fits", 1,
-                  wt_quic_congestion_can_send(&congestion, 11999U));
+    WT_EXPECT_INT("while one byte less fits", 1, wt_quic_congestion_can_send(&congestion, 11999U));
   }
 
   /* A datagram size of zero is a caller error rather than a window of zero. */
@@ -59,8 +56,7 @@ static void test_windows(void) {
                   wt_quic_congestion_window(&congestion));
   }
   WT_EXPECT_U64("a NULL window is zero", 0U, wt_quic_congestion_window(NULL));
-  WT_EXPECT_INT("a NULL connection cannot send", 0,
-                wt_quic_congestion_can_send(NULL, 0U));
+  WT_EXPECT_INT("a NULL connection cannot send", 0, wt_quic_congestion_can_send(NULL, 0U));
 }
 
 static void test_slow_start_and_avoidance(void) {
@@ -68,14 +64,11 @@ static void test_slow_start_and_avoidance(void) {
 
   /* Slow start: the window grows by what was acknowledged, which doubles it each round trip. */
   wt_quic_congestion_init(&congestion, WT_MDS);
-  WT_EXPECT_OK("one datagram is acknowledged",
-               wt_quic_congestion_on_ack(&congestion, 1200U, 100U));
-  WT_EXPECT_U64("and the window grows by it", 13200U,
-                wt_quic_congestion_window(&congestion));
+  WT_EXPECT_OK("one datagram is acknowledged", wt_quic_congestion_on_ack(&congestion, 1200U, 100U));
+  WT_EXPECT_U64("and the window grows by it", 13200U, wt_quic_congestion_window(&congestion));
   WT_EXPECT_OK("three more", wt_quic_congestion_on_ack(&congestion, 3600U, 200U));
   WT_EXPECT_U64("and again", 16800U, wt_quic_congestion_window(&congestion));
-  WT_EXPECT_INT("still in slow start", 1,
-                wt_quic_congestion_in_slow_start(&congestion));
+  WT_EXPECT_INT("still in slow start", 1, wt_quic_congestion_in_slow_start(&congestion));
 
   /* A loss takes it out of slow start: the threshold becomes half the window and the window
    * follows it. 16800 / 2 = 8400. */
@@ -85,8 +78,7 @@ static void test_slow_start_and_avoidance(void) {
                 wt_quic_congestion_ssthresh(&congestion));
   WT_EXPECT_U64("and so is the window", 8400U, wt_quic_congestion_window(&congestion));
   WT_EXPECT_INT("now in recovery", 1, wt_quic_congestion_in_recovery(&congestion));
-  WT_EXPECT_INT("and out of slow start", 0,
-                wt_quic_congestion_in_slow_start(&congestion));
+  WT_EXPECT_INT("and out of slow start", 0, wt_quic_congestion_in_slow_start(&congestion));
 
   /* Congestion avoidance: one datagram per round trip at most, as mds * acked / cwnd.
    * With cwnd 8400 and 1200 acknowledged: 1200 * 1200 / 8400 = 171. */
@@ -151,10 +143,8 @@ static void test_recovery_epoch(void) {
                 wt_quic_congestion_in_recovery_at(&congestion, 5001U));
 
   /* A packet sent after the period began is a new event: its loss halves the window again. */
-  WT_EXPECT_OK("a later packet is lost",
-               wt_quic_congestion_on_loss(&congestion, 6000U, 7000U));
-  WT_EXPECT_U64("which halves the window again", 3000U,
-                wt_quic_congestion_window(&congestion));
+  WT_EXPECT_OK("a later packet is lost", wt_quic_congestion_on_loss(&congestion, 6000U, 7000U));
+  WT_EXPECT_U64("which halves the window again", 3000U, wt_quic_congestion_window(&congestion));
   WT_EXPECT_U64("and begins a new period", 7000U, congestion.recovery_start_time);
 
   /* The window never goes below two datagrams, however many times it is halved. */
@@ -167,13 +157,10 @@ static void test_recovery_epoch(void) {
      * would change nothing at all, which the previous test checks. */
     for (i = 0U; i < 20U; i++) {
       uint64_t sent = 1000000U + i * 10U;
-      WT_EXPECT_OK("a loss in its own period",
-                   wt_quic_congestion_on_loss(&small, sent, sent + 5U));
+      WT_EXPECT_OK("a loss in its own period", wt_quic_congestion_on_loss(&small, sent, sent + 5U));
     }
-    WT_EXPECT_U64("the window stops at the minimum", 2400U,
-                  wt_quic_congestion_window(&small));
-    WT_EXPECT_INT("which is still able to send", 1,
-                  wt_quic_congestion_can_send(&small, 0U));
+    WT_EXPECT_U64("the window stops at the minimum", 2400U, wt_quic_congestion_window(&small));
+    WT_EXPECT_INT("which is still able to send", 1, wt_quic_congestion_can_send(&small, 0U));
     WT_EXPECT_INT("but not when a datagram is in flight", 0,
                   wt_quic_congestion_can_send(&small, 2400U));
   }
@@ -193,19 +180,15 @@ static void test_persistent_congestion(void) {
 
   wt_quic_congestion_init(&congestion, WT_MDS);
   WT_EXPECT_OK("the window grows first", wt_quic_congestion_on_ack(&congestion, 12000U, 100U));
-  WT_EXPECT_U64("to twice the initial window", 24000U,
-                wt_quic_congestion_window(&congestion));
+  WT_EXPECT_U64("to twice the initial window", 24000U, wt_quic_congestion_window(&congestion));
 
   /* Persistent congestion collapses the window to the minimum and makes the connection earn it
    * back: RFC 9002 section 7.6. */
   WT_EXPECT_OK("persistent congestion is declared",
                wt_quic_congestion_on_persistent_congestion(&congestion, 9000U));
-  WT_EXPECT_U64("which collapses the window", 2400U,
-                wt_quic_congestion_window(&congestion));
-  WT_EXPECT_U64("and the threshold with it", 2400U,
-                wt_quic_congestion_ssthresh(&congestion));
-  WT_EXPECT_INT("in a new recovery period", 1,
-                wt_quic_congestion_in_recovery(&congestion));
+  WT_EXPECT_U64("which collapses the window", 2400U, wt_quic_congestion_window(&congestion));
+  WT_EXPECT_U64("and the threshold with it", 2400U, wt_quic_congestion_ssthresh(&congestion));
+  WT_EXPECT_INT("in a new recovery period", 1, wt_quic_congestion_in_recovery(&congestion));
   WT_EXPECT_U64("which began now", 9000U, congestion.recovery_start_time);
   WT_EXPECT_INT("and the connection is not in slow start", 0,
                 wt_quic_congestion_in_slow_start(&congestion));

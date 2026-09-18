@@ -85,8 +85,7 @@ void *wt_alloc_array(const wt_allocator_t *a, size_t count, size_t elem_size,
 
 /* Resize. On failure the original block is untouched and still valid, and NULL
  * is returned; the caller keeps ownership of it. */
-void *wt_realloc(const wt_allocator_t *a, void *ptr, size_t old_size,
-                 size_t new_size);
+void *wt_realloc(const wt_allocator_t *a, void *ptr, size_t old_size, size_t new_size);
 
 /* Release. Safe on a NULL pointer, in which case nothing happens -- a
  * documented convenience so that a cleanup path does not need a guard at every

@@ -40,8 +40,7 @@ static void *wt_count_alloc(void *context, size_t size) {
   return block;
 }
 
-static void *wt_count_realloc(void *context, void *ptr, size_t old_size,
-                              size_t new_size) {
+static void *wt_count_realloc(void *context, void *ptr, size_t old_size, size_t new_size) {
   wt_counting_allocator_t *c = (wt_counting_allocator_t *)context;
   void *block;
   if (c->refuse) return NULL;
@@ -79,15 +78,12 @@ int main(void) {
 
   /* A fresh buffer allocates nothing, and freeing it is valid. */
   b = wt_buf_init(&alloc);
-  WT_EXPECT_U64("a fresh buffer allocates nothing", 0U,
-                counter.total_allocations);
+  WT_EXPECT_U64("a fresh buffer allocates nothing", 0U, counter.total_allocations);
   WT_EXPECT_U64("with no bytes outstanding", 0U, counter.outstanding_bytes);
   {
     wt_cursor_t c = wt_buf_cursor(&b);
-    WT_EXPECT_U64("and a cursor over it reads nothing", 0U,
-                  (uint64_t)wt_cursor_remaining(&c));
-    WT_EXPECT_INT("an empty buffer's cursor is at its end", 1,
-                  wt_cursor_at_end(&c));
+    WT_EXPECT_U64("and a cursor over it reads nothing", 0U, (uint64_t)wt_cursor_remaining(&c));
+    WT_EXPECT_INT("an empty buffer's cursor is at its end", 1, wt_cursor_at_end(&c));
   }
 
   /* Appending allocates, and the bytes land. */
@@ -112,11 +108,9 @@ int main(void) {
     }
     before = growth_counter.total_allocations;
     WT_EXPECT_U64("all 4096 bytes are present", 4096U, grow.len);
-    WT_EXPECT_TRUE("and the reallocation count is logarithmic, not linear",
-                   before <= 32U);
+    WT_EXPECT_TRUE("and the reallocation count is logarithmic, not linear", before <= 32U);
     wt_buf_free(&grow);
-    WT_EXPECT_U64("the growing buffer freed everything", 0U,
-                  growth_counter.outstanding_bytes);
+    WT_EXPECT_U64("the growing buffer freed everything", 0U, growth_counter.outstanding_bytes);
   }
 
   /* A reserve past the bound is WT_ERR_LIMIT and modifies nothing. */
@@ -124,24 +118,25 @@ int main(void) {
     wt_buf_t bounded = wt_buf_init(&alloc);
     size_t len_before = bounded.len;
     size_t cap_before = bounded.cap;
-    WT_EXPECT_STATUS("a reserve past the bound is refused", WT_ERR_LIMIT, wt_buf_reserve(&bounded, WT_BUF_MAX_CAPACITY + 1U));
+    WT_EXPECT_STATUS("a reserve past the bound is refused", WT_ERR_LIMIT,
+                     wt_buf_reserve(&bounded, WT_BUF_MAX_CAPACITY + 1U));
     WT_EXPECT_U64("the length is unchanged", len_before, bounded.len);
     WT_EXPECT_U64("and so is the capacity", cap_before, bounded.cap);
     /* An append whose total would exceed the bound is refused too. */
-    WT_EXPECT_STATUS("an append past the bound is refused", WT_ERR_LIMIT, wt_buf_append(&bounded, "x", WT_BUF_MAX_CAPACITY + 1U));
+    WT_EXPECT_STATUS("an append past the bound is refused", WT_ERR_LIMIT,
+                     wt_buf_append(&bounded, "x", WT_BUF_MAX_CAPACITY + 1U));
     wt_buf_free(&bounded);
   }
 
   /* A refused allocation leaves the buffer usable and unchanged. */
   {
     wt_buf_t refused = wt_buf_init(&alloc);
-    WT_EXPECT_OK("append before arming the refusal",
-                 wt_buf_append(&refused, "hello", 5U));
+    WT_EXPECT_OK("append before arming the refusal", wt_buf_append(&refused, "hello", 5U));
     counter.refuse = 1;
-    WT_EXPECT_STATUS("an append with no memory", WT_ERR_OUT_OF_MEMORY, wt_buf_append(&refused, "0123456789", 10U));
+    WT_EXPECT_STATUS("an append with no memory", WT_ERR_OUT_OF_MEMORY,
+                     wt_buf_append(&refused, "0123456789", 10U));
     WT_EXPECT_U64("the length is unchanged", 5U, refused.len);
-    WT_EXPECT_BYTES("and so are the bytes", (const uint8_t *)"hello",
-                    refused.data, 5U);
+    WT_EXPECT_BYTES("and so are the bytes", (const uint8_t *)"hello", refused.data, 5U);
     counter.refuse = 0;
     wt_buf_free(&refused);
   }
@@ -151,8 +146,8 @@ int main(void) {
   WT_EXPECT_U64("thirteen bytes now", 13U, b.len);
   wt_buf_consume(&b, 3U);
   WT_EXPECT_U64("ten left after dropping three", 10U, b.len);
-  WT_EXPECT_BYTES("and the front is now the fourth byte",
-                  (const uint8_t *)"0123456789", b.data, 10U);
+  WT_EXPECT_BYTES("and the front is now the fourth byte", (const uint8_t *)"0123456789", b.data,
+                  10U);
   wt_buf_consume(&b, 0U);
   WT_EXPECT_U64("dropping zero changes nothing", 10U, b.len);
   wt_buf_consume(&b, 10U);
@@ -195,14 +190,12 @@ int main(void) {
     WT_EXPECT_OK("copy_out succeeds", status);
     WT_EXPECT_TRUE("and returns a block", copy != NULL);
     if (copy != NULL) {
-      WT_EXPECT_BYTES("holding the right bytes",
-                      (const uint8_t *)"\x02\x03", copy, 2U);
+      WT_EXPECT_BYTES("holding the right bytes", (const uint8_t *)"\x02\x03", copy, 2U);
       wt_dealloc(&alloc, copy, 2U);
     }
     WT_EXPECT_TRUE("copying past the end is NULL",
                    wt_buf_copy_out(&b, 2U, 2U, &alloc, &status) == NULL);
-    WT_EXPECT_STATUS("and reports an invalid argument",
-                     WT_ERR_INVALID_ARGUMENT, status);
+    WT_EXPECT_STATUS("and reports an invalid argument", WT_ERR_INVALID_ARGUMENT, status);
     WT_EXPECT_TRUE("copying outside the buffer is NULL",
                    wt_buf_copy_out(&b, 4U, 1U, &alloc, &status) == NULL);
     /* A zero-length copy is valid and freeable. */
@@ -226,8 +219,7 @@ int main(void) {
 
   /* Freeing releases every byte, including through a reallocation. */
   wt_buf_free(&b);
-  WT_EXPECT_U64("no bytes are outstanding after free", 0U,
-                counter.outstanding_bytes);
+  WT_EXPECT_U64("no bytes are outstanding after free", 0U, counter.outstanding_bytes);
   WT_EXPECT_U64("and no blocks are live", 0U, counter.live_blocks);
   WT_EXPECT_TRUE("the buffer is empty", b.data == NULL && b.len == 0U && b.cap == 0U);
   /* Freeing twice is valid, because a cleanup path that runs twice is common. */
@@ -240,8 +232,7 @@ int main(void) {
     wt_buf_t defaulted;
     memset(&zeroed, 0, sizeof(zeroed));
     defaulted = wt_buf_init(&zeroed);
-    WT_EXPECT_OK("a zeroed allocator selects the default",
-                 wt_buf_append(&defaulted, "ok", 2U));
+    WT_EXPECT_OK("a zeroed allocator selects the default", wt_buf_append(&defaulted, "ok", 2U));
     WT_EXPECT_U64("and the default allocated", 2U, defaulted.len);
     wt_buf_free(&defaulted);
   }

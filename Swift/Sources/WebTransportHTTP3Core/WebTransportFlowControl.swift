@@ -62,50 +62,20 @@ public enum WebTransportFlowCapsuleCodec {
         case constants.wtCloseSessionCapsule:
             capsule = try parseCloseSession(payload)
             return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
-        case constants.wtMaxDataCapsule:
-            let limit = try readSingleVarInt(
-                from: &payloadCursor,
-                label: "wt-max-data"
-            )
-            capsule = .maxData(limit: limit)
-        case constants.wtMaxStreamsBidiCapsule:
-            let limit = try readSingleVarInt(
-                from: &payloadCursor,
-                label: "wt-max-streams-bidi"
-            )
-            capsule = .maxStreamsBidi(limit: limit)
-        case constants.wtMaxStreamsUniCapsule:
-            let limit = try readSingleVarInt(
-                from: &payloadCursor,
-                label: "wt-max-streams-uni"
-            )
-            capsule = .maxStreamsUni(limit: limit)
-        case constants.wtDataBlockedCapsule:
-            let limit = try readSingleVarInt(
-                from: &payloadCursor,
-                label: "wt-data-blocked"
-            )
-            capsule = .dataBlocked(limit: limit)
         case constants.wtMaxStreamDataCapsule, constants.wtStreamDataBlockedCapsule:
             throw WebTransportDraft16Error(
                 kind: .flowControl,
                 message: "per-stream flow-control capsules are prohibited over HTTP/3"
             )
-        case constants.wtStreamsBlockedBidiCapsule:
-            let limit = try readSingleVarInt(
-                from: &payloadCursor,
-                label: "wt-streams-blocked-bidi"
-            )
-            capsule = .streamsBlockedBidi(limit: limit)
-        case constants.wtStreamsBlockedUniCapsule:
-            let limit = try readSingleVarInt(
-                from: &payloadCursor,
-                label: "wt-streams-blocked-uni"
-            )
-            capsule = .streamsBlockedUni(limit: limit)
         default:
-            capsule = .unknown(type: type, payload: payload)
-            return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
+            // The single-varint capsules are one function below; anything else is the
+            // forward-compatible `.unknown` the caller is expected to carry past.
+            guard let limitCapsule = try parseLimitCapsule(type: type, constants: constants, cursor: &payloadCursor)
+            else {
+                capsule = .unknown(type: type, payload: payload)
+                return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
+            }
+            capsule = limitCapsule
         }
 
         if !payloadCursor.isAtEnd {
@@ -113,6 +83,33 @@ public enum WebTransportFlowCapsuleCodec {
         }
 
         return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
+    }
+
+    /// The capsules whose payload is exactly one varint limit.
+    ///
+    /// `nil` means "not one of these", which is how the caller tells a forward-compatible
+    /// capsule from a malformed one; it never means malformed.
+    private static func parseLimitCapsule(
+        type: UInt64,
+        constants: WebTransportHTTP3DraftConstants,
+        cursor: inout QUICByteCursor
+    ) throws -> WebTransportFlowCapsule? {
+        switch type {
+        case constants.wtMaxDataCapsule:
+            return .maxData(limit: try readSingleVarInt(from: &cursor, label: "wt-max-data"))
+        case constants.wtMaxStreamsBidiCapsule:
+            return .maxStreamsBidi(limit: try readSingleVarInt(from: &cursor, label: "wt-max-streams-bidi"))
+        case constants.wtMaxStreamsUniCapsule:
+            return .maxStreamsUni(limit: try readSingleVarInt(from: &cursor, label: "wt-max-streams-uni"))
+        case constants.wtDataBlockedCapsule:
+            return .dataBlocked(limit: try readSingleVarInt(from: &cursor, label: "wt-data-blocked"))
+        case constants.wtStreamsBlockedBidiCapsule:
+            return .streamsBlockedBidi(limit: try readSingleVarInt(from: &cursor, label: "wt-streams-blocked-bidi"))
+        case constants.wtStreamsBlockedUniCapsule:
+            return .streamsBlockedUni(limit: try readSingleVarInt(from: &cursor, label: "wt-streams-blocked-uni"))
+        default:
+            return nil
+        }
     }
 
     public static func serializedTypeAndPayload(_ capsule: WebTransportFlowCapsule) throws -> (UInt64, Data) {

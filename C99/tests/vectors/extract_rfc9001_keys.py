@@ -47,13 +47,7 @@ def hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
 
 def hkdf_expand_label(secret: bytes, label: str, context: bytes, length: int) -> bytes:
     full = b"tls13 " + label.encode()
-    info = (
-        length.to_bytes(2, "big")
-        + bytes([len(full)])
-        + full
-        + bytes([len(context)])
-        + context
-    )
+    info = length.to_bytes(2, "big") + bytes([len(full)]) + full + bytes([len(context)]) + context
     okm, block, counter = b"", b"", 1
     while len(okm) < length:
         block = hmac.new(secret, block + info + bytes([counter]), hashlib.sha256).digest()
@@ -152,17 +146,13 @@ def extract(rfc: str) -> tuple[dict[str, bytes], dict[str, int]]:
     # produced a 16-byte "secret" taken from the lines of a formula, which is
     # exactly the kind of extraction that would make a test pass against a wrong
     # implementation.
-    cursor = next(
-        (i for i, line in enumerate(lines) if line.startswith("A.1.")), 0
-    )
+    cursor = next((i for i, line in enumerate(lines) if line.startswith("A.1.")), 0)
 
     def take(name: str, label: str, length: int) -> None:
         nonlocal cursor
         value, at = hex_value_after(lines, label, cursor)
         if len(value) != length:
-            raise SystemExit(
-                f"{name}: expected {length} bytes from {label!r}, got {len(value)}"
-            )
+            raise SystemExit(f"{name}: expected {length} bytes from {label!r}, got {len(value)}")
         out[name] = value
         cursor = at
 
@@ -170,22 +160,22 @@ def extract(rfc: str) -> tuple[dict[str, bytes], dict[str, int]]:
     # The client's block comes before the server's, so a forward cursor is what
     # keeps `key =` from being read twice from the same place.
     take("CLIENT_INITIAL_SECRET", "client_initial_secret", 32)
-    take("CLIENT_INITIAL_KEY", 'key = HKDF-Expand-Label(client_initial_secret', 16)
-    take("CLIENT_INITIAL_IV", 'iv  = HKDF-Expand-Label(client_initial_secret', 12)
-    take("CLIENT_INITIAL_HP", 'hp  = HKDF-Expand-Label(client_initial_secret', 16)
+    take("CLIENT_INITIAL_KEY", "key = HKDF-Expand-Label(client_initial_secret", 16)
+    take("CLIENT_INITIAL_IV", "iv  = HKDF-Expand-Label(client_initial_secret", 12)
+    take("CLIENT_INITIAL_HP", "hp  = HKDF-Expand-Label(client_initial_secret", 16)
     take("SERVER_INITIAL_SECRET", "server_initial_secret", 32)
-    take("SERVER_INITIAL_KEY", 'key = HKDF-Expand-Label(server_initial_secret', 16)
-    take("SERVER_INITIAL_IV", 'iv  = HKDF-Expand-Label(server_initial_secret', 12)
-    take("SERVER_INITIAL_HP", 'hp  = HKDF-Expand-Label(server_initial_secret', 16)
+    take("SERVER_INITIAL_KEY", "key = HKDF-Expand-Label(server_initial_secret", 16)
+    take("SERVER_INITIAL_IV", "iv  = HKDF-Expand-Label(server_initial_secret", 12)
+    take("SERVER_INITIAL_HP", "hp  = HKDF-Expand-Label(server_initial_secret", 16)
 
     # A.5 lives in its own appendix, so the cursor is placed there rather than
     # walking the whole document looking for "secret".
     cursor = next((i for i, line in enumerate(lines) if line.startswith("A.5.")), 0)
     take("CHACHA_SECRET", "secret", 32)
-    take("CHACHA_KEY", 'key = HKDF-Expand-Label(secret', 32)
-    take("CHACHA_IV", 'iv  = HKDF-Expand-Label(secret', 12)
-    take("CHACHA_HP", 'hp  = HKDF-Expand-Label(secret', 32)
-    take("CHACHA_KEY_UPDATE", 'ku  = HKDF-Expand-Label(secret', 32)
+    take("CHACHA_KEY", "key = HKDF-Expand-Label(secret", 32)
+    take("CHACHA_IV", "iv  = HKDF-Expand-Label(secret", 12)
+    take("CHACHA_HP", "hp  = HKDF-Expand-Label(secret", 32)
+    take("CHACHA_KEY_UPDATE", "ku  = HKDF-Expand-Label(secret", 32)
 
     # Header protection, appendix by appendix. The samples and masks are printed
     # so that a test can localise a failure to the sample offset or to the mask
@@ -241,9 +231,7 @@ def extract(rfc: str) -> tuple[dict[str, bytes], dict[str, int]]:
                         break
                 value = bytes.fromhex("".join(tokens))
                 if len(value) != length:
-                    raise SystemExit(
-                        f"{name}: expected {length} bytes, got {len(value)}"
-                    )
+                    raise SystemExit(f"{name}: expected {length} bytes, got {len(value)}")
                 out[name] = value
                 return
         raise SystemExit(f"no protected packet after {label!r}")
@@ -254,15 +242,13 @@ def extract(rfc: str) -> tuple[dict[str, bytes], dict[str, int]]:
     # as a block, so it is read as a labelled value.
     chacha_packet, _ = hex_value_after(lines, "packet = ", 0)
     if len(chacha_packet) != 21:
-        raise SystemExit(
-            f"the ChaCha20 packet is {len(chacha_packet)} bytes, expected 21"
-        )
+        raise SystemExit(f"the ChaCha20 packet is {len(chacha_packet)} bytes, expected 21")
     out["CHACHA_PACKET"] = chacha_packet
     return out, scalars
 
 
 def self_check(rfc: str, values: dict[str, bytes], scalars: dict[str, int]) -> None:
-    lines = rfc.splitlines()
+    rfc.splitlines()
     # The connection ID is not printed as a labelled block: the appendix names it
     # in a sentence, "an 8-byte client-chosen Destination Connection ID of
     # 0x8394c8f03e515708". It is taken from there, and the Initial secret is then
@@ -315,9 +301,7 @@ def self_check(rfc: str, values: dict[str, bytes], scalars: dict[str, int]) -> N
     self_check_header_protection(values, scalars)
 
 
-def self_check_header_protection(
-    values: dict[str, bytes], scalars: dict[str, int]
-) -> None:
+def self_check_header_protection(values: dict[str, bytes], scalars: dict[str, int]) -> None:
     """Check the header protection vectors against arithmetic, not against AES.
 
     Reimplementing AES here to check a mask would be a second implementation of
@@ -365,9 +349,7 @@ def self_check_header_protection(
             raise SystemExit(f"the {where} first byte does not match its mask")
         expected = plain[pn_offset : pn_offset + pn_len]
         actual = protected[pn_offset : pn_offset + pn_len]
-        masked = bytes(
-            byte ^ mask[1 + index] for index, byte in enumerate(expected)
-        )
+        masked = bytes(byte ^ mask[1 + index] for index, byte in enumerate(expected))
         if actual != masked:
             raise SystemExit(f"the {where} packet number does not match its mask")
         # The protected header is the packet's first bytes, and the sample is part
@@ -435,73 +417,122 @@ def render(values: dict[str, bytes], scalars: dict[str, int]) -> str:
         )
 
     parts = [
-        c_array("INITIAL_SECRET", values["INITIAL_SECRET"],
-                "RFC 9001 A.1: HKDF-Extract(version-1 salt, destination connection ID)."),
-        c_array("CLIENT_INITIAL_SECRET", values["CLIENT_INITIAL_SECRET"],
-                "RFC 9001 A.1: the client's Initial secret."),
-        c_array("SERVER_INITIAL_SECRET", values["SERVER_INITIAL_SECRET"],
-                "RFC 9001 A.1: the server's Initial secret."),
-        c_array("CLIENT_INITIAL_KEY", values["CLIENT_INITIAL_KEY"],
-                "RFC 9001 A.1: quic key for the client's Initial keys."),
-        c_array("CLIENT_INITIAL_IV", values["CLIENT_INITIAL_IV"],
-                "RFC 9001 A.1: quic iv for the client's Initial keys."),
-        c_array("CLIENT_INITIAL_HP", values["CLIENT_INITIAL_HP"],
-                "RFC 9001 A.1: quic hp for the client's Initial keys."),
-        c_array("SERVER_INITIAL_KEY", values["SERVER_INITIAL_KEY"],
-                "RFC 9001 A.1: quic key for the server's Initial keys."),
-        c_array("SERVER_INITIAL_IV", values["SERVER_INITIAL_IV"],
-                "RFC 9001 A.1: quic iv for the server's Initial keys."),
-        c_array("SERVER_INITIAL_HP", values["SERVER_INITIAL_HP"],
-                "RFC 9001 A.1: quic hp for the server's Initial keys."),
-        c_array("CHACHA_SECRET", values["CHACHA_SECRET"],
-                "RFC 9001 A.5: a traffic secret for ChaCha20-Poly1305."),
-        c_array("CHACHA_KEY", values["CHACHA_KEY"],
-                "RFC 9001 A.5: quic key, 32 bytes because the AEAD's key is."),
+        c_array(
+            "INITIAL_SECRET",
+            values["INITIAL_SECRET"],
+            "RFC 9001 A.1: HKDF-Extract(version-1 salt, destination connection ID).",
+        ),
+        c_array("CLIENT_INITIAL_SECRET", values["CLIENT_INITIAL_SECRET"], "RFC 9001 A.1: the client's Initial secret."),
+        c_array("SERVER_INITIAL_SECRET", values["SERVER_INITIAL_SECRET"], "RFC 9001 A.1: the server's Initial secret."),
+        c_array(
+            "CLIENT_INITIAL_KEY", values["CLIENT_INITIAL_KEY"], "RFC 9001 A.1: quic key for the client's Initial keys."
+        ),
+        c_array(
+            "CLIENT_INITIAL_IV", values["CLIENT_INITIAL_IV"], "RFC 9001 A.1: quic iv for the client's Initial keys."
+        ),
+        c_array(
+            "CLIENT_INITIAL_HP", values["CLIENT_INITIAL_HP"], "RFC 9001 A.1: quic hp for the client's Initial keys."
+        ),
+        c_array(
+            "SERVER_INITIAL_KEY", values["SERVER_INITIAL_KEY"], "RFC 9001 A.1: quic key for the server's Initial keys."
+        ),
+        c_array(
+            "SERVER_INITIAL_IV", values["SERVER_INITIAL_IV"], "RFC 9001 A.1: quic iv for the server's Initial keys."
+        ),
+        c_array(
+            "SERVER_INITIAL_HP", values["SERVER_INITIAL_HP"], "RFC 9001 A.1: quic hp for the server's Initial keys."
+        ),
+        c_array("CHACHA_SECRET", values["CHACHA_SECRET"], "RFC 9001 A.5: a traffic secret for ChaCha20-Poly1305."),
+        c_array("CHACHA_KEY", values["CHACHA_KEY"], "RFC 9001 A.5: quic key, 32 bytes because the AEAD's key is."),
         c_array("CHACHA_IV", values["CHACHA_IV"], "RFC 9001 A.5: quic iv."),
-        c_array("CHACHA_HP", values["CHACHA_HP"],
-                "RFC 9001 A.5: quic hp, 32 bytes for ChaCha20."),
-        c_array("CHACHA_KEY_UPDATE", values["CHACHA_KEY_UPDATE"],
-                "RFC 9001 A.5: quic ku, the secret the next key update uses."),
-        c_array("CLIENT_INITIAL_HEADER_PLAIN", values["CLIENT_INITIAL_HEADER_PLAIN"],
-                "RFC 9001 A.2: the client Initial header before header protection."),
-        c_array("CLIENT_INITIAL_HEADER_PROTECTED",
-                values["CLIENT_INITIAL_HEADER_PROTECTED"],
-                "RFC 9001 A.2: the same header after header protection."),
-        c_array("CLIENT_INITIAL_SAMPLE", values["CLIENT_INITIAL_SAMPLE"],
-                "RFC 9001 A.2: the header protection sample, at pn_offset + 4."),
-        c_array("CLIENT_INITIAL_MASK", values["CLIENT_INITIAL_MASK"],
-                "RFC 9001 A.2: the five-byte header protection mask."),
-        c_array("CLIENT_INITIAL_PACKET", values["CLIENT_INITIAL_PACKET"],
-                "RFC 9001 A.2: the complete protected client Initial packet, 1200 bytes."),
-        c_array("SERVER_INITIAL_HEADER_PLAIN", values["SERVER_INITIAL_HEADER_PLAIN"],
-                "RFC 9001 A.3: the server Initial header before header protection."),
-        c_array("SERVER_INITIAL_HEADER_PROTECTED",
-                values["SERVER_INITIAL_HEADER_PROTECTED"],
-                "RFC 9001 A.3: the same header after header protection."),
-        c_array("SERVER_INITIAL_SAMPLE", values["SERVER_INITIAL_SAMPLE"],
-                "RFC 9001 A.3: the header protection sample, at pn_offset + 4."),
-        c_array("SERVER_INITIAL_MASK", values["SERVER_INITIAL_MASK"],
-                "RFC 9001 A.3: the five-byte header protection mask."),
-        c_array("SERVER_INITIAL_PACKET", values["SERVER_INITIAL_PACKET"],
-                "RFC 9001 A.3: the complete protected server Initial packet, 135 bytes."),
+        c_array("CHACHA_HP", values["CHACHA_HP"], "RFC 9001 A.5: quic hp, 32 bytes for ChaCha20."),
+        c_array(
+            "CHACHA_KEY_UPDATE",
+            values["CHACHA_KEY_UPDATE"],
+            "RFC 9001 A.5: quic ku, the secret the next key update uses.",
+        ),
+        c_array(
+            "CLIENT_INITIAL_HEADER_PLAIN",
+            values["CLIENT_INITIAL_HEADER_PLAIN"],
+            "RFC 9001 A.2: the client Initial header before header protection.",
+        ),
+        c_array(
+            "CLIENT_INITIAL_HEADER_PROTECTED",
+            values["CLIENT_INITIAL_HEADER_PROTECTED"],
+            "RFC 9001 A.2: the same header after header protection.",
+        ),
+        c_array(
+            "CLIENT_INITIAL_SAMPLE",
+            values["CLIENT_INITIAL_SAMPLE"],
+            "RFC 9001 A.2: the header protection sample, at pn_offset + 4.",
+        ),
+        c_array(
+            "CLIENT_INITIAL_MASK", values["CLIENT_INITIAL_MASK"], "RFC 9001 A.2: the five-byte header protection mask."
+        ),
+        c_array(
+            "CLIENT_INITIAL_PACKET",
+            values["CLIENT_INITIAL_PACKET"],
+            "RFC 9001 A.2: the complete protected client Initial packet, 1200 bytes.",
+        ),
+        c_array(
+            "SERVER_INITIAL_HEADER_PLAIN",
+            values["SERVER_INITIAL_HEADER_PLAIN"],
+            "RFC 9001 A.3: the server Initial header before header protection.",
+        ),
+        c_array(
+            "SERVER_INITIAL_HEADER_PROTECTED",
+            values["SERVER_INITIAL_HEADER_PROTECTED"],
+            "RFC 9001 A.3: the same header after header protection.",
+        ),
+        c_array(
+            "SERVER_INITIAL_SAMPLE",
+            values["SERVER_INITIAL_SAMPLE"],
+            "RFC 9001 A.3: the header protection sample, at pn_offset + 4.",
+        ),
+        c_array(
+            "SERVER_INITIAL_MASK", values["SERVER_INITIAL_MASK"], "RFC 9001 A.3: the five-byte header protection mask."
+        ),
+        c_array(
+            "SERVER_INITIAL_PACKET",
+            values["SERVER_INITIAL_PACKET"],
+            "RFC 9001 A.3: the complete protected server Initial packet, 135 bytes.",
+        ),
         "/* RFC 9001 A.5: the packet number of the ChaCha20 short header packet. */\n"
         "#define WT_RFC9001_CHACHA_PN UINT64_C(" + str(scalars["CHACHA_PN"]) + ")\n",
-        c_array("CHACHA_NONCE", values["CHACHA_NONCE"],
-                "RFC 9001 A.5: the AEAD nonce, the IV with the packet number XORed in."),
-        c_array("CHACHA_HEADER_PLAIN", values["CHACHA_HEADER_PLAIN"],
-                "RFC 9001 A.5: the short header before header protection, empty DCID."),
-        c_array("CHACHA_HEADER_PROTECTED", values["CHACHA_HEADER_PROTECTED"],
-                "RFC 9001 A.5: the short header after header protection."),
-        c_array("CHACHA_SAMPLE", values["CHACHA_SAMPLE"],
-                "RFC 9001 A.5: the header protection sample, at pn_offset + 4."),
-        c_array("CHACHA_MASK", values["CHACHA_MASK"],
-                "RFC 9001 A.5: the five-byte header protection mask."),
-        c_array("CHACHA_PAYLOAD_PLAIN", values["CHACHA_PAYLOAD_PLAIN"],
-                "RFC 9001 A.5: the payload before encryption: one PING frame."),
-        c_array("CHACHA_CIPHERTEXT", values["CHACHA_CIPHERTEXT"],
-                "RFC 9001 A.5: the payload after encryption, tag included."),
-        c_array("CHACHA_PACKET", values["CHACHA_PACKET"],
-                "RFC 9001 A.5: the protected ChaCha20-Poly1305 short header packet."),
+        c_array(
+            "CHACHA_NONCE",
+            values["CHACHA_NONCE"],
+            "RFC 9001 A.5: the AEAD nonce, the IV with the packet number XORed in.",
+        ),
+        c_array(
+            "CHACHA_HEADER_PLAIN",
+            values["CHACHA_HEADER_PLAIN"],
+            "RFC 9001 A.5: the short header before header protection, empty DCID.",
+        ),
+        c_array(
+            "CHACHA_HEADER_PROTECTED",
+            values["CHACHA_HEADER_PROTECTED"],
+            "RFC 9001 A.5: the short header after header protection.",
+        ),
+        c_array(
+            "CHACHA_SAMPLE", values["CHACHA_SAMPLE"], "RFC 9001 A.5: the header protection sample, at pn_offset + 4."
+        ),
+        c_array("CHACHA_MASK", values["CHACHA_MASK"], "RFC 9001 A.5: the five-byte header protection mask."),
+        c_array(
+            "CHACHA_PAYLOAD_PLAIN",
+            values["CHACHA_PAYLOAD_PLAIN"],
+            "RFC 9001 A.5: the payload before encryption: one PING frame.",
+        ),
+        c_array(
+            "CHACHA_CIPHERTEXT",
+            values["CHACHA_CIPHERTEXT"],
+            "RFC 9001 A.5: the payload after encryption, tag included.",
+        ),
+        c_array(
+            "CHACHA_PACKET",
+            values["CHACHA_PACKET"],
+            "RFC 9001 A.5: the protected ChaCha20-Poly1305 short header packet.",
+        ),
     ]
     return (
         "/* Generated by tests/vectors/extract_rfc9001_keys.py -- do not edit.\n"
@@ -516,9 +547,7 @@ def render(values: dict[str, bytes], scalars: dict[str, int]) -> str:
         " */\n\n"
         "#ifndef WT_RFC9001_VECTORS_H\n"
         "#define WT_RFC9001_VECTORS_H\n\n"
-        "#include <stdint.h>\n\n"
-        + "\n".join(parts)
-        + "\n#endif /* WT_RFC9001_VECTORS_H */\n"
+        "#include <stdint.h>\n\n" + "\n".join(parts) + "\n#endif /* WT_RFC9001_VECTORS_H */\n"
     )
 
 

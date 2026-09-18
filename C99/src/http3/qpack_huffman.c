@@ -28,7 +28,14 @@ wt_status_t wt_qpack_huffman_decode(const uint8_t *coded, size_t coded_length, u
       bits++;
       if (bits > (unsigned)WT_RFC7541_HUFFMAN_MAX_BITS) {
         /* No code is longer than thirty bits, so a run of bits that has not
-         * matched one is a representation this table cannot produce. */
+         * matched one is a representation this table cannot produce.
+         *
+         * UNREACHABLE, and proved rather than assumed (AUD-0034): the table is a COMPLETE
+         * prefix code -- its Kraft sum is exactly 1 over 257 symbols -- so every bit path
+         * resolves to a symbol within thirty bits, and a search of the whole code space finds
+         * no path that reaches thirty-one. It is kept because it is the bound that makes the
+         * `bits - 1U` index into the thirty-entry range table safe: if the table were ever
+         * regenerated with a code missing, this is what keeps the read inside it. */
         return WT_ERR_PROTOCOL;
       }
       range = &WT_RFC7541_HUFFMAN_RANGES[bits - 1U];

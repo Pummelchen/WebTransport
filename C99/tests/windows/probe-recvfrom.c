@@ -27,7 +27,8 @@ static struct sockaddr_in addr;
 
 static void fill_queue(int count) {
   int i;
-  for (i = 0; i < count; i++) sendto(b, "123456789", 9, 0, (struct sockaddr *)&addr, sizeof(addr));
+  for (i = 0; i < count; i++)
+    sendto(b, "123456789", 9, 0, (struct sockaddr *)&addr, sizeof(addr));
 }
 
 int main(void) {
@@ -74,13 +75,14 @@ int main(void) {
   printf("rc=%d err=%d (10040 is WSAEMSGSIZE) from_family=%d from_port=%u from_len=%d\n", rc,
          WSAGetLastError(), from.sin_family, (unsigned)ntohs(from.sin_port), from_len);
 
-  printf("--- 3: the same with MSG_PEEK, then two 64-byte receives (both must find a datagram) ---\n");
+  printf(
+      "--- 3: the same with MSG_PEEK, then two 64-byte receives (both must find a datagram) ---\n");
   fill_queue(2);
   memset(&from, 0, sizeof(from));
   from_len = (int)sizeof(from);
   rc = recvfrom(a, buf, 4, MSG_PEEK, (struct sockaddr *)&from, &from_len);
-  printf("rc=%d err=%d from_family=%d from_port=%u from_len=%d\n", rc, WSAGetLastError(), from.sin_family,
-         (unsigned)ntohs(from.sin_port), from_len);
+  printf("rc=%d err=%d from_family=%d from_port=%u from_len=%d\n", rc, WSAGetLastError(),
+         from.sin_family, (unsigned)ntohs(from.sin_port), from_len);
   memset(&from, 0, sizeof(from));
   from_len = (int)sizeof(from);
   rc = recvfrom(a, buf, 64, 0, (struct sockaddr *)&from, &from_len);
@@ -99,10 +101,11 @@ int main(void) {
   memset(&from, 0, sizeof(from));
   from_len = (int)sizeof(from);
   rc = recvfrom(a, buf, 4, 0, (struct sockaddr *)&from, &from_len);
-  printf("then receive 4 into 4: rc=%d err=%d (10035 is WSAEWOULDBLOCK: the peek CONSUMED it)\n", rc,
-         WSAGetLastError());
+  printf("then receive 4 into 4: rc=%d err=%d (10035 is WSAEWOULDBLOCK: the peek CONSUMED it)\n",
+         rc, WSAGetLastError());
 
-  printf("--- 5: a zero-length buffer, NULL and one stand-in byte (two datagrams, one for each call) ---\n");
+  printf("--- 5: a zero-length buffer, NULL and one stand-in byte (two datagrams, one for each "
+         "call) ---\n");
   fill_queue(2);
   memset(&from, 0, sizeof(from));
   from_len = (int)sizeof(from);
@@ -111,8 +114,8 @@ int main(void) {
   memset(&from, 0, sizeof(from));
   from_len = (int)sizeof(from);
   rc = recvfrom(a, &one, 0, 0, (struct sockaddr *)&from, &from_len);
-  printf("&one,0: rc=%d err=%d from_family=%d from_len=%d\n", rc, WSAGetLastError(), from.sin_family,
-         from_len);
+  printf("&one,0: rc=%d err=%d from_family=%d from_len=%d\n", rc, WSAGetLastError(),
+         from.sin_family, from_len);
 
   WSACleanup();
   return 0;

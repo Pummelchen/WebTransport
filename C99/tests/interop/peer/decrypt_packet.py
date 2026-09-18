@@ -18,7 +18,7 @@ import sys
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand, HKDF
+from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand
 
 
 def expand_label(secret: bytes, label: str, length: int) -> bytes:
@@ -50,8 +50,7 @@ def initial_client_secret(dcid: bytes) -> bytes:
     return expand_label(initial_secret, "client in", 32)
 
 
-def open_packet(secret: bytes, packet: bytearray, packet_number: int, long_header: bool,
-                initial: bool = False) -> int:
+def open_packet(secret: bytes, packet: bytearray, packet_number: int, long_header: bool, initial: bool = False) -> int:
     """Derive the keys, remove header protection and open the AEAD. Returns 0 on success."""
     key = expand_label(secret, "quic key", 16)
     iv = expand_label(secret, "quic iv", 12)
@@ -77,23 +76,23 @@ def open_packet(secret: bytes, packet: bytearray, packet_number: int, long_heade
         sample_offset = pn_offset + 4
         if sample_offset + 16 > len(packet):
             continue
-        sample = bytes(packet[sample_offset:sample_offset + 16])
+        sample = bytes(packet[sample_offset : sample_offset + 16])
         mask = Cipher(algorithms.AES(hp), modes.ECB()).encryptor().update(sample)
-        header = bytearray(packet[:pn_offset + candidate])
+        header = bytearray(packet[: pn_offset + candidate])
         if long_header:
             header[0] ^= mask[0] & 0x0F
         else:
             header[0] ^= mask[0] & 0x1F
         for i in range(candidate):
             header[pn_offset + i] ^= mask[1 + i]
-        truncated = int.from_bytes(header[pn_offset:pn_offset + candidate], "big")
+        truncated = int.from_bytes(header[pn_offset : pn_offset + candidate], "big")
         full_pn = truncated
         nonce = bytearray(iv)
         pn_bytes = full_pn.to_bytes(8, "big")
         for i in range(8):
             nonce[4 + i] ^= pn_bytes[i]
         try:
-            plaintext = AESGCM(key).decrypt(bytes(nonce), bytes(packet[pn_offset + candidate:]), bytes(header))
+            plaintext = AESGCM(key).decrypt(bytes(nonce), bytes(packet[pn_offset + candidate :]), bytes(header))
         except Exception as error:  # noqa: BLE001 - reporting the failure is the point
             print(f"pn_length={candidate}: AEAD failed ({error})")
             continue
@@ -107,7 +106,7 @@ def main() -> int:
     if sys.argv[1] == "initial-from-dcid":
         # RFC 9001 section 5.2: the Initial secret comes from the connection ID, so no keylog is needed.
         packet = bytearray(binascii.unhexlify(sys.argv[2]))
-        dcid = bytes(packet[6:6 + packet[5]])
+        dcid = bytes(packet[6 : 6 + packet[5]])
         return open_packet(initial_client_secret(dcid), packet, 0, True, initial=True)
     kind = sys.argv[1]
     secret = binascii.unhexlify(sys.argv[2])

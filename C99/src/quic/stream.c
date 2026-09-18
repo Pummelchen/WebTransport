@@ -141,8 +141,7 @@ wt_status_t wt_quic_stream_on_ack(wt_quic_stream_t *stream, uint64_t acknowledge
     stream->send_state = WT_QUIC_SEND_DATA_RECVD;
   }
   /* A reset stream's acknowledgement completes the send half too: there is nothing more to send. */
-  if (stream->send_state == WT_QUIC_SEND_RESET_SENT &&
-      stream->send_acked >= stream->final_size) {
+  if (stream->send_state == WT_QUIC_SEND_RESET_SENT && stream->send_acked >= stream->final_size) {
     stream->send_state = WT_QUIC_SEND_RESET_RECVD;
   }
   return WT_OK;
@@ -181,8 +180,8 @@ static wt_status_t check_final_size(wt_quic_stream_t *stream, uint64_t final_siz
   return WT_OK;
 }
 
-wt_status_t wt_quic_stream_on_reset_received(wt_quic_stream_t *stream,
-                                             uint64_t error_code, uint64_t final_size) {
+wt_status_t wt_quic_stream_on_reset_received(wt_quic_stream_t *stream, uint64_t error_code,
+                                             uint64_t final_size) {
   wt_status_t status;
   if (stream == NULL) return WT_ERR_INVALID_ARGUMENT;
   status = check_final_size(stream, final_size);
@@ -241,8 +240,7 @@ wt_status_t wt_quic_stream_on_stop_sending(wt_quic_stream_t *stream, uint64_t er
   return WT_OK;
 }
 
-wt_status_t wt_quic_stream_on_max_stream_data(wt_quic_stream_t *stream,
-                                              uint64_t new_max) {
+wt_status_t wt_quic_stream_on_max_stream_data(wt_quic_stream_t *stream, uint64_t new_max) {
   if (stream == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* Like the connection limit, a stream limit may only be raised (RFC 9000 section 4.1). */
   if (new_max < stream->peer_max_stream_data) return WT_ERR_PROTOCOL;
@@ -250,8 +248,7 @@ wt_status_t wt_quic_stream_on_max_stream_data(wt_quic_stream_t *stream,
   return WT_OK;
 }
 
-uint64_t wt_quic_stream_send_allowance(const wt_quic_stream_t *stream,
-                                       const wt_quic_flow_t *flow) {
+uint64_t wt_quic_stream_send_allowance(const wt_quic_stream_t *stream, const wt_quic_flow_t *flow) {
   uint64_t stream_allowance;
   uint64_t connection_allowance;
   if (stream == NULL) return 0U;
@@ -263,14 +260,13 @@ uint64_t wt_quic_stream_send_allowance(const wt_quic_stream_t *stream,
   return (stream_allowance < connection_allowance) ? stream_allowance : connection_allowance;
 }
 
-int wt_quic_stream_can_send(const wt_quic_stream_t *stream,
-                            const wt_quic_flow_t *flow, uint64_t length) {
+int wt_quic_stream_can_send(const wt_quic_stream_t *stream, const wt_quic_flow_t *flow,
+                            uint64_t length) {
   return wt_quic_stream_send_allowance(stream, flow) >= length;
 }
 
-wt_status_t wt_quic_stream_on_data(wt_quic_stream_t *stream, wt_quic_flow_t *flow,
-                                  uint64_t offset, uint64_t length, int fin,
-                                  uint64_t *out_credit, int *in_order) {
+wt_status_t wt_quic_stream_on_data(wt_quic_stream_t *stream, wt_quic_flow_t *flow, uint64_t offset,
+                                   uint64_t length, int fin, uint64_t *out_credit, int *in_order) {
   uint64_t end;
   uint64_t credit;
   wt_status_t status;
@@ -402,11 +398,17 @@ const char *wt_quic_recv_state_name(wt_quic_recv_state_t state) {
   }
 }
 
-uint64_t wt_quic_stream_id_index(uint64_t stream_id) { return stream_id >> 2; }
+uint64_t wt_quic_stream_id_index(uint64_t stream_id) {
+  return stream_id >> 2;
+}
 
-int wt_quic_stream_id_from_client(uint64_t stream_id) { return (stream_id & 0x01U) == 0U; }
+int wt_quic_stream_id_from_client(uint64_t stream_id) {
+  return (stream_id & 0x01U) == 0U;
+}
 
-int wt_quic_stream_id_is_bidirectional(uint64_t stream_id) { return (stream_id & 0x02U) == 0U; }
+int wt_quic_stream_id_is_bidirectional(uint64_t stream_id) {
+  return (stream_id & 0x02U) == 0U;
+}
 
 uint64_t wt_quic_stream_id_make(int from_client, int bidirectional, uint64_t index) {
   uint64_t id = index << 2;
@@ -441,8 +443,9 @@ wt_status_t wt_quic_stream_table_open(wt_quic_stream_table_t *table, uint64_t st
   if (table == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (table_slot(table, stream_id) != WT_QUIC_STREAM_TABLE_MAX) return WT_ERR_STATE;
   bidirectional = wt_quic_stream_id_is_bidirectional(stream_id);
-  opened = initiated_by_us ? (bidirectional ? &table->opened_by_us_bidi : &table->opened_by_us_uni)
-                           : (bidirectional ? &table->opened_by_peer_bidi : &table->opened_by_peer_uni);
+  opened = initiated_by_us
+               ? (bidirectional ? &table->opened_by_us_bidi : &table->opened_by_us_uni)
+               : (bidirectional ? &table->opened_by_peer_bidi : &table->opened_by_peer_uni);
   if (*opened >= limit) return WT_ERR_LIMIT;
   for (i = 0U; i < WT_QUIC_STREAM_TABLE_MAX; i++) {
     if (!table->used[i]) {
@@ -524,8 +527,8 @@ uint64_t wt_quic_stream_table_opened_by_us(const wt_quic_stream_table_t *table, 
   return bidirectional ? table->opened_by_us_bidi : table->opened_by_us_uni;
 }
 
-uint64_t wt_quic_stream_table_opened_by_peer(const wt_quic_stream_table_t *table, int bidirectional) {
+uint64_t wt_quic_stream_table_opened_by_peer(const wt_quic_stream_table_t *table,
+                                             int bidirectional) {
   if (table == NULL) return 0U;
   return bidirectional ? table->opened_by_peer_bidi : table->opened_by_peer_uni;
 }
-

@@ -158,15 +158,25 @@ struct WebTransportQueueFailureTranslationTests {
     }
 }
 
+/// The fields of a named transport failure.
+///
+/// A struct rather than a tuple: three named members is past the point a tuple reads as a
+/// value, and the call sites are unchanged because the member names are the same.
+private struct NamedTransportFailure {
+    let role: String
+    let domain: String
+    let code: Int
+}
+
 /// Extracts the fields of the named transport failure, or reports why it is not one.
 private func namedTransportFailure(
     _ error: (any Error)?
-) -> (role: String, domain: String, code: Int)? {
+) -> NamedTransportFailure? {
     guard let runtimeError = error as? WebTransportNetworkRuntimeError else {
         return nil
     }
     guard case .connectionTransportFailed(let role, let domain, let code) = runtimeError else {
         return nil
     }
-    return (role, domain, code)
+    return NamedTransportFailure(role: role, domain: domain, code: code)
 }

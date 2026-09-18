@@ -29,8 +29,7 @@ static void *wt_probe_alloc(void *context, size_t size) {
   return malloc(size);
 }
 
-static void *wt_probe_realloc(void *context, void *ptr, size_t old_size,
-                              size_t new_size) {
+static void *wt_probe_realloc(void *context, void *ptr, size_t old_size, size_t new_size) {
   wt_probe_t *p = (wt_probe_t *)context;
   p->last_old_size = old_size;
   p->last_size = new_size;
@@ -68,8 +67,7 @@ int main(void) {
     block = wt_realloc(&def, block, 16U, 64U);
     WT_EXPECT_TRUE("growing it succeeds", block != NULL);
     if (block != NULL) {
-      WT_EXPECT_INT("the contents survived the growth", 0x5A,
-                    (int)((uint8_t *)block)[0]);
+      WT_EXPECT_INT("the contents survived the growth", 0x5A, (int)((uint8_t *)block)[0]);
       wt_dealloc(&def, block, 64U);
     }
   }
@@ -160,8 +158,7 @@ int main(void) {
       memset(&partial, 0, sizeof(partial));
       partial.alloc = wt_probe_alloc;
       block = wt_alloc(&partial, 4U);
-      WT_EXPECT_TRUE("a partial allocator falls back to the default",
-                     block != NULL);
+      WT_EXPECT_TRUE("a partial allocator falls back to the default", block != NULL);
       wt_dealloc(&partial, block, 4U);
       WT_EXPECT_U64("and never reached the probe", before, probe.allocations);
     }

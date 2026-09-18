@@ -25,40 +25,50 @@ wt_cli_options_t wt_cli_options_default(void) {
 
 const char *wt_cli_mode_name(wt_cli_mode_t mode) {
   switch (mode) {
-    case WT_CLI_MODE_LISTEN: return "listen";
-    case WT_CLI_MODE_CONNECT: return "connect";
-    case WT_CLI_MODE_NONE: break;
+    case WT_CLI_MODE_LISTEN:
+      return "listen";
+    case WT_CLI_MODE_CONNECT:
+      return "connect";
+    case WT_CLI_MODE_NONE:
+      break;
   }
   return "none";
 }
 
 const char *wt_cli_transport_name(wt_cli_transport_t transport) {
   switch (transport) {
-    case WT_CLI_TRANSPORT_PACKET: return "packet";
+    case WT_CLI_TRANSPORT_PACKET:
+      return "packet";
   }
   return "unknown";
 }
 
 const char *wt_cli_trust_name(wt_cli_trust_t trust) {
   switch (trust) {
-    case WT_CLI_TRUST_SYSTEM: return "system";
-    case WT_CLI_TRUST_LOCAL_DEVELOPMENT: return "local-development";
+    case WT_CLI_TRUST_SYSTEM:
+      return "system";
+    case WT_CLI_TRUST_LOCAL_DEVELOPMENT:
+      return "local-development";
   }
   return "unknown";
 }
 
 const char *wt_cli_exchange_name(wt_cli_exchange_t exchange) {
   switch (exchange) {
-    case WT_CLI_EXCHANGE_STREAM: return "stream";
-    case WT_CLI_EXCHANGE_DATAGRAM: return "datagram";
+    case WT_CLI_EXCHANGE_STREAM:
+      return "stream";
+    case WT_CLI_EXCHANGE_DATAGRAM:
+      return "datagram";
   }
   return "unknown";
 }
 
 const char *wt_cli_upgrade_token_name(wt_cli_upgrade_token_t upgrade_token) {
   switch (upgrade_token) {
-    case WT_CLI_UPGRADE_TOKEN_DRAFT16: return "draft16";
-    case WT_CLI_UPGRADE_TOKEN_LEGACY: return "legacy";
+    case WT_CLI_UPGRADE_TOKEN_DRAFT16:
+      return "draft16";
+    case WT_CLI_UPGRADE_TOKEN_LEGACY:
+      return "legacy";
   }
   return "unknown";
 }
@@ -125,9 +135,8 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
       options->early_stream = 1;
     } else if (is_flag(argument, "--transport") || is_flag(argument, "--trust") ||
                is_flag(argument, "--origin") || is_flag(argument, "--authority") ||
-               is_flag(argument, "--protocol") ||
-               is_flag(argument, "--exchange") || is_flag(argument, "--message") ||
-               is_flag(argument, "--upgrade-token") ||
+               is_flag(argument, "--protocol") || is_flag(argument, "--exchange") ||
+               is_flag(argument, "--message") || is_flag(argument, "--upgrade-token") ||
                is_flag(argument, "--timeout-ms") || is_flag(argument, "--scenario") ||
                is_flag(argument, "--hostile") || is_flag(argument, "--address")) {
       const char *value;
@@ -250,20 +259,23 @@ wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **o
    * command line that asked for one and got a well-behaved peer would be a test that passes while testing
    * nothing. */
   if (options->hostile != NULL && options->mode != WT_CLI_MODE_LISTEN) {
-    if (out_error != NULL) *out_error = "--hostile is a listening peer's option: it names the act it performs";
+    if (out_error != NULL)
+      *out_error = "--hostile is a listening peer's option: it names the act it performs";
     return WT_ERR_INVALID_ARGUMENT;
   }
   /* A Retry is something a SERVER does to a client. A client that asked for one would be asking to be
    * validated, which is not a thing it can request: refusing it here is cheaper than a session that ignores the
    * flag, and a flag that is silently ignored is a report nobody can trust. */
   if (options->retry != 0 && options->mode != WT_CLI_MODE_LISTEN) {
-    if (out_error != NULL) *out_error = "--retry is a listener's option: it validates a client's address";
+    if (out_error != NULL)
+      *out_error = "--retry is a listener's option: it validates a client's address";
     return WT_ERR_INVALID_ARGUMENT;
   }
   /* And the mirror image: parking an early stream is something a SERVER does. A listener that asked to SEND one
    * would be asking for an order it cannot be in -- the CONNECT is what makes it a server (WT-189). */
   if (options->early_stream != 0 && options->mode != WT_CLI_MODE_CONNECT) {
-    if (out_error != NULL) *out_error = "--early-stream is a client's option: it sends before its CONNECT";
+    if (out_error != NULL)
+      *out_error = "--early-stream is a client's option: it sends before its CONNECT";
     return WT_ERR_INVALID_ARGUMENT;
   }
   /* And the token is a property of the client's own CONNECT: a listener never sends one, so a listener that
@@ -271,7 +283,8 @@ wt_status_t wt_cli_options_check(const wt_cli_options_t *options, const char **o
    * same reason as the two above -- and only when the caller actually passed the flag, because the DEFAULT is a
    * valid token for every mode that does send one. */
   if (options->upgrade_token_set != 0 && options->mode != WT_CLI_MODE_CONNECT) {
-    if (out_error != NULL) *out_error = "--upgrade-token is a client's option: it names the CONNECT's :protocol";
+    if (out_error != NULL)
+      *out_error = "--upgrade-token is a client's option: it names the CONNECT's :protocol";
     return WT_ERR_INVALID_ARGUMENT;
   }
   /* The development bypass is tied to a loopback name in the API as well, but a tool that
@@ -329,8 +342,8 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
   }
   fprintf(stream, ",\"settingsValidation\":%s%s,\"exchange\":\"%s\",\"timeoutMs\":%llu",
           options->settings_validation != 0 ? "true" : "false",
-          options->retry != 0 ? ",\"retry\":true" : "",
-          wt_cli_exchange_name(options->exchange), (unsigned long long)options->timeout_ms);
+          options->retry != 0 ? ",\"retry\":true" : "", wt_cli_exchange_name(options->exchange),
+          (unsigned long long)options->timeout_ms);
   /* Which `:protocol` token the CONNECT carries, so the interop runner's per-peer selection is in the report a
    * reader weighs rather than only in the command line that produced it (F-02b). */
   fprintf(stream, ",\"upgradeToken\":\"%s\"", wt_cli_upgrade_token_name(options->upgrade_token));
@@ -340,6 +353,5 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
   } else {
     wt_cli_write_json_string(stream, options->hostile);
   }
-  fprintf(stream, ",\"json\":%s}\n",
-          options->json != 0 ? "true" : "false");
+  fprintf(stream, ",\"json\":%s}\n", options->json != 0 ? "true" : "false");
 }

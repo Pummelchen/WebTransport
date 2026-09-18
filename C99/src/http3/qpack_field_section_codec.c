@@ -3,8 +3,8 @@
 #include "webtransport/http3/qpack.h"
 
 wt_status_t wt_qpack_field_section_begin(wt_qpack_field_section_decoder_t *decoder,
-                                         const wt_qpack_dynamic_table_t *table, uint64_t max_entries,
-                                         const uint8_t *bytes, size_t length,
+                                         const wt_qpack_dynamic_table_t *table,
+                                         uint64_t max_entries, const uint8_t *bytes, size_t length,
                                          uint64_t known_insert_count, wt_qpack_error_t *out_error) {
   wt_status_t status;
 
@@ -41,9 +41,9 @@ wt_status_t wt_qpack_field_section_decoder_next(wt_qpack_field_section_decoder_t
 }
 
 wt_status_t wt_qpack_field_section_encode(wt_writer_t *w, const wt_qpack_header_prefix_t *prefix,
-                                         uint64_t max_entries,
-                                         const wt_qpack_field_line_t *lines, size_t line_count,
-                                         uint8_t *scratch, size_t scratch_capacity) {
+                                          uint64_t max_entries, const wt_qpack_field_line_t *lines,
+                                          size_t line_count, uint8_t *scratch,
+                                          size_t scratch_capacity) {
   size_t i;
 
   if (w == NULL || prefix == NULL) return WT_ERR_INVALID_ARGUMENT;

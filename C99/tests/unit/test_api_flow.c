@@ -110,7 +110,8 @@ static void test_limits_and_allowances(void) {
   WT_EXPECT_U64("leaving nothing", 0U, wt_session_flow_data_allowance(session));
 
   /* One byte over the grant is refused, with the code the peer would be sent for it. */
-  WT_EXPECT_STATUS("one byte more is refused", WT_ERR_LIMIT, wt_session_flow_record_data(session, 1U));
+  WT_EXPECT_STATUS("one byte more is refused", WT_ERR_LIMIT,
+                   wt_session_flow_record_data(session, 1U));
   WT_EXPECT_U64("with the draft's flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR,
                 (uint64_t)wt_session_last_error(session).code);
   WT_EXPECT_U64("and the usage unchanged", 100U, wt_session_flow_snapshot(session).used_data);
@@ -156,10 +157,11 @@ static void test_limits_and_allowances(void) {
 
     over_length += wt_quic_varint_encode(WT_CAPSULE_MAX_STREAMS_BIDI, over_limit + over_length,
                                          sizeof(over_limit) - over_length);
-    over_length += wt_quic_varint_encode((uint64_t)wt_quic_varint_size(over), over_limit + over_length,
-                                         sizeof(over_limit) - over_length);
-    over_length += wt_quic_varint_encode(over, over_limit + over_length,
-                                         sizeof(over_limit) - over_length);
+    over_length +=
+        wt_quic_varint_encode((uint64_t)wt_quic_varint_size(over), over_limit + over_length,
+                              sizeof(over_limit) - over_length);
+    over_length +=
+        wt_quic_varint_encode(over, over_limit + over_length, sizeof(over_limit) - over_length);
     WT_EXPECT_STATUS("a count above the draft's ceiling is refused", WT_ERR_PROTOCOL,
                      wt_session_on_capsule(session, over_limit, over_length));
     WT_EXPECT_U64("as a flow-control error", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR,

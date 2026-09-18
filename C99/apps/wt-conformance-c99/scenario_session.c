@@ -37,8 +37,8 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
   wt_http3_settings_init(&settings);
   (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
   if (wt_http3_driver_start_session(&pair.client_side.driver, &pair.client_transport, &settings,
-                                    pair.authority, "/conformance", 0U, pair.now, &request_stream_id,
-                                    &h3_error) != WT_OK) {
+                                    pair.authority, "/conformance", 0U, pair.now,
+                                    &request_stream_id, &h3_error) != WT_OK) {
     scenario_detail_set(detail, detail_size, "the CONNECT could not be started");
     goto done_failed;
   }
@@ -54,8 +54,9 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
     goto done_failed;
   }
   if (wt_http3_endpoint_on_request_headers(&pair.server_side.endpoint, request_stream_id,
-                                           pair.server_side.section, pair.server_side.section_length,
-                                           scratch, sizeof(scratch), &decoded, &h3_error) != WT_OK) {
+                                           pair.server_side.section,
+                                           pair.server_side.section_length, scratch,
+                                           sizeof(scratch), &decoded, &h3_error) != WT_OK) {
     scenario_detail_set(detail, detail_size, "the CONNECT did not decode");
     goto done_failed;
   }
@@ -69,8 +70,8 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
   }
 
   /* The response, a message on a WebTransport stream, and a message as a datagram. */
-  if (wt_http3_driver_send_response(&pair.server_side.driver, &pair.server_transport, request_stream_id,
-                                    200U, 0U, 0, pair.now) != WT_OK) {
+  if (wt_http3_driver_send_response(&pair.server_side.driver, &pair.server_transport,
+                                    request_stream_id, 200U, 0U, 0, pair.now) != WT_OK) {
     scenario_detail_set(detail, detail_size, "the response could not be sent");
     goto done_failed;
   }
@@ -79,7 +80,8 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
     wt_writer_t w = wt_writer_init(message, sizeof(message));
     uint64_t stream_id = 0U;
 
-    if (pair.client_transport.open_stream(pair.client_transport.context, 0, &stream_id, pair.now) != WT_OK ||
+    if (pair.client_transport.open_stream(pair.client_transport.context, 0, &stream_id, pair.now) !=
+            WT_OK ||
         wt_webtransport_stream_prefix_write(&w, 1, request_stream_id) != WT_OK) {
       scenario_detail_set(detail, detail_size, "a WebTransport stream could not be opened");
       goto done_failed;
@@ -91,7 +93,8 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
       goto done_failed;
     }
     w = wt_writer_init(message, sizeof(message));
-    if (wt_webtransport_datagram_write(&w, request_stream_id / 4U, (const uint8_t *)"probe", 5U) != WT_OK ||
+    if (wt_webtransport_datagram_write(&w, request_stream_id / 4U, (const uint8_t *)"probe", 5U) !=
+            WT_OK ||
         pair.client_transport.send_datagram(pair.client_transport.context, message,
                                             wt_writer_offset(&w)) != WT_OK) {
       scenario_detail_set(detail, detail_size, "the datagram could not be sent");
@@ -120,8 +123,9 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
     size_t payload_length = 0U;
     uint64_t quarter = 0U;
     wt_http3_error_t datagram_error = WT_HTTP3_NO_ERROR;
-    if (wt_webtransport_datagram_parse(pair.server_side.datagram, pair.server_side.datagram_bytes, &quarter,
-                                       &payload, &payload_length, &datagram_error) != WT_OK ||
+    if (wt_webtransport_datagram_parse(pair.server_side.datagram, pair.server_side.datagram_bytes,
+                                       &quarter, &payload, &payload_length,
+                                       &datagram_error) != WT_OK ||
         quarter != request_stream_id / 4U || payload_length != 5U ||
         memcmp(payload, "probe", 5U) != 0) {
       scenario_detail_set(detail, detail_size, "the datagram's framing did not match");

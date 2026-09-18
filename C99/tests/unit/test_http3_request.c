@@ -17,11 +17,9 @@ static void test_the_legal_shapes(void) {
 
   /* HEADERS alone: a GET with no body. */
   wt_http3_request_init(&request);
-  WT_EXPECT_OK("HEADERS opens the request", wt_http3_request_on_frame(&request,
-                                                                     WT_HTTP3_FRAME_HEADERS,
-                                                                     &error));
-  WT_EXPECT_INT("and the machine expects the body", (int)WT_HTTP3_REQUEST_BODY,
-                (int)request.state);
+  WT_EXPECT_OK("HEADERS opens the request",
+               wt_http3_request_on_frame(&request, WT_HTTP3_FRAME_HEADERS, &error));
+  WT_EXPECT_INT("and the machine expects the body", (int)WT_HTTP3_REQUEST_BODY, (int)request.state);
   WT_EXPECT_OK("which may end at once", wt_http3_request_on_end(&request, &error));
 
   /* HEADERS, DATA, DATA: a request with content. */
@@ -35,17 +33,19 @@ static void test_the_legal_shapes(void) {
   wt_http3_request_init(&request);
   WT_EXPECT_OK("HEADERS", wt_http3_request_on_frame(&request, WT_HTTP3_FRAME_HEADERS, &error));
   WT_EXPECT_OK("DATA", wt_http3_request_on_frame(&request, WT_HTTP3_FRAME_DATA, &error));
-  WT_EXPECT_OK("then the trailer", wt_http3_request_on_frame(&request, WT_HTTP3_FRAME_HEADERS,
-                                                             &error));
-  WT_EXPECT_INT("which completes the request", (int)WT_HTTP3_REQUEST_COMPLETE,
-                (int)request.state);
+  WT_EXPECT_OK("then the trailer",
+               wt_http3_request_on_frame(&request, WT_HTTP3_FRAME_HEADERS, &error));
+  WT_EXPECT_INT("which completes the request", (int)WT_HTTP3_REQUEST_COMPLETE, (int)request.state);
   WT_EXPECT_OK("and the stream ends", wt_http3_request_on_end(&request, &error));
 }
 
 static void test_invalid_sequences(void) {
-  static const uint64_t types[] = {WT_HTTP3_FRAME_DATA,  WT_HTTP3_FRAME_SETTINGS,
-                                   WT_HTTP3_FRAME_GOAWAY, WT_HTTP3_FRAME_MAX_PUSH_ID,
-                                   WT_HTTP3_FRAME_CANCEL_PUSH, WT_HTTP3_FRAME_PUSH_PROMISE,
+  static const uint64_t types[] = {WT_HTTP3_FRAME_DATA,
+                                   WT_HTTP3_FRAME_SETTINGS,
+                                   WT_HTTP3_FRAME_GOAWAY,
+                                   WT_HTTP3_FRAME_MAX_PUSH_ID,
+                                   WT_HTTP3_FRAME_CANCEL_PUSH,
+                                   WT_HTTP3_FRAME_PUSH_PROMISE,
                                    0x2aU};
   wt_http3_request_stream_t request;
   wt_http3_error_t error = WT_HTTP3_NO_ERROR;

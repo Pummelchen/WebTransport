@@ -67,8 +67,7 @@ void wt_quic_transport_parameters_init(wt_quic_transport_parameters_t *params) {
 
 /* Where `id` belongs in a sorted list: the index of the first entry that is not
  * below it. */
-static size_t wt_quic_tp_lower_bound(const wt_quic_transport_parameters_t *p,
-                                     uint64_t id) {
+static size_t wt_quic_tp_lower_bound(const wt_quic_transport_parameters_t *p, uint64_t id) {
   size_t low = 0U;
   size_t high = p->count;
   while (low < high) {
@@ -84,8 +83,8 @@ static size_t wt_quic_tp_lower_bound(const wt_quic_transport_parameters_t *p,
 
 /* The entry for `id`, or NULL. Internal: the public lookup answers with a status
  * so that presence is not confused with a zero-length value. */
-static const wt_quic_transport_parameter_t *wt_quic_tp_entry(
-    const wt_quic_transport_parameters_t *params, uint64_t id) {
+static const wt_quic_transport_parameter_t *
+wt_quic_tp_entry(const wt_quic_transport_parameters_t *params, uint64_t id) {
   size_t i;
   if (params == NULL) return NULL;
   if (params->sorted) {
@@ -103,9 +102,9 @@ static const wt_quic_transport_parameter_t *wt_quic_tp_entry(
   return NULL;
 }
 
-wt_status_t wt_quic_transport_parameters_get(
-    const wt_quic_transport_parameters_t *params, uint64_t id,
-    const uint8_t **out_value, size_t *out_length) {
+wt_status_t wt_quic_transport_parameters_get(const wt_quic_transport_parameters_t *params,
+                                             uint64_t id, const uint8_t **out_value,
+                                             size_t *out_length) {
   const wt_quic_transport_parameter_t *entry;
   if (out_value != NULL) *out_value = NULL;
   if (out_length != NULL) *out_length = 0U;
@@ -117,8 +116,8 @@ wt_status_t wt_quic_transport_parameters_get(
   return WT_OK;
 }
 
-wt_status_t wt_quic_transport_parameters_integer(
-    const wt_quic_transport_parameters_t *params, uint64_t id, uint64_t *out) {
+wt_status_t wt_quic_transport_parameters_integer(const wt_quic_transport_parameters_t *params,
+                                                 uint64_t id, uint64_t *out) {
   size_t length = 0U;
   const uint8_t *value = NULL;
   wt_cursor_t c;
@@ -137,9 +136,9 @@ wt_status_t wt_quic_transport_parameters_integer(
   return WT_OK;
 }
 
-wt_status_t wt_quic_transport_parameters_decode(
-    const uint8_t *data, size_t length, wt_quic_transport_parameters_t *out,
-    wt_quic_error_t *out_error) {
+wt_status_t wt_quic_transport_parameters_decode(const uint8_t *data, size_t length,
+                                                wt_quic_transport_parameters_t *out,
+                                                wt_quic_error_t *out_error) {
   wt_cursor_t c;
   size_t i;
 
@@ -149,8 +148,6 @@ wt_status_t wt_quic_transport_parameters_decode(
 
   c = wt_cursor_init(data, length);
   while (wt_cursor_remaining(&c) > 0U) {
-    const uint8_t *start;
-    size_t start_offset;
     uint64_t id = 0U;
     uint64_t value_len = 0U;
     size_t value_len_size = 0U;
@@ -160,8 +157,6 @@ wt_status_t wt_quic_transport_parameters_decode(
       if (out_error != NULL) *out_error = WT_QUIC_TRANSPORT_PARAMETER_ERROR;
       return WT_ERR_PROTOCOL;
     }
-    start = c.data + c.offset;
-    start_offset = c.offset;
     if (wt_quic_varint_decode(&c, &id) != WT_OK) return WT_ERR_TRUNCATED;
     if (wt_quic_varint_decode_sized(&c, &value_len, &value_len_size) != WT_OK) {
       return WT_ERR_TRUNCATED;
@@ -187,12 +182,9 @@ wt_status_t wt_quic_transport_parameters_decode(
 
     /* Sorted as it arrives? Every received list is either wholly sorted or
      * treated as unsorted, never half of each. */
-    if (out->count > 1U &&
-        out->entries[out->count - 2U].id > out->entries[out->count - 1U].id) {
+    if (out->count > 1U && out->entries[out->count - 2U].id > out->entries[out->count - 1U].id) {
       out->sorted = 0;
     }
-    (void)start;
-    (void)start_offset;
   }
 
   /* Duplicates, which RFC 9000 section 7.4 makes a TRANSPORT_PARAMETER_ERROR.
@@ -211,35 +203,33 @@ wt_status_t wt_quic_transport_parameters_decode(
   return WT_OK;
 }
 
-wt_status_t wt_quic_transport_parameters_check(
-    const wt_quic_transport_parameters_t *params, int peer_is_client,
-    wt_quic_error_t *out_error, uint64_t *out_offender) {
+wt_status_t wt_quic_transport_parameters_check(const wt_quic_transport_parameters_t *params,
+                                               int peer_is_client, wt_quic_error_t *out_error,
+                                               uint64_t *out_offender) {
   wt_status_t status;
   uint64_t value = 0U;
 
   if (params == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (out_offender != NULL) *out_offender = 0U;
 
-#define WT_QUIC_TP_REJECT(id)                          \
-  do {                                                 \
-    if (out_error != NULL) {                           \
-      *out_error = WT_QUIC_TRANSPORT_PARAMETER_ERROR;  \
-    }                                                  \
-    if (out_offender != NULL) *out_offender = (id);    \
-    return WT_ERR_PROTOCOL;                            \
+#define WT_QUIC_TP_REJECT(id)                                                                      \
+  do {                                                                                             \
+    if (out_error != NULL) {                                                                       \
+      *out_error = WT_QUIC_TRANSPORT_PARAMETER_ERROR;                                              \
+    }                                                                                              \
+    if (out_offender != NULL) *out_offender = (id);                                                \
+    return WT_ERR_PROTOCOL;                                                                        \
   } while (0)
 
   /* RFC 9000 section 18.2: max_udp_payload_size below 1200 is a violation. A
    * peer that advertised less could not receive a packet this endpoint is
    * required to be able to send. */
-  status = wt_quic_transport_parameters_integer(
-      params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE, &value);
+  status = wt_quic_transport_parameters_integer(params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE, &value);
   if (status == WT_OK && value < WT_QUIC_MIN_MAX_UDP_PAYLOAD_SIZE) {
     WT_QUIC_TP_REJECT(WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE);
   }
   /* ack_delay_exponent is at most 20. */
-  status = wt_quic_transport_parameters_integer(
-      params, WT_QUIC_TP_ACK_DELAY_EXPONENT, &value);
+  status = wt_quic_transport_parameters_integer(params, WT_QUIC_TP_ACK_DELAY_EXPONENT, &value);
   if (status == WT_OK && value > 20U) {
     WT_QUIC_TP_REJECT(WT_QUIC_TP_ACK_DELAY_EXPONENT);
   }
@@ -256,15 +246,14 @@ wt_status_t wt_quic_transport_parameters_check(
     }
   }
   /* max_ack_delay is below 2^14 milliseconds. */
-  status = wt_quic_transport_parameters_integer(params, WT_QUIC_TP_MAX_ACK_DELAY,
-                                               &value);
+  status = wt_quic_transport_parameters_integer(params, WT_QUIC_TP_MAX_ACK_DELAY, &value);
   if (status == WT_OK && value >= (UINT64_C(1) << 14)) {
     WT_QUIC_TP_REJECT(WT_QUIC_TP_MAX_ACK_DELAY);
   }
   /* active_connection_id_limit is at least 2, because a connection needs its own
    * ID and at least one spare to migrate. */
-  status = wt_quic_transport_parameters_integer(
-      params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, &value);
+  status =
+      wt_quic_transport_parameters_integer(params, WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT, &value);
   if (status == WT_OK && value < 2U) {
     WT_QUIC_TP_REJECT(WT_QUIC_TP_ACTIVE_CONNECTION_ID_LIMIT);
   }
@@ -272,7 +261,8 @@ wt_status_t wt_quic_transport_parameters_check(
    * greater than 2^60 ... the connection MUST be closed immediately with a connection error of type
    * TRANSPORT_PARAMETER_ERROR if the offending value was received in a transport parameter". 2^60 itself is the
    * boundary and is legal; only a value above it is refused. The frame half is enforced in `frame.c`. */
-  status = wt_quic_transport_parameters_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, &value);
+  status =
+      wt_quic_transport_parameters_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, &value);
   if (status == WT_OK && value > (UINT64_C(1) << 60)) {
     WT_QUIC_TP_REJECT(WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI);
   }
@@ -283,9 +273,8 @@ wt_status_t wt_quic_transport_parameters_check(
   /* A stateless reset token is exactly sixteen bytes. */
   {
     size_t token_length = 0U;
-    if (wt_quic_transport_parameters_get(
-            params, WT_QUIC_TP_STATELESS_RESET_TOKEN, NULL,
-            &token_length) == WT_OK &&
+    if (wt_quic_transport_parameters_get(params, WT_QUIC_TP_STATELESS_RESET_TOKEN, NULL,
+                                         &token_length) == WT_OK &&
         token_length != 16U) {
       WT_QUIC_TP_REJECT(WT_QUIC_TP_STATELESS_RESET_TOKEN);
     }
@@ -293,8 +282,8 @@ wt_status_t wt_quic_transport_parameters_check(
      * stateless_reset_token transport parameter as a connection error of type TRANSPORT_PARAMETER_ERROR." The
      * length rule above cannot cover it: a well-formed token from the wrong role is still an error, and a
      * server (peer_is_client == 0) may send one. */
-    if (peer_is_client != 0 &&
-        wt_quic_transport_parameters_get(params, WT_QUIC_TP_STATELESS_RESET_TOKEN, NULL, NULL) == WT_OK) {
+    if (peer_is_client != 0 && wt_quic_transport_parameters_get(
+                                   params, WT_QUIC_TP_STATELESS_RESET_TOKEN, NULL, NULL) == WT_OK) {
       WT_QUIC_TP_REJECT(WT_QUIC_TP_STATELESS_RESET_TOKEN);
     }
   }
@@ -303,9 +292,8 @@ wt_status_t wt_quic_transport_parameters_check(
    * bytes, and this parameter carries it back for the client to check. */
   {
     size_t length = 0U;
-    if (wt_quic_transport_parameters_get(
-            params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, NULL,
-            &length) == WT_OK) {
+    if (wt_quic_transport_parameters_get(params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID,
+                                         NULL, &length) == WT_OK) {
       if (length == 0U || length > 20U) {
         WT_QUIC_TP_REJECT(WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID);
       }
@@ -314,14 +302,12 @@ wt_status_t wt_quic_transport_parameters_check(
   /* The two source connection ID parameters may be zero -- RFC 9000 section 7.3
    * allows a zero-length connection ID -- but not longer than twenty. */
   {
-    static const uint64_t cid_ids[2] = {
-        WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
-        WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID};
+    static const uint64_t cid_ids[2] = {WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                        WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID};
     size_t i;
     for (i = 0U; i < 2U; i++) {
       size_t length = 0U;
-      if (wt_quic_transport_parameters_get(params, cid_ids[i], NULL,
-                                           &length) == WT_OK) {
+      if (wt_quic_transport_parameters_get(params, cid_ids[i], NULL, &length) == WT_OK) {
         if (length > 20U) WT_QUIC_TP_REJECT(cid_ids[i]);
       }
     }
@@ -333,8 +319,8 @@ wt_status_t wt_quic_transport_parameters_check(
   return WT_OK;
 }
 
-wt_status_t wt_quic_transport_parameters_encode(
-    wt_writer_t *w, const wt_quic_transport_parameters_t *params) {
+wt_status_t wt_quic_transport_parameters_encode(wt_writer_t *w,
+                                                const wt_quic_transport_parameters_t *params) {
   size_t i;
   size_t j;
   if (w == NULL || params == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -359,9 +345,8 @@ wt_status_t wt_quic_transport_parameters_encode(
 }
 
 /* Insert an entry, keeping the list sorted by identifier. */
-static wt_status_t wt_quic_tp_insert(wt_quic_transport_parameters_t *params,
-                                     uint64_t id, const uint8_t *value,
-                                     size_t length) {
+static wt_status_t wt_quic_tp_insert(wt_quic_transport_parameters_t *params, uint64_t id,
+                                     const uint8_t *value, size_t length) {
   size_t at;
   size_t i;
   if (params == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -389,8 +374,8 @@ static wt_status_t wt_quic_tp_insert(wt_quic_transport_parameters_t *params,
   return WT_OK;
 }
 
-wt_status_t wt_quic_transport_parameters_add_integer(
-    wt_quic_transport_parameters_t *params, uint64_t id, uint64_t value) {
+wt_status_t wt_quic_transport_parameters_add_integer(wt_quic_transport_parameters_t *params,
+                                                     uint64_t id, uint64_t value) {
   uint8_t *slot;
   size_t written;
   wt_status_t status;
@@ -413,21 +398,20 @@ wt_status_t wt_quic_transport_parameters_add_integer(
   return status;
 }
 
-wt_status_t wt_quic_transport_parameters_add_bytes(
-    wt_quic_transport_parameters_t *params, uint64_t id, const uint8_t *value,
-    size_t length) {
+wt_status_t wt_quic_transport_parameters_add_bytes(wt_quic_transport_parameters_t *params,
+                                                   uint64_t id, const uint8_t *value,
+                                                   size_t length) {
   return wt_quic_tp_insert(params, id, value, length);
 }
 
-wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *params, int is_server,
-                                               const uint8_t *source_connection_id, size_t source_length,
-                                               const uint8_t *original_destination_connection_id,
-                                               size_t original_length, int retried,
-                                               const uint8_t *retry_source_connection_id,
-                                               size_t retry_source_length) {
+wt_status_t wt_quic_transport_parameters_build(
+    wt_quic_transport_parameters_t *params, int is_server, const uint8_t *source_connection_id,
+    size_t source_length, const uint8_t *original_destination_connection_id, size_t original_length,
+    int retried, const uint8_t *retry_source_connection_id, size_t retry_source_length) {
   wt_status_t status;
 
-  if (params == NULL || source_connection_id == NULL || source_length == 0U) return WT_ERR_INVALID_ARGUMENT;
+  if (params == NULL || source_connection_id == NULL || source_length == 0U)
+    return WT_ERR_INVALID_ARGUMENT;
   if (is_server && (original_destination_connection_id == NULL || original_length == 0U)) {
     /* A server that does not say which connection ID the client addressed it by is missing a parameter the RFC
      * requires of it, and the peer cannot tell that from a mis-routed packet. */
@@ -437,7 +421,8 @@ wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *p
    * and a name for a Retry that was never sent. The second is the one a caller reaches by accident -- passing a
    * leftover value on a path where `retried` is false -- and a client that checks (this tree's does, since
    * WT-166) answers it with TRANSPORT_PARAMETER_ERROR. */
-  if (retried != 0 && (!is_server || retry_source_connection_id == NULL || retry_source_length == 0U)) {
+  if (retried != 0 &&
+      (!is_server || retry_source_connection_id == NULL || retry_source_length == 0U)) {
     return WT_ERR_INVALID_ARGUMENT;
   }
   if (retried == 0 && retry_source_connection_id != NULL && retry_source_length != 0U) {
@@ -454,13 +439,15 @@ wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *p
   if (status != WT_OK) return status;
 
   if (is_server) {
-    status = wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID,
-                                                    original_destination_connection_id, original_length);
+    status = wt_quic_transport_parameters_add_bytes(
+        params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, original_destination_connection_id,
+        original_length);
     if (status != WT_OK) return status;
   }
   if (retried != 0) {
-    status = wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID,
-                                                    retry_source_connection_id, retry_source_length);
+    status =
+        wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID,
+                                               retry_source_connection_id, retry_source_length);
     if (status != WT_OK) return status;
   }
 
@@ -468,8 +455,8 @@ wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *p
    * a number that has to agree with what the runtime enforces. */
   status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_DATA, 100000U);
   if (status != WT_OK) return status;
-  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-                                                    4096U);
+  status = wt_quic_transport_parameters_add_integer(
+      params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, 4096U);
   if (status != WT_OK) return status;
   /* RFC 9000 section 18.2: this is the limit for data the PEER sends on streams THIS endpoint opened, which is
    * the response on the request stream and every answer on a WebTransport data stream. A client that omits it --
@@ -479,9 +466,11 @@ wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *p
   status = wt_quic_transport_parameters_add_integer(
       params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, 4096U);
   if (status != WT_OK) return status;
-  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI, 4096U);
+  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_UNI,
+                                                    4096U);
   if (status != WT_OK) return status;
-  status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 8U);
+  status =
+      wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_BIDI, 8U);
   if (status != WT_OK) return status;
   status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 8U);
   if (status != WT_OK) return status;
@@ -491,5 +480,6 @@ wt_status_t wt_quic_transport_parameters_build(wt_quic_transport_parameters_t *p
    * extension rather than configuring it. */
   status = wt_quic_transport_parameters_add_bytes(params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U);
   if (status != WT_OK) return status;
-  return wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U);
+  return wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE,
+                                                  1200U);
 }

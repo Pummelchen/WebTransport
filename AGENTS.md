@@ -107,8 +107,11 @@ they do not follow the library version and must not be bumped with it.
   `./build-release-apple-silicon.sh`, the package tests, the nested manifest's own
   test target (`swift test --package-path Swift --filter WebTransportTestSupportTests`),
   the library smoke pair (`Swift/run-library-smoke.sh`), the client and server CLI
-  conformance suites (`--scenario all`), a 20000-iteration ASan fuzz run, and a
-  thread-sanitizer job that skips `CLIProcess` / `ReleaseArtifacts`.
+  conformance suites (`--scenario all`), a 20000-iteration ASan fuzz run, an
+  `address-sanitizer` job that runs the whole suite under ASan, and a
+  thread-sanitizer job — both sanitizer jobs skip `CLIProcess` / `ReleaseArtifacts`,
+  which spawn non-instrumented binaries a sanitizer runtime in this process cannot
+  observe and would report on spuriously.
 - C99 (`.github/workflows/c99-ci.yml`): a macOS and `ubuntu-24.04` matrix (gcc and
   clang) building Debug and Release and running the suite under ASan+UBSan, a
   `linux-debian13` job in a `debian:trixie` container, and a `freebsd` job that boots
@@ -117,13 +120,18 @@ they do not follow the library version and must not be bumped with it.
   `check-package.sh` (builds a consumer of the installed package and *runs* all
   three installed tools), `check-matrix.sh`, `check-portability.sh`,
   `check-static-analysis.sh` (Clang Static Analyzer), `check-cppcheck.sh`,
-  `check-workflows.py`, and a CLI smoke step. A CMake configure fails when the
+  `check-workflows.py`, and a CLI smoke step. Three more came from the pre-production audit and run on the same legs: `check-format.sh` (every C source against the committed `.clang-format`, generated tables and RFC vectors excluded), `measure-coverage.sh` (line coverage from an instrumented build, so it is measured rather than remembered), and `check-unused-locals.py` (a local assigned and never read, hidden from `-Wunused-but-set-variable` by a `(void)` cast; an unused *parameter* is a deliberate suppression and is skipped). A CMake configure fails when the
   version mirrors disagree. Three Windows checks: `check-windows-platform.sh`,
   `check-windows-build.sh` and `check-windows-wine.sh` on the Ubuntu leg, plus the
   **enforced** `windows-native` job on `windows-latest` (MSYS2 MINGW64). Two more
   Windows jobs run the same configure, build and ctest under the compilers the plan's
   Phase 12 matrix names: `msvc` and `clang-cl`.
 - `security-scan.yml`: gitleaks 8.30.1 over full history, trivy 0.74.0.
+- `soak.yml`: the connection-churn soak (`./Swift/run-soak.sh`) nightly and on
+  manual dispatch — it watches resident memory and thread count for *sustained*
+  growth across 400 connections, which is the shape a per-connection leak takes.
+  Scheduled rather than per-pull-request because it is timing- and
+  memory-sensitive: a loaded shared runner can move the numbers with nothing wrong.
 
 ## Traps
 

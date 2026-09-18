@@ -18,17 +18,31 @@ static wt_status_t parse(const char *const *argv, int argc, wt_cli_options_t *op
 }
 
 static void test_the_required_flags(void) {
-  const char *argv[] = {"wt-conformance-c99", "--connect",       "--transport", "packet",
-                        "--trust",           "system",            "--origin",    "https://localhost",
-                        "--protocol",        "chat",              "--exchange",  "datagram",
-                        "--message",         "hello",             "--timeout-ms", "2500",
-                        "--scenario",        "all",               "--json",
+  const char *argv[] = {"wt-conformance-c99",
+                        "--connect",
+                        "--transport",
+                        "packet",
+                        "--trust",
+                        "system",
+                        "--origin",
+                        "https://localhost",
+                        "--protocol",
+                        "chat",
+                        "--exchange",
+                        "datagram",
+                        "--message",
+                        "hello",
+                        "--timeout-ms",
+                        "2500",
+                        "--scenario",
+                        "all",
+                        "--json",
                         "localhost:4433"};
   wt_cli_options_t options;
   const char *error = NULL;
 
-  WT_EXPECT_OK("every flag the plan names parses", parse(argv, (int)(sizeof(argv) / sizeof(argv[0])),
-                                                          &options, &error));
+  WT_EXPECT_OK("every flag the plan names parses",
+               parse(argv, (int)(sizeof(argv) / sizeof(argv[0])), &options, &error));
   WT_EXPECT_INT("as a connect", (int)WT_CLI_MODE_CONNECT, (int)options.mode);
   WT_EXPECT_STR("with the address", "localhost:4433", options.address);
   WT_EXPECT_INT("the packet transport", (int)WT_CLI_TRANSPORT_PACKET, (int)options.transport);
@@ -46,8 +60,7 @@ static void test_the_required_flags(void) {
   {
     const char *minimal[] = {"wt-client-c99", "--connect", "localhost:4433"};
     wt_cli_options_t plain;
-    WT_EXPECT_OK("a minimal command line parses",
-                 parse(minimal, 3, &plain, &error));
+    WT_EXPECT_OK("a minimal command line parses", parse(minimal, 3, &plain, &error));
     WT_EXPECT_INT("with packet transport", (int)WT_CLI_TRANSPORT_PACKET, (int)plain.transport);
     WT_EXPECT_INT("system trust", (int)WT_CLI_TRUST_SYSTEM, (int)plain.trust);
     WT_EXPECT_INT("a stream exchange", (int)WT_CLI_EXCHANGE_STREAM, (int)plain.exchange);
@@ -178,8 +191,8 @@ static void test_timeouts_are_digits_only(void) {
   }
   {
     const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--timeout-ms", "-5"};
-    WT_EXPECT_STATUS("a negative timeout is refused as a missing value",
-                     WT_ERR_INVALID_ARGUMENT, parse(argv, 5, &options, &error));
+    WT_EXPECT_STATUS("a negative timeout is refused as a missing value", WT_ERR_INVALID_ARGUMENT,
+                     parse(argv, 5, &options, &error));
   }
 }
 
@@ -266,7 +279,8 @@ static void test_the_names_and_the_json(void) {
     fclose(stream);
     WT_EXPECT_TRUE("the quote is escaped",
                    strstr(buffer, "\"origin\":\"http://a\\\"b\\\\c\"") != NULL);
-    WT_EXPECT_TRUE("the tab is escaped as \\t", strstr(buffer, "\"protocol\":\"chat\\tv1\"") != NULL);
+    WT_EXPECT_TRUE("the tab is escaped as \\t",
+                   strstr(buffer, "\"protocol\":\"chat\\tv1\"") != NULL);
     WT_EXPECT_TRUE("and no raw quote ends the value early",
                    strstr(buffer, "\"origin\":\"http://a\"") == NULL);
   }
@@ -289,11 +303,13 @@ static void test_the_upgrade_token_flag(void) {
     const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--upgrade-token", "draft16"};
     WT_EXPECT_OK("the draft-16 token parses", parse(argv, 5, &options, &error));
     WT_EXPECT_INT("and is selected", (int)WT_CLI_UPGRADE_TOKEN_DRAFT16, (int)options.upgrade_token);
-    WT_EXPECT_STR("under its own name", "draft16", wt_cli_upgrade_token_name(options.upgrade_token));
+    WT_EXPECT_STR("under its own name", "draft16",
+                  wt_cli_upgrade_token_name(options.upgrade_token));
   }
   /* A value that is neither is refused by name, and the argument named is the value rather than the flag. */
   {
-    const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--upgrade-token", "webtransport-h2"};
+    const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--upgrade-token",
+                          "webtransport-h2"};
     WT_EXPECT_STATUS("an unknown token is refused", WT_ERR_INVALID_ARGUMENT,
                      wt_cli_options_parse(&options, 5, argv, &error, &argument));
     WT_EXPECT_STR("with a message naming what was refused", "unsupported upgrade token", error);
@@ -313,7 +329,8 @@ static void test_the_upgrade_token_flag(void) {
   {
     const char *argv[] = {"wt-server-c99", "--listen", "h:1"};
     WT_EXPECT_OK("a listener without the flag parses", parse(argv, 3, &options, &error));
-    WT_EXPECT_OK("and passes the check at the draft-16 default", wt_cli_options_check(&options, &error));
+    WT_EXPECT_OK("and passes the check at the draft-16 default",
+                 wt_cli_options_check(&options, &error));
   }
   /* And the selection is in the report a script reads, not only on the command line. */
   {

@@ -14,7 +14,7 @@ import WebTransportLoopbackTestSupport
 /// delivered to `acceptUnidirectionalStream`; one naming another session is
 /// refused with `WT_SESSION_GONE` before the session manager sees it.
 @Suite("Unidirectional stream accept")
-struct WebTransportUnidirectionalStreamAcceptTests {
+struct UnidirectionalStreamAcceptTests {
     @Test
     func runtimeAcceptsPeerInitiatedUnidirectionalStreamAndDeliversBytes() async throws {
         try await WebTransportLoopbackTestLock.withLockAsync(label: #function) {

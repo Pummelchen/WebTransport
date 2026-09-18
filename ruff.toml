@@ -1,0 +1,37 @@
+# Ruff configuration for this repository's Python.
+#
+# Python here is test and glue code (Tier C), so it is deliberately cheap: one pinned
+# interpreter, one formatter and one linter, no type checker and no coverage target. The
+# rule set is chosen for the pitfalls the audit standard names rather than for volume:
+#
+#   B    flake8-bugbear      mutable default arguments, silent-failure shapes
+#   E722 bare except         also matched by E, named explicitly so it cannot be lost
+#   S101 assert              assertion used where -O would strip the check
+#   PT   flake8-pytest-style ordering and fixture mistakes
+#
+# A Python script that writes production data, handles credentials or runs as a migration
+# would be Tier A and gets the full treatment; there are none in this tree (recorded in
+# AUDIT/inventory.md).
+
+target-version = "py314"
+line-length = 120
+
+[lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "B",
+    "E722",
+    "S101",
+    "PT",
+    # Not named by the audit standard, but Ruff's own default set flags it and leaving a
+    # rule off because it was inconvenient is how a finding gets lost: a script with a
+    # shebang that is not executable is a script that cannot be run the way it says it can.
+    "EXE",
+]
+
+[lint.per-file-ignores]
+# S101 in a test file is the assertion, not a stripped validation: Ruff's own guidance and
+# the reason the rule exists. These paths are test-only and never executed with -O.
+"C99/tests/**" = ["S101"]

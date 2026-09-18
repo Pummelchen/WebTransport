@@ -39,6 +39,7 @@ USAGE
 
 Idempotent: a second run reports that it is already applied.
 """
+
 import pathlib
 import sys
 

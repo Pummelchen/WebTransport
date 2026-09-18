@@ -66,8 +66,8 @@ void test_a_retired_connection_id_is_replaced(void) {
                wt_quic_connection_retire_peer_connection_id(&pair.client.connection, spare_sequence,
                                                             pair.now));
   WT_EXPECT_STATUS("and cannot retire an ID it does not have", WT_ERR_STATE,
-                   wt_quic_connection_retire_peer_connection_id(&pair.client.connection, spare_sequence,
-                                                                pair.now));
+                   wt_quic_connection_retire_peer_connection_id(&pair.client.connection,
+                                                                spare_sequence, pair.now));
 
   rounds = pump_pair(&pair, 100U, peer_has_a_replacement);
   WT_EXPECT_TRUE("a replacement arrives", rounds < 100U);
@@ -138,7 +138,8 @@ void test_a_retire_flood_is_rate_limited(void) {
                wt_quic_connection_retire_peer_connection_id(&pair.client.connection, 2U, now));
   (void)pump_pair(&pair, 30U, peer_has_a_spare);
   WT_EXPECT_U64("no second replacement is issued", 2U, (uint64_t)pair.server.spare_ids_issued);
-  WT_EXPECT_U64("because the rate limit refused it", 1U, (uint64_t)pair.server.spare_ids_rate_limited);
+  WT_EXPECT_U64("because the rate limit refused it", 1U,
+                (uint64_t)pair.server.spare_ids_rate_limited);
   WT_EXPECT_U64("leaving the client with none", 0U, (uint64_t)pair.client.connection.peer_id_count);
 
   /* And past the interval the endpoint answers again: a peer that retires slowly is never cut off. */

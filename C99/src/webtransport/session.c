@@ -72,7 +72,8 @@ int wt_webtransport_session_allows_new_streams(const wt_webtransport_session_t *
   return session->state == WT_WEBTRANSPORT_SESSION_ESTABLISHED;
 }
 
-wt_status_t wt_webtransport_session_write_drain(wt_webtransport_session_t *session, wt_writer_t *w) {
+wt_status_t wt_webtransport_session_write_drain(wt_webtransport_session_t *session,
+                                                wt_writer_t *w) {
   wt_status_t status;
 
   if (session == NULL || w == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -84,8 +85,8 @@ wt_status_t wt_webtransport_session_write_drain(wt_webtransport_session_t *sessi
 }
 
 wt_status_t wt_webtransport_session_write_close(wt_webtransport_session_t *session, wt_writer_t *w,
-                                               uint32_t error_code, const uint8_t *reason,
-                                               size_t reason_length) {
+                                                uint32_t error_code, const uint8_t *reason,
+                                                size_t reason_length) {
   wt_status_t status;
 
   if (session == NULL || w == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -100,8 +101,8 @@ wt_status_t wt_webtransport_session_write_close(wt_webtransport_session_t *sessi
 
 wt_status_t wt_webtransport_session_on_capsule_bytes(wt_webtransport_session_t *session,
                                                      wt_cursor_t *cursor, size_t max_capsule_bytes,
-                                                     wt_webtransport_capsule_fn observe, void *context,
-                                                     wt_http3_error_t *out_error) {
+                                                     wt_webtransport_capsule_fn observe,
+                                                     void *context, wt_http3_error_t *out_error) {
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
   if (session == NULL || cursor == NULL) return WT_ERR_INVALID_ARGUMENT;
 
@@ -150,7 +151,8 @@ wt_status_t wt_webtransport_session_on_capsule_bytes(wt_webtransport_session_t *
       const uint8_t *reason = NULL;
       size_t reason_length = 0U;
 
-      status = wt_webtransport_close_session_parse(&capsule, &code, &reason, &reason_length, &error);
+      status =
+          wt_webtransport_close_session_parse(&capsule, &code, &reason, &reason_length, &error);
       if (status == WT_OK) status = wt_webtransport_session_on_close(session, 0, code);
       if (status == WT_OK && wt_cursor_remaining(&ahead) > 0U) {
         /* Section 5.4: a WT_CLOSE_SESSION capsule is the LAST thing on the CONNECT stream. Bytes after it are

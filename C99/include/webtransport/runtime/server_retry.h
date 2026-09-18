@@ -59,8 +59,8 @@ typedef struct wt_runtime_server_retry {
  * for its connection IDs -- the length must match the one its connection is configured with, because a short
  * header does not carry it (RFC 9000 section 17.2), and a Retry whose ID was another length would name a
  * connection the client's later packets could not be attributed to. Eight bytes is what the tools use. */
-wt_status_t wt_runtime_server_retry_arm(wt_runtime_server_retry_t *retry, size_t connection_id_length,
-                                        uint64_t token_max_age);
+wt_status_t wt_runtime_server_retry_arm(wt_runtime_server_retry_t *retry,
+                                        size_t connection_id_length, uint64_t token_max_age);
 
 /* Read `datagram` and, if it is an Initial that carries NO token yet, write the Retry that answers it.
  *
@@ -84,13 +84,15 @@ wt_status_t wt_runtime_server_retry_build(wt_runtime_server_retry_t *retry, cons
  * must name (section 7.3), and the client compares it. `*out_accepted` is 0 for every other case (not an Initial,
  * no token, addressed elsewhere, not this server's token, too old) with a reason in the return value that a
  * caller can log but not act on: all of them mean the same thing, which is "answer with another Retry". */
-wt_status_t wt_runtime_server_retry_accept(wt_runtime_server_retry_t *retry, const uint8_t *datagram,
-                                           size_t length, const wt_udp_address_t *peer, uint64_t now,
+wt_status_t wt_runtime_server_retry_accept(wt_runtime_server_retry_t *retry,
+                                           const uint8_t *datagram, size_t length,
+                                           const wt_udp_address_t *peer, uint64_t now,
                                            uint8_t *out_original, size_t capacity,
                                            size_t *out_original_length, int *out_accepted);
 
 /* The Source Connection ID this retry chose, for the caller that has to configure its connection with it. */
-const uint8_t *wt_runtime_server_retry_source_id(const wt_runtime_server_retry_t *retry, size_t *out_length);
+const uint8_t *wt_runtime_server_retry_source_id(const wt_runtime_server_retry_t *retry,
+                                                 size_t *out_length);
 
 #ifdef __cplusplus
 }

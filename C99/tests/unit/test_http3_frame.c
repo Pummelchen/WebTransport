@@ -57,9 +57,10 @@ static void test_frame_type_names_and_reserved_range(void) {
 
 static void test_frames_round_trip(void) {
   static const uint64_t types[] = {
-      WT_HTTP3_FRAME_DATA,       WT_HTTP3_FRAME_HEADERS, WT_HTTP3_FRAME_CANCEL_PUSH,
-      WT_HTTP3_FRAME_SETTINGS,   WT_HTTP3_FRAME_PUSH_PROMISE, WT_HTTP3_FRAME_GOAWAY,
-      WT_HTTP3_FRAME_MAX_PUSH_ID, 0x2aU /* unknown, and a frame all the same */};
+      WT_HTTP3_FRAME_DATA,         WT_HTTP3_FRAME_HEADERS,
+      WT_HTTP3_FRAME_CANCEL_PUSH,  WT_HTTP3_FRAME_SETTINGS,
+      WT_HTTP3_FRAME_PUSH_PROMISE, WT_HTTP3_FRAME_GOAWAY,
+      WT_HTTP3_FRAME_MAX_PUSH_ID,  0x2aU /* unknown, and a frame all the same */};
   static const uint8_t payload[5] = {0xdeU, 0xadU, 0xbeU, 0xefU, 0x00U};
   uint8_t buffer[64];
   size_t i;
@@ -75,8 +76,7 @@ static void test_frames_round_trip(void) {
     frame.payload = payload;
     frame.length = sizeof(payload);
     WT_EXPECT_OK("a frame encodes", wt_http3_frame_encode(&w, &frame));
-    WT_EXPECT_OK("and its size is known",
-                 wt_http3_frame_encoded_size(&frame, &encoded_size));
+    WT_EXPECT_OK("and its size is known", wt_http3_frame_encoded_size(&frame, &encoded_size));
     WT_EXPECT_U64("which is what was written", (uint64_t)wt_writer_offset(&w),
                   (uint64_t)encoded_size);
 
@@ -111,9 +111,9 @@ static void test_empty_payload_and_prefix_decoding(void) {
   with_payload.length = sizeof(settings_payload);
   WT_EXPECT_OK("a second frame encodes", wt_http3_frame_encode(&w, &with_payload));
 
-  WT_EXPECT_OK("the first is read from the front",
-               wt_http3_frame_decode_prefix(buffer, wt_writer_offset(&w), &decoded, &consumed,
-                                            &error));
+  WT_EXPECT_OK(
+      "the first is read from the front",
+      wt_http3_frame_decode_prefix(buffer, wt_writer_offset(&w), &decoded, &consumed, &error));
   WT_EXPECT_U64("with the type of the first", WT_HTTP3_FRAME_DATA, decoded.type);
   WT_EXPECT_U64("a zero length", 0U, (uint64_t)decoded.length);
   WT_EXPECT_U64("and only its own bytes consumed", (uint64_t)first_size, (uint64_t)consumed);
@@ -224,9 +224,11 @@ static void test_the_data_frame_around_a_connect_streams_capsules(void) {
   w = wt_http3_frame_data_writer(buffer, sizeof(buffer));
   WT_EXPECT_OK("and again through the reserved writer", wt_webtransport_max_data_write(&w, 4096U));
   payload_length = wt_writer_offset(&w);
-  WT_EXPECT_U64("the reservation does not change what is written", (uint64_t)raw_length, (uint64_t)payload_length);
-  WT_EXPECT_OK("the payload is wrapped where it was written",
-               wt_http3_frame_wrap_data_in_place(buffer, sizeof(buffer), payload_length, &frame_length));
+  WT_EXPECT_U64("the reservation does not change what is written", (uint64_t)raw_length,
+                (uint64_t)payload_length);
+  WT_EXPECT_OK(
+      "the payload is wrapped where it was written",
+      wt_http3_frame_wrap_data_in_place(buffer, sizeof(buffer), payload_length, &frame_length));
   WT_EXPECT_U64("and the frame is its header plus that payload",
                 (uint64_t)(payload_length + wt_quic_varint_size(WT_HTTP3_FRAME_DATA) +
                            wt_quic_varint_size((uint64_t)payload_length)),
@@ -236,7 +238,8 @@ static void test_the_data_frame_around_a_connect_streams_capsules(void) {
   WT_EXPECT_OK("the frame reads back", wt_http3_frame_decode(&c, &decoded, &error));
   WT_EXPECT_U64("as a DATA frame", WT_HTTP3_FRAME_DATA, decoded.type);
   WT_EXPECT_U64("whose payload is the capsule", (uint64_t)raw_length, (uint64_t)decoded.length);
-  WT_EXPECT_BYTES("byte for byte, wherever the reservation put it", raw, decoded.payload, raw_length);
+  WT_EXPECT_BYTES("byte for byte, wherever the reservation put it", raw, decoded.payload,
+                  raw_length);
   /* This is the whole point of the fix: the bytes inside the frame DECODE AS A CAPSULE. The raw form did not. */
   {
     wt_cursor_t capsule_cursor = wt_cursor_init(decoded.payload, decoded.length);
@@ -247,7 +250,8 @@ static void test_the_data_frame_around_a_connect_streams_capsules(void) {
     WT_EXPECT_OK("the payload decodes as a capsule",
                  wt_webtransport_capsule_decode(&capsule_cursor, decoded.length, &capsule, &error));
     WT_EXPECT_U64("of the type that was written", WT_CAPSULE_MAX_DATA, capsule.type);
-    WT_EXPECT_OK("with the value that was written", wt_webtransport_max_data_parse(&capsule, &maximum, &error));
+    WT_EXPECT_OK("with the value that was written",
+                 wt_webtransport_max_data_parse(&capsule, &maximum, &error));
     WT_EXPECT_U64("which is the grant", 4096U, maximum);
   }
 
@@ -264,11 +268,12 @@ static void test_the_data_frame_around_a_connect_streams_capsules(void) {
   /* A buffer that cannot hold the reservation and the payload is refused, and nothing is written. */
   frame_length = 7U;
   WT_EXPECT_STATUS("a buffer without room for the reservation is refused", WT_ERR_LIMIT,
-                   wt_http3_frame_wrap_data_in_place(buffer, WT_HTTP3_FRAME_DATA_HEADER_MAX - 1U, 0U,
-                                                     &frame_length));
+                   wt_http3_frame_wrap_data_in_place(buffer, WT_HTTP3_FRAME_DATA_HEADER_MAX - 1U,
+                                                     0U, &frame_length));
   WT_EXPECT_U64("and the length is cleared", 0U, (uint64_t)frame_length);
-  WT_EXPECT_STATUS("as is one without room for the payload", WT_ERR_LIMIT,
-                   wt_http3_frame_wrap_data_in_place(buffer, sizeof(buffer), sizeof(buffer), &frame_length));
+  WT_EXPECT_STATUS(
+      "as is one without room for the payload", WT_ERR_LIMIT,
+      wt_http3_frame_wrap_data_in_place(buffer, sizeof(buffer), sizeof(buffer), &frame_length));
   WT_EXPECT_STATUS("and a null buffer", WT_ERR_INVALID_ARGUMENT,
                    wt_http3_frame_wrap_data_in_place(NULL, sizeof(buffer), 0U, &frame_length));
 

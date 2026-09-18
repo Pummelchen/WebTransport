@@ -15,8 +15,7 @@ uint64_t wt_quic_congestion_minimum_window(uint64_t max_datagram_size) {
   return WT_QUIC_MINIMUM_WINDOW_PACKETS * max_datagram_size;
 }
 
-void wt_quic_congestion_init(wt_quic_congestion_t *congestion,
-                             uint64_t max_datagram_size) {
+void wt_quic_congestion_init(wt_quic_congestion_t *congestion, uint64_t max_datagram_size) {
   if (congestion == NULL) return;
   memset(congestion, 0, sizeof(*congestion));
   congestion->max_datagram_size = (max_datagram_size == 0U) ? 1200U : max_datagram_size;
@@ -44,16 +43,15 @@ int wt_quic_congestion_in_slow_start(const wt_quic_congestion_t *congestion) {
   return congestion->cwnd < congestion->ssthresh;
 }
 
-int wt_quic_congestion_in_recovery_at(const wt_quic_congestion_t *congestion,
-                                      uint64_t time_sent) {
+int wt_quic_congestion_in_recovery_at(const wt_quic_congestion_t *congestion, uint64_t time_sent) {
   if (congestion == NULL || !congestion->in_recovery) return 0;
   /* "At or before": the packet that was sent at the instant the period began is part of the event,
    * because the clock granularity makes "after" and "at" indistinguishable there. */
   return time_sent <= congestion->recovery_start_time;
 }
 
-wt_status_t wt_quic_congestion_on_ack(wt_quic_congestion_t *congestion,
-                                      uint64_t bytes_acked, uint64_t time_sent) {
+wt_status_t wt_quic_congestion_on_ack(wt_quic_congestion_t *congestion, uint64_t bytes_acked,
+                                      uint64_t time_sent) {
   if (congestion == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* An acknowledgement of a packet from before the recovery period says nothing about whether the
    * network has recovered, because it was sent into the congestion that caused the period. Growing
@@ -77,8 +75,8 @@ wt_status_t wt_quic_congestion_on_ack(wt_quic_congestion_t *congestion,
   return WT_OK;
 }
 
-wt_status_t wt_quic_congestion_on_loss(wt_quic_congestion_t *congestion,
-                                       uint64_t time_sent, uint64_t now) {
+wt_status_t wt_quic_congestion_on_loss(wt_quic_congestion_t *congestion, uint64_t time_sent,
+                                       uint64_t now) {
   uint64_t reduced;
   uint64_t floor;
 
@@ -100,8 +98,8 @@ wt_status_t wt_quic_congestion_on_loss(wt_quic_congestion_t *congestion,
   return WT_OK;
 }
 
-wt_status_t wt_quic_congestion_on_persistent_congestion(
-    wt_quic_congestion_t *congestion, uint64_t now) {
+wt_status_t wt_quic_congestion_on_persistent_congestion(wt_quic_congestion_t *congestion,
+                                                        uint64_t now) {
   if (congestion == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* RFC 9002 section 7.6: the window collapses to the minimum and a new recovery period begins, so
    * that the connection has to earn its window back rather than inherit the one it had before the
@@ -113,8 +111,7 @@ wt_status_t wt_quic_congestion_on_persistent_congestion(
   return WT_OK;
 }
 
-int wt_quic_congestion_can_send(const wt_quic_congestion_t *congestion,
-                                uint64_t bytes_in_flight) {
+int wt_quic_congestion_can_send(const wt_quic_congestion_t *congestion, uint64_t bytes_in_flight) {
   if (congestion == NULL) return 0;
   return bytes_in_flight < congestion->cwnd;
 }

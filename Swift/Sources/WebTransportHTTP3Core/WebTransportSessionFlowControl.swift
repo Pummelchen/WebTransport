@@ -88,10 +88,10 @@ extension WebTransportSessionManager {
         var received: [WebTransportReceivedFlowControlCapsule] = []
         var terminationActions: WebTransportSessionTerminationActions?
         while !remaining.isEmpty {
-            if requestStreamIDsClosedByReceivedCloseCapsule.contains(streamID) {
-                return WebTransportConnectStreamCapsuleResult(
-                    receivedCapsules: received,
-                    connectResetFrame: connectMessageErrorReset(streamID: streamID),
+            if closedRequestStreamIDs.contains(streamID) {
+                return connectStreamResetResult(
+                    streamID: streamID,
+                    received: received,
                     terminationActions: terminationActions
                 )
             }
@@ -119,23 +119,10 @@ extension WebTransportSessionManager {
                 try closeForFlowControlViolation(sessionID)
                 throw error
             } catch  where capsuleType == WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule {
-                let isAlreadyClosed: Bool
-                if case .closed = sessionsByID[sessionID]?.state {
-                    isAlreadyClosed = true
-                } else {
-                    isAlreadyClosed = false
-                }
-                if !isAlreadyClosed {
-                    terminationActions = try? markSessionClosed(
-                        sessionID,
-                        applicationErrorCode: 0,
-                        message: "",
-                        closeCapsuleReceived: false
-                    )
-                }
-                return WebTransportConnectStreamCapsuleResult(
-                    receivedCapsules: received,
-                    connectResetFrame: connectMessageErrorReset(streamID: streamID),
+                return try handleCloseSessionCapsule(
+                    streamID: streamID,
+                    sessionID: sessionID,
+                    received: received,
                     terminationActions: terminationActions
                 )
             }
@@ -145,6 +132,50 @@ extension WebTransportSessionManager {
             receivedCapsules: received,
             connectResetFrame: nil,
             terminationActions: terminationActions
+        )
+    }
+
+    /// What a reset CONNECT stream yields: everything received so far, plus the frame the
+    /// caller must send to reset it.
+    private func connectStreamResetResult(
+        streamID: UInt64,
+        received: [WebTransportReceivedFlowControlCapsule],
+        terminationActions: WebTransportSessionTerminationActions?
+    ) -> WebTransportConnectStreamCapsuleResult {
+        WebTransportConnectStreamCapsuleResult(
+            receivedCapsules: received,
+            connectResetFrame: connectMessageErrorReset(streamID: streamID),
+            terminationActions: terminationActions
+        )
+    }
+
+    /// A WT_CLOSE_SESSION capsule closes the session -- but only once; a second one is
+    /// accepted and changes nothing.
+    private mutating func handleCloseSessionCapsule(
+        streamID: UInt64,
+        sessionID: WebTransportSessionID,
+        received: [WebTransportReceivedFlowControlCapsule],
+        terminationActions: WebTransportSessionTerminationActions?
+    ) throws -> WebTransportConnectStreamCapsuleResult {
+        let isAlreadyClosed: Bool
+        if case .closed = sessionsByID[sessionID]?.state {
+            isAlreadyClosed = true
+        } else {
+            isAlreadyClosed = false
+        }
+        var actions = terminationActions
+        if !isAlreadyClosed {
+            actions = try? markSessionClosed(
+                sessionID,
+                applicationErrorCode: 0,
+                message: "",
+                closeCapsuleReceived: false
+            )
+        }
+        return WebTransportConnectStreamCapsuleResult(
+            receivedCapsules: received,
+            connectResetFrame: connectMessageErrorReset(streamID: streamID),
+            terminationActions: actions
         )
     }
 

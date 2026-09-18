@@ -31,15 +31,13 @@ static void test_capacity(void) {
   wt_qpack_dynamic_init(&table, 4096U);
   wt_qpack_encoder_stream_init(&stream, &table, 4096U);
 
-  WT_EXPECT_OK("a capacity instruction writes",
-               wt_qpack_encoder_stream_write_capacity(&w, 512U));
+  WT_EXPECT_OK("a capacity instruction writes", wt_qpack_encoder_stream_write_capacity(&w, 512U));
   apply(&stream, bytes, wt_writer_offset(&w), "and applies");
   WT_EXPECT_U64("setting the table's capacity", 512U, (uint64_t)table.capacity);
 
   /* Above the limit this endpoint advertised: an error, not a clamp. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a larger capacity writes",
-               wt_qpack_encoder_stream_write_capacity(&w, 8192U));
+  WT_EXPECT_OK("a larger capacity writes", wt_qpack_encoder_stream_write_capacity(&w, 8192U));
   c = wt_cursor_init(bytes, wt_writer_offset(&w));
   WT_EXPECT_STATUS("but applying it is refused", WT_ERR_PROTOCOL,
                    wt_qpack_encoder_stream_apply(&stream, &c, &error));
@@ -74,9 +72,9 @@ static void test_insertions(void) {
 
   /* An insertion whose name comes from the STATIC table: entry 15 is :method. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a static-name insertion writes",
-               wt_qpack_encoder_stream_write_insert_name_reference(
-                   &w, 1, 15U, (const uint8_t *)"GET", 3U));
+  WT_EXPECT_OK(
+      "a static-name insertion writes",
+      wt_qpack_encoder_stream_write_insert_name_reference(&w, 1, 15U, (const uint8_t *)"GET", 3U));
   apply(&stream, bytes, wt_writer_offset(&w), "and applies");
   WT_EXPECT_U64("storing a second entry", 2U, (uint64_t)table.count);
   WT_EXPECT_OK("whose name came from the table",
@@ -87,9 +85,9 @@ static void test_insertions(void) {
   /* And one whose name comes from the DYNAMIC table: relative 0 is the entry just
    * inserted, so this stores its name again with a different value. */
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a dynamic-name insertion writes",
-               wt_qpack_encoder_stream_write_insert_name_reference(
-                   &w, 0, 0U, (const uint8_t *)"POST", 4U));
+  WT_EXPECT_OK(
+      "a dynamic-name insertion writes",
+      wt_qpack_encoder_stream_write_insert_name_reference(&w, 0, 0U, (const uint8_t *)"POST", 4U));
   apply(&stream, bytes, wt_writer_offset(&w), "and applies");
   WT_EXPECT_U64("storing a third entry", 3U, (uint64_t)table.count);
   WT_EXPECT_OK("whose name is the referenced one",
@@ -113,9 +111,8 @@ static void test_duplicate_and_errors(void) {
   wt_qpack_dynamic_init(&table, 4096U);
   wt_qpack_encoder_stream_init(&stream, &table, 4096U);
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("an entry writes",
-               wt_qpack_encoder_stream_write_insert_literal(&w, (const uint8_t *)"n", 1U,
-                                                            (const uint8_t *)"v", 1U));
+  WT_EXPECT_OK("an entry writes", wt_qpack_encoder_stream_write_insert_literal(
+                                      &w, (const uint8_t *)"n", 1U, (const uint8_t *)"v", 1U));
   apply(&stream, bytes, wt_writer_offset(&w), "and inserts");
 
   /* Duplicating relative 0 copies the newest entry to the end. */

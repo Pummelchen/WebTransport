@@ -90,7 +90,8 @@ typedef struct wt_session_callbacks {
 
 /* Install the callbacks. They may be installed at any point, replaced, or cleared with
  * NULL. Everything already reported stays reported: this does not replay. */
-wt_status_t wt_session_set_callbacks(wt_session_t *session, const wt_session_callbacks_t *callbacks);
+wt_status_t wt_session_set_callbacks(wt_session_t *session,
+                                     const wt_session_callbacks_t *callbacks);
 
 /* A WebTransport stream arrived. `session_id` is what the stream's prefix named, and it
  * must be THIS session -- a stream for another session is refused with

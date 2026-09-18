@@ -8,6 +8,25 @@ import WebTransportUDPApple
 // internal because the scenario catalogue and the runner that consults it are in
 // separate files
 internal func scenarioCatalog() -> [CLIConformanceScenario] {
+    smokeScenarios()
+        + sessionEstablishmentScenarios()
+        + sessionIdentifierScenarios()
+        + http3ControlScenarios()
+        + headerScenarios()
+        + qpackScenarios()
+        + datagramScenarios()
+        + streamScenarios()
+        + streamResetScenarios()
+        + closeAndDrainScenarios()
+        + flowControlScenarios()
+        + flowControlLimitScenarios()
+        + errorsAndShutdownScenarios()
+        + interopMatrixScenarios()
+        + securityScenarios()
+        + releaseScenarios()
+}
+
+private func smokeScenarios() -> [CLIConformanceScenario] {
     [
         scenario("Smoke", "demo", "async client/server API connect, datagram, and close") {
             try await runClientServerAPIDemo()
@@ -17,6 +36,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
             let failures = results.filter { !$0.passed }
             try require(failures.isEmpty, "library smoke failures: \(failures)")
         },
+    ]
+}
+
+private func sessionEstablishmentScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Session Establishment", "session-accept", "extended CONNECT accepts and selects a protocol") {
             var pair = try makeReadyPair()
             let request = try WebTransportSessionRequest(
@@ -65,6 +89,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
             )
             try require(protocolDecision.session.state == .rejected(status: 400), "protocol mismatch rejected with 400")
         },
+    ]
+}
+
+private func sessionIdentifierScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Session Establishment", "session-invalid-id", "invalid WebTransport session IDs map to H3_ID_ERROR paths") {
             try expectThrows { _ = try WebTransportSessionID.fromRequestStreamID(1) }
             try expectThrows { _ = try WebTransportSessionID.fromRequestStreamID(2) }
@@ -72,7 +101,12 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
             try expectThrows {
                 _ = try WebTransportStreamSignaling.parsePrefix(prefix)
             }
-        },
+        }
+    ]
+}
+
+private func http3ControlScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("HTTP/3 Control", "settings-required", "HTTP/3 WebTransport settings requirements are enforced") {
             let constants = WebTransportHTTP3DraftConstants.current
             try HTTP3Settings.webTransportDraft16Defaults.validateWebTransportDraft16Requirements(peerRole: .server)
@@ -105,6 +139,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
                 try current.validateWebTransportZeroRTTCompatibility(remembered: remembered)
             }
         },
+    ]
+}
+
+private func headerScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Headers and QPACK", "protocol-structured-fields", "WT protocol negotiation uses Structured Fields strings and lists") {
             let encoded = try WebTransportProtocolNegotiation.encodeList(["chat.v1", "demo-v2"])
             try require(try WebTransportProtocolNegotiation.decodeList(encoded) == ["chat.v1", "demo-v2"], "structured list round trip")
@@ -130,6 +169,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
             ])
             try WebTransportHTTP3Headers.validateSuccessfulResponse(try QPACK.decodeHeadersFrame(response))
         },
+    ]
+}
+
+private func qpackScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Headers and QPACK", "qpack-static-literal-huffman", "QPACK static, literal, and Huffman field sections round-trip") {
             let fields = try [
                 HTTPFieldLine(name: ":status", value: "200"),
@@ -166,6 +210,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try QPACK.decodeFieldSection(data, limits: QPACKDecoderLimits(maxFieldSectionBytes: 512, maxFieldLineBytes: 4, maxFieldLineCount: 4))
             }
         },
+    ]
+}
+
+private func datagramScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Datagrams", "datagram-round-trip", "session datagrams route by quarter stream ID and preserve payload") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
@@ -208,6 +257,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
                 _ = try pair.client.makeDatagramFrame(sessionID: sessionID, payload: Data("late".utf8))
             }
         },
+    ]
+}
+
+private func streamScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Streams", "stream-bidi-uni-round-trip", "bidirectional and unidirectional stream prefixes register by session") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
@@ -228,6 +282,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(pair.server.popStreamPayload(streamID: 4) == Data("early".utf8), "early payload promoted")
             try require(sessionID.rawValue == 0, "session ID expected")
         },
+    ]
+}
+
+private func streamResetScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Streams", "stream-buffer-overflow-reset", "excess buffered stream emits WT_BUFFERED_STREAM_REJECTED reset action") {
             var pair = try makeReadyPair(maxBufferedStreamsPerSession: 0)
             let early = try WebTransportStreamSignaling.serializePrefix(form: .bidirectional, sessionID: 0)
@@ -262,6 +321,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
                         applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
                     ), "STOP_SENDING mapped")
         },
+    ]
+}
+
+private func closeAndDrainScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Close and Drain", "close-drain", "WT_DRAIN_SESSION and WT_CLOSE_SESSION drive state and cleanup") {
             var pair = try makeReadyPair()
             let sessionID = try establishDefaultSession(pair: &pair)
@@ -305,6 +369,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
                         finalSize: 0
                     ), "late CONNECT data reset")
         },
+    ]
+}
+
+private func flowControlScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Flow Control", "flow-disabled-multi-session", "disabled WebTransport flow control rejects simultaneous sessions") {
             var pair = try makeReadyPair()
             _ = try establishDefaultSession(pair: &pair, streamID: 0)
@@ -329,6 +398,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(pair.client.flowState(for: sessionID)?.maxStreamsBidi == 0, "explicit zero preserved")
             try expectThrows { _ = try pair.client.openBidirectionalStream(streamID: 4, sessionID: sessionID) }
         },
+    ]
+}
+
+private func flowControlLimitScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Flow Control", "flow-monotonic", "WT_MAX_DATA and WT_MAX_STREAMS updates are monotonic") {
             var state = WebTransportFlowControlState(maxData: 4, maxStreamsBidi: 1, maxStreamsUni: 1)
             try state.apply(.maxData(limit: 8))
@@ -359,6 +433,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
                         message: "WebTransport flow-control violation"
                     ), "receive-side violation closed session")
         },
+    ]
+}
+
+private func errorsAndShutdownScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Errors and Shutdown", "error-mapping", "WebTransport app error mapping is reversible and rejects reserved/out-of-range codes") {
             let code = WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x1234)
             try require(try WebTransportDraft16ErrorMapper.applicationErrorCode(forHTTPErrorCode: code) == 0x1234, "app error mapping reversible")
@@ -395,6 +474,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
             try require(pair.server.manager.sessionsByID[first]?.state == .closed(applicationErrorCode: 1, message: "done"), "first closed")
             try require(pair.server.manager.sessionsByID[second]?.state == .accepted, "second remains accepted")
         },
+    ]
+}
+
+private func interopMatrixScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Interop Matrices", "interop-connect-matrix", "CONNECT interop accepts valid peers and rejects malformed or policy-invalid peers") {
             try runConnectInteropMatrix()
         },
@@ -410,6 +494,11 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
         scenario("Interop Matrices", "interop-malformed-flow-matrix", "malformed input and flow-control interop close or reject with deterministic errors") {
             try runMalformedFlowInteropMatrix()
         },
+    ]
+}
+
+private func securityScenarios() -> [CLIConformanceScenario] {
+    [
         scenario("Security", "security-prompt-free-negatives", "wrong ALPN, bad origin, bad settings, and trust failure are deterministic") {
             try expectThrows { try WebTransportALPNPolicy.validateNegotiatedProtocol("h2") }
             var pair = try makeReadyPair()
@@ -426,7 +515,12 @@ internal func scenarioCatalog() -> [CLIConformanceScenario] {
             let wrongPin = Data(repeating: 0xaa, count: TLS13KeySchedule.sha256Length)
             let policy = try TLSPinnedCertificateTrustPolicy(allowedLeafCertificateSHA256Fingerprints: [wrongPin])
             try expectThrows { try policy.evaluate(certificateChainDER: [Data("not a certificate".utf8)]) }
-        },
+        }
+    ]
+}
+
+private func releaseScenarios() -> [CLIConformanceScenario] {
+    [
         scenario(
             "Release",
             "release-products",

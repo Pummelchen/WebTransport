@@ -24,8 +24,8 @@ wt_status_t wt_tls13_transcript_init(wt_tls13_transcript_t *transcript) {
   return wt_sha256_init(&transcript->hash);
 }
 
-wt_status_t wt_tls13_transcript_append(wt_tls13_transcript_t *transcript,
-                                       const uint8_t *message, size_t len) {
+wt_status_t wt_tls13_transcript_append(wt_tls13_transcript_t *transcript, const uint8_t *message,
+                                       size_t len) {
   size_t declared;
   wt_status_t status;
 
@@ -33,8 +33,7 @@ wt_status_t wt_tls13_transcript_append(wt_tls13_transcript_t *transcript,
   if (message == NULL) return WT_ERR_INVALID_ARGUMENT;
   /* HandshakeType (1) plus a three-octet length (RFC 8446 section 4). */
   if (len < 4U) return WT_ERR_TRUNCATED;
-  declared = ((size_t)message[1] << 16) | ((size_t)message[2] << 8) |
-             (size_t)message[3];
+  declared = ((size_t)message[1] << 16) | ((size_t)message[2] << 8) | (size_t)message[3];
   if (declared != len - 4U) return WT_ERR_PROTOCOL;
   status = wt_sha256_update(&transcript->hash, message, len);
   if (status != WT_OK) return status;
@@ -74,16 +73,15 @@ wt_status_t wt_tls13_early_secret(const uint8_t *psk, size_t psk_len,
    * therefore a different Early Secret, and RFC 8448's trace is what says which of
    * the two the schedule uses. */
   if (psk_len == 0U) {
-    return wt_hkdf_extract_sha256(wt_tls13_zeros, sizeof(wt_tls13_zeros),
-                                  wt_tls13_zeros, sizeof(wt_tls13_zeros), out);
+    return wt_hkdf_extract_sha256(wt_tls13_zeros, sizeof(wt_tls13_zeros), wt_tls13_zeros,
+                                  sizeof(wt_tls13_zeros), out);
   }
-  return wt_hkdf_extract_sha256(wt_tls13_zeros, sizeof(wt_tls13_zeros), psk, psk_len,
-                                out);
+  return wt_hkdf_extract_sha256(wt_tls13_zeros, sizeof(wt_tls13_zeros), psk, psk_len, out);
 }
 
-wt_status_t wt_tls13_handshake_secret(
-    const uint8_t early_secret[WT_TLS13_SECRET_LEN], const uint8_t *ecdhe,
-    size_t ecdhe_len, uint8_t out[WT_TLS13_SECRET_LEN]) {
+wt_status_t wt_tls13_handshake_secret(const uint8_t early_secret[WT_TLS13_SECRET_LEN],
+                                      const uint8_t *ecdhe, size_t ecdhe_len,
+                                      uint8_t out[WT_TLS13_SECRET_LEN]) {
   uint8_t derived[WT_TLS13_SECRET_LEN];
   wt_status_t status;
   size_t index;
@@ -106,33 +104,30 @@ wt_status_t wt_tls13_handshake_secret(
   return status;
 }
 
-wt_status_t wt_tls13_master_secret(
-    const uint8_t handshake_secret[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS13_SECRET_LEN]) {
+wt_status_t wt_tls13_master_secret(const uint8_t handshake_secret[WT_TLS13_SECRET_LEN],
+                                   uint8_t out[WT_TLS13_SECRET_LEN]) {
   uint8_t derived[WT_TLS13_SECRET_LEN];
   wt_status_t status;
 
   if (handshake_secret == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
   status = wt_tls13_derived(handshake_secret, derived);
   if (status != WT_OK) return status;
-  status = wt_hkdf_extract_sha256(derived, sizeof(derived), wt_tls13_zeros,
-                                  sizeof(wt_tls13_zeros), out);
+  status =
+      wt_hkdf_extract_sha256(derived, sizeof(derived), wt_tls13_zeros, sizeof(wt_tls13_zeros), out);
   wt_secure_zero(derived, sizeof(derived));
   return status;
 }
 
 /* ------------------------------------------------------------------ derivations */
 
-wt_status_t wt_tls13_derive_secret(const uint8_t secret[WT_TLS13_SECRET_LEN],
-                                   const char *label,
+wt_status_t wt_tls13_derive_secret(const uint8_t secret[WT_TLS13_SECRET_LEN], const char *label,
                                    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
                                    uint8_t out[WT_TLS13_SECRET_LEN]) {
   if (secret == NULL || label == NULL || transcript_hash == NULL || out == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
-  return wt_hkdf_expand_label_sha256(secret, WT_TLS13_SECRET_LEN, label,
-                                     transcript_hash, WT_TLS13_SECRET_LEN, out,
-                                     WT_TLS13_SECRET_LEN);
+  return wt_hkdf_expand_label_sha256(secret, WT_TLS13_SECRET_LEN, label, transcript_hash,
+                                     WT_TLS13_SECRET_LEN, out, WT_TLS13_SECRET_LEN);
 }
 
 wt_status_t wt_tls13_derived(const uint8_t secret[WT_TLS13_SECRET_LEN],
@@ -151,18 +146,15 @@ wt_status_t wt_tls13_derived(const uint8_t secret[WT_TLS13_SECRET_LEN],
   return status;
 }
 
-wt_status_t wt_tls13_handshake_traffic_secrets(
-    const uint8_t handshake_secret[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t client_out[WT_TLS13_SECRET_LEN],
-    uint8_t server_out[WT_TLS13_SECRET_LEN]) {
+wt_status_t wt_tls13_handshake_traffic_secrets(const uint8_t handshake_secret[WT_TLS13_SECRET_LEN],
+                                               const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                               uint8_t client_out[WT_TLS13_SECRET_LEN],
+                                               uint8_t server_out[WT_TLS13_SECRET_LEN]) {
   wt_status_t status;
   if (client_out == NULL || server_out == NULL) return WT_ERR_INVALID_ARGUMENT;
-  status = wt_tls13_derive_secret(handshake_secret, "c hs traffic", transcript_hash,
-                                  client_out);
+  status = wt_tls13_derive_secret(handshake_secret, "c hs traffic", transcript_hash, client_out);
   if (status != WT_OK) return status;
-  status = wt_tls13_derive_secret(handshake_secret, "s hs traffic", transcript_hash,
-                                  server_out);
+  status = wt_tls13_derive_secret(handshake_secret, "s hs traffic", transcript_hash, server_out);
   if (status != WT_OK) {
     /* A half-derived pair would be a connection whose two directions disagree about
      * which secret they came from. */
@@ -172,18 +164,15 @@ wt_status_t wt_tls13_handshake_traffic_secrets(
   return WT_OK;
 }
 
-wt_status_t wt_tls13_application_traffic_secrets(
-    const uint8_t master_secret[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t client_out[WT_TLS13_SECRET_LEN],
-    uint8_t server_out[WT_TLS13_SECRET_LEN]) {
+wt_status_t wt_tls13_application_traffic_secrets(const uint8_t master_secret[WT_TLS13_SECRET_LEN],
+                                                 const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                                 uint8_t client_out[WT_TLS13_SECRET_LEN],
+                                                 uint8_t server_out[WT_TLS13_SECRET_LEN]) {
   wt_status_t status;
   if (client_out == NULL || server_out == NULL) return WT_ERR_INVALID_ARGUMENT;
-  status = wt_tls13_derive_secret(master_secret, "c ap traffic", transcript_hash,
-                                  client_out);
+  status = wt_tls13_derive_secret(master_secret, "c ap traffic", transcript_hash, client_out);
   if (status != WT_OK) return status;
-  status = wt_tls13_derive_secret(master_secret, "s ap traffic", transcript_hash,
-                                  server_out);
+  status = wt_tls13_derive_secret(master_secret, "s ap traffic", transcript_hash, server_out);
   if (status != WT_OK) {
     wt_secure_zero(client_out, WT_TLS13_SECRET_LEN);
     return status;
@@ -191,40 +180,37 @@ wt_status_t wt_tls13_application_traffic_secrets(
   return WT_OK;
 }
 
-wt_status_t wt_tls13_exporter_master_secret(
-    const uint8_t master_secret[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS13_SECRET_LEN]) {
+wt_status_t wt_tls13_exporter_master_secret(const uint8_t master_secret[WT_TLS13_SECRET_LEN],
+                                            const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                            uint8_t out[WT_TLS13_SECRET_LEN]) {
   return wt_tls13_derive_secret(master_secret, "exp master", transcript_hash, out);
 }
 
-wt_status_t wt_tls13_resumption_master_secret(
-    const uint8_t master_secret[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS13_SECRET_LEN]) {
+wt_status_t wt_tls13_resumption_master_secret(const uint8_t master_secret[WT_TLS13_SECRET_LEN],
+                                              const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                              uint8_t out[WT_TLS13_SECRET_LEN]) {
   return wt_tls13_derive_secret(master_secret, "res master", transcript_hash, out);
 }
 
 wt_status_t wt_tls13_next_traffic_secret(const uint8_t secret[WT_TLS13_SECRET_LEN],
                                          uint8_t out[WT_TLS13_SECRET_LEN]) {
   if (secret == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
-  return wt_hkdf_expand_label_sha256(secret, WT_TLS13_SECRET_LEN, "traffic upd",
-                                     NULL, 0U, out, WT_TLS13_SECRET_LEN);
+  return wt_hkdf_expand_label_sha256(secret, WT_TLS13_SECRET_LEN, "traffic upd", NULL, 0U, out,
+                                     WT_TLS13_SECRET_LEN);
 }
 
 wt_status_t wt_tls13_traffic_keys(const uint8_t secret[WT_TLS13_SECRET_LEN],
-                                  uint8_t key[WT_TLS13_KEY_LEN],
-                                  uint8_t iv[WT_TLS13_IV_LEN]) {
+                                  uint8_t key[WT_TLS13_KEY_LEN], uint8_t iv[WT_TLS13_IV_LEN]) {
   wt_status_t status;
 
   if (secret == NULL || key == NULL || iv == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
-  status = wt_hkdf_expand_label_sha256(secret, WT_TLS13_SECRET_LEN, "key", NULL, 0U,
-                                       key, WT_TLS13_KEY_LEN);
+  status = wt_hkdf_expand_label_sha256(secret, WT_TLS13_SECRET_LEN, "key", NULL, 0U, key,
+                                       WT_TLS13_KEY_LEN);
   if (status != WT_OK) return status;
-  status = wt_hkdf_expand_label_sha256(secret, WT_TLS13_SECRET_LEN, "iv", NULL, 0U,
-                                       iv, WT_TLS13_IV_LEN);
+  status =
+      wt_hkdf_expand_label_sha256(secret, WT_TLS13_SECRET_LEN, "iv", NULL, 0U, iv, WT_TLS13_IV_LEN);
   if (status != WT_OK) {
     wt_secure_zero(key, WT_TLS13_KEY_LEN);
     return status;
@@ -237,14 +223,13 @@ wt_status_t wt_tls13_traffic_keys(const uint8_t secret[WT_TLS13_SECRET_LEN],
 wt_status_t wt_tls13_finished_key(const uint8_t base_key[WT_TLS13_SECRET_LEN],
                                   uint8_t out[WT_TLS13_FINISHED_LEN]) {
   if (base_key == NULL || out == NULL) return WT_ERR_INVALID_ARGUMENT;
-  return wt_hkdf_expand_label_sha256(base_key, WT_TLS13_SECRET_LEN, "finished", NULL,
-                                     0U, out, WT_TLS13_FINISHED_LEN);
+  return wt_hkdf_expand_label_sha256(base_key, WT_TLS13_SECRET_LEN, "finished", NULL, 0U, out,
+                                     WT_TLS13_FINISHED_LEN);
 }
 
-wt_status_t wt_tls13_finished_verify_data(
-    const uint8_t base_key[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    uint8_t out[WT_TLS13_FINISHED_LEN]) {
+wt_status_t wt_tls13_finished_verify_data(const uint8_t base_key[WT_TLS13_SECRET_LEN],
+                                          const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                          uint8_t out[WT_TLS13_FINISHED_LEN]) {
   uint8_t key[WT_TLS13_FINISHED_LEN];
   wt_status_t status;
 
@@ -256,10 +241,9 @@ wt_status_t wt_tls13_finished_verify_data(
   return status;
 }
 
-wt_status_t wt_tls13_finished_check(
-    const uint8_t base_key[WT_TLS13_SECRET_LEN],
-    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
-    const uint8_t *verify_data, size_t verify_data_len) {
+wt_status_t wt_tls13_finished_check(const uint8_t base_key[WT_TLS13_SECRET_LEN],
+                                    const uint8_t transcript_hash[WT_TLS13_SECRET_LEN],
+                                    const uint8_t *verify_data, size_t verify_data_len) {
   uint8_t expected[WT_TLS13_FINISHED_LEN];
   wt_status_t status;
   int equal;

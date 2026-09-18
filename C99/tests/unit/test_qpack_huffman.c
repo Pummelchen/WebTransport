@@ -27,11 +27,10 @@ static void test_the_rfc_example(void) {
 
   /* The output buffer is the caller's bound, and the decoded size is the peer's to
    * choose: one byte short is a limit, not a partial decode. */
-  WT_EXPECT_STATUS("a buffer one byte short is refused", WT_ERR_LIMIT,
-                   wt_qpack_huffman_decode(WT_RFC7541_HUFFMAN_EXAMPLE,
-                                           WT_RFC7541_HUFFMAN_EXAMPLE_LENGTH, decoded,
-                                           WT_RFC7541_HUFFMAN_EXAMPLE_PLAINTEXT_LENGTH - 1U,
-                                           &length));
+  WT_EXPECT_STATUS(
+      "a buffer one byte short is refused", WT_ERR_LIMIT,
+      wt_qpack_huffman_decode(WT_RFC7541_HUFFMAN_EXAMPLE, WT_RFC7541_HUFFMAN_EXAMPLE_LENGTH,
+                              decoded, WT_RFC7541_HUFFMAN_EXAMPLE_PLAINTEXT_LENGTH - 1U, &length));
   WT_EXPECT_U64("and nothing is reported decoded", 0U, (uint64_t)length);
 }
 

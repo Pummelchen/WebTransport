@@ -16,9 +16,8 @@ static uint64_t add_entries(wt_qpack_dynamic_table_t *table, size_t count) {
   uint64_t index = 0U;
   size_t i;
   for (i = 0U; i < count; i++) {
-    WT_EXPECT_OK("an entry inserts",
-                 wt_qpack_dynamic_insert(table, (const uint8_t *)"n", 1U, (const uint8_t *)"v", 1U,
-                                         &index));
+    WT_EXPECT_OK("an entry inserts", wt_qpack_dynamic_insert(table, (const uint8_t *)"n", 1U,
+                                                             (const uint8_t *)"v", 1U, &index));
   }
   return index + 1U;
 }
@@ -42,8 +41,7 @@ static void test_nothing_outstanding(void) {
   WT_EXPECT_U64("with a zero required count", 0U, prefix.required_insert_count);
   WT_EXPECT_U64("and a zero base", 0U, prefix.base);
   WT_EXPECT_U64("counting no outstanding section", 0U, (uint64_t)state.outstanding_count);
-  WT_EXPECT_U64("so nothing is held back", inserts,
-                wt_qpack_encoder_state_evictable_below(&state));
+  WT_EXPECT_U64("so nothing is held back", inserts, wt_qpack_encoder_state_evictable_below(&state));
 }
 
 static void test_outstanding_sections_bound_eviction(void) {
@@ -110,8 +108,7 @@ static void test_records_and_limits(void) {
 
   /* The same stream twice replaces its record rather than holding two: a stream
    * carries one field section at a time. */
-  WT_EXPECT_OK("a section begins",
-               wt_qpack_encoder_state_begin_section(&state, 12U, 1, &prefix));
+  WT_EXPECT_OK("a section begins", wt_qpack_encoder_state_begin_section(&state, 12U, 1, &prefix));
   WT_EXPECT_OK("and begins again", wt_qpack_encoder_state_begin_section(&state, 12U, 1, &prefix));
   WT_EXPECT_U64("leaving one record", 1U, (uint64_t)state.outstanding_count);
 

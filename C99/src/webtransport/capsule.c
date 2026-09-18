@@ -39,7 +39,8 @@ wt_status_t wt_webtransport_capsule_decode(wt_cursor_t *c, size_t max_length,
   return WT_OK;
 }
 
-wt_status_t wt_webtransport_capsule_encode(wt_writer_t *w, const wt_webtransport_capsule_t *capsule) {
+wt_status_t wt_webtransport_capsule_encode(wt_writer_t *w,
+                                           const wt_webtransport_capsule_t *capsule) {
   if (w == NULL || capsule == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (capsule->value == NULL && capsule->value_length != 0U) return WT_ERR_INVALID_ARGUMENT;
   if (capsule->type > WT_QUIC_VARINT_MAX) return WT_ERR_INVALID_ARGUMENT;
@@ -122,7 +123,8 @@ static int utf8_is_well_formed(const uint8_t *bytes, size_t length) {
 }
 
 wt_status_t wt_webtransport_close_session_parse(const wt_webtransport_capsule_t *capsule,
-                                                uint32_t *out_error_code, const uint8_t **out_reason,
+                                                uint32_t *out_error_code,
+                                                const uint8_t **out_reason,
                                                 size_t *out_reason_length,
                                                 wt_http3_error_t *out_error) {
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
@@ -198,7 +200,8 @@ static wt_status_t parse_one(wt_webtransport_capsule_t const *capsule, uint64_t 
 
 /* Two varints, exactly, in the order the draft fixes: the stream first, then the value. */
 static wt_status_t parse_two(const wt_webtransport_capsule_t *capsule, uint64_t expected_type,
-                             uint64_t *out_first, uint64_t *out_second, wt_http3_error_t *out_error) {
+                             uint64_t *out_first, uint64_t *out_second,
+                             wt_http3_error_t *out_error) {
   wt_cursor_t c;
 
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
@@ -260,8 +263,8 @@ static int stream_count_within_ceiling(uint64_t value) {
 /* One stream-count varint, with the ceiling applied after the value is read. The draft makes an over-limit value
  * a SESSION error rather than a malformed capsule, so it reports the registered WT_FLOW_CONTROL_ERROR -- the
  * caller that owns the session closes with it -- rather than H3_MESSAGE_ERROR, which names the syntax. */
-static wt_status_t parse_stream_count(const wt_webtransport_capsule_t *capsule, uint64_t *out_maximum,
-                                      wt_http3_error_t *out_error) {
+static wt_status_t parse_stream_count(const wt_webtransport_capsule_t *capsule,
+                                      uint64_t *out_maximum, wt_http3_error_t *out_error) {
   wt_status_t status;
 
   if (capsule == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -302,12 +305,12 @@ wt_status_t wt_webtransport_stream_data_blocked_write(wt_writer_t *w, uint64_t s
 }
 
 wt_status_t wt_webtransport_streams_blocked_write(wt_writer_t *w, int bidirectional,
-                                                 uint64_t maximum) {
+                                                  uint64_t maximum) {
   /* Section 5.6.3 states the same ceiling for WT_STREAMS_BLOCKED as section 5.6.2 does for WT_MAX_STREAMS, and
    * the same reason applies: a peer's over-limit value is a flow-control error, so this writer refuses it. */
   if (!stream_count_within_ceiling(maximum)) return WT_ERR_LIMIT;
-  return write_one(w, bidirectional ? WT_CAPSULE_STREAMS_BLOCKED_BIDI : WT_CAPSULE_STREAMS_BLOCKED_UNI,
-                   maximum);
+  return write_one(
+      w, bidirectional ? WT_CAPSULE_STREAMS_BLOCKED_BIDI : WT_CAPSULE_STREAMS_BLOCKED_UNI, maximum);
 }
 
 wt_status_t wt_webtransport_max_data_parse(const wt_webtransport_capsule_t *capsule,
@@ -365,8 +368,8 @@ void wt_webtransport_flow_limits_init(wt_webtransport_flow_limits_t *limits) {
   limits->max_streams_uni_set = 0;
 }
 
-wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limits, uint64_t maximum,
-                                             uint64_t *out_error) {
+wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limits,
+                                             uint64_t maximum, uint64_t *out_error) {
   if (out_error != NULL) *out_error = 0U;
   if (limits == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (limits->max_data_set && maximum <= limits->max_data) {

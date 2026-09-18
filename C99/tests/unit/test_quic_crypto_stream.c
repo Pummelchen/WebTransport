@@ -59,7 +59,7 @@ static void test_in_order(void) {
 
   WT_EXPECT_OK("everything is consumed",
                wt_quic_crypto_recv_consume(&recv, sizeof(k_message) - 2U));
-  WT_EXPECT_U64("leaving the offset at the end", (uint64_t)sizeof(k_message), 
+  WT_EXPECT_U64("leaving the offset at the end", (uint64_t)sizeof(k_message),
                 wt_quic_crypto_recv_read_offset(&recv));
   WT_EXPECT_U64("and nothing held", 0U, (uint64_t)recv.length);
   WT_EXPECT_U64("or available", 0U, (uint64_t)wt_quic_crypto_recv_available(&recv, &data));
@@ -77,8 +77,7 @@ static void test_out_of_order(void) {
   WT_EXPECT_U64("delivering nothing", 0U, (uint64_t)wt_quic_crypto_recv_available(&recv, &data));
   WT_EXPECT_INT("and reporting a gap", 1, wt_quic_crypto_recv_has_gap(&recv));
   WT_EXPECT_U64("while holding what arrived", 11U, (uint64_t)recv.length);
-  WT_EXPECT_U64("with the consumer still at the start", 0U,
-                wt_quic_crypto_recv_read_offset(&recv));
+  WT_EXPECT_U64("with the consumer still at the start", 0U, wt_quic_crypto_recv_read_offset(&recv));
 
   WT_EXPECT_OK("the first half fills the hole",
                wt_quic_crypto_recv_insert(&recv, 0U, k_message, 6U));
@@ -101,7 +100,8 @@ static void test_out_of_order(void) {
   WT_EXPECT_OK("all of it is consumed", wt_quic_crypto_recv_consume(&recv, 11U));
   WT_EXPECT_OK("and the peer sends it again",
                wt_quic_crypto_recv_insert(&recv, 0U, k_message, 11U));
-  WT_EXPECT_U64("which delivers nothing", 0U, (uint64_t)wt_quic_crypto_recv_available(&recv, &data));
+  WT_EXPECT_U64("which delivers nothing", 0U,
+                (uint64_t)wt_quic_crypto_recv_available(&recv, &data));
   WT_EXPECT_U64("and holds nothing", 0U, (uint64_t)recv.length);
 }
 
@@ -116,15 +116,16 @@ static void test_the_bound(void) {
   wt_quic_crypto_recv_init(&recv);
 
   /* A frame whose start is beyond the window. */
-  WT_EXPECT_STATUS("a frame past the window is a limit", WT_ERR_LIMIT,
-                   wt_quic_crypto_recv_insert(&recv, (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX, block, 1U));
+  WT_EXPECT_STATUS(
+      "a frame past the window is a limit", WT_ERR_LIMIT,
+      wt_quic_crypto_recv_insert(&recv, (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX, block, 1U));
   WT_EXPECT_U64("and nothing is held", 0U, (uint64_t)recv.length);
   WT_EXPECT_U64("nor delivered", 0U, (uint64_t)wt_quic_crypto_recv_available(&recv, &data));
 
   /* A frame that starts inside the window and runs past its end. */
-  WT_EXPECT_STATUS("a frame that runs past the window is a limit", WT_ERR_LIMIT,
-                   wt_quic_crypto_recv_insert(&recv, (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX - 16U, block,
-                                              32U));
+  WT_EXPECT_STATUS(
+      "a frame that runs past the window is a limit", WT_ERR_LIMIT,
+      wt_quic_crypto_recv_insert(&recv, (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX - 16U, block, 32U));
   WT_EXPECT_U64("and still nothing is held", 0U, (uint64_t)recv.length);
 
   /* A frame that ends exactly at the end fits. */
@@ -137,13 +138,13 @@ static void test_the_bound(void) {
   /* The window slides, which is what makes the bound workable: after the consumer takes the bytes, the
    * peer may send more at the offset it reached. */
   WT_EXPECT_OK("all of it is consumed", wt_quic_crypto_recv_consume(&recv, sizeof(block)));
-  WT_EXPECT_OK("and the peer sends the next block",
-               wt_quic_crypto_recv_insert(&recv, (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX, block,
-                                          sizeof(block)));
+  WT_EXPECT_OK(
+      "and the peer sends the next block",
+      wt_quic_crypto_recv_insert(&recv, (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX, block, sizeof(block)));
   WT_EXPECT_U64("which is delivered", (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX,
                 (uint64_t)wt_quic_crypto_recv_available(&recv, &data));
-  WT_EXPECT_U64("from the offset the consumer reached",
-                (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX, wt_quic_crypto_recv_read_offset(&recv));
+  WT_EXPECT_U64("from the offset the consumer reached", (uint64_t)WT_QUIC_CRYPTO_BUFFER_MAX,
+                wt_quic_crypto_recv_read_offset(&recv));
 
   /* The offset itself is bounded by the protocol: RFC 9000 section 19.6 makes a CRYPTO offset plus its
    * length no more than 2^62-1. */
@@ -176,8 +177,7 @@ static void test_consume_errors(void) {
   WT_EXPECT_OK("consuming nothing is fine", wt_quic_crypto_recv_consume(&recv, 0U));
   WT_EXPECT_STATUS("and a null stream is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_quic_crypto_recv_consume(NULL, 1U));
-  WT_EXPECT_U64("with quiet queries on a null stream", 0U,
-                wt_quic_crypto_recv_read_offset(NULL));
+  WT_EXPECT_U64("with quiet queries on a null stream", 0U, wt_quic_crypto_recv_read_offset(NULL));
   WT_EXPECT_INT("that report no gap", 0, wt_quic_crypto_recv_has_gap(NULL));
 }
 
@@ -218,8 +218,8 @@ static void test_send(void) {
                    wt_quic_crypto_send_next(&send, 100U, &offset, &data, &length));
 
   /* A loss of the first packet: its bytes are still held, which is the point of keeping them. */
-  WT_EXPECT_OK("the first range is handed out again", wt_quic_crypto_send_retransmit(&send, 0U, 4U,
-                                                                                     &data));
+  WT_EXPECT_OK("the first range is handed out again",
+               wt_quic_crypto_send_retransmit(&send, 0U, 4U, &data));
   WT_EXPECT_BYTES("with the bytes it carried", k_message, data, 4U);
   WT_EXPECT_OK("and so is the second", wt_quic_crypto_send_retransmit(&send, 4U, 7U, &data));
   WT_EXPECT_BYTES("with its bytes", k_message + 4, data, 7U);
@@ -237,8 +237,7 @@ static void test_send(void) {
 
   /* The bound, and the arguments. */
   wt_quic_crypto_send_init(&send);
-  WT_EXPECT_OK("a full buffer is accepted",
-               wt_quic_crypto_send_append(&send, big, sizeof(big)));
+  WT_EXPECT_OK("a full buffer is accepted", wt_quic_crypto_send_append(&send, big, sizeof(big)));
   WT_EXPECT_STATUS("and one more byte is refused", WT_ERR_LIMIT,
                    wt_quic_crypto_send_append(&send, k_bang, 1U));
   WT_EXPECT_STATUS("a null payload with a length is refused", WT_ERR_INVALID_ARGUMENT,

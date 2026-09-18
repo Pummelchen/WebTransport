@@ -22,11 +22,11 @@
  * OVERLAPPED for. `mswsock.h`'s own `LPFN_WSARECVMSG` is the five-parameter one, which is why the library now
  * uses that typedef instead of a copy.
  */
+#include <mswsock.h>
 #include <stdio.h>
 #include <string.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <mswsock.h>
 
 /* The documented prototype: exactly mingw's own `LPFN_WSARECVMSG`. */
 typedef INT(WINAPI *recvmsg5_fn)(SOCKET, LPWSAMSG, LPDWORD, LPWSAOVERLAPPED,
@@ -62,8 +62,8 @@ static void call5(const char *label, recvmsg5_fn fn, int peek, int capacity) {
   msg.dwFlags = peek ? MSG_PEEK : 0;
   WSASetLastError(0);
   rc = fn(a, &msg, &received, NULL, NULL);
-  printf("%s: rc=%d err=%d received=%lu dwFlags=0x%lx (MSG_TRUNC=%d) namelen=%d family=%d\n", label, rc,
-         WSAGetLastError(), (unsigned long)received, (unsigned long)msg.dwFlags,
+  printf("%s: rc=%d err=%d received=%lu dwFlags=0x%lx (MSG_TRUNC=%d) namelen=%d family=%d\n", label,
+         rc, WSAGetLastError(), (unsigned long)received, (unsigned long)msg.dwFlags,
          (msg.dwFlags & MSG_TRUNC) != 0, (int)msg.namelen, from.ss_family);
 }
 
@@ -86,9 +86,9 @@ static void call6(const char *label, recvmsg6_fn fn, int peek, int capacity) {
   msg.dwBufferCount = 1;
   WSASetLastError(0);
   rc = fn(a, &msg, &received, &flags, NULL, NULL);
-  printf("%s: rc=%d err=%d received=%lu outflags=0x%lx msg.dwFlags=0x%lx namelen=%d family=%d\n", label, rc,
-         WSAGetLastError(), (unsigned long)received, (unsigned long)flags, (unsigned long)msg.dwFlags,
-         (int)msg.namelen, from.ss_family);
+  printf("%s: rc=%d err=%d received=%lu outflags=0x%lx msg.dwFlags=0x%lx namelen=%d family=%d\n",
+         label, rc, WSAGetLastError(), (unsigned long)received, (unsigned long)flags,
+         (unsigned long)msg.dwFlags, (int)msg.namelen, from.ss_family);
 }
 
 int main(void) {
@@ -116,8 +116,8 @@ int main(void) {
     return 1;
   }
 
-  if (WSAIoctl(a, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, (DWORD)sizeof(guid), &five, (DWORD)sizeof(five),
-               &bytes, NULL, NULL) == SOCKET_ERROR) {
+  if (WSAIoctl(a, SIO_GET_EXTENSION_FUNCTION_POINTER, &guid, (DWORD)sizeof(guid), &five,
+               (DWORD)sizeof(five), &bytes, NULL, NULL) == SOCKET_ERROR) {
     printf("ioctl: FAILED err=%d\n", WSAGetLastError());
     return 1;
   }

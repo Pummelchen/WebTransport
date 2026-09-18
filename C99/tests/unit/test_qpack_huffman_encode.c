@@ -59,14 +59,15 @@ static void test_packing_and_limits(void) {
   size_t size = 0U;
   size_t decoded_length = 0U;
 
-  WT_EXPECT_OK("a word encodes", wt_qpack_huffman_encode(word, sizeof(word), encoded,
-                                                         sizeof(encoded), &length));
-  WT_EXPECT_OK("and decodes", wt_qpack_huffman_decode(encoded, length, decoded, sizeof(decoded),
-                                                      &decoded_length));
+  WT_EXPECT_OK("a word encodes",
+               wt_qpack_huffman_encode(word, sizeof(word), encoded, sizeof(encoded), &length));
+  WT_EXPECT_OK("and decodes",
+               wt_qpack_huffman_decode(encoded, length, decoded, sizeof(decoded), &decoded_length));
   WT_EXPECT_U64("to the same length", (uint64_t)sizeof(word), (uint64_t)decoded_length);
   WT_EXPECT_BYTES("and the same bytes", word, decoded, decoded_length);
 
-  WT_EXPECT_OK("its encoded size is known", wt_qpack_huffman_encoded_size(word, sizeof(word), &size));
+  WT_EXPECT_OK("its encoded size is known",
+               wt_qpack_huffman_encoded_size(word, sizeof(word), &size));
   WT_EXPECT_U64("and matches", (uint64_t)length, (uint64_t)size);
 
   /* A buffer one byte short is a limit, not a partial string: a half-written
@@ -79,8 +80,7 @@ static void test_packing_and_limits(void) {
   WT_EXPECT_OK("an empty string encodes",
                wt_qpack_huffman_encode(NULL, 0U, encoded, sizeof(encoded), &length));
   WT_EXPECT_U64("to nothing", 0U, (uint64_t)length);
-  WT_EXPECT_OK("with a size of zero",
-               wt_qpack_huffman_encoded_size(NULL, 0U, &size));
+  WT_EXPECT_OK("with a size of zero", wt_qpack_huffman_encoded_size(NULL, 0U, &size));
   WT_EXPECT_U64("as promised", 0U, (uint64_t)size);
 
   WT_EXPECT_STATUS("a null output length is a caller error", WT_ERR_INVALID_ARGUMENT,

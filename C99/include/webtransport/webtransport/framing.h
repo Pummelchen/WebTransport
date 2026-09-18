@@ -37,7 +37,14 @@ extern "C" {
  * section 2.1's numbering. */
 int wt_webtransport_is_session_stream_id(uint64_t stream_id);
 
-/* The session ID a quarter stream ID names, and the reverse. */
+/* The session ID a quarter stream ID names, and the reverse.
+ *
+ * `wt_webtransport_session_id_from_quarter` multiplies by four and has no way to report overflow
+ * -- it returns a plain `uint64_t`. A quarter above `UINT64_MAX / 4` therefore wraps, and the
+ * wrapped value can name a real session: a caller that fed 2^62 got session 0 (AUD-0035). Every
+ * value that comes off the wire is safe without the caller doing anything, because a QUIC varint
+ * cannot exceed 2^62 - 1, which is exactly `UINT64_MAX / 4`; a value from anywhere else has to be
+ * checked by the caller first. */
 uint64_t wt_webtransport_session_id_from_quarter(uint64_t quarter_stream_id);
 uint64_t wt_webtransport_quarter_stream_id(uint64_t session_id);
 

@@ -63,7 +63,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
 
     var datagramPayloadBytesBySessionID: [WebTransportSessionID: Int]
     var closedStreamSessionIDsByStreamID: [UInt64: WebTransportSessionID]
-    var requestStreamIDsClosedByReceivedCloseCapsule: Set<UInt64>
+    var closedRequestStreamIDs: Set<UInt64>
     /// Tombstone insertion order, oldest first, so eviction is deterministic.
     var closedSessionOrder: [WebTransportSessionID]
     var closedStreamOrder: [UInt64]
@@ -117,7 +117,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         self.maxRetainedClosedStreams = max(0, maxRetainedClosedStreams)
         self.datagramPayloadBytesBySessionID = [:]
         self.closedStreamSessionIDsByStreamID = [:]
-        self.requestStreamIDsClosedByReceivedCloseCapsule = []
+        self.closedRequestStreamIDs = []
         self.closedSessionOrder = []
         self.closedStreamOrder = []
         self.closedStreamHead = 0

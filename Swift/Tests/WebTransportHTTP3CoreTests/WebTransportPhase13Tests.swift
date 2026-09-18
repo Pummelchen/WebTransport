@@ -450,7 +450,14 @@ func webTransportDraft16ErrorMapperCoversRequiredOutcomes() throws {
 @Test
 func webTransportSecurityNegativesAreDeterministicAndPromptFree() throws {
     let constants = WebTransportHTTP3DraftConstants.current
+    try verifyALPNNegatives(constants: constants)
+    try verifyBadOriginIsRejected(constants: constants)
+    try verifyWrongSettingsAreRejected(constants: constants)
+}
 
+/// A negotiated and an offered ALPN that are not WebTransport are both refused with the
+/// draft's ALPN error.
+private func verifyALPNNegatives(constants: WebTransportHTTP3DraftConstants) throws {
     do {
         try WebTransportALPNPolicy.validateNegotiatedProtocol("hq-interop")
         Issue.record("wrong negotiated ALPN should be rejected")
@@ -476,7 +483,10 @@ func webTransportSecurityNegativesAreDeterministicAndPromptFree() throws {
         #expect(error.code == constants.wtALPNError)
     }
     try WebTransportALPNPolicy.validateOfferedProtocols(["h3"])
+}
 
+/// An origin outside the policy is rejected with 403 and the draft's requirements error.
+private func verifyBadOriginIsRejected(constants: WebTransportHTTP3DraftConstants) throws {
     var pair = try WebTransportPhase13Support.makeReadyManagers()
     let badOriginFrame = try pair.client.makeClientSessionRequest(
         streamID: 0,
@@ -495,7 +505,10 @@ func webTransportSecurityNegativesAreDeterministicAndPromptFree() throws {
     #expect(originDecision.rejectionError?.kind == .requirementsNotMet)
     #expect(originDecision.rejectionError?.code == constants.wtRequirementsNotMetError)
     #expect(pair.server.session(forRequestStreamID: 0)?.state == .rejected(status: 403))
+}
 
+/// SETTINGS_WT_ENABLE_WEBTRANSPORT = 0 is refused, and the connection keeps nothing from it.
+private func verifyWrongSettingsAreRejected(constants: WebTransportHTTP3DraftConstants) throws {
     var wrongSettings = HTTP3Settings.webTransportDraft16Defaults
     try wrongSettings.set(0, for: constants.settingsWTEnabled)
     let wrongSettingsControl = try HTTP3StreamTypeParser.encodePrefix(

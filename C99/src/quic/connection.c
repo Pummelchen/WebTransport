@@ -84,8 +84,8 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   memset(&limits, 0, sizeof(limits));
   limits.max_idle_timeout =
       microseconds_of_milliseconds(parameter_or(&params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 0U));
-  limits.max_udp_payload_size = parameter_or(&params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE,
-                                            WT_QUIC_DEFAULT_MAX_UDP_PAYLOAD_SIZE);
+  limits.max_udp_payload_size =
+      parameter_or(&params, WT_QUIC_TP_MAX_UDP_PAYLOAD_SIZE, WT_QUIC_DEFAULT_MAX_UDP_PAYLOAD_SIZE);
   limits.initial_max_data = parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_DATA, 0U);
   limits.initial_max_stream_data_bidi_local =
       parameter_or(&params, WT_QUIC_TP_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, 0U);
@@ -105,16 +105,16 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   {
     const uint8_t *value = NULL;
     size_t value_length = 0U;
-    limits.reset_stream_at =
-        wt_quic_transport_parameters_get(&params, WT_QUIC_TP_RESET_STREAM_AT, &value, &value_length) == WT_OK
-            ? 1
-            : 0;
+    limits.reset_stream_at = wt_quic_transport_parameters_get(&params, WT_QUIC_TP_RESET_STREAM_AT,
+                                                              &value, &value_length) == WT_OK
+                                 ? 1
+                                 : 0;
   }
   limits.set = 1;
   connection->peer_limits = limits;
   connection->flow.peer_max_data = limits.initial_max_data;
 
-/* RFC 9000 section 7.2: after the ServerHello, a client addresses every packet to the SOURCE CONNECTION ID the
+  /* RFC 9000 section 7.2: after the ServerHello, a client addresses every packet to the SOURCE CONNECTION ID the
    * server chose, and a server addresses a client the same way.
    *
    * NOTHING DID THAT HERE, and it cost this tree a third-party interop: the destination connection ID was written
@@ -129,8 +129,8 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   {
     const uint8_t *peer_source = NULL;
     size_t peer_source_length = 0U;
-    if (wt_quic_transport_parameters_get(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID, &peer_source,
-                                         &peer_source_length) == WT_OK) {
+    if (wt_quic_transport_parameters_get(&params, WT_QUIC_TP_INITIAL_SOURCE_CONNECTION_ID,
+                                         &peer_source, &peer_source_length) == WT_OK) {
       /* RFC 9000 section 7.3: "Endpoints MUST validate that received transport parameters match received
        * connection ID values", and a mismatch is a connection error of type TRANSPORT_PARAMETER_ERROR or
        * PROTOCOL_VIOLATION. The reference value is the Source Connection ID of the Initial packets the peer
@@ -161,9 +161,9 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   if (connection->config.role == WT_QUIC_ROLE_CLIENT) {
     const uint8_t *value = NULL;
     size_t value_length = 0U;
-    int present = wt_quic_transport_parameters_get(&params,
-                                                   WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, &value,
-                                                   &value_length) == WT_OK;
+    int present =
+        wt_quic_transport_parameters_get(&params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID,
+                                         &value, &value_length) == WT_OK;
 
     /* The check needs something to check AGAINST: an endpoint only has an original destination connection ID
      * when it chose one, and the runtime session records it for every client it starts. A bare connection object
@@ -176,8 +176,8 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
     }
     value = NULL;
     value_length = 0U;
-    present = wt_quic_transport_parameters_get(&params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID, &value,
-                                               &value_length) == WT_OK;
+    present = wt_quic_transport_parameters_get(&params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID,
+                                               &value, &value_length) == WT_OK;
     if (connection->retry_accepted != 0) {
       if (present == 0 || value_length != connection->retry_source_connection_id_length ||
           (value_length != 0U &&
@@ -190,10 +190,12 @@ wt_status_t wt_quic_connection_set_peer_parameters(wt_quic_connection_t *connect
   }
   return WT_OK;
 }
-const wt_quic_peer_limits_t *wt_quic_connection_peer_limits(const wt_quic_connection_t *connection) {
+const wt_quic_peer_limits_t *
+wt_quic_connection_peer_limits(const wt_quic_connection_t *connection) {
   return connection == NULL ? NULL : &connection->peer_limits;
 }
-wt_status_t wt_quic_connection_discard_keys(wt_quic_connection_t *connection, wt_quic_space_t space) {
+wt_status_t wt_quic_connection_discard_keys(wt_quic_connection_t *connection,
+                                            wt_quic_space_t space) {
   if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (space >= WT_QUIC_SPACE_COUNT) return WT_ERR_INVALID_ARGUMENT;
   /* Zeroed rather than marked unused: the key material must not be left in memory a caller can read,
@@ -207,8 +209,8 @@ wt_status_t wt_quic_connection_discard_keys(wt_quic_connection_t *connection, wt
   connection->has_keys_out[space] = 0;
   return WT_OK;
 }
-wt_status_t close_with(wt_quic_connection_t *connection, uint64_t error_code,
-                              uint64_t frame_type, uint64_t now) {
+wt_status_t close_with(wt_quic_connection_t *connection, uint64_t error_code, uint64_t frame_type,
+                       uint64_t now) {
   return wt_quic_connection_close(connection, error_code, frame_type, NULL, 0U, now);
 }
 void wt_quic_connection_refuse_application(wt_quic_connection_t *connection, uint64_t error_code,
@@ -266,8 +268,7 @@ wt_status_t wt_quic_connection_init(wt_quic_connection_t *connection,
   return WT_OK;
 }
 wt_status_t wt_quic_connection_attach(wt_quic_connection_t *connection,
-                                      const wt_udp_socket_t *socket,
-                                      const wt_udp_address_t *peer) {
+                                      const wt_udp_socket_t *socket, const wt_udp_address_t *peer) {
   if (connection == NULL || socket == NULL) return WT_ERR_INVALID_ARGUMENT;
   connection->socket = *socket;
   if (peer != NULL) {
@@ -320,8 +321,8 @@ wt_status_t wt_quic_connection_send_crypto(wt_quic_connection_t *connection, wt_
   return sent ? WT_OK : WT_ERR_STATE;
 }
 wt_status_t wt_quic_connection_close(wt_quic_connection_t *connection, uint64_t error_code,
-                                     uint64_t frame_type, const uint8_t *reason, size_t reason_length,
-                                     uint64_t now) {
+                                     uint64_t frame_type, const uint8_t *reason,
+                                     size_t reason_length, uint64_t now) {
   if (connection == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (reason == NULL && reason_length != 0U) return WT_ERR_INVALID_ARGUMENT;
   if (wt_quic_connection_is_closed(connection)) return WT_OK;
@@ -333,7 +334,8 @@ int wt_quic_connection_is_closed(const wt_quic_connection_t *connection) {
   if (connection == NULL) return 0;
   return connection->peer_closed != 0 || wt_quic_close_is_closed(&connection->close) != 0;
 }
-const wt_quic_close_state_t *wt_quic_connection_close_state(const wt_quic_connection_t *connection) {
+const wt_quic_close_state_t *
+wt_quic_connection_close_state(const wt_quic_connection_t *connection) {
   if (connection == NULL) return NULL;
   return &connection->close;
 }
@@ -394,7 +396,8 @@ uint64_t wt_quic_connection_key_updates_responded(const wt_quic_connection_t *co
 uint64_t wt_quic_connection_key_update_errors(const wt_quic_connection_t *connection) {
   return connection != NULL ? connection->key_update_errors : 0U;
 }
-uint64_t wt_quic_connection_aead_encrypted(const wt_quic_connection_t *connection, wt_quic_space_t space) {
+uint64_t wt_quic_connection_aead_encrypted(const wt_quic_connection_t *connection,
+                                           wt_quic_space_t space) {
   if (connection == NULL || space >= WT_QUIC_SPACE_COUNT) return 0U;
   return connection->aead_encrypted[space];
 }

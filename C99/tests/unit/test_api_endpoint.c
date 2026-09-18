@@ -13,8 +13,8 @@
 
 #include "webtransport/api/endpoint.h"
 #include "webtransport/api/events.h"
-#include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/capsule.h"
+#include "webtransport/webtransport/framing.h"
 #include "webtransport/writer.h"
 
 static void test_roles_and_names(void) {
@@ -187,8 +187,10 @@ static void test_a_session_is_built_from_it(void) {
   WT_EXPECT_OK("established", wt_session_established(session));
 
   w = wt_writer_init(bytes, sizeof(bytes));
-  WT_EXPECT_OK("a datagram writes", wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"x", 1U));
-  WT_EXPECT_OK("and is delivered on it", wt_session_on_datagram(session, bytes, wt_writer_offset(&w)));
+  WT_EXPECT_OK("a datagram writes",
+               wt_webtransport_datagram_write(&w, 1U, (const uint8_t *)"x", 1U));
+  WT_EXPECT_OK("and is delivered on it",
+               wt_session_on_datagram(session, bytes, wt_writer_offset(&w)));
   wt_session_destroy(session, NULL);
 
   /* An endpoint that does not pass its own check produces no configuration at all. */
@@ -196,7 +198,8 @@ static void test_a_session_is_built_from_it(void) {
   memset(&session_config, 0, sizeof(session_config));
   WT_EXPECT_STATUS("a misconfigured endpoint produces nothing", WT_ERR_INVALID_ARGUMENT,
                    wt_endpoint_session_config(&config, 4U, &session_config));
-  WT_EXPECT_STR("whose fields are untouched", "", session_config.path != NULL ? session_config.path : "");
+  WT_EXPECT_STR("whose fields are untouched", "",
+                session_config.path != NULL ? session_config.path : "");
 }
 
 int main(void) {

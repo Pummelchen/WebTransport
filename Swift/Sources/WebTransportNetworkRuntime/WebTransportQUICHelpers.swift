@@ -156,7 +156,7 @@ enum InteroperableQUICHelpers {
         _ stream: QUIC.Stream<QUICStream>,
         into inboundStreams: InteroperableQUICStreamQueue<QUIC.Stream<QUICStream>>,
         role: String
-    ) async -> InteroperableQUICInboundStreamDisposition {
+    ) async -> InboundStreamDisposition {
         let direction = streamDirectionKey(stream.directionality)
         let disposition = await inboundStreams.enqueue(
             stream,
@@ -379,20 +379,22 @@ enum InteroperableQUICHelpers {
         )
     }
 
-    static func waitForReady(
+    /// The states that are already decided, checked before any wait is set up.
+    ///
+    /// Returns whether the wait should be skipped entirely. A failed or cancelled
+    /// connection throws instead of returning, because neither can become ready.
+    private static func connectionIsAlreadySettled(
         connection: NetworkConnection<QUIC>,
-        role: String = "client",
-        start: (@Sendable () -> Void)? = nil,
-        allowSetupProceed: Bool = false,
-        timeoutMilliseconds: Int32
-    ) async throws {
+        role: String,
+        allowSetupProceed: Bool
+    ) throws -> Bool {
         if connection.state == .ready {
             InteroperableQUICDebug.log("\(role) connection already ready")
-            return
+            return true
         }
         if allowSetupProceed, case .setup = connection.state {
             InteroperableQUICDebug.log("\(role) connection in setup state; proceeding to stream negotiation")
-            return
+            return true
         }
         if case .failed(let error) = connection.state {
             InteroperableQUICDebug.log("\(role) connection already failed: \(error)")
@@ -401,6 +403,20 @@ enum InteroperableQUICHelpers {
         if case .cancelled = connection.state {
             InteroperableQUICDebug.log("\(role) connection already cancelled")
             throw WebTransportNetworkRuntimeError.timeout(0)
+        }
+        return false
+    }
+
+    static func waitForReady(
+        connection: NetworkConnection<QUIC>,
+        role: String = "client",
+        start: (@Sendable () -> Void)? = nil,
+        allowSetupProceed: Bool = false,
+        timeoutMilliseconds: Int32
+    ) async throws {
+        guard try !connectionIsAlreadySettled(connection: connection, role: role, allowSetupProceed: allowSetupProceed)
+        else {
+            return
         }
 
         try await withTimeout(timeoutMilliseconds) {
@@ -458,225 +474,9 @@ enum InteroperableQUICHelpers {
             }
         }
     }
+}
 
-    /// Whether H3 DATAGRAM was negotiated with the peer.
-    ///
-    /// Network.framework does not expose the peer's `max_datagram_frame_size`
-    /// before the datagram channel is first used — measured: `usableDatagramFrameSize`
-    /// reports 0 on an established connection even when both peers advertised it —
-    /// so the honest pre-use answer is the HTTP/3 one. Draft-16 carries datagrams
-    /// inside HTTP/3 DATAGRAM frames, so both endpoints must have advertised
-    /// `SETTINGS_H3_DATAGRAM = 1` for the capability to be real. The framework
-    /// remains the authority for a send or receive that is actually attempted.
-    static func datagramsUsable(localSettings: HTTP3Settings, remoteSettings: HTTP3Settings?) -> Bool {
-        let identifier = WebTransportHTTP3DraftConstants.current.settingsH3Datagram
-        guard localSettings[identifier] == 1 else {
-            return false
-        }
-        guard let remoteSettings, remoteSettings[identifier] == 1 else {
-            return false
-        }
-        return true
-    }
-
-    /// What one chunk of a stream means to a reader waiting for its first bytes.
-    enum FirstChunkDecision: Equatable {
-        case bytes(Data)
-        case keepWaiting
-        case peerClosed
-    }
-
-    /// Classify a chunk from a stream the caller is waiting to read.
-    ///
-    /// `receive(atMost:)` defaults to `atLeast: 1`, so an empty chunk with the stream
-    /// still open is the one case the framework does not promise; waiting rather than
-    /// returning it is what keeps "no bytes yet" from reaching a caller that cannot tell
-    /// it apart from "the stream is over". An empty chunk at end of stream is the peer
-    /// having ended the stream without writing to it. Measured against the real
-    /// framework (WebTransport issue #24): a stream opened without data is not delivered
-    /// at all until its first byte arrives, and a stream finished with no bytes reads as
-    /// empty with `endOfStream` set.
-    static func decideFirstChunk(_ content: Data, endOfStream: Bool) -> FirstChunkDecision {
-        if !content.isEmpty {
-            return .bytes(content)
-        }
-        return endOfStream ? .peerClosed : .keepWaiting
-    }
-
-    static func readStream(
-        _ stream: QUIC.Stream<QUICStream>,
-        timeoutMilliseconds: Int32,
-        maxBytes: Int = 8_192
-    ) async throws -> Data {
-        try await withTimeout(timeoutMilliseconds) {
-            while true {
-                let chunk = try await stream.receive(atMost: maxBytes)
-                switch decideFirstChunk(chunk.content, endOfStream: chunk.metadata.endOfStream) {
-                case .bytes(let bytes):
-                    return bytes
-                case .keepWaiting:
-                    continue
-                case .peerClosed:
-                    // A payload read is allowed to see the end of the stream: an empty
-                    // result with nothing behind it is how a reader learns the peer is
-                    // done. The callers that need bytes use `readFirstChunk`.
-                    return Data()
-                }
-            }
-        }
-    }
-
-    /// The first bytes of a stream whose protocol requires data, refusing a peer that
-    /// ended the stream before writing any.
-    ///
-    /// The codecs report that emptiness as `QUICCodecError.truncated(needed: 1,
-    /// available: 0)`, which is a true statement about the bytes and a misleading one
-    /// about the cause, so the runtime names it here instead (issue #24).
-    static func readFirstChunk(
-        _ stream: QUIC.Stream<QUICStream>,
-        timeoutMilliseconds: Int32,
-        maxBytes: Int = 8_192
-    ) async throws -> Data {
-        let bytes = try await readStream(
-            stream,
-            timeoutMilliseconds: timeoutMilliseconds,
-            maxBytes: maxBytes
-        )
-        guard !bytes.isEmpty else {
-            throw WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID: stream.streamID)
-        }
-        return bytes
-    }
-
-    /// Retains an HTTP/3-critical peer unidirectional stream, or reports the
-    /// duplicate as a connection error.
-    ///
-    /// RFC 9114 section 6.2.1 makes a second HTTP/3 control stream a connection
-    /// error of type H3_STREAM_CREATION_ERROR, and RFC 9204 section 4.2 says the
-    /// same for a second QPACK encoder or decoder stream. The collector holds at
-    /// most one of each, so a refusal here is the peer having opened a stream the
-    /// protocol does not allow it to open, not a resource limit.
-    fileprivate static func retainPeerCriticalStreamOrThrow(
-        _ stream: QUIC.Stream<QUICStream>,
-        type: UInt64,
-        in inboundStreams: InteroperableQUICInboundStreamCollector
-    ) async throws {
-        guard await inboundStreams.retainCritical(stream, type: type) else {
-            throw HTTP3ConnectionError(
-                code: .streamCreationError,
-                reason: "peer opened more than one HTTP/3 stream of type \(type)"
-            )
-        }
-    }
-
-    /// Classifies a peer unidirectional stream that carries no WebTransport
-    /// prefix, retaining it when it is critical and ignoring it when it is not.
-    ///
-    /// The peer's control and QPACK streams share the unidirectional direction
-    /// with WebTransport streams. ``readPeerControlStream(from:role:timeoutMilliseconds:)``
-    /// returns as soon as it reads the control stream, so a QPACK stream that
-    /// arrived behind it is still queued when the application starts accepting
-    /// WebTransport streams. RFC 9114 section 6.2.1 and RFC 9204 section 4.2 make
-    /// those streams critical — they must not be closed — so the accept path
-    /// retains them and waits on.
-    ///
-    /// Every other HTTP/3 stream type is one this runtime does not serve. RFC
-    /// 9114 section 6.2 requires an *unknown* one be discarded rather than
-    /// reported: a recipient of an unknown stream type "MUST NOT consider [it] to
-    /// be a connection error of any kind", and section 6.2.3 reserves the
-    /// `0x1f * N + 0x21` range precisely so peers may send such streams. A type
-    /// HTTP/3 itself defines — the push stream — is not unknown, so it is
-    /// reported instead of being mistaken for one, and bytes that do not begin
-    /// with a decodable stream type are reported because no HTTP/3 stream grammar
-    /// admits them.
-    // internal, not fileprivate: the session file classifies an unprefixed stream with this.
-    internal static func classifyPeerUnprefixedUnidirectionalStream(
-        _ stream: QUIC.Stream<QUICStream>,
-        firstBytes: Data,
-        in inboundStreams: InteroperableQUICInboundStreamCollector
-    ) async throws -> InteroperableQUICPeerStreamClassification {
-        guard let prefix = try? HTTP3StreamTypeParser.parsePrefix(firstBytes) else {
-            return .malformed
-        }
-        switch prefix.type {
-        case HTTP3StreamType.control, HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
-            try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
-            Task {
-                await drainPeerCriticalStream(stream)
-            }
-            return .retained
-        case HTTP3StreamType.push:
-            InteroperableQUICDebug.log(
-                "reporting peer push stream \(stream.streamID): this runtime does not serve server push"
-            )
-            return .unserved
-        default:
-            InteroperableQUICDebug.log(
-                "ignoring peer unidirectional stream \(stream.streamID) of type \(prefix.type)"
-            )
-            return .ignored
-        }
-    }
-
-    // internal, not fileprivate: the client and server files both read the peer's control stream here.
-    internal static func readPeerControlStream(
-        from inboundStreams: InteroperableQUICInboundStreamCollector,
-        role: String,
-        timeoutMilliseconds: Int32
-    ) async throws -> Data {
-        while true {
-            let stream: QUIC.Stream<QUICStream>
-            do {
-                stream = try await inboundStreams.next(
-                    direction: unidirectionalStreamDirection,
-                    timeoutMilliseconds: timeoutMilliseconds
-                )
-            } catch let error as WebTransportNetworkRuntimeError {
-                // Name what actually happened. Waiting here and running out of
-                // time means the peer's control stream never arrived, which the
-                // transport can cause by dropping an inbound stream on a busy
-                // host. Reporting it as a generic timeout sent every previous
-                // investigation looking for a slow peer instead.
-                guard case .timeout = error else {
-                    throw error
-                }
-                throw WebTransportNetworkRuntimeError.peerControlStreamNotDelivered(
-                    role: role,
-                    timeoutMilliseconds: timeoutMilliseconds
-                )
-            }
-            InteroperableQUICDebug.log("\(role) got peer unidirectional stream \(stream.streamID)")
-            let bytes = try await readFirstChunk(stream, timeoutMilliseconds: timeoutMilliseconds)
-            let prefix = try HTTP3StreamTypeParser.parsePrefix(bytes)
-            switch prefix.type {
-            case HTTP3StreamType.control:
-                try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
-                return bytes
-            case HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
-                InteroperableQUICDebug.log("\(role) ignoring peer QPACK stream type=\(prefix.type)")
-                try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
-                Task {
-                    await drainPeerCriticalStream(stream)
-                }
-                continue
-            case HTTP3StreamType.push:
-                // HTTP/3 defines the push stream, so it is not an unknown type
-                // that RFC 9114 section 6.2 protects; this runtime never
-                // negotiates push, and a server push stream arriving before the
-                // peer's control stream is reported rather than discarded.
-                throw WebTransportNetworkRuntimeError.unexpectedFrame
-            default:
-                // RFC 9114 section 6.2: an unknown or reserved stream type is
-                // discarded rather than reported as a connection error. Only the
-                // peer's control stream ends this wait.
-                InteroperableQUICDebug.log(
-                    "\(role) ignoring peer unidirectional stream type=\(prefix.type) while waiting for control"
-                )
-                continue
-            }
-        }
-    }
-
+extension InteroperableQUICHelpers {
     private static func drainPeerCriticalStream(_ stream: QUIC.Stream<QUICStream>) async {
         do {
             while !Task.isCancelled {
@@ -797,5 +597,212 @@ enum InteroperableQUICHelpers {
         }
         let nsError = error as NSError
         return nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ENOTCONN)
+    }
+}
+
+extension InteroperableQUICHelpers {
+    fileprivate static func retainPeerCriticalStreamOrThrow(
+        _ stream: QUIC.Stream<QUICStream>,
+        type: UInt64,
+        in inboundStreams: InteroperableQUICInboundStreamCollector
+    ) async throws {
+        guard await inboundStreams.retainCritical(stream, type: type) else {
+            throw HTTP3ConnectionError(
+                code: .streamCreationError,
+                reason: "peer opened more than one HTTP/3 stream of type \(type)"
+            )
+        }
+    }
+
+    /// Classifies a peer unidirectional stream that carries no WebTransport
+    /// prefix, retaining it when it is critical and ignoring it when it is not.
+    ///
+    /// The peer's control and QPACK streams share the unidirectional direction
+    /// with WebTransport streams. ``readPeerControlStream(from:role:timeoutMilliseconds:)``
+    /// returns as soon as it reads the control stream, so a QPACK stream that
+    /// arrived behind it is still queued when the application starts accepting
+    /// WebTransport streams. RFC 9114 section 6.2.1 and RFC 9204 section 4.2 make
+    /// those streams critical — they must not be closed — so the accept path
+    /// retains them and waits on.
+    ///
+    /// Every other HTTP/3 stream type is one this runtime does not serve. RFC
+    /// 9114 section 6.2 requires an *unknown* one be discarded rather than
+    /// reported: a recipient of an unknown stream type "MUST NOT consider [it] to
+    /// be a connection error of any kind", and section 6.2.3 reserves the
+    /// `0x1f * N + 0x21` range precisely so peers may send such streams. A type
+    /// HTTP/3 itself defines — the push stream — is not unknown, so it is
+    /// reported instead of being mistaken for one, and bytes that do not begin
+    /// with a decodable stream type are reported because no HTTP/3 stream grammar
+    /// admits them.
+    ///
+    /// - Note: internal, not fileprivate, because the session file classifies an unprefixed
+    ///   stream with this.
+    internal static func classifyPeerUnprefixedUnidirectionalStream(
+        _ stream: QUIC.Stream<QUICStream>,
+        firstBytes: Data,
+        in inboundStreams: InteroperableQUICInboundStreamCollector
+    ) async throws -> PeerStreamClassification {
+        guard let prefix = try? HTTP3StreamTypeParser.parsePrefix(firstBytes) else {
+            return .malformed
+        }
+        switch prefix.type {
+        case HTTP3StreamType.control, HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
+            try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
+            Task {
+                await drainPeerCriticalStream(stream)
+            }
+            return .retained
+        case HTTP3StreamType.push:
+            InteroperableQUICDebug.log(
+                "reporting peer push stream \(stream.streamID): this runtime does not serve server push"
+            )
+            return .unserved
+        default:
+            InteroperableQUICDebug.log(
+                "ignoring peer unidirectional stream \(stream.streamID) of type \(prefix.type)"
+            )
+            return .ignored
+        }
+    }
+
+    // internal, not fileprivate: the client and server files both read the peer's control stream here.
+    internal static func readPeerControlStream(
+        from inboundStreams: InteroperableQUICInboundStreamCollector,
+        role: String,
+        timeoutMilliseconds: Int32
+    ) async throws -> Data {
+        while true {
+            let stream: QUIC.Stream<QUICStream>
+            do {
+                stream = try await inboundStreams.next(
+                    direction: unidirectionalStreamDirection,
+                    timeoutMilliseconds: timeoutMilliseconds
+                )
+            } catch let error as WebTransportNetworkRuntimeError {
+                // Name what actually happened. Waiting here and running out of
+                // time means the peer's control stream never arrived, which the
+                // transport can cause by dropping an inbound stream on a busy
+                // host. Reporting it as a generic timeout sent every previous
+                // investigation looking for a slow peer instead.
+                guard case .timeout = error else {
+                    throw error
+                }
+                throw WebTransportNetworkRuntimeError.peerControlStreamNotDelivered(
+                    role: role,
+                    timeoutMilliseconds: timeoutMilliseconds
+                )
+            }
+            InteroperableQUICDebug.log("\(role) got peer unidirectional stream \(stream.streamID)")
+            let bytes = try await readFirstChunk(stream, timeoutMilliseconds: timeoutMilliseconds)
+            let prefix = try HTTP3StreamTypeParser.parsePrefix(bytes)
+            switch prefix.type {
+            case HTTP3StreamType.control:
+                try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
+                return bytes
+            case HTTP3StreamType.qpackEncoder, HTTP3StreamType.qpackDecoder:
+                InteroperableQUICDebug.log("\(role) ignoring peer QPACK stream type=\(prefix.type)")
+                try await retainPeerCriticalStreamOrThrow(stream, type: prefix.type, in: inboundStreams)
+                Task {
+                    await drainPeerCriticalStream(stream)
+                }
+                continue
+            case HTTP3StreamType.push:
+                // HTTP/3 defines the push stream, so it is not an unknown type
+                // that RFC 9114 section 6.2 protects; this runtime never
+                // negotiates push, and a server push stream arriving before the
+                // peer's control stream is reported rather than discarded.
+                throw WebTransportNetworkRuntimeError.unexpectedFrame
+            default:
+                // RFC 9114 section 6.2: an unknown or reserved stream type is
+                // discarded rather than reported as a connection error. Only the
+                // peer's control stream ends this wait.
+                InteroperableQUICDebug.log(
+                    "\(role) ignoring peer unidirectional stream type=\(prefix.type) while waiting for control"
+                )
+                continue
+            }
+        }
+    }
+}
+
+extension InteroperableQUICHelpers {
+    static func datagramsUsable(localSettings: HTTP3Settings, remoteSettings: HTTP3Settings?) -> Bool {
+        let identifier = WebTransportHTTP3DraftConstants.current.settingsH3Datagram
+        guard localSettings[identifier] == 1 else {
+            return false
+        }
+        guard let remoteSettings, remoteSettings[identifier] == 1 else {
+            return false
+        }
+        return true
+    }
+
+    /// What one chunk of a stream means to a reader waiting for its first bytes.
+    enum FirstChunkDecision: Equatable {
+        case bytes(Data)
+        case keepWaiting
+        case peerClosed
+    }
+
+    /// Classify a chunk from a stream the caller is waiting to read.
+    ///
+    /// `receive(atMost:)` defaults to `atLeast: 1`, so an empty chunk with the stream
+    /// still open is the one case the framework does not promise; waiting rather than
+    /// returning it is what keeps "no bytes yet" from reaching a caller that cannot tell
+    /// it apart from "the stream is over". An empty chunk at end of stream is the peer
+    /// having ended the stream without writing to it. Measured against the real
+    /// framework (WebTransport issue #24): a stream opened without data is not delivered
+    /// at all until its first byte arrives, and a stream finished with no bytes reads as
+    /// empty with `endOfStream` set.
+    static func decideFirstChunk(_ content: Data, endOfStream: Bool) -> FirstChunkDecision {
+        if !content.isEmpty {
+            return .bytes(content)
+        }
+        return endOfStream ? .peerClosed : .keepWaiting
+    }
+
+    static func readStream(
+        _ stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        maxBytes: Int = 8_192
+    ) async throws -> Data {
+        try await withTimeout(timeoutMilliseconds) {
+            while true {
+                let chunk = try await stream.receive(atMost: maxBytes)
+                switch decideFirstChunk(chunk.content, endOfStream: chunk.metadata.endOfStream) {
+                case .bytes(let bytes):
+                    return bytes
+                case .keepWaiting:
+                    continue
+                case .peerClosed:
+                    // A payload read is allowed to see the end of the stream: an empty
+                    // result with nothing behind it is how a reader learns the peer is
+                    // done. The callers that need bytes use `readFirstChunk`.
+                    return Data()
+                }
+            }
+        }
+    }
+
+    /// The first bytes of a stream whose protocol requires data, refusing a peer that
+    /// ended the stream before writing any.
+    ///
+    /// The codecs report that emptiness as `QUICCodecError.truncated(needed: 1,
+    /// available: 0)`, which is a true statement about the bytes and a misleading one
+    /// about the cause, so the runtime names it here instead (issue #24).
+    static func readFirstChunk(
+        _ stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        maxBytes: Int = 8_192
+    ) async throws -> Data {
+        let bytes = try await readStream(
+            stream,
+            timeoutMilliseconds: timeoutMilliseconds,
+            maxBytes: maxBytes
+        )
+        guard !bytes.isEmpty else {
+            throw WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID: stream.streamID)
+        }
+        return bytes
     }
 }

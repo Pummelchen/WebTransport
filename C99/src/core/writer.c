@@ -118,8 +118,7 @@ uint8_t *wt_writer_reserve(wt_writer_t *w, size_t n) {
   return at;
 }
 
-wt_status_t wt_writer_patch(wt_writer_t *w, size_t offset, const void *data,
-                            size_t n) {
+wt_status_t wt_writer_patch(wt_writer_t *w, size_t offset, const void *data, size_t n) {
   if (w == NULL || data == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (w->overflow) return WT_ERR_LIMIT;
   if (!w->copy) return WT_ERR_LIMIT;

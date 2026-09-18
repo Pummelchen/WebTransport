@@ -180,8 +180,8 @@ static void test_a_whole_request_off_the_wire(void) {
     corpus_fill(&rng, bytes, length);
     /* A field section with NO dynamic table: the strictest configuration, where a section that references one
      * is refused rather than read against indices that do not exist. */
-    if (wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, bytes, length, NULL, 0U, 0U, scratch,
-                                sizeof(scratch), &error) == WT_OK) {
+    if (wt_http3_message_decode(&message, WT_HTTP3_HEADER_REQUEST, bytes, length, NULL, 0U, 0U,
+                                scratch, sizeof(scratch), &error) == WT_OK) {
       wt_webtransport_request_policy_t policy;
       wt_webtransport_session_request_t decision;
       accepted++;
@@ -228,7 +228,8 @@ static void test_the_driver_under_random_streams(void) {
 
     /* A fresh driver per iteration: the corpus is about the parsers, and a driver that accumulated state would
      * be testing the table's bounds instead (which the bounded-table tests already do). */
-    wt_http3_endpoint_init(&endpoint, (iteration & 1U) != 0U ? WT_HTTP3_ROLE_SERVER : WT_HTTP3_ROLE_CLIENT);
+    wt_http3_endpoint_init(&endpoint,
+                           (iteration & 1U) != 0U ? WT_HTTP3_ROLE_SERVER : WT_HTTP3_ROLE_CLIENT);
     wt_http3_driver_init(&driver, &endpoint);
     corpus_fill(&rng, bytes, length);
     if (wt_http3_driver_on_uni_stream_data(&driver, 4U, 0U, bytes, length, &kind, &payload,

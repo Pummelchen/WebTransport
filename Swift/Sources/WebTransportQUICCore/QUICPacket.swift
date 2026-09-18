@@ -83,39 +83,10 @@ public struct QUICLongHeaderPacket: Equatable, Sendable {
     public static func decode(_ data: Data, largestAcknowledged: UInt64? = nil) throws -> QUICLongHeaderPacket {
         var cursor = QUICByteCursor(data)
         let first = try cursor.readUInt8()
-        guard (first & 0x80) != 0 else {
-            throw QUICCodecError.malformed("not a long header packet")
-        }
-        // RFC 9000 section 17.2: "Packets that have the Fixed Bit set to 0 ... are not
-        // valid packets in this version and MUST be discarded." The short-header decoder
-        // already enforces this; without the same check here a long-header packet with
-        // the bit cleared would be processed despite being invalid.
-        guard (first & 0x40) != 0 else {
-            throw QUICCodecError.malformed("long header fixed bit is not set")
-        }
-        // RFC 9001 section 5.4: the two reserved bits must be zero after header
-        // protection is removed; a non-zero value is a PROTOCOL_VIOLATION.
-        guard (first & 0x0c) == 0 else {
-            throw QUICCodecError.malformed("long header reserved bits are not zero")
-        }
-        guard let packetType = QUICPacketType(rawValue: (first >> 4) & 0x03) else {
-            throw QUICCodecError.malformed("unknown long header packet type")
-        }
-        guard packetType != .retry else {
-            throw QUICCodecError.malformed("Retry packets use QUICRetryPacket")
-        }
+        let packetType = try longHeaderPacketType(from: first)
         let packetNumberLength = Int(first & 0x03) + 1
         let version = try cursor.readUInt32()
-        let destinationLength = Int(try cursor.readUInt8())
-        guard destinationLength <= 20 else {
-            throw QUICCodecError.valueOutOfRange("destination connection ID length exceeds 20")
-        }
-        let destinationConnectionID = try cursor.readBytes(count: destinationLength)
-        let sourceLength = Int(try cursor.readUInt8())
-        guard sourceLength <= 20 else {
-            throw QUICCodecError.valueOutOfRange("source connection ID length exceeds 20")
-        }
-        let sourceConnectionID = try cursor.readBytes(count: sourceLength)
+        let (destinationConnectionID, sourceConnectionID) = try readConnectionIDs(from: &cursor)
 
         let token: Data
         if packetType == .initial {
@@ -149,6 +120,46 @@ public struct QUICLongHeaderPacket: Equatable, Sendable {
             packetNumberLength: packetNumberLength,
             payload: payload
         )
+    }
+
+    /// The first byte's type and validity, before anything else is read.
+    ///
+    /// RFC 9000 section 17.2: "Packets that have the Fixed Bit set to 0 ... are not valid
+    /// packets in this version and MUST be discarded." The short-header decoder already
+    /// enforces this; without the same check here a long-header packet with the bit
+    /// cleared would be processed despite being invalid. RFC 9001 section 5.4 requires the
+    /// two reserved bits to be zero after header protection is removed.
+    private static func longHeaderPacketType(from first: UInt8) throws -> QUICPacketType {
+        guard (first & 0x80) != 0 else {
+            throw QUICCodecError.malformed("not a long header packet")
+        }
+        guard (first & 0x40) != 0 else {
+            throw QUICCodecError.malformed("long header fixed bit is not set")
+        }
+        guard (first & 0x0c) == 0 else {
+            throw QUICCodecError.malformed("long header reserved bits are not zero")
+        }
+        guard let packetType = QUICPacketType(rawValue: (first >> 4) & 0x03) else {
+            throw QUICCodecError.malformed("unknown long header packet type")
+        }
+        guard packetType != .retry else {
+            throw QUICCodecError.malformed("Retry packets use QUICRetryPacket")
+        }
+        return packetType
+    }
+
+    /// Both connection IDs, each length-prefixed and each capped at RFC 9000's 20 bytes.
+    private static func readConnectionIDs(from cursor: inout QUICByteCursor) throws -> (Data, Data) {
+        let destinationLength = Int(try cursor.readUInt8())
+        guard destinationLength <= 20 else {
+            throw QUICCodecError.valueOutOfRange("destination connection ID length exceeds 20")
+        }
+        let destination = try cursor.readBytes(count: destinationLength)
+        let sourceLength = Int(try cursor.readUInt8())
+        guard sourceLength <= 20 else {
+            throw QUICCodecError.valueOutOfRange("source connection ID length exceeds 20")
+        }
+        return (destination, try cursor.readBytes(count: sourceLength))
     }
 
     private static func checkedLength(_ value: UInt64) throws -> Int {

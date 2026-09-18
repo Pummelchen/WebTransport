@@ -316,6 +316,8 @@ public struct TLSQUICConnectionState: Equatable, Sendable {
         return closeState.closeTransport(error: error, frameType: frameType, reason: reason)
     }
 
+}
+extension TLSQUICConnectionState {
     private func ensureOpen() throws {
         guard !closeState.isClosed else {
             throw TLSQUICConnectionStateError.connectionClosed

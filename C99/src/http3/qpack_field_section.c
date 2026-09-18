@@ -22,7 +22,7 @@ static wt_status_t materialise(const uint8_t *bytes, size_t length, int huffman,
    * would write past the caller's buffer, so this is a bound rather than a formality (WT-154). */
   if (*scratch_used > capacity) return WT_ERR_LIMIT;
   status = wt_qpack_huffman_decode(bytes, length, scratch + *scratch_used, capacity - *scratch_used,
-                                  &decoded);
+                                   &decoded);
   if (status == WT_ERR_PROTOCOL) return WT_ERR_PROTOCOL;
   if (status != WT_OK) return status;
   *out = scratch + *scratch_used;
@@ -37,9 +37,8 @@ static wt_status_t dynamic_lookup(const wt_qpack_dynamic_table_t *table, uint64_
                                   wt_qpack_error_t *out_error, const uint8_t **out_name,
                                   size_t *out_name_length, const uint8_t **out_value,
                                   size_t *out_value_length) {
-  if (table == NULL ||
-      wt_qpack_dynamic_entry(table, absolute, out_name, out_name_length, out_value,
-                             out_value_length) != WT_OK) {
+  if (table == NULL || wt_qpack_dynamic_entry(table, absolute, out_name, out_name_length, out_value,
+                                              out_value_length) != WT_OK) {
     if (out_error != NULL) *out_error = WT_QPACK_ERROR_DECOMPRESSION_FAILED;
     return WT_ERR_PROTOCOL;
   }
@@ -61,7 +60,8 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
   wt_status_t status;
 
   if (out_error != NULL) *out_error = WT_QPACK_ERROR_NONE;
-  if (c == NULL || prefix == NULL || out == NULL || scratch_used == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (c == NULL || prefix == NULL || out == NULL || scratch_used == NULL)
+    return WT_ERR_INVALID_ARGUMENT;
   if (scratch == NULL && scratch_capacity != 0U) return WT_ERR_INVALID_ARGUMENT;
 
   /* The end of the section is not an error: the caller asked for the next field and
@@ -82,8 +82,8 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
                          scratch_capacity, scratch_used, &inline_value, &inline_value_length);
     if (status != WT_OK) {
       if (out_error != NULL) {
-        *out_error = status == WT_ERR_LIMIT ? WT_QPACK_ERROR_NONE
-                                            : WT_QPACK_ERROR_DECOMPRESSION_FAILED;
+        *out_error =
+            status == WT_ERR_LIMIT ? WT_QPACK_ERROR_NONE : WT_QPACK_ERROR_DECOMPRESSION_FAILED;
       }
       return status;
     }
@@ -180,8 +180,8 @@ wt_status_t wt_qpack_field_section_next(wt_cursor_t *c, const wt_qpack_header_pr
                            scratch_capacity, scratch_used, &out->name, &out->name_length);
       if (status != WT_OK) {
         if (out_error != NULL) {
-          *out_error = status == WT_ERR_LIMIT ? WT_QPACK_ERROR_NONE
-                                              : WT_QPACK_ERROR_DECOMPRESSION_FAILED;
+          *out_error =
+              status == WT_ERR_LIMIT ? WT_QPACK_ERROR_NONE : WT_QPACK_ERROR_DECOMPRESSION_FAILED;
         }
         return status;
       }

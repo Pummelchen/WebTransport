@@ -18,27 +18,27 @@
 #include "webtransport/cli/report.h"
 
 #include "hostile_peer.h"
-#include "scenario_connection_ids.h"
-#include "scenario_session.h"
-#include "scenario_refusals.h"
 #include "scenario_capsules.h"
-#include "scenario_refusal_wire.h"
+#include "scenario_connection_ids.h"
 #include "scenario_control.h"
 #include "scenario_headers.h"
 #include "scenario_isolation.h"
 #include "scenario_matrix.h"
 #include "scenario_protocol.h"
+#include "scenario_refusal_wire.h"
+#include "scenario_refusals.h"
+#include "scenario_session.h"
 #include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
+#include "webtransport/version.h"
 #include "webtransport/webtransport/capsule.h"
 #include "webtransport/webtransport/session_request.h"
-#include "webtransport/version.h"
 
 static int wt_usage(const char *program) {
   printf("usage: %s [options]\n", program);
   printf("\n");
-  printf("WebTransport over HTTP/3, C99 implementation %s (%s).\n",
-         wt_version_string(), wt_protocol_draft());
+  printf("WebTransport over HTTP/3, C99 implementation %s (%s).\n", wt_version_string(),
+         wt_protocol_draft());
   printf("\n");
   printf("It runs the scenario suites and writes a machine-readable report: the\n");
   printf("codec and framing cases, the refusals, the connection-control and\n");
@@ -136,7 +136,8 @@ int main(int argc, char **argv) {
         uint8_t encoded[8];
         wt_cursor_t varint_cursor;
         uint64_t decoded_value = 0U;
-        size_t encoded_length = wt_quic_varint_encode(values[value_index], encoded, sizeof(encoded));
+        size_t encoded_length =
+            wt_quic_varint_encode(values[value_index], encoded, sizeof(encoded));
         size_t expected_length = wt_quic_varint_size(values[value_index]);
         varint_cursor = wt_cursor_init(encoded, encoded_length != 0U ? encoded_length : 1U);
         if (encoded_length == 0U || encoded_length != expected_length ||
@@ -202,7 +203,8 @@ int main(int argc, char **argv) {
       policy.authority = "localhost";
       policy.path = "/chat";
       policy.wt_enabled = 1;
-      if (wt_webtransport_session_request_validate(&message, &policy, &decision, &h3_error) == WT_OK &&
+      if (wt_webtransport_session_request_validate(&message, &policy, &decision, &h3_error) ==
+              WT_OK &&
           decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT) {
         ok = 1;
       }
@@ -270,9 +272,11 @@ int main(int argc, char **argv) {
       static char ipv4_detail[WT_CLI_SCENARIO_DETAIL_MAX];
       static char ipv6_detail[WT_CLI_SCENARIO_DETAIL_MAX];
       (void)wt_cli_report_add(&report, "session-over-ipv4",
-                              wt_scenario_session_run(0, ipv4_detail, sizeof(ipv4_detail)), ipv4_detail);
+                              wt_scenario_session_run(0, ipv4_detail, sizeof(ipv4_detail)),
+                              ipv4_detail);
       (void)wt_cli_report_add(&report, "session-over-ipv6",
-                              wt_scenario_session_run(1, ipv6_detail, sizeof(ipv6_detail)), ipv6_detail);
+                              wt_scenario_session_run(1, ipv6_detail, sizeof(ipv6_detail)),
+                              ipv6_detail);
     }
 
     if (options.json != 0) {

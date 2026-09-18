@@ -54,8 +54,8 @@ wt_status_t wt_tls_self_signed_generate(wt_tls_self_signed_t *out, const char *c
 
   name = X509_get_subject_name(certificate);
   if (name == NULL) goto fail;
-  if (X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-                                 (const unsigned char *)common_name, -1, -1, 0) != 1) {
+  if (X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char *)common_name, -1,
+                                 -1, 0) != 1) {
     goto fail;
   }
   /* Self-signed: the issuer is the subject, which is what makes the pin the only thing to trust. */

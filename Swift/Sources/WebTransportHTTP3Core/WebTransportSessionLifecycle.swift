@@ -132,23 +132,7 @@ extension WebTransportSessionManager {
         frame: HTTP3Frame,
         policy: WebTransportServerSessionPolicy
     ) throws -> WebTransportServerSessionDecision {
-        guard http3.role == .server else {
-            throw QUICCodecError.malformed("only servers receive WebTransport CONNECT requests")
-        }
-        try validateSettingsReady()
-        try validateRequestAllowedByGoaway(streamID)
-
-        let sessionID = try WebTransportSessionID.fromRequestStreamID(streamID)
-        guard sessionsByID[sessionID] == nil else {
-            throw QUICCodecError.malformed("WebTransport session already exists")
-        }
-        try validateSessionAdmission()
-        guard frame.type == HTTP3FrameType.headers else {
-            throw WebTransportDraft16Error(
-                kind: .requirementsNotMet,
-                message: "WebTransport CONNECT stream must start with HEADERS"
-            )
-        }
+        let sessionID = try validateClientSessionRequest(streamID: streamID, frame: frame)
 
         var requestStream = try http3.acceptRequestStream(streamID: streamID)
         try requestStream.receive(
@@ -191,6 +175,43 @@ extension WebTransportSessionManager {
             selectedProtocol: selectedProtocol,
             state: state
         )
+        try storeNewSession(session)
+        return WebTransportServerSessionDecision(
+            session: session,
+            responseFrame: responseFrame,
+            rejectionError: rejection?.error
+        )
+    }
+
+    /// Everything that must be true before a CONNECT request is looked at, and the session
+    /// ID the request will get.
+    private mutating func validateClientSessionRequest(
+        streamID: UInt64,
+        frame: HTTP3Frame
+    ) throws -> WebTransportSessionID {
+        guard http3.role == .server else {
+            throw QUICCodecError.malformed("only servers receive WebTransport CONNECT requests")
+        }
+        try validateSettingsReady()
+        try validateRequestAllowedByGoaway(streamID)
+
+        let sessionID = try WebTransportSessionID.fromRequestStreamID(streamID)
+        guard sessionsByID[sessionID] == nil else {
+            throw QUICCodecError.malformed("WebTransport session already exists")
+        }
+        try validateSessionAdmission()
+        guard frame.type == HTTP3FrameType.headers else {
+            throw WebTransportDraft16Error(
+                kind: .requirementsNotMet,
+                message: "WebTransport CONNECT stream must start with HEADERS"
+            )
+        }
+        return sessionID
+    }
+
+    /// Stores the session and applies the consequence of its state: a rejected session's
+    /// buffered ingress is discarded and its streams tombstoned.
+    private mutating func storeNewSession(_ session: WebTransportSession) throws {
         store(session)
         if session.state == .accepted {
             try promoteBufferedStreams(for: session.id)
@@ -198,11 +219,6 @@ extension WebTransportSessionManager {
             discardBufferedIngress(for: session.id, tombstoneStreams: true)
             recordClosedSession(session.id)
         }
-        return WebTransportServerSessionDecision(
-            session: session,
-            responseFrame: responseFrame,
-            rejectionError: rejection?.error
-        )
     }
 
     public mutating func receiveControlFrame(_ frame: HTTP3Frame) throws {
@@ -352,7 +368,7 @@ extension WebTransportSessionManager {
     private mutating func releaseSessionState(_ sessionID: WebTransportSessionID) {
         if let session = sessionsByID.removeValue(forKey: sessionID) {
             sessionIDsByRequestStreamID.removeValue(forKey: session.requestStreamID)
-            requestStreamIDsClosedByReceivedCloseCapsule.remove(session.requestStreamID)
+            closedRequestStreamIDs.remove(session.requestStreamID)
         }
         streamIDsBySessionID.removeValue(forKey: sessionID)
         bufferedStreamIDsBySessionID.removeValue(forKey: sessionID)
@@ -384,7 +400,7 @@ extension WebTransportSessionManager {
         session.state = .closed(applicationErrorCode: applicationErrorCode, message: message)
         sessionsByID[sessionID] = session
         if closeCapsuleReceived {
-            requestStreamIDsClosedByReceivedCloseCapsule.insert(session.requestStreamID)
+            closedRequestStreamIDs.insert(session.requestStreamID)
         }
 
         let terminationActions = terminateAssociatedStreams(for: sessionID, requestStreamID: session.requestStreamID)

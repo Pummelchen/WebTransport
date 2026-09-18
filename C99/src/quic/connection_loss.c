@@ -53,9 +53,9 @@ void on_lost(void *context, const wt_quic_sent_packet_t *packet) {
          * would therefore drop the frame for the life of the connection AND leave the slot occupied forever --
          * nothing later names it. The slot is flagged instead, and `wt_quic_connection_flush` re-drives it (the
          * bytes are still the frame, which is why the slot is kept at all). */
-        wt_status_t resent = send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1,
-                                                tag_for_control(connection, slot), NULL,
-                                                connection->last_activity);
+        wt_status_t resent =
+            send_encoded_frame(connection, kept->space, kept->wire, kept->wire_length, 1,
+                               tag_for_control(connection, slot), NULL, connection->last_activity);
         if (resent != WT_OK) {
           kept->resend_pending = 1;
           connection->control_frames_resend_deferred++;
@@ -120,7 +120,7 @@ static int ack_covers(const wt_quic_frame_t *frame, uint64_t packet_number) {
   return 0;
 }
 wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t space,
-                              const wt_quic_frame_t *frame, uint64_t now) {
+                       const wt_quic_frame_t *frame, uint64_t now) {
   wt_quic_pn_space_t *space_state = &connection->spaces[space];
   uint64_t largest = frame->as.ack.largest;
   wt_quic_sent_packet_t snapshot[WT_QUIC_SENT_PACKETS_MAX];
@@ -188,9 +188,9 @@ wt_status_t handle_ack(wt_quic_connection_t *connection, wt_quic_space_t space,
   if (has_largest) {
     /* One round trip sample per acknowledgement, from the largest newly acknowledged packet
      * (RFC 9002 section 5.1). */
-    status = wt_quic_rtt_update(&space_state->rtt, now - largest_time_sent, frame->as.ack.delay,
-                                max_ack_delay_for(connection, space),
-                                connection->handshake_confirmed);
+    status =
+        wt_quic_rtt_update(&space_state->rtt, now - largest_time_sent, frame->as.ack.delay,
+                           max_ack_delay_for(connection, space), connection->handshake_confirmed);
     if (status != WT_OK) return status;
     status = wt_quic_pn_space_on_ack(space_state, largest_newly_acked);
     if (status != WT_OK) return status;
@@ -243,14 +243,13 @@ wt_status_t wt_quic_connection_next_timeout(wt_quic_connection_t *connection, ui
     wt_quic_space_t space = (wt_quic_space_t)i;
     const wt_quic_pn_space_t *space_state = &connection->spaces[space];
     uint64_t largest_acked = space_state->has_largest_acked ? space_state->largest_acked : 0U;
-    uint64_t loss_time = wt_quic_loss_time(&connection->loss, (uint8_t)space, &space_state->rtt,
-                                           largest_acked);
+    uint64_t loss_time =
+        wt_quic_loss_time(&connection->loss, (uint8_t)space, &space_state->rtt, largest_acked);
     uint64_t pto = 0U;
 
     /* An acknowledgement that is owed and delayed is a deadline like any other: the peer is waiting
      * for it, and RFC 9000 section 13.2.1 bounds how long it may wait. */
-    if (space_state->received.ack_pending &&
-        space_state->received.ack_eliciting_since_ack != 0U) {
+    if (space_state->received.ack_pending && space_state->received.ack_eliciting_since_ack != 0U) {
       uint64_t ack_deadline = connection->received_at[space] + ack_delay_for(connection, space);
       if (ack_deadline <= now) {
         *out_micros = 0U;
@@ -315,8 +314,8 @@ wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint
     wt_quic_space_t space = (wt_quic_space_t)i;
     wt_quic_pn_space_t *space_state = &connection->spaces[space];
     uint64_t largest_acked = space_state->has_largest_acked ? space_state->largest_acked : 0U;
-    uint64_t loss_time = wt_quic_loss_time(&connection->loss, (uint8_t)space, &space_state->rtt,
-                                           largest_acked);
+    uint64_t loss_time =
+        wt_quic_loss_time(&connection->loss, (uint8_t)space, &space_state->rtt, largest_acked);
 
     if (loss_time != 0U && now >= loss_time) {
       status = wt_quic_loss_detect(&connection->loss, (uint8_t)space, &space_state->rtt, now,
@@ -372,7 +371,8 @@ wt_status_t wt_quic_connection_on_timeout(wt_quic_connection_t *connection, uint
       if (!sent_packet->ack_eliciting) continue;
       if (tag >= (uint64_t)WT_QUIC_CONNECTION_FRAMES_MAX) continue;
       if (!connection->frames[tag].in_use) continue;
-      if (oldest == connection->loss.count || sent_packet->time_sent < connection->loss.sent[oldest].time_sent) {
+      if (oldest == connection->loss.count ||
+          sent_packet->time_sent < connection->loss.sent[oldest].time_sent) {
         oldest = i;
       }
     }

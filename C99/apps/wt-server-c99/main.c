@@ -13,8 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "webtransport/cli/endpoint.h"
 #include "session_loop.h"
+#include "webtransport/cli/endpoint.h"
 
 #include "webtransport/cli/options.h"
 #include "webtransport/version.h"
@@ -22,8 +22,8 @@
 static int wt_usage(const char *program) {
   printf("usage: %s [options]\n", program);
   printf("\n");
-  printf("WebTransport over HTTP/3, C99 implementation %s (%s).\n",
-         wt_version_string(), wt_protocol_draft());
+  printf("WebTransport over HTTP/3, C99 implementation %s (%s).\n", wt_version_string(),
+         wt_protocol_draft());
   printf("\n");
   printf("It listens for one peer and serves the WebTransport session that peer\n");
   printf("asks for, over the transport named by --transport, presenting the\n");
@@ -163,14 +163,15 @@ int main(int argc, char **argv) {
        * that no JSON parser would read. Every assertion here matched a substring, so nothing said so; the check
        * script validates the report as JSON now, which is what a caller parsing it does (WT-144). */
       printf("\",\"request\":\"%s\",\"requestOutcome\":%u,\"requestStatus\":%llu,\"h3Error\":%llu,"
-             "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,\"closeCause\":\"%s\","
+             "\"closeKind\":%u,\"closeSentErrorCode\":%llu,\"closeSentFrameType\":%llu,"
+             "\"closeCause\":\"%s\","
              "\"closeSent\":%s,\"closeCauseFrame\":%llu,"
              "\"peerMaxDataSet\":%s,\"peerMaxData\":%llu,\"peerDrained\":%s,"
              "\"peerSessionClosed\":%s,\"peerSessionCloseCode\":%u,"
              "\"capsulesRefused\":%u,\"capsuleError\":%llu}\n",
              result.request_line, result.request_outcome, (unsigned long long)result.request_status,
-             (unsigned long long)result.h3_error,
-             result.close_kind, (unsigned long long)result.close_sent_error_code,
+             (unsigned long long)result.h3_error, result.close_kind,
+             (unsigned long long)result.close_sent_error_code,
              (unsigned long long)result.close_sent_frame_type, wt_status_name(result.close_cause),
              result.close_was_sent != 0 ? "true" : "false",
              (unsigned long long)result.close_cause_frame,
@@ -187,14 +188,17 @@ int main(int argc, char **argv) {
        * had sent CONNECTION_CLOSE (WT-144). `close_was_sent` says the peer was actually TOLD: a silent idle
        * timeout (RFC 9000 section 10.1) is a connection this endpoint stopped, not one it announced (WT-145). */
       if (result.close_was_sent != 0) {
-        printf("server: THIS endpoint closed the connection with code 0x%llx, blaming frame type %llu\n",
+        printf("server: THIS endpoint closed the connection with code 0x%llx, blaming frame type "
+               "%llu\n",
                (unsigned long long)result.close_sent_error_code,
                (unsigned long long)result.close_sent_frame_type);
         if (result.close_cause != WT_OK) {
-          printf("server: after a frame handler refused with %s\n", wt_status_name(result.close_cause));
+          printf("server: after a frame handler refused with %s\n",
+                 wt_status_name(result.close_cause));
         }
       } else if (result.close_kind != 0U) {
-        printf("server: the connection was closed silently (the idle timeout; no CONNECTION_CLOSE was sent)\n");
+        printf("server: the connection was closed silently (the idle timeout; no CONNECTION_CLOSE "
+               "was sent)\n");
       }
       /* What the peer said on the CONNECT stream: the session's own flow control and its close, neither of which
        * a connection-level report can show (WT-164). */
@@ -206,7 +210,8 @@ int main(int argc, char **argv) {
         printf("server: the peer sent a drain, so no new streams\n");
       }
       if (result.peer_close_code_set != 0) {
-        printf("server: the peer closed the SESSION with application code 0x%x\n", result.peer_close_code);
+        printf("server: the peer closed the SESSION with application code 0x%x\n",
+               result.peer_close_code);
       }
     }
     return status == WT_OK ? 0 : 1;

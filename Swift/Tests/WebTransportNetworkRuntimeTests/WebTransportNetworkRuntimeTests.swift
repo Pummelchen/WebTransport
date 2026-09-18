@@ -75,209 +75,17 @@ func quicPacketProbeCodecUsesProtectedInitialPacketsAndRejectsMalformedPackets()
         try TLSQUICTransportParametersExtension.parameters(from: clientTransportParameters.data)
             .integer(for: QUICTransportParameterID.maxDatagramFrameSize) == 1_200)
 
-    let serverPacket = try WebTransportQUICPacketProbeCodec.encodeServerInitial(
-        request: decodedRequest,
-        message: decodedRequest.message
+    let serverFlight = try verifyServerFlight(decodedRequest: decodedRequest)
+    try verifyServerFlightRejectsInvalidMessages(
+        decodedRequest: decodedRequest,
+        serverMessages: serverFlight.messages
     )
-    #expect(serverPacket.range(of: Data("WT-QUIC-SERVER-FLIGHT".utf8)) == nil)
-    let handshakeContext = try WebTransportQUICPacketProbeCodec.decodeServerInitialContext(
-        serverPacket,
-        request: decodedRequest
+    try verifyApplicationExchange(
+        decodedRequest: decodedRequest,
+        handshakeContext: serverFlight.context
     )
-    #expect(handshakeContext.message == "hello")
-    #expect(handshakeContext.request == decodedRequest)
-    #expect(
-        handshakeContext.serverHandshakeMessages.map(\.type) == [
-            .serverHello,
-            .encryptedExtensions,
-            .certificate,
-            .certificateVerify,
-            .finished,
-        ])
-    let decodedServerPacket = try QUICInitialPacketProtection.open(
-        serverPacket,
-        keyPhase: .server,
-        initialSecretConnectionID: decodedRequest.destinationConnectionID,
-        parsedHeader: try QUICInitialPacketProtection.parseProtectedLongHeader(serverPacket)
-    )
-    let serverCryptoFrames = try QUICFrame.decodeFrames(decodedServerPacket.payload).compactMap { frame -> QUICFrame? in
-        guard case .crypto = frame else {
-            return nil
-        }
-        return frame
-    }
-    var serverFlightDecoder = TLSHandshakeFlightDecoder()
-    let serverMessages = try serverFlightDecoder.receive(frames: serverCryptoFrames)
-    #expect(
-        serverMessages.map(\.type) == [
-            .serverHello,
-            .encryptedExtensions,
-            .certificate,
-            .certificateVerify,
-            .finished,
-        ])
-    #expect(try TLSCertificate.decode(serverMessages[2].body).entries.count == 1)
-    #expect(try TLSCertificateVerify.decode(serverMessages[3].body).signature.count == 64)
-    #expect(TLSFinished.decode(serverMessages[4].body).verifyData.count == 32)
-
-    var invalidCertificateVerifyMessages = serverMessages
-    invalidCertificateVerifyMessages[3] = try TLSCertificateVerify(
-        algorithm: TLSSignatureScheme.ed25519,
-        signature: Data(repeating: 0xaa, count: 64)
-    ).handshakeMessage()
-    let invalidCertificateVerifyPacket = try protectedServerInitial(
-        request: decodedRequest,
-        messages: invalidCertificateVerifyMessages
-    )
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
-            invalidCertificateVerifyPacket,
-            request: decodedRequest
-        )
-    }
-
-    var invalidFinishedMessages = serverMessages
-    invalidFinishedMessages[4] = TLSFinished(verifyData: Data(repeating: 0xbb, count: 32)).handshakeMessage()
-    let invalidFinishedPacket = try protectedServerInitial(
-        request: decodedRequest,
-        messages: invalidFinishedMessages
-    )
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
-            invalidFinishedPacket,
-            request: decodedRequest
-        )
-    }
-
-    let applicationRequestPacket = try WebTransportQUICPacketProbeCodec.encodeClientApplicationRequest(
-        handshakeContext: handshakeContext,
-        message: "hello"
-    )
-    #expect(applicationRequestPacket.range(of: Data("hello".utf8)) == nil)
-    let applicationRequest = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
-        applicationRequestPacket,
-        handshakeContext: handshakeContext
-    )
-    #expect(applicationRequest.message == "hello")
-    #expect(applicationRequest.packetNumber == 1)
-    #expect(
-        applicationRequest.requestHeaders.contains {
-            $0.name == ":protocol" && $0.value == "webtransport-h3"
-        })
-
-    let applicationResponsePacket = try WebTransportQUICPacketProbeCodec.encodeServerApplicationResponse(
-        handshakeContext: handshakeContext,
-        message: applicationRequest.message
-    )
-    #expect(applicationResponsePacket.range(of: Data("hello".utf8)) == nil)
-    #expect(
-        try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
-            applicationResponsePacket,
-            handshakeContext: handshakeContext
-        ) == "hello")
-
-    let mismatchedHandshakeContext = try WebTransportQUICPacketProbeCodec.serverHandshakeContext(
-        request: decodedRequest,
-        message: "other"
-    )
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
-            applicationRequestPacket,
-            handshakeContext: mismatchedHandshakeContext
-        )
-    }
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
-            applicationResponsePacket,
-            handshakeContext: mismatchedHandshakeContext
-        )
-    }
-
-    var truncated = clientPacket
-    truncated.removeLast()
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(truncated)
-    }
-    var tamperedCiphertext = clientPacket
-    tamperedCiphertext[tamperedCiphertext.count - 1] ^= 0x01
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(tamperedCiphertext)
-    }
-    var tamperedHeader = clientPacket
-    tamperedHeader[5] ^= 0x01
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(tamperedHeader)
-    }
-
-    let unexpectedFramePacket = try protectedClientInitial(
-        destinationConnectionID: decodedRequest.destinationConnectionID,
-        sourceConnectionID: decodedRequest.sourceConnectionID,
-        frames: [
-            .stream(id: 0, offset: 0, fin: false, data: Data("not allowed".utf8))
-        ],
-        padToMinimumInitialSize: true
-    )
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(unexpectedFramePacket)
-    }
-
-    let shortClientInitial = try protectedClientInitial(
-        destinationConnectionID: decodedRequest.destinationConnectionID,
-        sourceConnectionID: decodedRequest.sourceConnectionID,
-        frames: [
-            .crypto(offset: 0, data: Data("WT-QUIC-CLIENT-FLIGHT\0short".utf8)),
-            .ping,
-        ],
-        padToMinimumInitialSize: false
-    )
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(shortClientInitial)
-    }
-
-    let duplicateCryptoBytes = try protectedClientInitial(
-        destinationConnectionID: decodedRequest.destinationConnectionID,
-        sourceConnectionID: decodedRequest.sourceConnectionID,
-        frames: [
-            .crypto(offset: 0, data: try WebTransportQUICPacketProbeCodec.makeClientHelloHandshakeMessage(message: "one").encode()),
-            .crypto(offset: 0, data: try WebTransportQUICPacketProbeCodec.makeClientHelloHandshakeMessage(message: "two").encode()),
-            .ping,
-        ],
-        padToMinimumInitialSize: true
-    )
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(duplicateCryptoBytes)
-    }
-
-    let mismatchedServerInitial = try QUICInitialPacketProtection.seal(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
-        destinationConnectionID: Data([0x01, 0x02, 0x03, 0x04]),
-        sourceConnectionID: decodedRequest.destinationConnectionID,
-        token: Data(),
-        packetNumber: 0,
-        packetNumberLength: 2,
-        plaintextPayload: try QUICFrame.encodeFrames([
-            .ack(largestAcknowledged: decodedRequest.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
-            .crypto(offset: 0, data: Data("WT-QUIC-SERVER-FLIGHT\0hello".utf8)),
-        ]),
-        keyPhase: .server,
-        initialSecretConnectionID: decodedRequest.destinationConnectionID
-    )
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
-            mismatchedServerInitial,
-            request: decodedRequest
-        )
-    }
-
-    var tamperedApplication = applicationRequestPacket
-    tamperedApplication[tamperedApplication.count - 1] ^= 0x01
-    #expect(throws: Error.self) {
-        _ = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
-            tamperedApplication,
-            handshakeContext: handshakeContext
-        )
-    }
+    try verifyClientInitialRejectsTampering(clientPacket: clientPacket)
+    try verifyClientInitialRejectsDisallowedFrames(decodedRequest: decodedRequest)
 }
 
 @Test
@@ -396,20 +204,7 @@ private func protectedClientInitial(
 ) throws -> Data {
     var payload = try QUICFrame.encodeFrames(frames)
     var encoded = try QUICInitialPacketProtection.seal(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
-        destinationConnectionID: destinationConnectionID,
-        sourceConnectionID: sourceConnectionID,
-        token: Data(),
-        packetNumber: 0,
-        packetNumberLength: 2,
-        plaintextPayload: payload,
-        keyPhase: .client,
-        initialSecretConnectionID: destinationConnectionID
-    )
-    while padToMinimumInitialSize && encoded.count < WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes {
-        payload.append(0x00)
-        encoded = try QUICInitialPacketProtection.seal(
+        QUICInitialPacketProtection.SealRequest(
             packetType: .initial,
             version: WebTransportQUICPacketProbeCodec.quicVersion,
             destinationConnectionID: destinationConnectionID,
@@ -420,7 +215,22 @@ private func protectedClientInitial(
             plaintextPayload: payload,
             keyPhase: .client,
             initialSecretConnectionID: destinationConnectionID
-        )
+        ))
+    while padToMinimumInitialSize && encoded.count < WebTransportQUICPacketProbeCodec.minimumInitialDatagramBytes {
+        payload.append(0x00)
+        encoded = try QUICInitialPacketProtection.seal(
+            QUICInitialPacketProtection.SealRequest(
+                packetType: .initial,
+                version: WebTransportQUICPacketProbeCodec.quicVersion,
+                destinationConnectionID: destinationConnectionID,
+                sourceConnectionID: sourceConnectionID,
+                token: Data(),
+                packetNumber: 0,
+                packetNumberLength: 2,
+                plaintextPayload: payload,
+                keyPhase: .client,
+                initialSecretConnectionID: destinationConnectionID
+            ))
     }
     return encoded
 }
@@ -433,17 +243,18 @@ private func protectedServerInitial(
         [.ack(largestAcknowledged: request.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: [])]
         + (try TLSHandshakeFlight(messages: messages).cryptoFrames(maxFramePayloadBytes: 9))
     return try QUICInitialPacketProtection.seal(
-        packetType: .initial,
-        version: WebTransportQUICPacketProbeCodec.quicVersion,
-        destinationConnectionID: request.sourceConnectionID,
-        sourceConnectionID: request.destinationConnectionID,
-        token: Data(),
-        packetNumber: 0,
-        packetNumberLength: 2,
-        plaintextPayload: try QUICFrame.encodeFrames(frames),
-        keyPhase: .server,
-        initialSecretConnectionID: request.destinationConnectionID
-    )
+        QUICInitialPacketProtection.SealRequest(
+            packetType: .initial,
+            version: WebTransportQUICPacketProbeCodec.quicVersion,
+            destinationConnectionID: request.sourceConnectionID,
+            sourceConnectionID: request.destinationConnectionID,
+            token: Data(),
+            packetNumber: 0,
+            packetNumberLength: 2,
+            plaintextPayload: try QUICFrame.encodeFrames(frames),
+            keyPhase: .server,
+            initialSecretConnectionID: request.destinationConnectionID
+        ))
 }
 
 private func clientHelloForValidationTest(
@@ -469,4 +280,242 @@ private func clientHelloForValidationTest(
             try TLSSignatureAlgorithmsExtension.make([TLSSignatureScheme.ed25519]),
         ]
     ).handshakeMessage()
+}
+
+/// The server's flight must decode, and its five handshake messages must be the ones the
+/// probe promises.
+private func verifyServerFlight(
+    decodedRequest: WebTransportQUICPacketProbeRequest
+) throws -> (context: WebTransportQUICPacketHandshakeContext, messages: [TLSHandshakeMessage]) {
+    let serverPacket = try WebTransportQUICPacketProbeCodec.encodeServerInitial(
+        request: decodedRequest,
+        message: decodedRequest.message
+    )
+    #expect(serverPacket.range(of: Data("WT-QUIC-SERVER-FLIGHT".utf8)) == nil)
+    let handshakeContext = try WebTransportQUICPacketProbeCodec.decodeServerInitialContext(
+        serverPacket,
+        request: decodedRequest
+    )
+    #expect(handshakeContext.message == "hello")
+    #expect(handshakeContext.request == decodedRequest)
+    #expect(
+        handshakeContext.serverHandshakeMessages.map(\.type) == [
+            .serverHello,
+            .encryptedExtensions,
+            .certificate,
+            .certificateVerify,
+            .finished,
+        ])
+    let decodedServerPacket = try QUICInitialPacketProtection.open(
+        serverPacket,
+        keyPhase: .server,
+        initialSecretConnectionID: decodedRequest.destinationConnectionID,
+        parsedHeader: try QUICInitialPacketProtection.parseProtectedLongHeader(serverPacket)
+    )
+    let serverCryptoFrames = try QUICFrame.decodeFrames(decodedServerPacket.payload).compactMap { frame -> QUICFrame? in
+        guard case .crypto = frame else {
+            return nil
+        }
+        return frame
+    }
+    var serverFlightDecoder = TLSHandshakeFlightDecoder()
+    let serverMessages = try serverFlightDecoder.receive(frames: serverCryptoFrames)
+    #expect(
+        serverMessages.map(\.type) == [
+            .serverHello,
+            .encryptedExtensions,
+            .certificate,
+            .certificateVerify,
+            .finished,
+        ])
+    #expect(try TLSCertificate.decode(serverMessages[2].body).entries.count == 1)
+    #expect(try TLSCertificateVerify.decode(serverMessages[3].body).signature.count == 64)
+    #expect(TLSFinished.decode(serverMessages[4].body).verifyData.count == 32)
+    return (handshakeContext, serverMessages)
+}
+
+/// A server flight carrying a bad CertificateVerify or Finished, or one sealed for a
+/// different connection ID, must be refused.
+private func verifyServerFlightRejectsInvalidMessages(
+    decodedRequest: WebTransportQUICPacketProbeRequest,
+    serverMessages: [TLSHandshakeMessage]
+) throws {
+    var invalidCertificateVerifyMessages = serverMessages
+    invalidCertificateVerifyMessages[3] = try TLSCertificateVerify(
+        algorithm: TLSSignatureScheme.ed25519,
+        signature: Data(repeating: 0xaa, count: 64)
+    ).handshakeMessage()
+    let invalidCertificateVerifyPacket = try protectedServerInitial(
+        request: decodedRequest,
+        messages: invalidCertificateVerifyMessages
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
+            invalidCertificateVerifyPacket,
+            request: decodedRequest
+        )
+    }
+
+    var invalidFinishedMessages = serverMessages
+    invalidFinishedMessages[4] = TLSFinished(verifyData: Data(repeating: 0xbb, count: 32)).handshakeMessage()
+    let invalidFinishedPacket = try protectedServerInitial(
+        request: decodedRequest,
+        messages: invalidFinishedMessages
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
+            invalidFinishedPacket,
+            request: decodedRequest
+        )
+    }
+
+    let mismatchedServerInitial = try QUICInitialPacketProtection.seal(
+        QUICInitialPacketProtection.SealRequest(
+            packetType: .initial,
+            version: WebTransportQUICPacketProbeCodec.quicVersion,
+            destinationConnectionID: Data([0x01, 0x02, 0x03, 0x04]),
+            sourceConnectionID: decodedRequest.destinationConnectionID,
+            token: Data(),
+            packetNumber: 0,
+            packetNumberLength: 2,
+            plaintextPayload: try QUICFrame.encodeFrames([
+                .ack(largestAcknowledged: decodedRequest.packetNumber, ackDelay: 0, firstAckRange: 0, ranges: []),
+                .crypto(offset: 0, data: Data("WT-QUIC-SERVER-FLIGHT\0hello".utf8)),
+            ]),
+            keyPhase: .server,
+            initialSecretConnectionID: decodedRequest.destinationConnectionID
+        ))
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeServerInitial(
+            mismatchedServerInitial,
+            request: decodedRequest
+        )
+    }
+}
+
+/// The application exchange round-trips, and a mismatched handshake context refuses both
+/// directions.
+private func verifyApplicationExchange(
+    decodedRequest: WebTransportQUICPacketProbeRequest,
+    handshakeContext: WebTransportQUICPacketHandshakeContext
+) throws {
+    let applicationRequestPacket = try WebTransportQUICPacketProbeCodec.encodeClientApplicationRequest(
+        handshakeContext: handshakeContext,
+        message: "hello"
+    )
+    #expect(applicationRequestPacket.range(of: Data("hello".utf8)) == nil)
+    let applicationRequest = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
+        applicationRequestPacket,
+        handshakeContext: handshakeContext
+    )
+    #expect(applicationRequest.message == "hello")
+    #expect(applicationRequest.packetNumber == 1)
+    #expect(
+        applicationRequest.requestHeaders.contains {
+            $0.name == ":protocol" && $0.value == "webtransport-h3"
+        })
+
+    let applicationResponsePacket = try WebTransportQUICPacketProbeCodec.encodeServerApplicationResponse(
+        handshakeContext: handshakeContext,
+        message: applicationRequest.message
+    )
+    #expect(applicationResponsePacket.range(of: Data("hello".utf8)) == nil)
+    #expect(
+        try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
+            applicationResponsePacket,
+            handshakeContext: handshakeContext
+        ) == "hello")
+
+    let mismatchedHandshakeContext = try WebTransportQUICPacketProbeCodec.serverHandshakeContext(
+        request: decodedRequest,
+        message: "other"
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
+            applicationRequestPacket,
+            handshakeContext: mismatchedHandshakeContext
+        )
+    }
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeServerApplicationResponse(
+            applicationResponsePacket,
+            handshakeContext: mismatchedHandshakeContext
+        )
+    }
+
+    var tamperedApplication = applicationRequestPacket
+    tamperedApplication[tamperedApplication.count - 1] ^= 0x01
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientApplicationRequest(
+            tamperedApplication,
+            handshakeContext: handshakeContext
+        )
+    }
+}
+
+/// The client initial must reject truncation, ciphertext and header tampering, and the
+/// frames the probe does not allow on it.
+/// Truncation, ciphertext tampering and header tampering must all be refused.
+private func verifyClientInitialRejectsTampering(clientPacket: Data) throws {
+    var truncated = clientPacket
+    truncated.removeLast()
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(truncated)
+    }
+    var tamperedCiphertext = clientPacket
+    tamperedCiphertext[tamperedCiphertext.count - 1] ^= 0x01
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(tamperedCiphertext)
+    }
+    var tamperedHeader = clientPacket
+    tamperedHeader[5] ^= 0x01
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(tamperedHeader)
+    }
+
+}
+
+/// Frames the probe does not allow on a client initial are refused, as are a too-short
+/// flight and a duplicate CRYPTO offset.
+private func verifyClientInitialRejectsDisallowedFrames(
+    decodedRequest: WebTransportQUICPacketProbeRequest
+) throws {
+    let unexpectedFramePacket = try protectedClientInitial(
+        destinationConnectionID: decodedRequest.destinationConnectionID,
+        sourceConnectionID: decodedRequest.sourceConnectionID,
+        frames: [
+            .stream(id: 0, offset: 0, fin: false, data: Data("not allowed".utf8))
+        ],
+        padToMinimumInitialSize: true
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(unexpectedFramePacket)
+    }
+
+    let shortClientInitial = try protectedClientInitial(
+        destinationConnectionID: decodedRequest.destinationConnectionID,
+        sourceConnectionID: decodedRequest.sourceConnectionID,
+        frames: [
+            .crypto(offset: 0, data: Data("WT-QUIC-CLIENT-FLIGHT\0short".utf8)),
+            .ping,
+        ],
+        padToMinimumInitialSize: false
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(shortClientInitial)
+    }
+
+    let duplicateCryptoBytes = try protectedClientInitial(
+        destinationConnectionID: decodedRequest.destinationConnectionID,
+        sourceConnectionID: decodedRequest.sourceConnectionID,
+        frames: [
+            .crypto(offset: 0, data: try WebTransportQUICPacketProbeCodec.makeClientHelloHandshakeMessage(message: "one").encode()),
+            .crypto(offset: 0, data: try WebTransportQUICPacketProbeCodec.makeClientHelloHandshakeMessage(message: "two").encode()),
+            .ping,
+        ],
+        padToMinimumInitialSize: true
+    )
+    #expect(throws: Error.self) {
+        _ = try WebTransportQUICPacketProbeCodec.decodeClientInitial(duplicateCryptoBytes)
+    }
 }

@@ -26,8 +26,8 @@ wt_status_t wt_webtransport_stream_prefix_write(wt_writer_t *w, int unidirection
   /* A prefix can only name a session, so a caller asking for another ID has a bug
    * rather than a peer. */
   if (!wt_webtransport_is_session_stream_id(session_id)) return WT_ERR_INVALID_ARGUMENT;
-  (void)wt_quic_writer_varint(w,
-                              unidirectional ? WT_WEBTRANSPORT_STREAM_UNI : WT_WEBTRANSPORT_STREAM_BIDI);
+  (void)wt_quic_writer_varint(w, unidirectional ? WT_WEBTRANSPORT_STREAM_UNI
+                                                : WT_WEBTRANSPORT_STREAM_BIDI);
   (void)wt_quic_writer_varint(w, session_id);
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
@@ -95,7 +95,14 @@ wt_status_t wt_webtransport_datagram_parse(const uint8_t *data, size_t length,
   /* And a quarter ID whose session would not fit is the same class of error, refused here rather than handed on:
    * `wt_webtransport_session_id_from_quarter` multiplies by four, and a peer-supplied value above
    * `UINT64_MAX / 4` wraps to an ID that can name a REAL session -- an audit fed quarter 2^62 and got session 0.
-   * Checked at the parse boundary because this is where a peer's number enters the library. */
+   * Checked at the parse boundary because this is where a peer's number enters the library.
+   *
+   * UNREACHABLE as a wire check, and that is worth knowing rather than discovering from a coverage report
+   * (AUD-0035): a QUIC varint cannot encode more than 2^62 - 1, which is EXACTLY `UINT64_MAX / 4`, so the
+   * `quarter` decoded above can never exceed the threshold. It stays as the second line of defence for the
+   * day the decode above is replaced -- and the precondition it enforces is now stated on
+   * `wt_webtransport_session_id_from_quarter` itself, whose own multiply remains unguarded for callers that
+   * build a quarter ID by hand. */
   if (quarter > UINT64_MAX / 4U) {
     if (out_error != NULL) *out_error = WT_HTTP3_DATAGRAM_ERROR;
     return WT_ERR_PROTOCOL;

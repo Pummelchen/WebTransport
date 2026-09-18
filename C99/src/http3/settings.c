@@ -90,8 +90,8 @@ uint64_t wt_http3_settings_get(const wt_http3_settings_t *settings, uint64_t ide
   return 0U;
 }
 
-wt_status_t wt_http3_settings_parse(const uint8_t *payload, size_t length,
-                                    wt_http3_settings_t *out, wt_http3_error_t *out_error) {
+wt_status_t wt_http3_settings_parse(const uint8_t *payload, size_t length, wt_http3_settings_t *out,
+                                    wt_http3_error_t *out_error) {
   wt_cursor_t c;
   wt_http3_settings_t parsed;
   wt_status_t status;

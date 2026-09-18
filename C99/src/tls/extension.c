@@ -19,8 +19,7 @@ static wt_status_t sub_cursor(wt_cursor_t *cursor, size_t len, wt_cursor_t *out)
   return WT_OK;
 }
 
-wt_status_t wt_tls_extensions_parse(wt_cursor_t *cursor,
-                                    wt_tls_extension_list_t *out) {
+wt_status_t wt_tls_extensions_parse(wt_cursor_t *cursor, wt_tls_extension_list_t *out) {
   wt_cursor_t block;
   uint16_t total;
   size_t i;
@@ -60,8 +59,7 @@ wt_status_t wt_tls_extensions_parse(wt_cursor_t *cursor,
   return WT_OK;
 }
 
-wt_status_t wt_tls_extensions_encode(wt_writer_t *w,
-                                     const wt_tls_extension_list_t *list) {
+wt_status_t wt_tls_extensions_encode(wt_writer_t *w, const wt_tls_extension_list_t *list) {
   size_t i;
   size_t total = 0U;
 
@@ -84,8 +82,8 @@ wt_status_t wt_tls_extensions_encode(wt_writer_t *w,
   return wt_writer_ok(w) ? WT_OK : WT_ERR_LIMIT;
 }
 
-const wt_tls_extension_t *wt_tls_extensions_find(
-    const wt_tls_extension_list_t *list, uint16_t type) {
+const wt_tls_extension_t *wt_tls_extensions_find(const wt_tls_extension_list_t *list,
+                                                 uint16_t type) {
   size_t i;
   if (list == NULL) return NULL;
   for (i = 0U; i < list->count; i++) {
@@ -94,8 +92,7 @@ const wt_tls_extension_t *wt_tls_extensions_find(
   return NULL;
 }
 
-int wt_tls_extensions_contains(const wt_tls_extension_list_t *list,
-                               uint16_t type) {
+int wt_tls_extensions_contains(const wt_tls_extension_list_t *list, uint16_t type) {
   return wt_tls_extensions_find(list, type) != NULL;
 }
 
@@ -103,8 +100,7 @@ int wt_tls_extensions_contains(const wt_tls_extension_list_t *list,
 
 /* The extension's own bytes as a cursor. A reader that forgets this would parse the
  * bytes after the extension, which is why every reader below starts with it. */
-static wt_status_t extension_cursor(const wt_tls_extension_t *extension,
-                                    wt_cursor_t *out) {
+static wt_status_t extension_cursor(const wt_tls_extension_t *extension, wt_cursor_t *out) {
   if (extension == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (extension->data == NULL && extension->len != 0U) {
     return WT_ERR_INVALID_ARGUMENT;
@@ -121,8 +117,7 @@ static wt_status_t extension_end(const wt_cursor_t *cursor) {
 }
 
 wt_status_t wt_tls_supported_versions_client(const wt_tls_extension_t *extension,
-                                             uint16_t *versions, size_t capacity,
-                                             size_t *count) {
+                                             uint16_t *versions, size_t capacity, size_t *count) {
   wt_cursor_t cursor;
   uint8_t length;
   size_t entries;
@@ -163,9 +158,8 @@ wt_status_t wt_tls_supported_versions_server(const wt_tls_extension_t *extension
   return extension_end(&cursor);
 }
 
-wt_status_t wt_tls_u16_list_parse(const wt_tls_extension_t *extension,
-                                  uint16_t *values, size_t capacity,
-                                  size_t *count) {
+wt_status_t wt_tls_u16_list_parse(const wt_tls_extension_t *extension, uint16_t *values,
+                                  size_t capacity, size_t *count) {
   wt_cursor_t cursor;
   uint16_t length;
   size_t entries;
@@ -211,9 +205,8 @@ static wt_status_t key_share_entry(wt_cursor_t *cursor, wt_tls_key_share_t *out)
   return WT_OK;
 }
 
-wt_status_t wt_tls_key_share_client(const wt_tls_extension_t *extension,
-                                    wt_tls_key_share_t *shares, size_t capacity,
-                                    size_t *count) {
+wt_status_t wt_tls_key_share_client(const wt_tls_extension_t *extension, wt_tls_key_share_t *shares,
+                                    size_t capacity, size_t *count) {
   wt_cursor_t cursor;
   uint16_t total;
   wt_cursor_t block;
@@ -254,8 +247,7 @@ wt_status_t wt_tls_key_share_server(const wt_tls_extension_t *extension,
   return extension_end(&cursor);
 }
 
-wt_status_t wt_tls_alpn_parse(const wt_tls_extension_t *extension,
-                              wt_tls_alpn_t *out) {
+wt_status_t wt_tls_alpn_parse(const wt_tls_extension_t *extension, wt_tls_alpn_t *out) {
   wt_cursor_t cursor;
   uint16_t total;
   wt_cursor_t block;
@@ -292,8 +284,8 @@ wt_status_t wt_tls_alpn_parse(const wt_tls_extension_t *extension,
   return extension_end(&cursor);
 }
 
-wt_status_t wt_tls_transport_parameters(const wt_tls_extension_t *extension,
-                                        const uint8_t **data, size_t *len) {
+wt_status_t wt_tls_transport_parameters(const wt_tls_extension_t *extension, const uint8_t **data,
+                                        size_t *len) {
   if (extension == NULL || data == NULL || len == NULL) {
     return WT_ERR_INVALID_ARGUMENT;
   }
@@ -311,8 +303,7 @@ wt_status_t wt_tls_transport_parameters(const wt_tls_extension_t *extension,
  * generic case does it, and the shaped extensions compute it directly because their
  * layout is fixed. */
 
-void wt_tls_extension_supported_versions_client(wt_writer_t *w,
-                                                const uint16_t *versions,
+void wt_tls_extension_supported_versions_client(wt_writer_t *w, const uint16_t *versions,
                                                 size_t count) {
   size_t i;
   if (versions == NULL || count == 0U || count > 127U) {
@@ -335,8 +326,8 @@ void wt_tls_extension_supported_versions_server(wt_writer_t *w, uint16_t version
   wt_writer_u16(w, version);
 }
 
-void wt_tls_extension_u16_list(wt_writer_t *w, uint16_t type,
-                               const uint16_t *values, size_t count) {
+void wt_tls_extension_u16_list(wt_writer_t *w, uint16_t type, const uint16_t *values,
+                               size_t count) {
   size_t i;
   if (values == NULL || count == 0U || count > 0x7FFFU) return;
   wt_writer_u16(w, type);
@@ -347,16 +338,14 @@ void wt_tls_extension_u16_list(wt_writer_t *w, uint16_t type,
   }
 }
 
-void wt_tls_extension_key_share_client(wt_writer_t *w,
-                                       const wt_tls_key_share_t *shares,
+void wt_tls_extension_key_share_client(wt_writer_t *w, const wt_tls_key_share_t *shares,
                                        size_t count) {
   size_t i;
   size_t total = 0U;
 
   if (shares == NULL || count == 0U || count > 0x7FFFU) return;
   for (i = 0U; i < count; i++) {
-    if (shares[i].key == NULL || shares[i].key_len == 0U ||
-        shares[i].key_len > 0xFFFFU) {
+    if (shares[i].key == NULL || shares[i].key_len == 0U || shares[i].key_len > 0xFFFFU) {
       return;
     }
     total += 4U + shares[i].key_len;
@@ -375,10 +364,8 @@ void wt_tls_extension_key_share_client(wt_writer_t *w,
   }
 }
 
-void wt_tls_extension_key_share_server(wt_writer_t *w,
-                                       const wt_tls_key_share_t *share) {
-  if (share == NULL || share->key == NULL || share->key_len == 0U ||
-      share->key_len > 0xFFFFU) {
+void wt_tls_extension_key_share_server(wt_writer_t *w, const wt_tls_key_share_t *share) {
+  if (share == NULL || share->key == NULL || share->key_len == 0U || share->key_len > 0xFFFFU) {
     return;
   }
   wt_writer_u16(w, WT_TLS_EXTENSION_KEY_SHARE);
@@ -413,8 +400,7 @@ void wt_tls_extension_alpn(wt_writer_t *w, const char *const *names, size_t coun
   }
 }
 
-void wt_tls_extension_transport_parameters(wt_writer_t *w, const uint8_t *data,
-                                           size_t len) {
+void wt_tls_extension_transport_parameters(wt_writer_t *w, const uint8_t *data, size_t len) {
   if (data == NULL && len != 0U) return;
   if (len > 0xFFFFU) return;
   wt_writer_u16(w, WT_TLS_EXTENSION_QUIC_TRANSPORT_PARAMETERS);

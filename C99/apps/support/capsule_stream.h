@@ -20,8 +20,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "webtransport/quic/connection.h"
 #include "webtransport/http3/driver.h"
+#include "webtransport/quic/connection.h"
 #include "webtransport/webtransport/capsule.h"
 #include "webtransport/webtransport/session.h"
 
@@ -89,7 +89,8 @@ void wt_capsule_stream_set_flow_advertised(wt_capsule_stream_t *stream,
  * reassembles it and records whether it advertised a section 5.1 flow-control setting, which is the PEER half
  * above. `last` completes the frame; pieces before it are kept. */
 wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, const uint8_t *payload,
-                                               size_t length, int last, wt_http3_error_t *out_error);
+                                               size_t length, int last,
+                                               wt_http3_error_t *out_error);
 
 /* One delivery of bytes the driver routed off the CONNECT stream, with the stream's end on the last one.
  *
@@ -105,9 +106,9 @@ wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, cons
  * WT_ERR_TRUNCATED is returned when the stream ENDS part way through a capsule: an incomplete capsule at FIN is a
  * refusal, the same rule an incomplete HTTP/3 frame follows (WT-158). A capsule that has merely not arrived is kept
  * and this returns WT_OK, so the caller's next delivery completes it. */
-wt_status_t wt_capsule_stream_on_bytes(wt_capsule_stream_t *stream, const uint8_t *data, size_t length, int fin,
-                                       wt_capsule_stream_fn observe, void *context,
-                                       wt_http3_error_t *out_error);
+wt_status_t wt_capsule_stream_on_bytes(wt_capsule_stream_t *stream, const uint8_t *data,
+                                       size_t length, int fin, wt_capsule_stream_fn observe,
+                                       void *context, wt_http3_error_t *out_error);
 
 /* Apply the connection-level grants: MAX_DATA and both MAX_STREAMS. The context is the `wt_capsule_stream_t`, so
  * the usual call is `(wt_capsule_stream_apply_flow, stream)`.
@@ -150,9 +151,8 @@ typedef enum wt_capsule_refusal {
 } wt_capsule_refusal_t;
 
 wt_capsule_refusal_t wt_capsule_stream_refuse(wt_capsule_stream_t *stream,
-                                              const wt_http3_driver_transport_t *transport, uint64_t stream_id,
-                                              wt_quic_connection_t *connection, uint64_t now,
-                                              wt_http3_error_t error);
+                                              const wt_http3_driver_transport_t *transport,
+                                              uint64_t stream_id, wt_quic_connection_t *connection,
+                                              uint64_t now, wt_http3_error_t error);
 
 #endif /* WT_SUPPORT_CAPSULE_STREAM_H */
-

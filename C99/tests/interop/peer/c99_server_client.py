@@ -26,7 +26,7 @@ async def collect_server_message(session, timeout):
         # A server-initiated bidirectional stream reaches the client through the session's incoming streams.
         incoming = await asyncio.wait_for(session.incoming_streams().__anext__(), timeout=timeout)
         return await asyncio.wait_for(incoming.read_all(), timeout=timeout)
-    except (asyncio.TimeoutError, StopAsyncIteration):
+    except asyncio.TimeoutError, StopAsyncIteration:
         return b""
 
 

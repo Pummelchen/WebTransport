@@ -175,48 +175,57 @@ public struct WebTransportLogger: Sendable {
 public enum WebTransportErrorSurface {
     public static func publicDescription(for error: Error) -> String {
         if let draftError = error as? WebTransportDraft16Error {
-            switch draftError.kind {
-            case .sessionGone:
-                return "WebTransport session is gone"
-            case .bufferedStreamRejected:
-                return "WebTransport buffered stream was rejected"
-            case .flowControl:
-                return "WebTransport flow-control violation"
-            case .requirementsNotMet:
-                return "WebTransport peer requirements were not met"
-            case .alpn:
-                return "WebTransport ALPN negotiation failed"
-            case .h3ID:
-                return "WebTransport session identifier was invalid"
-            case .requestRejected:
-                return "WebTransport request was rejected"
-            }
+            return description(ofDraftError: draftError)
         }
         if error is QUICCodecError {
             return "WebTransport protocol codec rejected malformed input"
         }
         if let runtimeError = error as? WebTransportNetworkRuntimeError {
-            // Named rather than collapsed into the generic line below, and named *without*
-            // the identifiers each case carries: this surface exists to keep transport
-            // identifiers out of user-visible text, and a stream or connection number is
-            // one. The role is a local label rather than peer input, so it is safe.
-            switch runtimeError {
-            case .connectionEstablishmentFailed(let role, _, _):
-                return "WebTransport \(role) connection could not be established"
-            case .connectionTransportFailed(let role, _, _):
-                return "WebTransport \(role) connection failed after it was taken on"
-            case .peerControlStreamNotDelivered(let role, _):
-                return "WebTransport \(role) did not receive the peer's HTTP/3 control stream"
-            case .peerClosedStreamWithoutData:
-                return "WebTransport peer ended a stream before sending any bytes"
-            case .timeout:
-                return "WebTransport operation timed out"
-            case .invalidEndpoint, .invalidPayload, .invalidTransport, .exporterUnavailable,
-                .unexpectedPacket, .unexpectedFrame:
-                return "WebTransport operation failed"
-            }
+            return description(ofRuntimeError: runtimeError)
         }
         return "WebTransport operation failed"
+    }
+
+    /// The draft-16 names, one switch and no classifier above it.
+    private static func description(ofDraftError error: WebTransportDraft16Error) -> String {
+        switch error.kind {
+        case .sessionGone:
+            return "WebTransport session is gone"
+        case .bufferedStreamRejected:
+            return "WebTransport buffered stream was rejected"
+        case .flowControl:
+            return "WebTransport flow-control violation"
+        case .requirementsNotMet:
+            return "WebTransport peer requirements were not met"
+        case .alpn:
+            return "WebTransport ALPN negotiation failed"
+        case .h3ID:
+            return "WebTransport session identifier was invalid"
+        case .requestRejected:
+            return "WebTransport request was rejected"
+        }
+    }
+
+    /// The runtime names, deliberately *without* the identifiers each case carries: this
+    /// surface exists to keep transport identifiers out of user-visible text, and a stream
+    /// or connection number is one. The role is a local label rather than peer input, so it
+    /// is safe.
+    private static func description(ofRuntimeError error: WebTransportNetworkRuntimeError) -> String {
+        switch error {
+        case .connectionEstablishmentFailed(let role, _, _):
+            return "WebTransport \(role) connection could not be established"
+        case .connectionTransportFailed(let role, _, _):
+            return "WebTransport \(role) connection failed after it was taken on"
+        case .peerControlStreamNotDelivered(let role, _):
+            return "WebTransport \(role) did not receive the peer's HTTP/3 control stream"
+        case .peerClosedStreamWithoutData:
+            return "WebTransport peer ended a stream before sending any bytes"
+        case .timeout:
+            return "WebTransport operation timed out"
+        case .invalidEndpoint, .invalidPayload, .invalidTransport, .exporterUnavailable,
+            .unexpectedPacket, .unexpectedFrame:
+            return "WebTransport operation failed"
+        }
     }
 }
 

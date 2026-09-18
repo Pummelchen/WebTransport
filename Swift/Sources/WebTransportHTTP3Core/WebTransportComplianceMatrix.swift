@@ -43,14 +43,19 @@ public enum WebTransportDraft16ComplianceMatrix {
             requirementFamily: "Session establishment and application protocol negotiation",
             status: .pass,
             documentedBehavior:
-                "Extended CONNECT setup, protocol negotiation, 405 resource rejection, excess-session rejection, optimistic capsules, and session ID mapping are implemented and documented.",
+                "Extended CONNECT setup, protocol negotiation, 405 resource rejection, excess-session rejection, optimistic capsules, and session ID "
+                + "mapping are implemented and documented.",
             evidence: ["WebTransportSessionTests", "WebTransportDraft16Tests", "WebTransportPublicAPITests"]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Streams and datagrams, including buffered ingress and rejection behavior",
             status: .pass,
             documentedBehavior:
-                "WebTransport stream/datagram prefixes, ownership, routing, buffering, rejection cleanup, and bounded ingress are implemented and documented. The shipped runtime opens and accepts bidirectional streams and accepts a peer-initiated unidirectional stream as a receive-only stream; the runtime serves exactly one session per connection, so a unidirectional stream whose prefix names another session is refused with WT_SESSION_GONE before it is registered or buffered. Opening a locally initiated unidirectional stream is not exposed by the shipped WebTransport session API.",
+                "WebTransport stream/datagram prefixes, ownership, routing, buffering, rejection cleanup, and bounded ingress are implemented and "
+                + "documented. The shipped runtime opens and accepts bidirectional streams and accepts a peer-initiated unidirectional stream as a "
+                + "receive-only stream; the runtime serves exactly one session per connection, so a unidirectional stream whose prefix names another "
+                + "session is refused with WT_SESSION_GONE before it is registered or buffered. Opening a locally initiated unidirectional stream is "
+                + "not exposed by the shipped WebTransport session API.",
             evidence: [
                 "WebTransportStreamTests",
                 "WebTransportDatagramTests",
@@ -64,28 +69,40 @@ public enum WebTransportDraft16ComplianceMatrix {
             requirementFamily: "Session close/drain behavior",
             status: .pass,
             documentedBehavior:
-                "WT_DRAIN_SESSION, 1024-byte UTF-8 WT_CLOSE_SESSION validation, H3_MESSAGE_ERROR reset behavior, CONNECT FIN close equivalence, stream cleanup, and post-close gating are implemented and documented.",
+                "WT_DRAIN_SESSION, 1024-byte UTF-8 WT_CLOSE_SESSION validation, H3_MESSAGE_ERROR reset behavior, CONNECT FIN close equivalence, "
+                + "stream cleanup, and post-close gating are implemented and documented.",
             evidence: ["WebTransportDraft16Tests", "WebTransportPhase13Tests", "WebTransportLibrarySmokeMatrix"]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Flow-control and error codes",
             status: .partial,
             documentedBehavior:
-                "Both-peer flow-control negotiation, directional stream-byte accounting, missing-setting zero defaults, strictly increasing WT_MAX_* capsules, the 2^60 stream ceiling, blocked capsules, and prohibited HTTP/2 capsule handling are implemented in WebTransportHTTP3Core and exercised by the conformance suite. The shipped Network.framework runtime does not advertise SETTINGS_WT_INITIAL_MAX_* and so never negotiates WebTransport flow control; it admits one session per connection, and the multi-session path that flow control gates is reachable only through WebTransportSessionManager, not through WebTransportNetworkRuntime.",
+                "Both-peer flow-control negotiation, directional stream-byte accounting, missing-setting zero defaults, strictly increasing WT_MAX_* "
+                + "capsules, the 2^60 stream ceiling, blocked capsules, and prohibited HTTP/2 capsule handling are implemented in "
+                + "WebTransportHTTP3Core and exercised by the conformance suite. The shipped Network.framework runtime does not advertise "
+                + "SETTINGS_WT_INITIAL_MAX_* and so never negotiates WebTransport flow control; it admits one session per connection, and the "
+                + "multi-session path that flow control gates is reachable only through WebTransportSessionManager, not through "
+                + "WebTransportNetworkRuntime.",
             evidence: ["WebTransportDraft16Tests", "WebTransportFlowControlTests", "WebTransportPhase13Tests"]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "H3 control and request stream constraints",
             status: .pass,
             documentedBehavior:
-                "HTTP/3 SETTINGS, GOAWAY, request stream lifecycle, DATA policy, malformed ordering, and control-stream constraints are implemented and documented.",
+                "HTTP/3 SETTINGS, GOAWAY, request stream lifecycle, DATA policy, malformed ordering, and control-stream constraints are implemented "
+                + "and documented.",
             evidence: ["HTTP3ConnectionTests", "HTTP3CoreTests", "WebTransportPhase13Tests"]
         ),
         WebTransportDraft16ComplianceItem(
             requirementFamily: "Security and identity handling without prompts",
             status: .partial,
             documentedBehavior:
-                "ALPN/settings/session-policy negatives, prompt-free identity inputs, deterministic trust failures, and the EXPORTER-WebTransport TLS binding are implemented and documented. Pinned-certificate trust (TLSPinnedCertificateTrustPolicy) and the CertificateVerify verifier (TLSCertificateVerifier) are implemented and conformance-tested in WebTransportTLSCore, but they are not wired into the shipped client path: WebTransportQUICPeerTrustPolicy offers only systemTrust and localDevelopmentSelfSigned, and WebTransportNetworkRuntime delegates certificate and signature validation to Network.framework, so the runtime cannot pin a leaf certificate. Pinning is a WebTransportTLSCore-only API for direct callers.",
+                "ALPN/settings/session-policy negatives, prompt-free identity inputs, deterministic trust failures, and the EXPORTER-WebTransport "
+                + "TLS binding are implemented and documented. Pinned-certificate trust (TLSPinnedCertificateTrustPolicy) and the CertificateVerify "
+                + "verifier (TLSCertificateVerifier) are implemented and conformance-tested in WebTransportTLSCore, but they are not wired into the "
+                + "shipped client path: WebTransportQUICPeerTrustPolicy offers only systemTrust and localDevelopmentSelfSigned, and "
+                + "WebTransportNetworkRuntime delegates certificate and signature validation to Network.framework, so the runtime cannot pin a leaf "
+                + "certificate. Pinning is a WebTransportTLSCore-only API for direct callers.",
             evidence: [
                 "WebTransportTLSCoreTests",
                 "WebTransportPublicAPITests",

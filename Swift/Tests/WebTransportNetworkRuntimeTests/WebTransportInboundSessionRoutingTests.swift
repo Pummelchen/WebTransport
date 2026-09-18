@@ -24,81 +24,42 @@ func runtimeClassifiesForeignSessionPrefixedStreamsForRefusal() throws {
 
     // The prefix for the session this connection serves is not foreign.
     let matching = try WebTransportStreamSignaling.serializeBidirectionalPrefix(sessionID: servedSessionID)
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: matching,
-            expectedSessionID: servedSessionID
-        ) == nil)
+    expectNotForeign(matching, expectedSessionID: servedSessionID)
 
     // A bidirectional prefix that names another session is foreign, and the
     // named session ID is reported so the caller can reset the stream.
     let foreign = try WebTransportStreamSignaling.serializeBidirectionalPrefix(sessionID: 8)
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: foreign,
-            expectedSessionID: servedSessionID
-        ) == 8)
+    expectForeign(foreign, expectedSessionID: servedSessionID, names: 8)
     // Whatever payload follows the prefix does not change the classification.
     let foreignWithPayload = foreign + Data("payload".utf8)
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: foreignWithPayload,
-            expectedSessionID: servedSessionID
-        ) == 8)
+    expectForeign(foreignWithPayload, expectedSessionID: servedSessionID, names: 8)
 
     // No WebTransport marker: the manager owns the grammar and reports the
     // malformed-stream error, so this is not a foreign-session refusal.
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: Data("not-a-prefix".utf8),
-            expectedSessionID: servedSessionID
-        ) == nil)
+    expectNotForeign(Data("not-a-prefix".utf8), expectedSessionID: servedSessionID)
 
     // A unidirectional marker on a bidirectional accept is a grammar error, not
     // a foreign session, so it is left to the manager too.
     let unidirectional = try WebTransportStreamSignaling.serializeUnidirectionalPrefix(sessionID: 8)
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: unidirectional,
-            expectedSessionID: servedSessionID
-        ) == nil)
+    expectNotForeign(unidirectional, expectedSessionID: servedSessionID)
 
     // F-swift-line-security-05b: the same classification is applied on the
     // unidirectional accept path, where a unidirectional prefix naming another
     // session *is* foreign and must be refused before the manager registers or
     // buffers it.
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: unidirectional,
-            expectedSessionID: servedSessionID,
-            form: .unidirectional
-        ) == 8)
+    expectForeign(unidirectional, expectedSessionID: servedSessionID, form: .unidirectional, names: 8)
     // The prefix for the session this connection serves is not foreign in either
     // form.
     let matchingUnidirectional = try WebTransportStreamSignaling.serializeUnidirectionalPrefix(
         sessionID: servedSessionID
     )
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: matchingUnidirectional,
-            expectedSessionID: servedSessionID,
-            form: .unidirectional
-        ) == nil)
+    expectNotForeign(matchingUnidirectional, expectedSessionID: servedSessionID, form: .unidirectional)
     // A bidirectional prefix on a unidirectional accept is a grammar error, so it
     // is still left to the manager rather than reported as a foreign session.
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: matching,
-            expectedSessionID: servedSessionID,
-            form: .unidirectional
-        ) == nil)
+    expectNotForeign(matching, expectedSessionID: servedSessionID, form: .unidirectional)
 
     // A truncated prefix is malformed, not foreign.
-    #expect(
-        InteroperableQUICHelpers.foreignSessionID(
-            inPrefixedStream: Data([0x41]),
-            expectedSessionID: servedSessionID
-        ) == nil)
+    expectNotForeign(Data([0x41]), expectedSessionID: servedSessionID)
 }
 
 /// F-swift-architecture-08: the connection-scoped datagram channel cannot hand a
@@ -145,4 +106,34 @@ func runtimeClassifiesForeignSessionDatagramsForRefusal() throws {
     } catch let error as WebTransportDraft16Error {
         #expect(error.kind == .h3ID)
     }
+}
+
+/// Asserts the classifier reports the stream as naming another session.
+private func expectForeign(
+    _ stream: Data,
+    expectedSessionID: UInt64,
+    form: WebTransportStreamForm = .bidirectional,
+    names expected: UInt64
+) {
+    #expect(
+        InteroperableQUICHelpers.foreignSessionID(
+            inPrefixedStream: stream,
+            expectedSessionID: expectedSessionID,
+            form: form
+        ) == expected)
+}
+
+/// Asserts the classifier leaves the stream to the manager: it is not a prefix, not foreign,
+/// or a grammar error for this direction.
+private func expectNotForeign(
+    _ stream: Data,
+    expectedSessionID: UInt64,
+    form: WebTransportStreamForm = .bidirectional
+) {
+    #expect(
+        InteroperableQUICHelpers.foreignSessionID(
+            inPrefixedStream: stream,
+            expectedSessionID: expectedSessionID,
+            form: form
+        ) == nil)
 }

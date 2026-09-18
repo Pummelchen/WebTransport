@@ -32,7 +32,8 @@ static void make_keys(uint8_t seed, wt_quic_packet_keys_t *out) {
   uint8_t secret[WT_SHA256_LEN];
   size_t i;
 
-  for (i = 0; i < sizeof(secret); i++) secret[i] = (uint8_t)(seed + i);
+  for (i = 0; i < sizeof(secret); i++)
+    secret[i] = (uint8_t)(seed + i);
   WT_EXPECT_OK("the packet keys derive",
                wt_quic_packet_keys_from_secret(secret, WT_AEAD_AES_128_GCM, out));
 }
@@ -114,8 +115,7 @@ static void test_long_header_round_trip(void) {
 
   memset(&received, 0, sizeof(received));
   /* A long header carries its destination connection ID length, so the reader is not told one. */
-  WT_EXPECT_OK("and reads back",
-               wt_quic_packet_read(packet, packet_len, &keys, 0U, 0U, &received));
+  WT_EXPECT_OK("and reads back", wt_quic_packet_read(packet, packet_len, &keys, 0U, 0U, &received));
   WT_EXPECT_INT("as a long header", 0, received.short_header);
   WT_EXPECT_U64("of its type", (uint64_t)WT_QUIC_PACKET_HANDSHAKE, (uint64_t)received.type);
   WT_EXPECT_U64("its version", (uint64_t)WT_QUIC_VERSION_1, (uint64_t)received.version);
@@ -149,7 +149,8 @@ static void test_initial_with_token(void) {
   wt_quic_received_packet_t received;
   size_t i;
 
-  for (i = 0; i < sizeof(token); i++) token[i] = (uint8_t)(0x40U + i);
+  for (i = 0; i < sizeof(token); i++)
+    token[i] = (uint8_t)(0x40U + i);
   make_keys(3U, &keys);
   memset(&build, 0, sizeof(build));
   build.type = WT_QUIC_PACKET_INITIAL;
@@ -169,17 +170,16 @@ static void test_initial_with_token(void) {
   WT_EXPECT_OK("an Initial packet with a token builds",
                wt_quic_packet_build(&build, packet, sizeof(packet), &packet_len));
   memset(&received, 0, sizeof(received));
-  WT_EXPECT_OK("and reads back",
-               wt_quic_packet_read(packet, packet_len, &keys, 0U, 0U, &received));
+  WT_EXPECT_OK("and reads back", wt_quic_packet_read(packet, packet_len, &keys, 0U, 0U, &received));
   WT_EXPECT_U64("with its packet number", 0x0102U, received.packet_number);
   WT_EXPECT_U64("in three bytes", 3U, (uint64_t)received.packet_number_length);
   WT_EXPECT_BYTES("and its payload", k_frames, received.payload, sizeof(k_frames));
   /* The header the AEAD authenticated covers the token, so it is longer than the same packet without
    * one, and a reader that skipped the token would have every later offset wrong by its length. */
-  WT_EXPECT_U64("and the header ends after the token",
-                (uint64_t)(1U + 4U + 1U + sizeof(k_dcid) + 1U + sizeof(k_scid) + 2U +
-                           sizeof(token) + 3U),
-                (uint64_t)received.header_len);
+  WT_EXPECT_U64(
+      "and the header ends after the token",
+      (uint64_t)(1U + 4U + 1U + sizeof(k_dcid) + 1U + sizeof(k_scid) + 2U + sizeof(token) + 3U),
+      (uint64_t)received.header_len);
 
   wt_quic_packet_keys_clear(&keys);
 }
@@ -213,9 +213,8 @@ static void test_packet_number_reconstruction(void) {
                  wt_quic_packet_build(&build, packet, sizeof(packet), &packet_len));
 
     memset(&received, 0, sizeof(received));
-    WT_EXPECT_OK("and reads back",
-                 wt_quic_packet_read(packet, packet_len, &keys, largest, sizeof(k_dcid),
-                                     &received));
+    WT_EXPECT_OK("and reads back", wt_quic_packet_read(packet, packet_len, &keys, largest,
+                                                       sizeof(k_dcid), &received));
     WT_EXPECT_U64("with the number the sender meant", numbers[i], received.packet_number);
   }
   wt_quic_packet_keys_clear(&keys);
@@ -359,8 +358,7 @@ static void test_unprotected_packets_are_refused(void) {
   vn[6U + sizeof(k_dcid)] = sizeof(k_scid);
   memcpy(vn + 7U + sizeof(k_dcid), k_scid, sizeof(k_scid));
   vn_len = 7U + sizeof(k_dcid) + sizeof(k_scid) + 4U;
-  WT_EXPECT_OK("the hand-built datagram is recognised",
-               wt_quic_packet_kind(vn, vn_len, &kind));
+  WT_EXPECT_OK("the hand-built datagram is recognised", wt_quic_packet_kind(vn, vn_len, &kind));
   WT_EXPECT_U64("as a Version Negotiation", (uint64_t)WT_QUIC_PACKET_KIND_VERSION_NEGOTIATION,
                 (uint64_t)kind);
   memset(&received, 0, sizeof(received));
@@ -594,16 +592,17 @@ static void test_a_header_that_cannot_be_parsed_is_not_a_violation(void) {
   packet[7] = 0x00U; /* no token */
   packet[8] = 20U;   /* Length: one packet number byte and nineteen of payload */
   memset(&received, 0, sizeof(received));
-  WT_EXPECT_STATUS("a header without the fixed bit is DISCARDED, not refused", WT_ERR_AUTHENTICATION,
-                   wt_quic_packet_read(packet, sizeof(packet), &keys, 0U, sizeof(k_dcid), &received));
+  WT_EXPECT_STATUS(
+      "a header without the fixed bit is DISCARDED, not refused", WT_ERR_AUTHENTICATION,
+      wt_quic_packet_read(packet, sizeof(packet), &keys, 0U, sizeof(k_dcid), &received));
 
   /* And the ordering that makes it safe: a header with the RESERVED bits set and a tag that does not verify is
    * the same answer -- the packet never authenticated, so nothing about it is a protocol violation yet. */
   packet[0] = 0xccU; /* fixed bit back on, reserved bits set, one-byte packet number */
   memset(&received, 0, sizeof(received));
-  WT_EXPECT_STATUS("reserved bits and a bad tag are a failed authentication",
-                   WT_ERR_AUTHENTICATION,
-                   wt_quic_packet_read(packet, sizeof(packet), &keys, 0U, sizeof(k_dcid), &received));
+  WT_EXPECT_STATUS(
+      "reserved bits and a bad tag are a failed authentication", WT_ERR_AUTHENTICATION,
+      wt_quic_packet_read(packet, sizeof(packet), &keys, 0U, sizeof(k_dcid), &received));
   wt_quic_packet_keys_clear(&keys);
 }
 
