@@ -18,7 +18,7 @@ plus layered QUIC/TLS/HTTP-3 modules and two CLI peers) and, under `C99/`, a
 separate CMake C99 library with its own CLI tools and test suite. The two are
 built and tested separately and versioned in lockstep from a single `VERSION` file,
 so a caller pairing them knows the pair is compatible. Both are released together
-(`1.5.2`, one artifact per library under one tag); the C99 side is built and
+(`1.6`, one artifact per library under one tag); the C99 side is built and
 exercised — 105 CTest tests, ASan/UBSan, Windows under Wine and natively, and
 FreeBSD in a VM. The
 audience is protocol implementers reading a
@@ -102,7 +102,7 @@ compatible, so the unchanged one is recompiled at the new number rather than lef
 behind.
 
 **The lockstep is landed and enforced.** `VERSION` at the repository root (currently
-`1.5.2`) is the single source; it is mirrored in
+`1.6`) is the single source; it is mirrored in
 `C99/include/webtransport/version.h` (`WT_VERSION_MAJOR/MINOR/PATCH`) and in
 `Swift/Sources/WebTransport/WebTransportVersion.swift` (`WebTransportVersion.library`).
 A bump is one edit plus one command: write `VERSION`, then run
