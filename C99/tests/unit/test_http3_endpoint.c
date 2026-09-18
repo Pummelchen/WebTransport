@@ -421,6 +421,13 @@ static void test_request_headers_are_decoded(void) {
   WT_EXPECT_OK("a decoder capacity is set", wt_http3_endpoint_set_decoder_capacity(&server, 0U));
   WT_EXPECT_OK("and setting it again is not a reconfiguration",
                wt_http3_endpoint_set_decoder_capacity(&server, 0U));
+  /* AUD-0027: a capacity this build cannot honour is refused rather than accepted in silence.
+   * Nothing parses the QPACK encoder stream, so the table could never be filled, and an endpoint
+   * that believed otherwise would read every field-section prefix against an empty window. */
+  WT_EXPECT_STATUS("a capacity this build cannot fill is unsupported", WT_ERR_UNSUPPORTED,
+                   wt_http3_endpoint_set_decoder_capacity(&server, 4096U));
+  WT_EXPECT_U64("and the endpoint keeps the capacity it had", 0U,
+                (uint64_t)server.decoder_table.capacity);
 
   WT_EXPECT_OK("the server receives a request stream",
                wt_http3_endpoint_on_request_stream(&server, 0U, &error));

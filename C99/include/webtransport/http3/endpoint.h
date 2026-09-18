@@ -242,7 +242,15 @@ size_t wt_http3_endpoint_request_count(const wt_http3_endpoint_t *endpoint);
  * a field section's MaxEntries prefix readable: the prefix is encoded against that number,
  * so reading it without saying what was advertised would mean guessing. A capacity below
  * 32 makes MaxEntries zero, and then no field section may reference the dynamic table at
- * all -- which is the correct state for an endpoint that advertised no dynamic table. */
+ * all -- which is the correct state for an endpoint that advertised no dynamic table.
+ *
+ * A non-zero capacity is WT_ERR_UNSUPPORTED (AUD-0027). This build never advertises a
+ * capacity and never parses the QPACK encoder stream, so nothing could ever fill the
+ * table: accepting the call would leave the endpoint reading field-section prefixes
+ * against a window it cannot populate, and every dynamic reference would fail with an
+ * error that blames the peer. The encoder-stream decoder exists and is tested
+ * (`wt_qpack_encoder_stream_apply`); wiring it in is what would make this call
+ * meaningful, and until then 0 is the only capacity that describes this endpoint. */
 wt_status_t wt_http3_endpoint_set_decoder_capacity(wt_http3_endpoint_t *endpoint, size_t capacity);
 
 /* A HEADERS frame's payload on a tracked request stream: the ordering rule first, then the

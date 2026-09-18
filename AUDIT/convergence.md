@@ -141,6 +141,10 @@ violation.
 
 26 gates, **0 failed**.
 
+## Sweep 14 — primary host, after the QPACK capacity refusal
+
+26 gates, **0 failed**.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host

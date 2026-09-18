@@ -43,6 +43,8 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/quic/connection_loss.c` | Read in part (`validate_ack`, the ACK-range chain) — `AUD-0024` |
 | `C99/src/webtransport/capsule.c` | Read in part (the close and flow-control parsers) — `AUD-0025` |
 | `C99/src/http3/qpack_header_prefix.c` | **Read in full** (128 lines) and the algorithm checked against RFC 9204 section 4.5.1 — `AUD-0026` |
+| `C99/src/http3/qpack_encoder_stream.c` | **Read in full** (247 lines) — `AUD-0027` |
+| `C99/src/http3/endpoint.c` | Read in part (the QPACK decoder-state seam) — `AUD-0027` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -176,3 +178,29 @@ The same filter is worth running again as more of the tier is read. It also answ
 percentage cannot: **the audit's own fixes moved the figure down** (91.64% at `AUD-0009` to 91.49%
 before `AUD-0024`), because they added executable branches the suite did not cover. A baseline
 nobody re-measures is a claim, not a measurement.
+
+## What the worklist is really finding
+
+Three rounds of following uncovered guards has produced a pattern worth stating: **the uncovered
+refusals are concentrated in code no production path can reach.** `qpack_encoder_stream.c` is the
+clearest case -- 247 lines, fully tested, with no caller. The coverage filter pointed at it three
+times before the reason became clear.
+
+`AUD-0027` is what that turned out to mean. The encoder-stream instruction decoder is never
+constructed, so the endpoint's QPACK decoder table can never hold an entry, so
+`wt_http3_endpoint_set_decoder_capacity` -- public API, documented as the way to say what this
+endpoint advertised -- was accepting capacities this build cannot honour. A non-zero one made
+`max_entries` non-zero, which is the number every field-section prefix is decoded against, so the
+endpoint would read prefixes against a window it could never populate and blame the peer for the
+failure. It now refuses with `WT_ERR_UNSUPPORTED` and says why.
+
+Two consequences for the rest of this review:
+
+- **A large share of the remaining worklist is probably the same shape**, and the honest
+  resolution there is disclosure rather than tests: a refusal in unreachable code cannot be
+  exercised through the public API, and inventing a test that calls an internal function to cover
+  it would raise the percentage without proving anything about the library. The distinction to
+  record each time is "unreachable, and here is why" versus "reachable and untested".
+- **The module is not deleted.** The encoder-stream decoder is correct, tested and is the wiring
+  that would make dynamic-table support real; removing it would destroy work to make a metric
+  look better, which is the opposite of what this audit is for.

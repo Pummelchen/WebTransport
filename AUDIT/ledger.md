@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 24 |
+| DONE | 25 |
 
 Non-terminal (open): 0
-Terminal: 26
+Terminal: 27
 
 ## Tasks
 
@@ -44,6 +44,7 @@ Terminal: 26
 | AUD-0024 | S2 | A | P2 | DONE | The ACK-range validator's refusal paths were never executed by the suite, and two of its guards are load-bearing | C99/src/quic/connection_loss.c:85 |
 | AUD-0025 | S2 | A | P2 | DONE | The flow-control capsule rules the header states outright were unexecuted: trailing bytes, a partial varint, and an over-long close reason | C99/src/webtransport/capsule.c:194 |
 | AUD-0026 | S2 | A | P2 | DONE | Four of RFC 9204 section 4.5.1's decoding error exits and its wrap branch were never executed | C99/src/http3/qpack_header_prefix.c:90 |
+| AUD-0027 | S2 | A | P2 | DONE | A public API accepted a QPACK decoder capacity this build cannot honour, because nothing parses the encoder stream | C99/src/http3/endpoint.c:118 |
 
 ## Detail
 
@@ -308,4 +309,14 @@ Terminal: 26
 - fix: Added `test_the_algorithm_s_refusals_are_all_reachable` to `test_qpack_header_prefix.c`, with each case aimed at one line of the algorithm rather than at "something malformed": a MaxEntries whose doubled full range wraps, an encoded count whose continuation runs past the 62-bit bound, the same for the delta after a valid count, a wrap that lands on zero, the wrap itself (six inserts known and a two-entry window, so an encoded two names nine and subtracts to five), and a positive delta that would carry the base past UINT64_MAX.
 - evidence after: Coverage: `qpack_header_prefix.c` 18 uncovered lines -> 4, and the total 91.60% -> **91.69%** lines -- above the 91.64% recorded at AUD-0009, which the audit's own added branches had pushed down. No file lost coverage. The guard-like worklist is now **277 lines in 53 files**, from 295 when the worklist started, then 285 after AUD-0025. Deliberate violation: removing the `required == 0` exit fails the new test with `FAIL a wrap that lands on zero is refused: want protocol, got ok` and `FAIL as a decompression failure: want 512, got 0` (2 of 71 checks, exit 8); restoring leaves `100% tests passed out of 97`.
 - commit: e339fdf
+
+### AUD-0027 — A public API accepted a QPACK decoder capacity this build cannot honour, because nothing parses the encoder stream
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: api | discovered by: Tier A review, following the coverage worklist into unreachable code (AUDIT/tier-a-review.md)
+- where: C99/src/http3/endpoint.c:118
+- evidence before: The coverage worklist showed 28 uncovered refusals in `qpack_encoder_stream.c`, and the reason turned out to be structural: `wt_qpack_encoder_stream_apply`, the decoder for the peer's encoder-stream instructions, has **no production caller** -- `wt_qpack_encoder_stream_init` is called only from tests. Verified end to end rather than assumed: the only caller of `wt_qpack_dynamic_insert` outside the tests is inside that unreachable path, and `decoder_insert_count` is only ever SET TO ZERO (endpoint.c:34, :126) and read, never incremented. So the endpoint's decoder table can never hold an entry. Meanwhile `wt_http3_endpoint_set_decoder_capacity` -- public API -- accepted any capacity, and its only caller anywhere was a test passing 0. A caller passing 4096 would put the endpoint into a mode it cannot honour: `max_entries` becomes non-zero, so every field-section prefix is read against a window that can never be populated, and every dynamic reference in it fails with a decompression error that BLAMES THE PEER. The build also advertises no QPACK capacity (the SETTINGS identifier is defined and never sent), so the two halves disagreed.
+- fix: `wt_http3_endpoint_set_decoder_capacity` refuses a non-zero capacity with `WT_ERR_UNSUPPORTED` -- the status the library defines for exactly this, "something is not implemented or not compiled in ... so a caller can degrade deliberately". The comment and the header both state what is missing (the encoder stream is never parsed) and that the tested encoder-stream decoder is what would make the call meaningful, so the gap is visible to the next reader instead of silently accepted. Capacity 0 still succeeds and still makes `max_entries` zero, which is the correct state for an endpoint that advertises no dynamic table. A test asserts the refusal AND that the endpoint keeps the capacity it had.
+- evidence after: `100% tests passed out of 97`, `check-format.sh`: all 312 C sources match. Deliberate violation: removing the refusal fails with `FAIL a capacity this build cannot fill is unsupported: want unsupported, got ok` and `FAIL and the endpoint keeps the capacity it had: want 0, got 4096` (2 of 181 checks, exit 8); restoring leaves the suite green. Not fixed by implementing the dynamic table -- that is a feature, not an audit repair, and the 247 tested lines of encoder-stream decoder are left in the tree with the wiring recorded as the remaining work rather than deleted.
+- commit: PENDING
 

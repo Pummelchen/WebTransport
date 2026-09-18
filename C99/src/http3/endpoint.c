@@ -117,6 +117,16 @@ wt_status_t wt_http3_endpoint_on_request_stream(wt_http3_endpoint_t *endpoint, u
 
 wt_status_t wt_http3_endpoint_set_decoder_capacity(wt_http3_endpoint_t *endpoint, size_t capacity) {
   if (endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
+  /* AUD-0027. This build never advertises a QPACK dynamic-table capacity, so it never receives the
+   * encoder-stream instructions that would fill the table: `wt_qpack_encoder_stream_apply` has no
+   * production caller, `decoder_insert_count` is only ever zeroed, and the only caller of
+   * `wt_qpack_dynamic_insert` outside the tests lives in that unreachable path. A non-zero capacity
+   * would therefore put the endpoint into a mode it cannot honour -- the field section's prefix would
+   * be read against a window this endpoint can never populate, and every dynamic reference in it would
+   * fail with a decompression error that blames the peer. Refused explicitly rather than accepted in
+   * silence, so a caller that wants QPACK compression learns it is not available instead of getting a
+   * connection that fails against any peer using the table. */
+  if (capacity != 0U) return WT_ERR_UNSUPPORTED;
   if (endpoint->decoder_capacity_set != 0 && endpoint->decoder_table.capacity == capacity) {
     /* The same capacity twice is not a reconfiguration, and treating it as one would let a
      * caller silently discard the peer's insertions. */
