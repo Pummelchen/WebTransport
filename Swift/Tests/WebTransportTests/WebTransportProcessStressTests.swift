@@ -246,45 +246,24 @@ func webTransportExternalInteropHookRunsWhenConfigured() throws {
             return
         }
         let client = try WebTransportProcessSupport.productURL("WebTransportClient", configuration: "debug")
-        let transport = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRANSPORT"] ?? "packet"
-        let authority = environment["WEBTRANSPORT_EXTERNAL_INTEROP_AUTHORITY"] ?? endpoint.split(separator: ":").first.map(String.init) ?? "localhost"
-        let path = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PATH"] ?? "/"
-        let origin = environment["WEBTRANSPORT_EXTERNAL_INTEROP_ORIGIN"] ?? "https://\(authority)"
-        let wtProtocol = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PROTOCOL"] ?? "none"
-        let trust = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRUST"] ?? "system"
-        let message = environment["WEBTRANSPORT_EXTERNAL_INTEROP_MESSAGE"] ?? "external-interop"
-        let timeoutMilliseconds = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TIMEOUT_MS"] ?? "5000"
-        let result = try WebTransportProcessSupport.run(
-            client,
-            [
-                "--connect", endpoint,
-                "--transport", transport,
-                "--authority", authority,
-                "--path", path,
-                "--origin", origin,
-                "--protocol", wtProtocol,
-                "--trust", trust,
-                "--message", message,
-                "--timeout-ms", timeoutMilliseconds,
-            ],
-            timeout: 10
-        )
+        let settings = ExternalInteropSettings(environment: environment, endpoint: endpoint)
+        let result = try WebTransportProcessSupport.run(client, settings.clientArguments, timeout: 10)
         #expect(result.exitCode == 0)
         #expect(result.stdout.contains("connected"))
-        #expect(result.stdout.contains(message))
+        #expect(result.stdout.contains(settings.message))
         try WebTransportProcessSupport.writeExternalInteropProof(
             WebTransportProcessSupport.ExternalInteropProofRequest(
                 implementation: environment["WEBTRANSPORT_EXTERNAL_INTEROP_IMPLEMENTATION"]
                     ?? "configured independent WebTransport endpoint",
-                endpoint: endpoint,
-                authority: authority,
-                path: path,
-                origin: origin,
-                wtProtocol: wtProtocol,
-                transport: transport,
-                trust: trust,
-                message: message,
-                timeoutMilliseconds: timeoutMilliseconds
+                endpoint: settings.endpoint,
+                authority: settings.authority,
+                path: settings.path,
+                origin: settings.origin,
+                wtProtocol: settings.wtProtocol,
+                transport: settings.transport,
+                trust: settings.trust,
+                message: settings.message,
+                timeoutMilliseconds: settings.timeoutMilliseconds
             ),
             result: result
         )
@@ -325,4 +304,48 @@ func webTransportReleaseArtifactsAreExecutableAndScenarioCapable() throws {
 func webTransportAPISurfaceIsExercisedByPublicImports() throws {
     let script = WebTransportProcessSupport.packageDirectory.appendingPathComponent("check-api-compatibility.sh")
     #expect(FileManager.default.isExecutableFile(atPath: script.path))
+}
+
+/// The external-interop settings, read once from the environment.
+///
+/// Each has a default so the hook can be pointed at an endpoint by setting only the variables
+/// that differ from a plain packet session.
+private struct ExternalInteropSettings {
+    let endpoint: String
+    let transport: String
+    let authority: String
+    let path: String
+    let origin: String
+    let wtProtocol: String
+    let trust: String
+    let message: String
+    let timeoutMilliseconds: String
+
+    init(environment: [String: String], endpoint: String) {
+        self.endpoint = endpoint
+        transport = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRANSPORT"] ?? "packet"
+        authority =
+            environment["WEBTRANSPORT_EXTERNAL_INTEROP_AUTHORITY"]
+            ?? endpoint.split(separator: ":").first.map(String.init) ?? "localhost"
+        path = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PATH"] ?? "/"
+        origin = environment["WEBTRANSPORT_EXTERNAL_INTEROP_ORIGIN"] ?? "https://\(authority)"
+        wtProtocol = environment["WEBTRANSPORT_EXTERNAL_INTEROP_PROTOCOL"] ?? "none"
+        trust = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TRUST"] ?? "system"
+        message = environment["WEBTRANSPORT_EXTERNAL_INTEROP_MESSAGE"] ?? "external-interop"
+        timeoutMilliseconds = environment["WEBTRANSPORT_EXTERNAL_INTEROP_TIMEOUT_MS"] ?? "5000"
+    }
+
+    var clientArguments: [String] {
+        [
+            "--connect", endpoint,
+            "--transport", transport,
+            "--authority", authority,
+            "--path", path,
+            "--origin", origin,
+            "--protocol", wtProtocol,
+            "--trust", trust,
+            "--message", message,
+            "--timeout-ms", timeoutMilliseconds,
+        ]
+    }
 }
