@@ -155,7 +155,9 @@ public enum QUICFrame: Equatable, Sendable {
 
         return output
     }
+}
 
+extension QUICFrame {
     public static func decode(from cursor: inout QUICByteCursor) throws -> QUICFrame {
         let type = try cursor.readUInt8()
 

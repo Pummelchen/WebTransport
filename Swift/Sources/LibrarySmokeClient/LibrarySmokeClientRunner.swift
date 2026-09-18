@@ -136,7 +136,89 @@ struct LibrarySmokeRunner {
         try runEchoDatagrams(session: session, scenario: .echoDatagrams)
         print("client: quick smoke checks passed")
     }
+}
 
+extension LibrarySmokeRunner {
+    mutating func runSessionRequest(
+        requestFrame: HTTP3Frame,
+        requestStreamID: UInt64,
+        scenario: Phase11Scenario,
+        expectedAccepted: Bool
+    ) throws -> Phase11Envelope {
+        try send(
+            Phase11Envelope(
+                scenario: scenario,
+                kind: .sessionRequest,
+                requestStreamID: requestStreamID,
+                payload: try Phase11FramePacket.encodeHTTP3Frame(requestFrame)
+            )
+        )
+
+        let response = try receive(expect: .sessionResponse)
+        guard let payload = response.payload else {
+            throw Error.runtime("missing session response payload")
+        }
+        let responseFrame = try Phase11FramePacket.decodeHTTP3Frame(payload)
+        _ = try manager.receiveServerSessionResponse(streamID: requestStreamID, frame: responseFrame)
+        print("client: manager has session? \(manager.session(forRequestStreamID: requestStreamID) != nil)")
+
+        if expectedAccepted && response.status != nil {
+            throw Error.runtime("session rejected unexpectedly with status \(String(describing: response.status))")
+        }
+        if !expectedAccepted && response.status == nil {
+            throw Error.runtime("session accepted unexpectedly")
+        }
+        return response
+    }
+
+    mutating func send(_ envelope: Phase11Envelope) throws {
+        let encoded = try Phase11Protocol.encode(envelope)
+        try client.send(encoded, to: serverEndpoint)
+    }
+
+    mutating func receive(expect expected: Phase11MessageKind? = nil) throws -> Phase11Envelope {
+        let (bytes, _) = try client.receive(timeoutMilliseconds: 10_000)
+        let envelope = try Phase11Protocol.decode(bytes)
+        if let expected,
+            envelope.kind != expected
+        {
+            throw Error.transport("expected \(expected) got \(envelope.kind)")
+        }
+        return envelope
+    }
+
+    mutating func nextRequestStreamID() -> UInt64 {
+        let streamID = nextClientRequestStreamIndex
+        nextClientRequestStreamIndex += 2
+        return QUICStreamID.make(index: streamID, direction: .bidirectional, initiator: .client)
+    }
+
+    mutating func nextServerBidiStreamID() -> UInt64 {
+        let streamID = nextServerBidiStreamIndex
+        nextServerBidiStreamIndex += 2
+        return QUICStreamID.make(index: streamID, direction: .bidirectional, initiator: .server)
+    }
+
+    mutating func nextServerUniStreamID() -> UInt64 {
+        let streamID = nextServerUniStreamIndex
+        nextServerUniStreamIndex += 2
+        return QUICStreamID.make(index: streamID, direction: .unidirectional, initiator: .server)
+    }
+
+    mutating func nextBidirectionalStreamID() -> UInt64 {
+        let streamID = nextClientBidiStreamIndex
+        nextClientBidiStreamIndex += 2
+        return QUICStreamID.make(index: streamID, direction: .bidirectional, initiator: .client)
+    }
+
+    mutating func nextUnidirectionalStreamID() -> UInt64 {
+        let streamID = nextClientUniStreamIndex
+        nextClientUniStreamIndex += 2
+        return QUICStreamID.make(index: streamID, direction: .unidirectional, initiator: .client)
+    }
+}
+
+extension LibrarySmokeRunner {
     mutating func runSuite() throws {
         let suiteStart = Date()
         print("client: starting smoke suite")
@@ -371,83 +453,5 @@ struct LibrarySmokeRunner {
             availableProtocols: availableProtocols
         )
         return try manager.makeClientSessionRequest(streamID: requestStreamID, request: request)
-    }
-
-    mutating func runSessionRequest(
-        requestFrame: HTTP3Frame,
-        requestStreamID: UInt64,
-        scenario: Phase11Scenario,
-        expectedAccepted: Bool
-    ) throws -> Phase11Envelope {
-        try send(
-            Phase11Envelope(
-                scenario: scenario,
-                kind: .sessionRequest,
-                requestStreamID: requestStreamID,
-                payload: try Phase11FramePacket.encodeHTTP3Frame(requestFrame)
-            )
-        )
-
-        let response = try receive(expect: .sessionResponse)
-        guard let payload = response.payload else {
-            throw Error.runtime("missing session response payload")
-        }
-        let responseFrame = try Phase11FramePacket.decodeHTTP3Frame(payload)
-        _ = try manager.receiveServerSessionResponse(streamID: requestStreamID, frame: responseFrame)
-        print("client: manager has session? \(manager.session(forRequestStreamID: requestStreamID) != nil)")
-
-        if expectedAccepted && response.status != nil {
-            throw Error.runtime("session rejected unexpectedly with status \(String(describing: response.status))")
-        }
-        if !expectedAccepted && response.status == nil {
-            throw Error.runtime("session accepted unexpectedly")
-        }
-        return response
-    }
-
-    mutating func send(_ envelope: Phase11Envelope) throws {
-        let encoded = try Phase11Protocol.encode(envelope)
-        try client.send(encoded, to: serverEndpoint)
-    }
-
-    mutating func receive(expect expected: Phase11MessageKind? = nil) throws -> Phase11Envelope {
-        let (bytes, _) = try client.receive(timeoutMilliseconds: 10_000)
-        let envelope = try Phase11Protocol.decode(bytes)
-        if let expected,
-            envelope.kind != expected
-        {
-            throw Error.transport("expected \(expected) got \(envelope.kind)")
-        }
-        return envelope
-    }
-
-    mutating func nextRequestStreamID() -> UInt64 {
-        let streamID = nextClientRequestStreamIndex
-        nextClientRequestStreamIndex += 2
-        return QUICStreamID.make(index: streamID, direction: .bidirectional, initiator: .client)
-    }
-
-    mutating func nextServerBidiStreamID() -> UInt64 {
-        let streamID = nextServerBidiStreamIndex
-        nextServerBidiStreamIndex += 2
-        return QUICStreamID.make(index: streamID, direction: .bidirectional, initiator: .server)
-    }
-
-    mutating func nextServerUniStreamID() -> UInt64 {
-        let streamID = nextServerUniStreamIndex
-        nextServerUniStreamIndex += 2
-        return QUICStreamID.make(index: streamID, direction: .unidirectional, initiator: .server)
-    }
-
-    mutating func nextBidirectionalStreamID() -> UInt64 {
-        let streamID = nextClientBidiStreamIndex
-        nextClientBidiStreamIndex += 2
-        return QUICStreamID.make(index: streamID, direction: .bidirectional, initiator: .client)
-    }
-
-    mutating func nextUnidirectionalStreamID() -> UInt64 {
-        let streamID = nextClientUniStreamIndex
-        nextClientUniStreamIndex += 2
-        return QUICStreamID.make(index: streamID, direction: .unidirectional, initiator: .client)
     }
 }

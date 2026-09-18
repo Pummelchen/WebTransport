@@ -74,7 +74,9 @@ enum LibrarySmokeServer {
         var port: UInt16 = 45500
         var suiteMode: Bool = false
     }
+}
 
+extension LibrarySmokeServer {
     struct Runner {
         let config: LibrarySmokeServerConfig
         let server: QUICUDPPort

@@ -532,81 +532,123 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
     }
 
-    /// Test support: opens a locally initiated unidirectional stream and returns a
-    /// handle the loopback tests can send on, so the peer has a stream to accept.
-    ///
-    /// `writingSessionID` overrides the session the stream prefix names. The
-    /// default is this connection's session; any other value writes that session's
-    /// prefix without registering the stream with this session's manager, because
-    /// the stream does not belong to the session this endpoint serves. That is the
-    /// foreign-session case ``acceptUnidirectionalStream(maximumInitialBytes:timeoutMilliseconds:)``
-    /// must refuse. It exists only for tests: the shipped surface accepts
-    /// peer-initiated unidirectional streams but does not open one, so there is no
-    /// production caller.
-    func openUnidirectionalStreamForTesting(
-        writingSessionID sessionID: UInt64? = nil,
-        firstPayload: Data = Data(),
-        endOfStream: Bool = false,
-        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
-    ) async throws -> UnidirectionalStreamProducer {
-        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
-        let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
-            try await self.connection.openStream(directionality: .unidirectional)
+}
+
+private actor WebTransportNetworkStreamState {
+    private var outboundPrefix: Data?
+    private var initialPayload: Data?
+
+    init(prefix: Data?, initialPayload: Data) {
+        self.outboundPrefix = prefix
+        self.initialPayload = initialPayload
+    }
+
+    func consumeOutboundPrefix() -> Data? {
+        let value = outboundPrefix
+        outboundPrefix = nil
+        return value
+    }
+
+    func consumeInitialPayload(maximumBytes: Int) -> Data? {
+        guard let buffered = initialPayload, !buffered.isEmpty else {
+            return nil
         }
-        let targetSessionID = sessionID ?? self.sessionID
-        let prefix: Data
-        if targetSessionID == self.sessionID {
-            prefix = try await manager.withManager { manager in
-                try manager.openUnidirectionalStream(
-                    streamID: stream.streamID,
-                    sessionID: WebTransportSessionID(rawValue: self.sessionID)
-                )
+        let limit = max(0, maximumBytes)
+        guard buffered.count > limit else {
+            initialPayload = nil
+            return buffered
+        }
+        let returned = Data(buffered.prefix(limit))
+        let remainder = Data(buffered.dropFirst(limit))
+        initialPayload = remainder.isEmpty ? nil : remainder
+        return returned
+    }
+}
+
+extension WebTransportNetworkSession {
+
+    private static func receiveConnectCapsules(
+        from stream: QUIC.Stream<QUICStream>,
+        manager: WebTransportNetworkSessionManagerState,
+        streamID: UInt64,
+        initialBytes: Data,
+        releaseConnection: @Sendable () -> Void
+    ) async {
+        var decoder = InteroperableCONNECTCapsuleDecoder()
+
+        /// Delivers capsules to the session manager in order, returning `true`
+        /// when one reset the CONNECT stream and this reader must stop.
+        func deliver(_ capsules: [Data]) async throws -> Bool {
+            for capsule in capsules {
+                let result = try await manager.withManager { manager in
+                    try manager.receiveConnectStreamCapsulesWithActions(
+                        streamID: streamID,
+                        bytes: capsule
+                    )
+                }
+                if result.connectResetFrame != nil {
+                    stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+                    try? await stream.send(Data(), endOfStream: true)
+                    // The peer closed the session (this is the frame its WT_CLOSE_SESSION capsule produces), so
+                    // there is nothing left for this connection to carry.
+                    releaseConnection()
+                    return true
+                }
             }
-        } else {
-            prefix = try WebTransportStreamSignaling.serializeUnidirectionalPrefix(
-                sessionID: targetSessionID
-            )
+            return false
         }
-        let producer = UnidirectionalStreamProducer(
-            stream: stream,
-            timeoutMilliseconds: timeout,
-            prefix: prefix
-        )
-        if !firstPayload.isEmpty || endOfStream {
-            try await producer.send(firstPayload, endOfStream: endOfStream)
-        }
-        return producer
-    }
 
-    /// Test support: opens a locally initiated unidirectional stream and writes
-    /// `firstPayload` verbatim, with no WebTransport prefix in front of it.
-    ///
-    /// HTTP/3 stream types and WebTransport streams share the unidirectional
-    /// direction (RFC 9114 section 6.2; draft-ietf-webtrans-http3-16 section 4.4),
-    /// so a peer can open a stream this runtime does not serve. The shipped
-    /// surface never produces one, which leaves a loopback test no way to make a
-    /// peer do it; this helper does, so the runtime's classification of an
-    /// unknown or critical HTTP/3 stream type can be exercised end to end.
-    func openUnframedUnidirectionalStreamForTesting(
-        firstPayload: Data,
-        endOfStream: Bool = false,
-        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
-    ) async throws -> UnidirectionalStreamProducer {
-        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
-        let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
-            try await self.connection.openStream(directionality: .unidirectional)
+        do {
+            if try await deliver(try decoder.append(initialBytes)) {
+                return
+            }
+            while !Task.isCancelled {
+                let received = try await stream.receive(atMost: 8_192)
+                if try await deliver(try decoder.append(received.content)) {
+                    return
+                }
+                if received.metadata.endOfStream {
+                    if decoder.hasPendingBytes {
+                        // Bytes that never completed a frame or a capsule: the
+                        // peer ended the stream mid-unit, which is a truncation
+                        // rather than the orderly close a bare FIN is.
+                        stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+                        try? await stream.send(Data(), endOfStream: true)
+                    } else {
+                        _ = try? await manager.withManager { manager in
+                            try manager.finishConnectStream(streamID: streamID)
+                        }
+                        // The peer ended the CONNECT stream, which ends the session (draft-16 section 4.4), so the
+                        // connection has no further use either.
+                        releaseConnection()
+                    }
+                    return
+                }
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            // draft-ietf-webtrans-http3-16 section 5.6.2 names the code for a
+            // flow-control violation. The session manager has already closed the
+            // session with it by the time this catches, so the CONNECT stream is
+            // reset with the same code rather than a generic H3_MESSAGE_ERROR:
+            // otherwise the peer cannot tell a malformed capsule from an
+            // over-limit flow-control value, and the code the draft requires it
+            // close the session with never reaches it.
+            if let draft16Error = error as? WebTransportDraft16Error,
+                draft16Error.kind == .flowControl
+            {
+                stream.streamApplicationErrorCode =
+                    WebTransportHTTP3DraftConstants.current.wtFlowControlError
+            } else {
+                stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+            }
+            try? await stream.send(Data(), endOfStream: true)
         }
-        let producer = UnidirectionalStreamProducer(
-            stream: stream,
-            timeoutMilliseconds: timeout,
-            prefix: Data()
-        )
-        if !firstPayload.isEmpty || endOfStream {
-            try await producer.send(firstPayload, endOfStream: endOfStream)
-        }
-        return producer
     }
+}
 
+extension WebTransportNetworkSession {
     public func sendDatagram(
         _ data: Data,
         requireAvailability: Bool = true,
@@ -671,60 +713,9 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             return payload
         }
     }
+}
 
-    public func exportKeyingMaterial(
-        applicationLabel: Data,
-        applicationContext: Data = Data(),
-        outputByteCount: Int
-    ) throws -> Data {
-        guard outputByteCount >= 0 else {
-            throw QUICCodecError.valueOutOfRange("negative WebTransport exporter output length")
-        }
-        let context = try WebTransportExporter.context(
-            sessionID: WebTransportSessionID(rawValue: sessionID),
-            applicationLabel: applicationLabel,
-            applicationContext: applicationContext
-        )
-        let contextBytes = context.isEmpty ? [UInt8(0)] : [UInt8](context)
-        let labelBytes = Array(WebTransportExporter.tlsLabel.utf8CString)
-        // The base addresses are guarded rather than force-unwrapped. The label always
-        // carries its terminator and the context is substituted with one byte when empty, so
-        // nil is unreachable today -- but "unreachable" is exactly what `!` asserts, and it
-        // is what a future edit can falsify silently. `flatMap` keeps both pointers optional
-        // through to the call, and a nil flows into the existing `guard let exported` below,
-        // which already reports `exporterUnavailable`.
-        let exported = labelBytes.withUnsafeBufferPointer { labelBuffer in
-            unsafe labelBuffer.baseAddress.flatMap { labelPointer in
-                contextBytes.withUnsafeBufferPointer { contextBuffer in
-                    unsafe contextBuffer.baseAddress.flatMap { contextPointer in
-                        unsafe sec_protocol_metadata_create_secret_with_context(
-                            connection.securityProtocolMetadata,
-                            labelBytes.count - 1,
-                            labelPointer,
-                            context.count,
-                            contextPointer,
-                            outputByteCount
-                        )
-                    }
-                }
-            }
-        }
-        guard let exported else {
-            throw WebTransportNetworkRuntimeError.exporterUnavailable
-        }
-        return Data(exported as DispatchData)
-    }
-
-    /// Tells the peer this endpoint is going away, without tearing the session down.
-    ///
-    /// Sends HTTP/3 GOAWAY on the control stream, then WT_DRAIN_SESSION on the
-    /// CONNECT stream. The peer learns no new sessions or requests will be
-    /// accepted while in-flight work continues, which is what lets a deploy
-    /// finish serving instead of severing every live connection.
-    ///
-    /// The GOAWAY identifier is the next client-initiated bidirectional stream
-    /// after this session's CONNECT stream: everything already accepted is still
-    /// honoured, nothing beyond it is.
+extension WebTransportNetworkSession {
     public func beginGracefulShutdown(
         timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
     ) async throws {
@@ -820,115 +811,113 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             lease?.release()
         }
     }
-
-    private static func receiveConnectCapsules(
-        from stream: QUIC.Stream<QUICStream>,
-        manager: WebTransportNetworkSessionManagerState,
-        streamID: UInt64,
-        initialBytes: Data,
-        releaseConnection: @Sendable () -> Void
-    ) async {
-        var decoder = InteroperableCONNECTCapsuleDecoder()
-
-        /// Delivers capsules to the session manager in order, returning `true`
-        /// when one reset the CONNECT stream and this reader must stop.
-        func deliver(_ capsules: [Data]) async throws -> Bool {
-            for capsule in capsules {
-                let result = try await manager.withManager { manager in
-                    try manager.receiveConnectStreamCapsulesWithActions(
-                        streamID: streamID,
-                        bytes: capsule
-                    )
-                }
-                if result.connectResetFrame != nil {
-                    stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
-                    try? await stream.send(Data(), endOfStream: true)
-                    // The peer closed the session (this is the frame its WT_CLOSE_SESSION capsule produces), so
-                    // there is nothing left for this connection to carry.
-                    releaseConnection()
-                    return true
-                }
-            }
-            return false
-        }
-
-        do {
-            if try await deliver(try decoder.append(initialBytes)) {
-                return
-            }
-            while !Task.isCancelled {
-                let received = try await stream.receive(atMost: 8_192)
-                if try await deliver(try decoder.append(received.content)) {
-                    return
-                }
-                if received.metadata.endOfStream {
-                    if decoder.hasPendingBytes {
-                        // Bytes that never completed a frame or a capsule: the
-                        // peer ended the stream mid-unit, which is a truncation
-                        // rather than the orderly close a bare FIN is.
-                        stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
-                        try? await stream.send(Data(), endOfStream: true)
-                    } else {
-                        _ = try? await manager.withManager { manager in
-                            try manager.finishConnectStream(streamID: streamID)
-                        }
-                        // The peer ended the CONNECT stream, which ends the session (draft-16 section 4.4), so the
-                        // connection has no further use either.
-                        releaseConnection()
-                    }
-                    return
-                }
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            // draft-ietf-webtrans-http3-16 section 5.6.2 names the code for a
-            // flow-control violation. The session manager has already closed the
-            // session with it by the time this catches, so the CONNECT stream is
-            // reset with the same code rather than a generic H3_MESSAGE_ERROR:
-            // otherwise the peer cannot tell a malformed capsule from an
-            // over-limit flow-control value, and the code the draft requires it
-            // close the session with never reaches it.
-            if let draft16Error = error as? WebTransportDraft16Error,
-                draft16Error.kind == .flowControl
-            {
-                stream.streamApplicationErrorCode =
-                    WebTransportHTTP3DraftConstants.current.wtFlowControlError
-            } else {
-                stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
-            }
-            try? await stream.send(Data(), endOfStream: true)
-        }
-    }
 }
 
-private actor WebTransportNetworkStreamState {
-    private var outboundPrefix: Data?
-    private var initialPayload: Data?
-
-    init(prefix: Data?, initialPayload: Data) {
-        self.outboundPrefix = prefix
-        self.initialPayload = initialPayload
+extension WebTransportNetworkSession {
+    func openUnidirectionalStreamForTesting(
+        writingSessionID sessionID: UInt64? = nil,
+        firstPayload: Data = Data(),
+        endOfStream: Bool = false,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> UnidirectionalStreamProducer {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
+            try await self.connection.openStream(directionality: .unidirectional)
+        }
+        let targetSessionID = sessionID ?? self.sessionID
+        let prefix: Data
+        if targetSessionID == self.sessionID {
+            prefix = try await manager.withManager { manager in
+                try manager.openUnidirectionalStream(
+                    streamID: stream.streamID,
+                    sessionID: WebTransportSessionID(rawValue: self.sessionID)
+                )
+            }
+        } else {
+            prefix = try WebTransportStreamSignaling.serializeUnidirectionalPrefix(
+                sessionID: targetSessionID
+            )
+        }
+        let producer = UnidirectionalStreamProducer(
+            stream: stream,
+            timeoutMilliseconds: timeout,
+            prefix: prefix
+        )
+        if !firstPayload.isEmpty || endOfStream {
+            try await producer.send(firstPayload, endOfStream: endOfStream)
+        }
+        return producer
     }
 
-    func consumeOutboundPrefix() -> Data? {
-        let value = outboundPrefix
-        outboundPrefix = nil
-        return value
+    /// Test support: opens a locally initiated unidirectional stream and writes
+    /// `firstPayload` verbatim, with no WebTransport prefix in front of it.
+    ///
+    /// HTTP/3 stream types and WebTransport streams share the unidirectional
+    /// direction (RFC 9114 section 6.2; draft-ietf-webtrans-http3-16 section 4.4),
+    /// so a peer can open a stream this runtime does not serve. The shipped
+    /// surface never produces one, which leaves a loopback test no way to make a
+    /// peer do it; this helper does, so the runtime's classification of an
+    /// unknown or critical HTTP/3 stream type can be exercised end to end.
+    func openUnframedUnidirectionalStreamForTesting(
+        firstPayload: Data,
+        endOfStream: Bool = false,
+        timeoutMilliseconds overrideTimeoutMilliseconds: Int32? = nil
+    ) async throws -> UnidirectionalStreamProducer {
+        let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
+        let stream = try await InteroperableQUICHelpers.withTimeout(timeout) {
+            try await self.connection.openStream(directionality: .unidirectional)
+        }
+        let producer = UnidirectionalStreamProducer(
+            stream: stream,
+            timeoutMilliseconds: timeout,
+            prefix: Data()
+        )
+        if !firstPayload.isEmpty || endOfStream {
+            try await producer.send(firstPayload, endOfStream: endOfStream)
+        }
+        return producer
     }
 
-    func consumeInitialPayload(maximumBytes: Int) -> Data? {
-        guard let buffered = initialPayload, !buffered.isEmpty else {
-            return nil
+    public func exportKeyingMaterial(
+        applicationLabel: Data,
+        applicationContext: Data = Data(),
+        outputByteCount: Int
+    ) throws -> Data {
+        guard outputByteCount >= 0 else {
+            throw QUICCodecError.valueOutOfRange("negative WebTransport exporter output length")
         }
-        let limit = max(0, maximumBytes)
-        guard buffered.count > limit else {
-            initialPayload = nil
-            return buffered
+        let context = try WebTransportExporter.context(
+            sessionID: WebTransportSessionID(rawValue: sessionID),
+            applicationLabel: applicationLabel,
+            applicationContext: applicationContext
+        )
+        let contextBytes = context.isEmpty ? [UInt8(0)] : [UInt8](context)
+        let labelBytes = Array(WebTransportExporter.tlsLabel.utf8CString)
+        // The base addresses are guarded rather than force-unwrapped. The label always
+        // carries its terminator and the context is substituted with one byte when empty, so
+        // nil is unreachable today -- but "unreachable" is exactly what `!` asserts, and it
+        // is what a future edit can falsify silently. `flatMap` keeps both pointers optional
+        // through to the call, and a nil flows into the existing `guard let exported` below,
+        // which already reports `exporterUnavailable`.
+        let exported = labelBytes.withUnsafeBufferPointer { labelBuffer in
+            unsafe labelBuffer.baseAddress.flatMap { labelPointer in
+                contextBytes.withUnsafeBufferPointer { contextBuffer in
+                    unsafe contextBuffer.baseAddress.flatMap { contextPointer in
+                        unsafe sec_protocol_metadata_create_secret_with_context(
+                            connection.securityProtocolMetadata,
+                            labelBytes.count - 1,
+                            labelPointer,
+                            context.count,
+                            contextPointer,
+                            outputByteCount
+                        )
+                    }
+                }
+            }
         }
-        let returned = Data(buffered.prefix(limit))
-        let remainder = Data(buffered.dropFirst(limit))
-        initialPayload = remainder.isEmpty ? nil : remainder
-        return returned
+        guard let exported else {
+            throw WebTransportNetworkRuntimeError.exporterUnavailable
+        }
+        return Data(exported as DispatchData)
     }
 }

@@ -312,7 +312,36 @@ public struct WebTransportQUICClient: Sendable {
             initialConnectCapsuleBytes: Data(responseData.dropFirst(responsePrefix.bytesConsumed))
         )
     }
+}
 
+// `makeClientQUIC` stays in this file because it is the client's own construction
+// site, next to the policies whose selection it implements. Its parameter type is
+// internal rather than private so the tests can pin that selection.
+extension InteroperableQUICRuntime {
+    fileprivate static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
+        switch trustConfiguration {
+        case .systemTrust:
+            return makeBaseQUIC()
+        case .systemTrustForName(let name):
+            // The framework would verify the address it dialled; this verifies the name the caller asked for, with
+            // the platform's own anchors and its own SSL policy (WT-261).
+            //
+            // `peerAuthentication` is deliberately NOT set here. Security.framework's own
+            // `sec_protocol_options_set_peer_authentication_required` documents that "clients default to true,
+            // whereas servers default to false", so a client already requires a peer certificate, and installing a
+            // validator neither narrows that nor relaxes it: a server that presents no certificate is still
+            // refused. The local development bypass below is the only place that turns the requirement off, and it
+            // does so explicitly.
+            return makeBaseQUIC().tls.certificateValidator { _, trust in
+                InteroperableQUICCertificateVerification.isValid(trust, forName: name)
+            }
+        case .localLoopbackDevelopmentSelfSigned:
+            return makeBaseQUIC().tls.peerAuthentication(.none)
+        }
+    }
+}
+
+extension WebTransportQUICClient {
     @discardableResult
     public func run(
         to endpoint: WebTransportNetworkEndpoint,
@@ -381,32 +410,5 @@ public struct WebTransportQUICClient: Sendable {
             transport: .packet,
             sessionEstablished: true
         )
-    }
-}
-
-// `makeClientQUIC` stays in this file because it is the client's own construction
-// site, next to the policies whose selection it implements. Its parameter type is
-// internal rather than private so the tests can pin that selection.
-extension InteroperableQUICRuntime {
-    fileprivate static func makeClientQUIC(trustConfiguration: InteroperableQUICTrustConfiguration) -> QUIC {
-        switch trustConfiguration {
-        case .systemTrust:
-            return makeBaseQUIC()
-        case .systemTrustForName(let name):
-            // The framework would verify the address it dialled; this verifies the name the caller asked for, with
-            // the platform's own anchors and its own SSL policy (WT-261).
-            //
-            // `peerAuthentication` is deliberately NOT set here. Security.framework's own
-            // `sec_protocol_options_set_peer_authentication_required` documents that "clients default to true,
-            // whereas servers default to false", so a client already requires a peer certificate, and installing a
-            // validator neither narrows that nor relaxes it: a server that presents no certificate is still
-            // refused. The local development bypass below is the only place that turns the requirement off, and it
-            // does so explicitly.
-            return makeBaseQUIC().tls.certificateValidator { _, trust in
-                InteroperableQUICCertificateVerification.isValid(trust, forName: name)
-            }
-        case .localLoopbackDevelopmentSelfSigned:
-            return makeBaseQUIC().tls.peerAuthentication(.none)
-        }
     }
 }

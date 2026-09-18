@@ -227,7 +227,9 @@ enum QUICInitialPacketProtection {
             )
         }
     }
+}
 
+extension QUICInitialPacketProtection {
     static func applyHeaderProtection(
         headerAndCiphertext: Data,
         packetNumberOffset: Int,

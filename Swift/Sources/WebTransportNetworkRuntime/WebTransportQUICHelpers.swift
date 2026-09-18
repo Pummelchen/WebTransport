@@ -458,104 +458,133 @@ enum InteroperableQUICHelpers {
             }
         }
     }
+}
 
-    /// Whether H3 DATAGRAM was negotiated with the peer.
-    ///
-    /// Network.framework does not expose the peer's `max_datagram_frame_size`
-    /// before the datagram channel is first used — measured: `usableDatagramFrameSize`
-    /// reports 0 on an established connection even when both peers advertised it —
-    /// so the honest pre-use answer is the HTTP/3 one. Draft-16 carries datagrams
-    /// inside HTTP/3 DATAGRAM frames, so both endpoints must have advertised
-    /// `SETTINGS_H3_DATAGRAM = 1` for the capability to be real. The framework
-    /// remains the authority for a send or receive that is actually attempted.
-    static func datagramsUsable(localSettings: HTTP3Settings, remoteSettings: HTTP3Settings?) -> Bool {
-        let identifier = WebTransportHTTP3DraftConstants.current.settingsH3Datagram
-        guard localSettings[identifier] == 1 else {
-            return false
-        }
-        guard let remoteSettings, remoteSettings[identifier] == 1 else {
-            return false
-        }
-        return true
-    }
-
-    /// What one chunk of a stream means to a reader waiting for its first bytes.
-    enum FirstChunkDecision: Equatable {
-        case bytes(Data)
-        case keepWaiting
-        case peerClosed
-    }
-
-    /// Classify a chunk from a stream the caller is waiting to read.
-    ///
-    /// `receive(atMost:)` defaults to `atLeast: 1`, so an empty chunk with the stream
-    /// still open is the one case the framework does not promise; waiting rather than
-    /// returning it is what keeps "no bytes yet" from reaching a caller that cannot tell
-    /// it apart from "the stream is over". An empty chunk at end of stream is the peer
-    /// having ended the stream without writing to it. Measured against the real
-    /// framework (WebTransport issue #24): a stream opened without data is not delivered
-    /// at all until its first byte arrives, and a stream finished with no bytes reads as
-    /// empty with `endOfStream` set.
-    static func decideFirstChunk(_ content: Data, endOfStream: Bool) -> FirstChunkDecision {
-        if !content.isEmpty {
-            return .bytes(content)
-        }
-        return endOfStream ? .peerClosed : .keepWaiting
-    }
-
-    static func readStream(
-        _ stream: QUIC.Stream<QUICStream>,
-        timeoutMilliseconds: Int32,
-        maxBytes: Int = 8_192
-    ) async throws -> Data {
-        try await withTimeout(timeoutMilliseconds) {
-            while true {
-                let chunk = try await stream.receive(atMost: maxBytes)
-                switch decideFirstChunk(chunk.content, endOfStream: chunk.metadata.endOfStream) {
-                case .bytes(let bytes):
-                    return bytes
-                case .keepWaiting:
-                    continue
-                case .peerClosed:
-                    // A payload read is allowed to see the end of the stream: an empty
-                    // result with nothing behind it is how a reader learns the peer is
-                    // done. The callers that need bytes use `readFirstChunk`.
-                    return Data()
+extension InteroperableQUICHelpers {
+    private static func drainPeerCriticalStream(_ stream: QUIC.Stream<QUICStream>) async {
+        do {
+            while !Task.isCancelled {
+                let received = try await stream.receive(atMost: 8_192)
+                if received.metadata.endOfStream {
+                    return
                 }
+            }
+        } catch {
+            return
+        }
+    }
+
+    static func remainingTimeout(timeoutMilliseconds: Int32, started: Date) -> Int32 {
+        let elapsedMilliseconds = Int32(max(0.0, Date().timeIntervalSince(started) * 1_000.0))
+        return max(0, timeoutMilliseconds - elapsedMilliseconds)
+    }
+
+    static func withTimeout<T: Sendable>(
+        _ timeoutMilliseconds: Int32,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        guard timeoutMilliseconds > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds)
+        }
+
+        // Deliberately unstructured. Several operations wrapped here bottom out
+        // in Network.framework calls that do not observe cancellation, so a
+        // structured group would block on draining a stuck child after the
+        // deadline fired. This races the work against the timer and abandons
+        // the loser; `gate` guarantees the continuation resumes exactly once.
+        return try await withCheckedThrowingContinuation { continuation in
+            let gate = OneShotContinuation()
+            let timer = PendingTimer()
+
+            let operationTask = Task { @Sendable in
+                do {
+                    let value = try await operation()
+                    await gate.complete { continuation.resume(returning: value) }
+                } catch {
+                    await gate.complete { continuation.resume(throwing: error) }
+                }
+                // Retire the timer as soon as the work is done. Letting it sleep
+                // out the full timeout is not free: it holds its captures for
+                // the whole window, and with a long configured timeout and many
+                // timed operations per connection those sleeping tasks
+                // accumulate into real memory growth under sustained churn.
+                timer.operationFinished()
+            }
+
+            let timeoutTask = Task { @Sendable in
+                try? await Task.sleep(for: .milliseconds(Int(timeoutMilliseconds)))
+                await gate.complete {
+                    operationTask.cancel()
+                    continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
+                }
+            }
+            // The operation can finish before this assignment, so handing the
+            // task over has to cancel it immediately in that case.
+            timer.arm(timeoutTask)
+        }
+    }
+
+    /// Runs `operations` concurrently and returns the first one to succeed.
+    ///
+    /// An operation that fails does not end the race; the error surfaces only if
+    /// every operation fails, in which case the first error is thrown. Losers are
+    /// cancelled but never awaited, for the same reason `withTimeout` abandons
+    /// rather than drains: these operations bottom out in Network.framework calls
+    /// that may not observe cancellation. Each is independently bounded by its
+    /// own timeout, so an abandoned loser retires on its own.
+    static func raceFirstSuccess<T: Sendable>(
+        _ operations: [@Sendable () async throws -> T]
+    ) async throws -> T {
+        guard !operations.isEmpty else {
+            throw WebTransportNetworkRuntimeError.invalidPayload
+        }
+        let total = operations.count
+        return try await withCheckedThrowingContinuation { continuation in
+            let state = RaceCompletion()
+            let tasks = Mutex<[Task<Void, Never>]>([])
+            for operation in operations {
+                let task = Task { @Sendable in
+                    do {
+                        let value = try await operation()
+                        let won = await state.succeed()
+                        if won {
+                            continuation.resume(returning: value)
+                            tasks.withLock { $0.forEach { $0.cancel() } }
+                        }
+                    } catch {
+                        if let final = await state.fail(error, total: total) {
+                            continuation.resume(throwing: final)
+                        }
+                    }
+                }
+                tasks.withLock { $0.append(task) }
             }
         }
     }
 
-    /// The first bytes of a stream whose protocol requires data, refusing a peer that
-    /// ended the stream before writing any.
+    /// Whether a failed stream operation failed because the connection was not connected
+    /// yet, which a retry can clear.
     ///
-    /// The codecs report that emptiness as `QUICCodecError.truncated(needed: 1,
-    /// available: 0)`, which is a true statement about the bytes and a misleading one
-    /// about the cause, so the runtime names it here instead (issue #24).
-    static func readFirstChunk(
-        _ stream: QUIC.Stream<QUICStream>,
-        timeoutMilliseconds: Int32,
-        maxBytes: Int = 8_192
-    ) async throws -> Data {
-        let bytes = try await readStream(
-            stream,
-            timeoutMilliseconds: timeoutMilliseconds,
-            maxBytes: maxBytes
-        )
-        guard !bytes.isEmpty else {
-            throw WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID: stream.streamID)
+    /// **This predicate was dead for the errors the runtime actually sees.** `NWError.posix`
+    /// bridges to `NSError` under the domain `"Network.NWError"`, not under
+    /// `NSPOSIXErrorDomain`, so the bridged-domain test below never matched a real
+    /// framework error; nor does `error as? POSIXError` succeed for one. The connection's
+    /// own `ENOTCONN` therefore never took the retry branch in `openBidirectionalStream`.
+    /// It unwraps the `NWError` case first, which is the only form that identifies the
+    /// condition. Found while fixing `WT-185`, which is the same misunderstanding.
+    static func isTransientNotConnected(_ error: Error) -> Bool {
+        if let networkError = error as? NWError, case .posix(let posixCode) = networkError {
+            return posixCode == .ENOTCONN
         }
-        return bytes
+        if let posix = error as? POSIXError {
+            return posix.code == .ENOTCONN
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ENOTCONN)
     }
+}
 
-    /// Retains an HTTP/3-critical peer unidirectional stream, or reports the
-    /// duplicate as a connection error.
-    ///
-    /// RFC 9114 section 6.2.1 makes a second HTTP/3 control stream a connection
-    /// error of type H3_STREAM_CREATION_ERROR, and RFC 9204 section 4.2 says the
-    /// same for a second QPACK encoder or decoder stream. The collector holds at
-    /// most one of each, so a refusal here is the peer having opened a stream the
-    /// protocol does not allow it to open, not a resource limit.
+extension InteroperableQUICHelpers {
     fileprivate static func retainPeerCriticalStreamOrThrow(
         _ stream: QUIC.Stream<QUICStream>,
         type: UInt64,
@@ -678,126 +707,86 @@ enum InteroperableQUICHelpers {
             }
         }
     }
+}
 
-    private static func drainPeerCriticalStream(_ stream: QUIC.Stream<QUICStream>) async {
-        do {
-            while !Task.isCancelled {
-                let received = try await stream.receive(atMost: 8_192)
-                if received.metadata.endOfStream {
-                    return
-                }
-            }
-        } catch {
-            return
+extension InteroperableQUICHelpers {
+    static func datagramsUsable(localSettings: HTTP3Settings, remoteSettings: HTTP3Settings?) -> Bool {
+        let identifier = WebTransportHTTP3DraftConstants.current.settingsH3Datagram
+        guard localSettings[identifier] == 1 else {
+            return false
         }
+        guard let remoteSettings, remoteSettings[identifier] == 1 else {
+            return false
+        }
+        return true
     }
 
-    static func remainingTimeout(timeoutMilliseconds: Int32, started: Date) -> Int32 {
-        let elapsedMilliseconds = Int32(max(0.0, Date().timeIntervalSince(started) * 1_000.0))
-        return max(0, timeoutMilliseconds - elapsedMilliseconds)
+    /// What one chunk of a stream means to a reader waiting for its first bytes.
+    enum FirstChunkDecision: Equatable {
+        case bytes(Data)
+        case keepWaiting
+        case peerClosed
     }
 
-    static func withTimeout<T: Sendable>(
-        _ timeoutMilliseconds: Int32,
-        _ operation: @escaping @Sendable () async throws -> T
-    ) async throws -> T {
-        guard timeoutMilliseconds > 0 else {
-            throw WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds)
-        }
-
-        // Deliberately unstructured. Several operations wrapped here bottom out
-        // in Network.framework calls that do not observe cancellation, so a
-        // structured group would block on draining a stuck child after the
-        // deadline fired. This races the work against the timer and abandons
-        // the loser; `gate` guarantees the continuation resumes exactly once.
-        return try await withCheckedThrowingContinuation { continuation in
-            let gate = OneShotContinuation()
-            let timer = PendingTimer()
-
-            let operationTask = Task { @Sendable in
-                do {
-                    let value = try await operation()
-                    await gate.complete { continuation.resume(returning: value) }
-                } catch {
-                    await gate.complete { continuation.resume(throwing: error) }
-                }
-                // Retire the timer as soon as the work is done. Letting it sleep
-                // out the full timeout is not free: it holds its captures for
-                // the whole window, and with a long configured timeout and many
-                // timed operations per connection those sleeping tasks
-                // accumulate into real memory growth under sustained churn.
-                timer.operationFinished()
-            }
-
-            let timeoutTask = Task { @Sendable in
-                try? await Task.sleep(for: .milliseconds(Int(timeoutMilliseconds)))
-                await gate.complete {
-                    operationTask.cancel()
-                    continuation.resume(throwing: WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds))
-                }
-            }
-            // The operation can finish before this assignment, so handing the
-            // task over has to cancel it immediately in that case.
-            timer.arm(timeoutTask)
-        }
-    }
-
-    /// Runs `operations` concurrently and returns the first one to succeed.
+    /// Classify a chunk from a stream the caller is waiting to read.
     ///
-    /// An operation that fails does not end the race; the error surfaces only if
-    /// every operation fails, in which case the first error is thrown. Losers are
-    /// cancelled but never awaited, for the same reason `withTimeout` abandons
-    /// rather than drains: these operations bottom out in Network.framework calls
-    /// that may not observe cancellation. Each is independently bounded by its
-    /// own timeout, so an abandoned loser retires on its own.
-    static func raceFirstSuccess<T: Sendable>(
-        _ operations: [@Sendable () async throws -> T]
-    ) async throws -> T {
-        guard !operations.isEmpty else {
-            throw WebTransportNetworkRuntimeError.invalidPayload
+    /// `receive(atMost:)` defaults to `atLeast: 1`, so an empty chunk with the stream
+    /// still open is the one case the framework does not promise; waiting rather than
+    /// returning it is what keeps "no bytes yet" from reaching a caller that cannot tell
+    /// it apart from "the stream is over". An empty chunk at end of stream is the peer
+    /// having ended the stream without writing to it. Measured against the real
+    /// framework (WebTransport issue #24): a stream opened without data is not delivered
+    /// at all until its first byte arrives, and a stream finished with no bytes reads as
+    /// empty with `endOfStream` set.
+    static func decideFirstChunk(_ content: Data, endOfStream: Bool) -> FirstChunkDecision {
+        if !content.isEmpty {
+            return .bytes(content)
         }
-        let total = operations.count
-        return try await withCheckedThrowingContinuation { continuation in
-            let state = RaceCompletion()
-            let tasks = Mutex<[Task<Void, Never>]>([])
-            for operation in operations {
-                let task = Task { @Sendable in
-                    do {
-                        let value = try await operation()
-                        let won = await state.succeed()
-                        if won {
-                            continuation.resume(returning: value)
-                            tasks.withLock { $0.forEach { $0.cancel() } }
-                        }
-                    } catch {
-                        if let final = await state.fail(error, total: total) {
-                            continuation.resume(throwing: final)
-                        }
-                    }
+        return endOfStream ? .peerClosed : .keepWaiting
+    }
+
+    static func readStream(
+        _ stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        maxBytes: Int = 8_192
+    ) async throws -> Data {
+        try await withTimeout(timeoutMilliseconds) {
+            while true {
+                let chunk = try await stream.receive(atMost: maxBytes)
+                switch decideFirstChunk(chunk.content, endOfStream: chunk.metadata.endOfStream) {
+                case .bytes(let bytes):
+                    return bytes
+                case .keepWaiting:
+                    continue
+                case .peerClosed:
+                    // A payload read is allowed to see the end of the stream: an empty
+                    // result with nothing behind it is how a reader learns the peer is
+                    // done. The callers that need bytes use `readFirstChunk`.
+                    return Data()
                 }
-                tasks.withLock { $0.append(task) }
             }
         }
     }
 
-    /// Whether a failed stream operation failed because the connection was not connected
-    /// yet, which a retry can clear.
+    /// The first bytes of a stream whose protocol requires data, refusing a peer that
+    /// ended the stream before writing any.
     ///
-    /// **This predicate was dead for the errors the runtime actually sees.** `NWError.posix`
-    /// bridges to `NSError` under the domain `"Network.NWError"`, not under
-    /// `NSPOSIXErrorDomain`, so the bridged-domain test below never matched a real
-    /// framework error; nor does `error as? POSIXError` succeed for one. The connection's
-    /// own `ENOTCONN` therefore never took the retry branch in `openBidirectionalStream`.
-    /// It unwraps the `NWError` case first, which is the only form that identifies the
-    /// condition. Found while fixing `WT-185`, which is the same misunderstanding.
-    static func isTransientNotConnected(_ error: Error) -> Bool {
-        if let networkError = error as? NWError, case .posix(let posixCode) = networkError {
-            return posixCode == .ENOTCONN
+    /// The codecs report that emptiness as `QUICCodecError.truncated(needed: 1,
+    /// available: 0)`, which is a true statement about the bytes and a misleading one
+    /// about the cause, so the runtime names it here instead (issue #24).
+    static func readFirstChunk(
+        _ stream: QUIC.Stream<QUICStream>,
+        timeoutMilliseconds: Int32,
+        maxBytes: Int = 8_192
+    ) async throws -> Data {
+        let bytes = try await readStream(
+            stream,
+            timeoutMilliseconds: timeoutMilliseconds,
+            maxBytes: maxBytes
+        )
+        guard !bytes.isEmpty else {
+            throw WebTransportNetworkRuntimeError.peerClosedStreamWithoutData(streamID: stream.streamID)
         }
-        if let posix = error as? POSIXError {
-            return posix.code == .ENOTCONN
-        }
-        let nsError = error as NSError
-        return nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(ENOTCONN)
+        return bytes
     }
 }

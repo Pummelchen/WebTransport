@@ -258,61 +258,9 @@ enum WebTransportQUICPacketProbeCodec {
         }
         return try messageDatagram(from: frames)
     }
+}
 
-    /// Everything one protected Initial packet is built from, as a single value.
-    private struct InitialPacketEncoding {
-        var destinationConnectionID: Data
-        var sourceConnectionID: Data
-        var packetNumber: UInt64
-        var keyPhase: QUICInitialPacketProtection.KeyPhase
-        var initialSecretConnectionID: Data
-        var frames: [QUICFrame]
-        var minimumDatagramBytes: Int
-    }
-
-    private static func encodeProtectedInitial(
-        _ encoding: InitialPacketEncoding
-    ) throws -> Data {
-        let destinationConnectionID = encoding.destinationConnectionID
-        let sourceConnectionID = encoding.sourceConnectionID
-        let packetNumber = encoding.packetNumber
-        let keyPhase = encoding.keyPhase
-        let initialSecretConnectionID = encoding.initialSecretConnectionID
-        let frames = encoding.frames
-        let minimumDatagramBytes = encoding.minimumDatagramBytes
-        var payload = try QUICFrame.encodeFrames(frames)
-        var encoded = try QUICInitialPacketProtection.seal(
-            QUICInitialPacketProtection.SealRequest(
-                packetType: .initial,
-                version: quicVersion,
-                destinationConnectionID: destinationConnectionID,
-                sourceConnectionID: sourceConnectionID,
-                token: Data(),
-                packetNumber: packetNumber,
-                packetNumberLength: 2,
-                plaintextPayload: payload,
-                keyPhase: keyPhase,
-                initialSecretConnectionID: initialSecretConnectionID
-            ))
-        while encoded.count < minimumDatagramBytes {
-            payload.append(0x00)
-            encoded = try QUICInitialPacketProtection.seal(
-                QUICInitialPacketProtection.SealRequest(
-                    packetType: .initial,
-                    version: quicVersion,
-                    destinationConnectionID: destinationConnectionID,
-                    sourceConnectionID: sourceConnectionID,
-                    token: Data(),
-                    packetNumber: packetNumber,
-                    packetNumberLength: 2,
-                    plaintextPayload: payload,
-                    keyPhase: keyPhase,
-                    initialSecretConnectionID: initialSecretConnectionID
-                ))
-        }
-        return encoded
-    }
-
+extension WebTransportQUICPacketProbeCodec {
     private static func encodeProtectedShortHeader(
         destinationConnectionID: Data,
         packetNumber: UInt64,
@@ -521,5 +469,60 @@ enum WebTransportQUICPacketProbeCodec {
             handshakeSecret: handshakeSecret,
             transcriptHash: TLS13KeySchedule.transcriptHash(Data("WebTransportNetworkRuntime server handshake".utf8))
         ).serverHandshakeTrafficSecret
+    }
+}
+
+extension WebTransportQUICPacketProbeCodec {
+    private struct InitialPacketEncoding {
+        var destinationConnectionID: Data
+        var sourceConnectionID: Data
+        var packetNumber: UInt64
+        var keyPhase: QUICInitialPacketProtection.KeyPhase
+        var initialSecretConnectionID: Data
+        var frames: [QUICFrame]
+        var minimumDatagramBytes: Int
+    }
+
+    private static func encodeProtectedInitial(
+        _ encoding: InitialPacketEncoding
+    ) throws -> Data {
+        let destinationConnectionID = encoding.destinationConnectionID
+        let sourceConnectionID = encoding.sourceConnectionID
+        let packetNumber = encoding.packetNumber
+        let keyPhase = encoding.keyPhase
+        let initialSecretConnectionID = encoding.initialSecretConnectionID
+        let frames = encoding.frames
+        let minimumDatagramBytes = encoding.minimumDatagramBytes
+        var payload = try QUICFrame.encodeFrames(frames)
+        var encoded = try QUICInitialPacketProtection.seal(
+            QUICInitialPacketProtection.SealRequest(
+                packetType: .initial,
+                version: quicVersion,
+                destinationConnectionID: destinationConnectionID,
+                sourceConnectionID: sourceConnectionID,
+                token: Data(),
+                packetNumber: packetNumber,
+                packetNumberLength: 2,
+                plaintextPayload: payload,
+                keyPhase: keyPhase,
+                initialSecretConnectionID: initialSecretConnectionID
+            ))
+        while encoded.count < minimumDatagramBytes {
+            payload.append(0x00)
+            encoded = try QUICInitialPacketProtection.seal(
+                QUICInitialPacketProtection.SealRequest(
+                    packetType: .initial,
+                    version: quicVersion,
+                    destinationConnectionID: destinationConnectionID,
+                    sourceConnectionID: sourceConnectionID,
+                    token: Data(),
+                    packetNumber: packetNumber,
+                    packetNumberLength: 2,
+                    plaintextPayload: payload,
+                    keyPhase: keyPhase,
+                    initialSecretConnectionID: initialSecretConnectionID
+                ))
+        }
+        return encoded
     }
 }
