@@ -135,42 +135,47 @@ public struct QUICStreamState: Equatable, Sendable {
             guard streamID == id else {
                 throw QUICStateError.streamStateViolation("expected STREAM frame for stream \(id)")
             }
-            let frameOffset = offset ?? 0
-            let (attempted, receiveOverflow) = frameOffset.addingReportingOverflow(UInt64(data.count))
-
-            // RFC 9000 section 4.5: both final-size rules are checked before the
-            // receive-closed gate. The FIN that records the final size closes the
-            // receive half in the same step, so a check placed after that gate can
-            // never observe a non-nil `finalReceiveSize`.
-            if let finalReceiveSize {
-                guard !receiveOverflow, attempted <= finalReceiveSize else {
-                    throw QUICStateError.finalSizeViolation("STREAM data exceeds final size")
-                }
-                if fin, attempted != finalReceiveSize {
-                    throw QUICStateError.finalSizeViolation("inconsistent final stream size")
-                }
-            }
-
-            try ensureCanReceive()
-            guard !receiveOverflow else {
-                throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: UInt64.max)
-            }
-            guard frameOffset == receiveOffset else {
-                throw QUICStateError.streamStateViolation("out-of-order STREAM data is not accepted")
-            }
-            guard attempted <= maxReceiveOffset else {
-                throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: attempted)
-            }
-
-            receiveOffset = attempted
-            if fin {
-                finalReceiveSize = attempted
-                receiveClosed = true
-            }
-            return data
+            return try receiveStream(offset: offset, fin: fin, data: data)
         default:
             throw QUICStateError.streamStateViolation("expected STREAM frame for stream \(id)")
         }
+    }
+
+    /// One STREAM frame's payload, in the order RFC 9000 section 4.5 requires.
+    ///
+    /// Both final-size rules are checked before the receive-closed gate. The FIN that
+    /// records the final size closes the receive half in the same step, so a check placed
+    /// after that gate can never observe a non-nil `finalReceiveSize`.
+    private mutating func receiveStream(offset: UInt64?, fin: Bool, data: Data) throws -> Data {
+        let frameOffset = offset ?? 0
+        let (attempted, receiveOverflow) = frameOffset.addingReportingOverflow(UInt64(data.count))
+
+        if let finalReceiveSize {
+            guard !receiveOverflow, attempted <= finalReceiveSize else {
+                throw QUICStateError.finalSizeViolation("STREAM data exceeds final size")
+            }
+            if fin, attempted != finalReceiveSize {
+                throw QUICStateError.finalSizeViolation("inconsistent final stream size")
+            }
+        }
+
+        try ensureCanReceive()
+        guard !receiveOverflow else {
+            throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: UInt64.max)
+        }
+        guard frameOffset == receiveOffset else {
+            throw QUICStateError.streamStateViolation("out-of-order STREAM data is not accepted")
+        }
+        guard attempted <= maxReceiveOffset else {
+            throw QUICStateError.flowControlViolation(limit: maxReceiveOffset, attempted: attempted)
+        }
+
+        receiveOffset = attempted
+        if fin {
+            finalReceiveSize = attempted
+            receiveClosed = true
+        }
+        return data
     }
 
     /// Records the Final Size carried by an inbound RESET_STREAM frame and closes

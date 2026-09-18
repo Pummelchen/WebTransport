@@ -314,42 +314,11 @@ public struct QUICAckTracker: Equatable, Sendable {
     /// The list stays sorted high to low with no two ranges adjacent, so
     /// ``makeAckFrame(nowMicros:)`` can translate it directly into ACK ranges.
     private mutating func insertReceivedRange(_ packetNumber: UInt64) {
-        guard !receivedRangesDescending.isEmpty else {
-            receivedRangesDescending.append(packetNumber...packetNumber)
-            return
-        }
-        // In-order arrival is the common case and costs O(1): extend the newest
-        // range, or open a new one above it.
-        if let highest = receivedRangesDescending.first, packetNumber > highest.upperBound {
-            if highest.upperBound != UInt64.max, packetNumber == highest.upperBound + 1 {
-                receivedRangesDescending[0] = highest.lowerBound...packetNumber
-            } else {
-                receivedRangesDescending.insert(packetNumber...packetNumber, at: 0)
-            }
-            return
-        }
-        if let lowest = receivedRangesDescending.last, packetNumber < lowest.lowerBound {
-            if packetNumber + 1 == lowest.lowerBound {
-                receivedRangesDescending[receivedRangesDescending.count - 1] = packetNumber...lowest.upperBound
-            } else {
-                receivedRangesDescending.append(packetNumber...packetNumber)
-            }
+        if insertAdjacentToEdge(packetNumber) {
             return
         }
 
-        // A gap in the middle: find the first range whose lower bound is at or
-        // below the number. Ranges descend, so that range is the one below the
-        // insertion point and the one before it is the range above.
-        var low = 0
-        var high = receivedRangesDescending.count
-        while low < high {
-            let mid = low + (high - low) / 2
-            if receivedRangesDescending[mid].lowerBound > packetNumber {
-                low = mid + 1
-            } else {
-                high = mid
-            }
-        }
+        let low = lowerBoundIndex(for: packetNumber)
         guard low < receivedRangesDescending.count else {
             // The end cases above make this unreachable, but a number the set has
             // accepted must never be dropped from the range list.
@@ -360,6 +329,59 @@ public struct QUICAckTracker: Equatable, Sendable {
             return
         }
 
+        mergeReceivedRange(at: low, packetNumber: packetNumber)
+    }
+
+    /// The two ends of the tracked set, where an arrival is O(1): extend the newest range
+    /// upward or the oldest one downward.
+    ///
+    /// Returns whether the number was placed. The order of the two checks matters -- the
+    /// empty case first, then the high end, then the low end -- and it is the same order
+    /// the single function used before it was split.
+    private mutating func insertAdjacentToEdge(_ packetNumber: UInt64) -> Bool {
+        guard !receivedRangesDescending.isEmpty else {
+            receivedRangesDescending.append(packetNumber...packetNumber)
+            return true
+        }
+        // In-order arrival is the common case and costs O(1): extend the newest
+        // range, or open a new one above it.
+        if let highest = receivedRangesDescending.first, packetNumber > highest.upperBound {
+            if highest.upperBound != UInt64.max, packetNumber == highest.upperBound + 1 {
+                receivedRangesDescending[0] = highest.lowerBound...packetNumber
+            } else {
+                receivedRangesDescending.insert(packetNumber...packetNumber, at: 0)
+            }
+            return true
+        }
+        if let lowest = receivedRangesDescending.last, packetNumber < lowest.lowerBound {
+            if packetNumber + 1 == lowest.lowerBound {
+                receivedRangesDescending[receivedRangesDescending.count - 1] = packetNumber...lowest.upperBound
+            } else {
+                receivedRangesDescending.append(packetNumber...packetNumber)
+            }
+            return true
+        }
+        return false
+    }
+
+    /// The first range whose lower bound is at or below `packetNumber`. Ranges descend, so
+    /// that range is the one below the insertion point and the one before it is above.
+    private func lowerBoundIndex(for packetNumber: UInt64) -> Int {
+        var low = 0
+        var high = receivedRangesDescending.count
+        while low < high {
+            let mid = low + (high - low) / 2
+            if receivedRangesDescending[mid].lowerBound > packetNumber {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        return low
+    }
+
+    /// Places `packetNumber` next to the range at `low`, merging one or both neighbours.
+    private mutating func mergeReceivedRange(at low: Int, packetNumber: UInt64) {
         let aboveIndex = low - 1
         let touchesAbove =
             low > 0 && receivedRangesDescending[aboveIndex].lowerBound > 0
