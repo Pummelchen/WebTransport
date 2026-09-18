@@ -28,7 +28,7 @@ extern "C" {
 /* Mirrors VERSION. See the note above. */
 #define WT_VERSION_MAJOR 1
 #define WT_VERSION_MINOR 5
-#define WT_VERSION_PATCH 0
+#define WT_VERSION_PATCH 1
 
 /* Incremented only when a public structure's layout, a function's signature, or
  * a documented constant's value changes in a way that a caller compiled against
