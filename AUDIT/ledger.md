@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 29 |
+| DONE | 30 |
 
 Non-terminal (open): 0
-Terminal: 31
+Terminal: 32
 
 ## Tasks
 
@@ -49,6 +49,7 @@ Terminal: 31
 | AUD-0029 | S3 | A | P2 | DONE | wt_quic_initial_token's two leading guards -- the header form and the packet type -- were never executed | C99/src/quic/packet.c:105 |
 | AUD-0030 | S2 | A | P2 | DONE | Neither trusting mode's 'these bytes are not a certificate' refusal had ever executed | C99/src/tls/trust.c:169 |
 | AUD-0031 | S3 | A | P2 | DONE | Three uncovered peer-input refusals are unreachable, each with a proof, and one tried to be tested twice over | C99/src/quic/protection.c:294 |
+| AUD-0032 | S2 | A | P2 | DONE | Two WebTransport capsule refusals a previous audit added had no test, and both are honest regressions | C99/src/webtransport/session.c:144 |
 
 ## Detail
 
@@ -363,4 +364,14 @@ Terminal: 31
 - fix: Recorded all three with their proofs, and added the missing one to the code: `protection.c` now carries a comment saying the guard is unreachable given the sample's precondition and is kept as defence in depth, so the next reader does not delete it to raise a coverage figure. The other two were already documented in place (the ACK one by `AUD-0024`, the key-share one by its own comment).
 - evidence after: The key-share case produced the round's most useful result, and it is a NON-change: a test was written for it, and the deliberate violation showed it proved nothing -- neutering the all-zero branch left the suite green, because OpenSSL refuses the small-order key inside the derivation. Three tests then failed when the DERIVE-FAILURE status was changed, including two that already existed (`a small-order public key is refused`, `the primitive refuses it too`), so the contract was already covered twice and the uncovered branch is backend-defensive. The new test was REVERTED rather than kept: adding a duplicate to move a percentage is the behaviour this audit exists to catch. `100% tests passed out of 97`; `check-format.sh`: all 312 C sources match.
 - commit: 771a0a3
+
+### AUD-0032 — Two WebTransport capsule refusals a previous audit added had no test, and both are honest regressions
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, peer-input coverage filter (AUDIT/tier-a-review.md)
+- where: C99/src/webtransport/session.c:144
+- evidence before: Two refusals on the CONNECT-stream capsule path were unexecuted, and the code's own comments say why each exists: a DRAIN capsule whose value is not empty "used to be ignored, which is a malformed capsule accepted in silence", and bytes after a CLOSE in the same delivery, where "a peer could close the session and then send another grant, which the endpoint would honour". The existing close test covers a capsule arriving in a LATER frame, which is a different branch from the same-buffer walk.
+- fix: Added `test_a_malformed_drain_and_bytes_after_a_close` to `test_webtransport_session.c`. The malformed DRAIN is built with the varint writer rather than through `wt_webtransport_drain_session_write`, which cannot produce it because it writes the empty value the draft requires. The second case puts a CLOSE and a flow-control grant in ONE buffer and asserts both the refusal and that the observer was never called.
+- evidence after: `llvm-cov show` confirms session.c:144 and :163 now execute; the total moved 91.77% -> **91.81%** lines. Deliberate violation, each refusal's effect removed while its condition stayed (so the compiler stays quiet), and each failure shows why the check matters: without the drain check, `FAIL a drain capsule with a value is refused: want protocol, got ok` AND `FAIL and the drain is not applied: want 0, got 1` -- the malformed capsule is APPLIED. Without the after-close check, `FAIL bytes after the close are refused: want protocol, got ok` AND `FAIL and the grant behind the close is never applied: want 0, got 1` -- the peer's grant behind the close is HONOURED. Restored, 97/97.
+- commit: PENDING
 

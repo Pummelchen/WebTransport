@@ -301,11 +301,63 @@ static void test_a_capsule_after_the_close_is_refused(void) {
                                                         observe_flow, &log, &error));
 }
 
+/* AUD-0032. Two refusals a previous audit added, neither of which had a test. The DRAIN capsule's
+ * value must be EMPTY -- the code says a value here "used to be ignored, which is a malformed
+ * capsule accepted in silence" -- and nothing may follow a CLOSE in the same delivery, where the
+ * code says "a peer could close the session and then send another grant, which the endpoint would
+ * honour". Both are peer input on the CONNECT stream, and the existing close test covers a capsule
+ * arriving in a LATER frame, which is a different branch. */
+static void test_a_malformed_drain_and_bytes_after_a_close(void) {
+  uint8_t buffer[64];
+  wt_webtransport_session_t session;
+  capsule_observer_t log;
+  wt_writer_t w;
+  wt_cursor_t cursor;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  memset(&log, 0, sizeof(log));
+
+  /* A DRAIN carrying one byte. `wt_webtransport_drain_session_write` cannot produce this, because
+   * it writes the empty value the draft requires, so the capsule is built here. */
+  wt_webtransport_session_init(&session);
+  WT_EXPECT_OK("a session establishes", wt_webtransport_session_established(&session));
+  w = wt_writer_init(buffer, sizeof(buffer));
+  WT_EXPECT_TRUE("a drain type writes", wt_quic_writer_varint(&w, WT_CAPSULE_DRAIN_SESSION) != 0U);
+  WT_EXPECT_TRUE("with a length of one", wt_quic_writer_varint(&w, 1U) != 0U);
+  wt_writer_u8(&w, 0x00U);
+  cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a drain capsule with a value is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                            observe_flow, &log, &error));
+  WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  WT_EXPECT_INT("and the drain is not applied", 0, session.drain_received);
+
+  /* A CLOSE followed by a grant in the SAME delivery: the close ends the session, and the bytes
+   * behind it are not capsules at all. */
+  wt_webtransport_session_init(&session);
+  WT_EXPECT_OK("a session establishes once more", wt_webtransport_session_established(&session));
+  log.calls = 0U;
+  w = wt_writer_init(buffer, sizeof(buffer));
+  WT_EXPECT_OK("the close capsule encodes",
+               wt_webtransport_close_session_write(&w, 0x33U, NULL, 0U));
+  WT_EXPECT_OK("and a grant follows it in the same buffer",
+               wt_webtransport_max_data_write(&w, 65536U));
+  cursor = wt_cursor_init(buffer, wt_writer_offset(&w));
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("bytes after the close are refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_session_on_capsule_bytes(&session, &cursor, sizeof(buffer),
+                                                            observe_flow, &log, &error));
+  WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  WT_EXPECT_U64("and the grant behind the close is never applied", 0U, (uint64_t)log.calls);
+}
+
 int main(void) {
   test_the_establishing_and_established_states();
   test_draining();
   test_closing_and_the_first_code();
   test_the_connect_streams_capsules_are_walked();
   test_a_capsule_after_the_close_is_refused();
+  test_a_malformed_drain_and_bytes_after_a_close();
   WT_TEST_MAIN_END("wt_webtransport_session");
 }

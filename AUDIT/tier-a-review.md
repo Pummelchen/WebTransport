@@ -48,6 +48,7 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/tls/handshake.c` | Read in part (the ClientHello parse path) — `AUD-0028` |
 | `C99/src/quic/packet.c` | **Read in full**; the remaining uncovered guards closed — `AUD-0029` |
 | `C99/src/tls/trust.c` | Read in part (both trusting modes' certificate path) — `AUD-0030` |
+| `C99/src/webtransport/session.c` | Read in part (the CONNECT-stream capsule walk) — `AUD-0032` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -255,6 +256,7 @@ rather than by deletion.
 | `tls/handshake.c` ClientHello cipher-suite vector | `AUD-0028` |
 | `quic/packet.c` `initial_token` form and type guards | `AUD-0029` |
 | `tls/trust.c` unparseable certificate in both trusting modes | `AUD-0030` |
+| `webtransport/session.c` malformed DRAIN and bytes after a CLOSE | `AUD-0032` |
 
 **Unreachable, and recorded as such:**
 
@@ -264,6 +266,7 @@ rather than by deletion.
 | `quic/connection_loss.c:87` (a truncated ACK range list) | The frame decoder walks the same range list before `handle_ack` sees it and refuses a truncated one, so only a hand-built frame could reach it. It is defence in depth, and `AUD-0024` records it as such rather than inventing a test that calls the validator directly. |
 | `quic/protection.c:294` (`pn_len` past the packet's end) | Unreachable by arithmetic: `wt_quic_header_protection_sample` has already required `packet_len - pn_offset >= 4 + 16` and `pn_len` is at most 4, so the comparison cannot be true. `AUD-0031` records the proof, and the code now says so where the guard is. |
 | `tls/keyshare.c:150` (an all-zero shared secret) | Unreachable with the OpenSSL backend, which fails the derivation for a small-order key instead of returning zeroes -- the code's own comment says the branch covers a backend that returns them. The contract is already tested twice. |
+| `http3/qpack_decoder_stream.c` (4 refusals) | Same unwired feature as the encoder stream: `wt_qpack_decoder_stream_apply` has no production caller either, because the runtime never enables the QPACK dynamic table (`AUD-0027`). Wiring either stream in is one piece of work and would make both reachable. |
 
 **A peer-input filter makes the rest tractable.** Of the worklist, a `return WT_ERR_PROTOCOL` or
 `WT_ERR_TRUNCATED` is a statement about the peer's bytes, while `WT_ERR_INVALID_ARGUMENT` is a
