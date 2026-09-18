@@ -81,6 +81,7 @@ if [ "$heavy" = "1" ]; then
   gate "peer-input fuzz under AddressSanitizer" swift test --sanitize=address --filter 'peerFacingParsers|huffmanDecoder'
   gate "tests under Thread Sanitizer" swift test --sanitize=thread --skip CLIProcess --skip ReleaseArtifacts
   gate "C99 sanitizer build and tests" ./C99/scripts/build-and-test.sh --sanitize
+  gate "connection-churn soak" ./Swift/run-soak.sh
 fi
 
 printf '\n%d gates ran, %d failed\n' "$ran" "$failed"

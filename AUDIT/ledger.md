@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 15 |
+| DONE | 16 |
 
 Non-terminal (open): 0
-Terminal: 17
+Terminal: 18
 
 ## Tasks
 
@@ -35,6 +35,7 @@ Terminal: 17
 | AUD-0015 | S3 | A | P1 | DONE | identifier_name: rename what is internal, exclude only RFC-registry and public-API names | .swiftlint.yml |
 | AUD-0016 | S1 | A | P1 | DONE | SwiftLint redundant_void_return's fix does not compile | .swiftlint.yml |
 | AUD-0017 | S2 | B | P1 | DONE | The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage | Swift/check-api-compatibility.sh |
+| AUD-0018 | S3 | C | P1 | DONE | The connection-churn soak exists but no workflow runs it, so the resource property it verifies is unchecked | Swift/run-soak.sh |
 
 ## Detail
 
@@ -209,4 +210,14 @@ Terminal: 17
 - fix: Added `Swift/check-unsafe-flags.sh`, wired into `swift-ci.yml` next to the manifest-sync gate. It reads `swift package dump-package` for both manifests and fails naming every target whose settings carry `unsafeFlags`, so the class of change the path-based consumer check cannot see is now caught by a gate that reads what SwiftPM actually resolved.
 - evidence after: Proven both ways on the primary host: exit 0 with the tree as it stands, and exit 1 with `.unsafeFlags(["-require-explicit-sendable"])` added to `Swift/Package.swift`, listing all 22 affected targets (`WebTransport: -require-explicit-sendable`, ...). The deliberate violation was reverted and the gate re-run green. `shellcheck` clean; `check-workflows.py` parses the edited workflow.
 - commit: ad210da
+
+### AUD-0018 — The connection-churn soak exists but no workflow runs it, so the resource property it verifies is unchecked
+
+- severity: S3 | tier: C | project: P1 | status: DONE | host: Mac14,3
+- category: ops | discovered by: the L5 pass (AUDIT/passes.md)
+- where: Swift/run-soak.sh
+- evidence before: `Swift/run-soak.sh` drives 400 connections and watches resident memory and thread count for sustained growth, and its own header states the justification: a leak per connection is invisible at 200 connections and fatal at 200,000. `grep -rn run-soak .github/workflows/*.yml` returned nothing, so the property was verified only when someone remembered to run it, and nothing recorded the result.
+- fix: Added `.github/workflows/soak.yml`: scheduled nightly at 04:17 UTC with `workflow_dispatch` for a release to run it on demand, on the same `xcode-27` image as `swift-ci.yml`, with the toolchain asserted and the products built before the soak starts. Scheduled rather than per-pull-request because the check is timing- and memory-sensitive and a loaded shared runner can move the numbers without anything being wrong. The soak is also in the heavy set of `AUDIT/run-sweep.sh`, so a local sweep can cover it.
+- evidence after: The soak was run on the primary host as the L5 pass: 400/400 connections completed, **400 established and 400 released**, threads settled from a peak of 10 back to 2, and the harness's own verdict `SOAK PASSED: no sustained growth in resident memory or thread count` (exit 0). `check-workflows.py` parses all four workflow files with no duplicate keys, and the new workflow's triggers, job and steps were read back from the parsed YAML.
+- commit: PENDING
 

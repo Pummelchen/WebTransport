@@ -1,0 +1,42 @@
+name: Soak
+
+# AUD-0018. `Swift/run-soak.sh` is the repository's only measurement of the runtime's resource
+# behaviour under sustained load: it drives connection churn and watches resident memory and
+# thread count for *sustained growth*, which is the shape a leak takes. Its own header gives the
+# justification -- "a leak per connection is invisible at 200 connections and fatal at 200,000"
+# -- and until this workflow existed nothing ran it, so that property was verified only when
+# someone remembered to. A harness nobody runs is a claim, not a control.
+#
+# Scheduled rather than per-pull-request, deliberately: the check is timing- and
+# memory-sensitive, and a shared runner under load can move the numbers without anything being
+# wrong. Nightly, plus manual dispatch so a release can run it on demand.
+on:
+  schedule:
+    # 04:17 UTC, off the hour so it does not queue behind the cron jobs every repository has at
+    # :00.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: Connection-churn soak
+    # The same image as `swift-ci.yml`: the soak builds and runs the package, so it needs the
+    # mandated toolchain, not whatever the default macOS image carries.
+    runs-on: xcode-27
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Assert mandated toolchain (Swift 6.4 / Xcode 27)
+        run: ./Swift/check-toolchain.sh 6.4 27.0
+
+      # The soak starts the built server and clients, so the products have to exist before it
+      # runs; it does not build them itself.
+      - name: Build the products the soak drives
+        run: swift build
+
+      - name: Run the connection-churn soak
+        run: ./Swift/run-soak.sh

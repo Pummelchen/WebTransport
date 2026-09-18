@@ -42,16 +42,39 @@ Two things are worth recording about that:
 
 ## Sweep 2 — primary host, after the fix
 
-24 gates, **0 failed**. No new task was added, which is the standard's convergence condition:
-a full sweep that adds nothing is what closes discovery.
+24 gates, **0 failed**.
 
 The only change between the two runs is the restored generated header and the corrected
 exclusion list, which is the point — the sweep that finds nothing has to be a sweep that would
 have found the thing it found last time.
 
+## Between sweeps 2 and 3: the L5 pass added a task
+
+The sweep is not the only discovery instrument, and this is the round it showed. Running the
+L0–L7 passes (`AUDIT/passes.md`) required the performance pass to produce evidence rather than
+an opinion, which meant running the repository's own resource harness. `Swift/run-soak.sh`
+passed — 400/400 connections, 400 established and 400 released, threads back to 2 — and running
+it revealed the finding that mattered more than its result:
+
+**No workflow ran it.** `grep -rn run-soak .github/workflows/*.yml` returned nothing. The
+harness's own header gives the justification for its existence ("a leak per connection is
+invisible at 200 connections and fatal at 200,000"), so the property was verified only when
+someone remembered, and nothing recorded the outcome. That is `AUD-0018`, filed and fixed in the
+same round: a nightly `soak.yml` with manual dispatch, plus the soak in this sweep's heavy set.
+
+A clean sweep two rounds earlier would not have found it, because the sweep runs the gates that
+exist and this was the absence of one. That is worth recording next to the convergence claim
+rather than buried: convergence means a sweep adds nothing, and the standard's sweeps are not
+the only place work comes from.
+
+## Sweep 3 — primary host, after the L5 fix
+
+24 gates, **0 failed**. This is the run that satisfies the standard's convergence condition: the
+first sweep after the last discovery, with nothing new found.
+
 ## Heavy gates (`SWEEP_HEAVY=1`)
 
-These are in the script but not in the two runs above, because on the primary host they are
+These are in the script but not in the three runs above, because on the primary host they are
 serialised against each other by memory rather than by choice. Their status is recorded in
 `AUDIT/ledger.json` and the CI workflows, and they are run before Phase E:
 
@@ -60,3 +83,6 @@ serialised against each other by memory rather than by choice. Their status is r
 - the peer-input fuzz run under AddressSanitizer
 - the package tests under Thread Sanitizer
 - `./C99/scripts/build-and-test.sh --sanitize` — the C99 suite under ASan and UBSan
+- `./Swift/run-soak.sh` — run on the primary host as the L5 evidence (see above); in this list
+  because it is timing-sensitive and belongs on the nightly workflow rather than in front of
+  every pull request
