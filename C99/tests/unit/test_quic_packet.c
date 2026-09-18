@@ -332,6 +332,40 @@ int main(void) {
     }
   }
 
+  /* The two guards `wt_quic_initial_token` applies before it reads anything: the header form and
+   * the fixed bit together, then the packet type. AUD-0029: both were unexecuted, and both are
+   * reachable from the server, which peeks the token of whatever a peer sends
+   * (`runtime/server_retry.c`). A well-formed Initial sits behind each first byte, so the FIRST
+   * BYTE IS THE MESSAGE'S ONLY FAULT -- with either guard deleted, the parse continues, succeeds,
+   * and the test fails. */
+  {
+    static const uint8_t body[] = {0x00U, 0x00U, 0x00U, 0x01U, 0x04U, 0x01U, 0x02U, 0x03U,
+                                   0x04U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U, 0x00U};
+    static const struct {
+      const char *label;
+      uint8_t first;
+    } cases[] = {
+        {"a short header is not an Initial", 0x40U}, /* the long header bit is clear */
+        {"a long header without the fixed bit is refused", 0x80U},
+        {"a Handshake long header is not an Initial", 0xe0U}, /* type bits 10 */
+    };
+    uint8_t message[sizeof(body) + 1U];
+    const uint8_t *token = NULL;
+    size_t token_length = 0U;
+    size_t i;
+
+    /* The unmodified first byte parses, so each refusal below is about the byte and not the body. */
+    message[0] = 0xc0U;
+    memcpy(message + 1U, body, sizeof(body));
+    WT_EXPECT_OK("a well-formed Initial is accepted for the guard checks",
+                 wt_quic_initial_token(message, sizeof(message), &token, &token_length));
+    for (i = 0U; i < sizeof(cases) / sizeof(cases[0]); i++) {
+      message[0] = cases[i].first;
+      WT_EXPECT_STATUS(cases[i].label, WT_ERR_PROTOCOL,
+                       wt_quic_initial_token(message, sizeof(message), &token, &token_length));
+    }
+  }
+
   /* A handshake packet with a 2-byte packet number, a token of zero length and
    * a source connection ID, encoded and decoded. */
   {

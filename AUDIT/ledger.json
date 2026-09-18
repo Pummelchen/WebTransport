@@ -482,6 +482,23 @@
       "evidence_after": "With the check: `100% tests passed out of 97`. With it removed, BOTH cases fail -- `FAIL an empty cipher suite vector is refused: want protocol, got ok` and `FAIL an odd cipher suite vector length is refused: want protocol, got ok` (2 of 190 checks, exit 8) -- which is what the first version could not do. `check-format.sh`: all 312 C sources match. The same round recorded a dead-function scan: of 190 extern functions with no production call site, every one is public API or a function-pointer registration, so there is no internal dead code of the kind AUD-0027 found in the QPACK module.",
       "commit": "d06aa06",
       "blocked_reason": ""
+    },
+    {
+      "id": "AUD-0029",
+      "severity": "S3",
+      "tier": "A",
+      "project": "P2",
+      "file_line": "C99/src/quic/packet.c:105",
+      "title": "wt_quic_initial_token's two leading guards -- the header form and the packet type -- were never executed",
+      "category": "tests",
+      "status": "DONE",
+      "host": "Mac14,3",
+      "discovered_by": "Tier A review, coverage-as-reviewer worklist (AUDIT/tier-a-review.md)",
+      "evidence_before": "`wt_quic_initial_token` checks the header form and fixed bit, then the packet type, before reading anything -- and line coverage showed both refusals at packet.c:105-110 never executed. The function is reachable from production: `runtime/server_retry.c` calls it on whatever a peer sends, to decide whether a datagram is a first Initial or an answer to a Retry. Until AUD-0023 its version guard was missing too; these two are the ones that remained unexecuted after that fix.",
+      "fix_summary": "Added three cases to `test_quic_packet.c`, one per condition: a short header (the long header bit clear), a long header with the fixed bit clear, and a Handshake-type long header. Each is a well-formed Initial behind the first byte, so the first byte is the message's ONLY fault -- the lesson AUD-0028 produced -- and the block asserts first that the unmodified byte (0xc0) parses, so the refusals are demonstrably about the byte and not the body.",
+      "evidence_after": "With both guards: `100% tests passed out of 97`. Deliberate violation, each guard on its own: removing the form/fixed-bit guard fails with `FAIL a short header is not an Initial: want protocol, got ok` and `FAIL a long header without the fixed bit is refused: want protocol, got ok` (2 of 218 checks); removing the type guard fails with `FAIL a Handshake long header is not an Initial: want protocol, got ok` (1 of 218). Both restored green. `check-format.sh`: all 312 C sources match.",
+      "commit": "PENDING",
+      "blocked_reason": ""
     }
   ]
 }

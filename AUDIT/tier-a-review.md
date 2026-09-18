@@ -46,6 +46,7 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/http3/qpack_encoder_stream.c` | **Read in full** (247 lines) — `AUD-0027` |
 | `C99/src/http3/endpoint.c` | Read in part (the QPACK decoder-state seam) — `AUD-0027` |
 | `C99/src/tls/handshake.c` | Read in part (the ClientHello parse path) — `AUD-0028` |
+| `C99/src/quic/packet.c` | **Read in full**; the remaining uncovered guards closed — `AUD-0029` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -236,3 +237,44 @@ Rebuilding the message so the vector's length is its only fault fixed that: with
 removed, both cases now fail. The general form is worth keeping in mind for the rest of this
 worklist -- **a malformed-input test proves nothing unless the malformation is the message's only
 fault**, and the only way to know is to delete the check and watch the test fail.
+
+## Reachability triage of the worklist
+
+The distinction the triage turns on is **"unreachable, and here is why"** versus **"reachable and
+untested"**, and each verdict is recorded with its reason so the worklist shrinks by argument
+rather than by deletion.
+
+**Reachable, and now tested:**
+
+| Where | Finding |
+| --- | --- |
+| `quic/connection_loss.c` ACK-range validator | `AUD-0024` |
+| `webtransport/capsule.c` flow-control parsers | `AUD-0025` |
+| `http3/qpack_header_prefix.c` section 4.5.1 algorithm | `AUD-0026` |
+| `tls/handshake.c` ClientHello cipher-suite vector | `AUD-0028` |
+| `quic/packet.c` `initial_token` form and type guards | `AUD-0029` |
+
+**Unreachable, and recorded as such:**
+
+| Where | Why it cannot be exercised, and what would change that |
+| --- | --- |
+| `http3/qpack_encoder_stream.c` (28 refusals, 247 lines) | No production path constructs the encoder-stream decoder, so the endpoint's dynamic table can never be filled. `AUD-0027` made the consequence explicit by refusing the capacity that would enable it. Wiring the decoder into the endpoint is what would make these testable through the public API. |
+| `quic/connection_loss.c:87` (a truncated ACK range list) | The frame decoder walks the same range list before `handle_ack` sees it and refuses a truncated one, so only a hand-built frame could reach it. It is defence in depth, and `AUD-0024` records it as such rather than inventing a test that calls the validator directly. |
+
+The remaining 270-odd guard-like lines are untriaged. Most are argument-validation paths on the
+public API, which no test has a reason to reach -- but the five findings above came out of this
+filter, so the honest expectation is that a few more of them are peer-input refusals that no test
+executes, and that the rest are the expected cost of validating caller arguments.
+
+## What the worklist has taught, in one place
+
+Three rounds of this filter have produced a rule worth stating once:
+
+1. **A rule that is implemented correctly is not a rule that is checked.** Every finding here was
+   in code that matched its RFC or its header comment line for line.
+2. **A test only counts if deleting the check fails it.** Two of the tests written this way passed
+   with their own check removed -- `AUD-0024`'s zero-length range (caught by the next guard's
+   underflow) and `AUD-0028`'s first version (the misalignment was refused later). Both were
+   rebuilt until the malformation was the input's ONLY fault.
+3. **Some uncovered refusals cannot be reached, and saying so is the resolution** -- not a test
+   that calls an internal function to raise a percentage.

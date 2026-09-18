@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 26 |
+| DONE | 27 |
 
 Non-terminal (open): 0
-Terminal: 28
+Terminal: 29
 
 ## Tasks
 
@@ -46,6 +46,7 @@ Terminal: 28
 | AUD-0026 | S2 | A | P2 | DONE | Four of RFC 9204 section 4.5.1's decoding error exits and its wrap branch were never executed | C99/src/http3/qpack_header_prefix.c:90 |
 | AUD-0027 | S2 | A | P2 | DONE | A public API accepted a QPACK decoder capacity this build cannot honour, because nothing parses the encoder stream | C99/src/http3/endpoint.c:118 |
 | AUD-0028 | S2 | A | P2 | DONE | The ClientHello cipher-suite vector rule was never executed, and the obvious test for it passes with the check deleted | C99/src/tls/handshake.c:486 |
+| AUD-0029 | S3 | A | P2 | DONE | wt_quic_initial_token's two leading guards -- the header form and the packet type -- were never executed | C99/src/quic/packet.c:105 |
 
 ## Detail
 
@@ -330,4 +331,14 @@ Terminal: 28
 - fix: Added the case to `test_message_refusals` in `test_tls13_handshake.c`. The first version mutated the RFC 8448 vector in place, and the deliberate violation showed it was worthless: shortening the vector misaligns everything after it, so a LATER rule refuses the message and the test passes with this check deleted. The message is now REBUILT -- header, version, random, session id, a length of 0 or 1, then the RFC's compression methods and extensions spliced directly behind it -- so the vector's length is the message's only fault. The test also asserts the offset it edits first, because a test that mutates the wrong byte passes without testing anything.
 - evidence after: With the check: `100% tests passed out of 97`. With it removed, BOTH cases fail -- `FAIL an empty cipher suite vector is refused: want protocol, got ok` and `FAIL an odd cipher suite vector length is refused: want protocol, got ok` (2 of 190 checks, exit 8) -- which is what the first version could not do. `check-format.sh`: all 312 C sources match. The same round recorded a dead-function scan: of 190 extern functions with no production call site, every one is public API or a function-pointer registration, so there is no internal dead code of the kind AUD-0027 found in the QPACK module.
 - commit: d06aa06
+
+### AUD-0029 — wt_quic_initial_token's two leading guards -- the header form and the packet type -- were never executed
+
+- severity: S3 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, coverage-as-reviewer worklist (AUDIT/tier-a-review.md)
+- where: C99/src/quic/packet.c:105
+- evidence before: `wt_quic_initial_token` checks the header form and fixed bit, then the packet type, before reading anything -- and line coverage showed both refusals at packet.c:105-110 never executed. The function is reachable from production: `runtime/server_retry.c` calls it on whatever a peer sends, to decide whether a datagram is a first Initial or an answer to a Retry. Until AUD-0023 its version guard was missing too; these two are the ones that remained unexecuted after that fix.
+- fix: Added three cases to `test_quic_packet.c`, one per condition: a short header (the long header bit clear), a long header with the fixed bit clear, and a Handshake-type long header. Each is a well-formed Initial behind the first byte, so the first byte is the message's ONLY fault -- the lesson AUD-0028 produced -- and the block asserts first that the unmodified byte (0xc0) parses, so the refusals are demonstrably about the byte and not the body.
+- evidence after: With both guards: `100% tests passed out of 97`. Deliberate violation, each guard on its own: removing the form/fixed-bit guard fails with `FAIL a short header is not an Initial: want protocol, got ok` and `FAIL a long header without the fixed bit is refused: want protocol, got ok` (2 of 218 checks); removing the type guard fails with `FAIL a Handshake long header is not an Initial: want protocol, got ok` (1 of 218). Both restored green. `check-format.sh`: all 312 C sources match.
+- commit: PENDING
 
