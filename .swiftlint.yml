@@ -2,7 +2,7 @@
 #
 # The audit standard requires a committed SwiftLint config run with `--strict`, so that a
 # linter warning also fails the build. This file is that config, and every deviation from
-# SwiftLint's defaults is justified here and has a task in AUDIT/ledger.json. Deviations are
+# SwiftLint's defaults is justified here and is recorded in the wiki project tracker. Deviations are
 # not a way to make the gate pass: a rule that is turned off has an explicit reason and an
 # open task that owns the finding.
 

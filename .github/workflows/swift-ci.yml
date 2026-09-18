@@ -81,15 +81,14 @@ jobs:
       # findings, so the gate is green at the commit that adds it rather than aspirational.
       #
       # The four rules that are disabled in the config each have a numbered task in
-      # `AUDIT/ledger.json` recording why, with the evidence: `swift-format` owns commas and
+      # the wiki project tracker and the commit history recording why, with the evidence: `swift-format` owns commas and
       # braces, and `redundant_void_return`'s suggested fix does not compile. Nothing is
       # excluded from analysis and no threshold was raised.
       # The linter is installed rather than assumed: `swiftlint` is not part of the Xcode
       # toolchain, and a gate that silently skips because the command is missing is worse than
       # no gate. The version is pinned to the one the audit ran, and the asset is pinned by
       # digest because this release publishes no checksum file of its own -- the digest was
-      # taken from the downloaded release and is recorded in AUDIT/environment.md with the
-      # version. If the download fails, this step fails; it never degrades to "not checked".
+      # taken from the downloaded release, and the version it belongs to is pinned below. If the download fails, this step fails; it never degrades to "not checked".
       - name: Install the pinned SwiftLint
         run: |
           set -euo pipefail

@@ -229,7 +229,7 @@ jobs:
           fi
 
   # The Python rule set, in one place rather than repeated on three matrix legs. Python
-  # here is test and glue code (Tier C in AUDIT/inventory.md), so the standard keeps it
+  # here is test and glue code, so the standard keeps it
   # cheap: one pinned Ruff, `--fix` available to a contributor, and the rules the audit
   # standard names (B, E722, S101, PT) enabled in the committed `ruff.toml`. A config
   # nothing runs is not a standard, which is exactly what AUD-0007 recorded.
