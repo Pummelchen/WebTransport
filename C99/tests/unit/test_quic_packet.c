@@ -16,8 +16,7 @@
 
 #include "webtransport/quic/packet.h"
 
-#include "rfc9001_retry.h"
-#include "test_quic_packet_connection_ids_support.h"
+#include "test_quic_packet_internal.h"
 
 /* A listener peeks the FRONT of a datagram, so the two connection IDs must be readable from a prefix of a long
  * header -- which `wt_quic_long_header_decode` cannot do, because it also reads the Length field and hands back
@@ -242,6 +241,19 @@ static void test_the_leading_guards_of_initial_token(void) {
 }
 
 int main(void) {
+  /* The corpora `ce1e708` dropped when it split this file, restored into the topic files beside it:
+   * the header round trips and names, the refusal corpus, and the Retry shape. */
+  test_the_rfc9001_a2_client_initial_header();
+  test_the_first_byte_classification();
+  test_a_handshake_packet_round_trips();
+  test_an_initial_with_a_large_token_round_trips();
+  test_a_short_header_round_trips();
+  test_a_coalesced_datagram_walks_by_reported_sizes();
+  test_the_packet_type_names();
+  test_the_long_header_refusals();
+  test_the_encoding_refusals();
+  test_a_retry_packet_round_trips();
+
   test_the_connection_ids_of_a_long_header_can_be_read_from_a_prefix();
   test_a_retry_ignores_the_unused_bits();
   test_a_retry_encoder_refuses_missing_argument_bytes();

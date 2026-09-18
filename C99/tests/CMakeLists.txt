@@ -151,6 +151,15 @@ foreach(test IN LISTS WT_UNIT_TESTS)
       unit/test_http3_driver_frames.c
       unit/test_http3_driver_outbound.c
       unit/test_http3_driver_routing.c)
+  elseif(test STREQUAL "test_quic_packet")
+    # The header round trips and names, the refusal corpus and the Retry shape are topic files of
+    # the same executable: they are additional SOURCES, not additional CTest entries, so restoring
+    # the corpora `ce1e708` dropped does not change the suite count.
+    set(_wt_test_sources
+      unit/test_quic_packet.c
+      unit/test_quic_packet_header.c
+      unit/test_quic_packet_refusals.c
+      unit/test_quic_packet_retry.c)
   else()
     set(_wt_test_sources unit/${test}.c)
   endif()
