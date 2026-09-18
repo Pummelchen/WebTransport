@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 32 |
+| DONE | 33 |
 
 Non-terminal (open): 0
-Terminal: 34
+Terminal: 35
 
 ## Tasks
 
@@ -52,6 +52,7 @@ Terminal: 34
 | AUD-0032 | S2 | A | P2 | DONE | Two WebTransport capsule refusals a previous audit added had no test, and both are honest regressions | C99/src/webtransport/session.c:144 |
 | AUD-0033 | S2 | A | P2 | DONE | RFC 9000 section 7.3's client half -- the check that stops an injected connection ID -- had all three refusals unexecuted | C99/src/quic/connection.c:175 |
 | AUD-0034 | S3 | A | P2 | DONE | The Huffman decoder's bound is unreachable because its table is a complete prefix code, and the empty :method rule had no test | C99/src/http3/qpack_huffman.c:29 |
+| AUD-0035 | S3 | A | P2 | DONE | The quarter-ID overflow guard added for a past audit finding cannot fire from the wire, and the helper it protects still wraps silently | C99/src/webtransport/framing.c:99 |
 
 ## Detail
 
@@ -396,4 +397,14 @@ Terminal: 34
 - fix: (1) Proved the guard unreachable and wrote the proof where the guard is. The RFC 7541 table is a COMPLETE prefix code: its Kraft sum is exactly 1 over 257 symbols, so every bit path resolves to a symbol within thirty bits and a run that never matches cannot exist. A search of the whole code space (DFS over unmatched prefixes, 30 levels) finds no 31-bit path, confirming it independently. The comment now says so, and why the guard is kept anyway: it is the bound that would matter if the table were regenerated with a code missing. (2) Added the empty `:method` case to `test_empty_values_and_blocked`, with `:scheme` and `:path` present so the method is the message's ONLY fault.
 - evidence after: Coverage: message.c:137 now executes and the total moved 91.85% -> **91.87%** lines. The Huffman guard stays at zero -- and the run gives it an empirical edge to the proof: the range lookup line executed **31.3 million times** without the guard ever firing, which is what a complete code looks like. Deliberate violation on the empty-method check: removing it fails with `FAIL an empty :method is refused: want protocol, got ok` (1 of 77 checks); restored, 97/97. `check-format.sh`: all 312 C sources match.
 - commit: 6e1eb3b
+
+### AUD-0035 — The quarter-ID overflow guard added for a past audit finding cannot fire from the wire, and the helper it protects still wraps silently
+
+- severity: S3 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, peer-input coverage filter (AUDIT/tier-a-review.md)
+- where: C99/src/webtransport/framing.c:99
+- evidence before: Two items from the worklist. (1) `framing.c`'s `quarter > UINT64_MAX / 4` guard -- added after an audit "fed quarter 2^62 and got session 0" -- was unexecuted; (2) `protocol.c`'s token-grammar refusal on a hand-built list was unexecuted, because every list the tests decode has already been through the grammar.
+- fix: (1) Proved the quarter guard UNREACHABLE from the wire and wrote the proof where it is: a QUIC varint cannot encode more than 2^62 - 1, which is EXACTLY `UINT64_MAX / 4`, so the decoded value can never exceed the threshold -- the coverage run shows the condition evaluated 4,000 times with the body never entered. It stays as the second line of defence for the day the decode changes. The precondition it enforces is now stated on `wt_webtransport_session_id_from_quarter` itself, in the public header: that helper multiplies by four and returns a plain `uint64_t`, so it cannot report overflow and STILL WRAPS for a caller that builds a quarter by hand -- which is the actual defect the past finding named, and it is now documented rather than left as a trap. Changing its signature would be an ABI change under `WT_ABI_VERSION`, which is a maintainer's decision. (2) Added the hand-built invalid-token case to `test_webtransport_protocol.c`, which reaches the list-level grammar check the decoder short-circuits.
+- evidence after: Coverage: protocol.c:30 now executes and the total moved 91.87% -> **91.88%** lines. Deliberate violation on the token rule: removing it fails with `FAIL a hand-built list with an invalid token is refused: want protocol, got ok` (1 of 102 checks); restored, 97/97. `check-format.sh`: all 312 C sources match.
+- commit: PENDING
 

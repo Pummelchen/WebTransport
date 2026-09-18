@@ -173,6 +173,16 @@ static void test_list_bounds_and_repeats(void) {
       "a repeated token is refused", WT_ERR_PROTOCOL,
       wt_webtransport_protocol_decode_list((const uint8_t *)"\"a\",\"a\"", 7U, &read_back));
 
+  /* A HAND-BUILT list can name anything, and the token grammar is enforced on the list as well as by the
+   * decoder: a caller that assembled its own tokens gets the same refusal. AUD-0035 -- this branch had no
+   * test, because every list the tests decoded had already been refused by the grammar. */
+  memset(&list, 0, sizeof(list));
+  list.tokens[0].bytes = (const uint8_t *)"a b"; /* the space the token rules refuse */
+  list.tokens[0].length = 3U;
+  list.count = 1U;
+  WT_EXPECT_STATUS("a hand-built list with an invalid token is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_protocol_validate(&list));
+
   memset(&list, 0, sizeof(list));
   for (index = 0U; index < (size_t)WT_WEBTRANSPORT_PROTOCOL_MAX; index++) {
     list.tokens[index].bytes = (const uint8_t *)"aaaaaaaa";
