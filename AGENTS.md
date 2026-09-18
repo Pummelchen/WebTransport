@@ -47,17 +47,18 @@ not as TODO markers in the tree.
   `.gitignore` and `README.md` are tracked).
 
 **Files are kept under 500 code lines** (non-blank, non-comment) where that can be done without
-weakening something. Two C99 files and two Swift files exceed it, each for a reason recorded here
+weakening something. Two C99 files and one Swift file exceed it, each for a reason recorded here
 rather than left as a puzzle for the next person who counts lines.
 
-The Swift side was WT-266, and two of its four files are now restructured rather than split --
-`WebTransportQUICServer` (703 -> 418) and `QPACK` (566 -> 374) each shed components that own what
-they use: `WebTransportServerRequestHandling`, `WebTransportServerSessionSetup`,
-`WebTransportQUICServer+Serving`, `QPACKPrimitives` and `QPACK+StreamInstructions`. Neither needed
-a class's `private` state widened; the two access levels that did change are data types and helper
-functions crossing a file boundary, which carry no invariant.
+The Swift side was WT-266, and three of its four files are done -- `WebTransportQUICServer`
+(703 -> 418) and `QPACK` (566 -> 374) each shed components that own what they use
+(`WebTransportServerRequestHandling`, `WebTransportServerSessionSetup`,
+`WebTransportQUICServer+Serving`, `QPACKPrimitives`, `QPACK+StreamInstructions`), and
+`LibrarySmokeClientScenarios` (772 -> 433) split its independent scenario methods across two files.
+No class's `private` state was widened anywhere; the access levels that changed are data types and
+helper functions crossing a file boundary, which carry no invariant.
 
-The four that remain:
+The three that remain:
 
 - `C99/src/quic/connection_receive.c` (581) — every seam crosses a file-static boundary, so
   splitting it means exporting internal symbols, which is an ABI change.
@@ -66,9 +67,6 @@ The four that remain:
 - `Swift/.../WebTransportNetworkSession.swift` (584) — its extensions are **public API** over three
   pieces of shared private state (`connection`, `manager`, `timeoutMilliseconds`), so moving them
   would change the public API, which the compatibility gate would reject, or widen that state.
-- `Swift/.../LibrarySmokeClientScenarios.swift` (772) — one extension holding a single ~700-line
-  scenario function. It is decomposable, but by extracting steps from a long function rather than by
-  moving a component, and it is smoke-test support rather than library code.
 
 The C99 exceptions are recorded in `C99/CMakeLists.txt` and `C99/tests/CMakeLists.txt`.
 
