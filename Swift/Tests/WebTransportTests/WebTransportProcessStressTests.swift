@@ -113,78 +113,96 @@ func webTransportCLIProcessConcurrentClientsAgainstSingleServer() throws {
         let port = try WebTransportProcessSupport.parseListeningPort(from: line)
 
         let count = 2
-        let maxConcurrentClients = 2
-        let launchGate = DispatchSemaphore(value: maxConcurrentClients)
-        final class ConcurrentCapture: @unchecked Sendable {
-            private(set) var results: [ProcessResult] = []
-            private(set) var errors: [String] = []
-            private(set) var connectedCount = 0
-            private let lock = NSLock()
-
-            func addResult(_ result: ProcessResult, connected: Bool, message: String) {
-                lock.lock()
-                defer { lock.unlock() }
-                results.append(result)
-                if connected {
-                    connectedCount += 1
-                } else if !message.isEmpty {
-                    errors.append(message)
-                }
-            }
-
-            func addError(_ message: String) {
-                lock.lock()
-                defer { lock.unlock() }
-                errors.append(message)
-            }
-        }
         let capture = ConcurrentCapture()
-
-        let group = DispatchGroup()
-        for index in 0..<count {
-            group.enter()
-            DispatchQueue.global(qos: .userInitiated).async {
-                launchGate.wait()
-                do {
-                    var result = try WebTransportProcessSupport.run(
-                        client,
-                        [
-                            "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)",
-                            "--timeout-ms", "25000",
-                        ],
-                        timeout: 30
-                    )
-                    var attempts = 1
-                    while !result.stdout.contains("connected") && attempts < 4 {
-                        attempts += 1
-                        Thread.sleep(forTimeInterval: 0.12)
-                        result = try WebTransportProcessSupport.run(
-                            client,
-                            [
-                                "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message",
-                                "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "25000",
-                            ],
-                            timeout: 30
-                        )
-                    }
-                    let message =
-                        result.stdout.contains("connected")
-                        ? ""
-                        : "non-connected client #\(index) after \(attempts) attempts: exit=\(result.exitCode) stdout=\(result.stdout) stderr=\(result.stderr)"
-                    capture.addResult(result, connected: result.stdout.contains("connected"), message: message)
-                } catch {
-                    capture.addError("client process #\(index) failed: \(error.localizedDescription)")
-                }
-                launchGate.signal()
-                group.leave()
-            }
-        }
-        let done = group.wait(timeout: .now() + 180)
+        let done = runConcurrentClients(
+            client: client,
+            port: port,
+            count: count,
+            maxConcurrentClients: 2,
+            capture: capture
+        )
         let failures = capture.errors.filter { !$0.isEmpty }
         #expect(done == .success, Comment(rawValue: failures.joined(separator: "\n")))
         #expect(capture.connectedCount == count, Comment(rawValue: failures.joined(separator: "\n")))
         #expect(failures.isEmpty)
         #expect(capture.results.count == count, Comment(rawValue: failures.joined(separator: "\n")))
+    }
+}
+
+/// Runs `count` clients against one server, at most `maxConcurrentClients` at a time, retrying
+/// each until it reports "connected" or four attempts are spent.
+private func runConcurrentClients(
+    client: URL,
+    port: UInt16,
+    count: Int,
+    maxConcurrentClients: Int,
+    capture: ConcurrentCapture
+) -> DispatchTimeoutResult {
+    let launchGate = DispatchSemaphore(value: maxConcurrentClients)
+    let group = DispatchGroup()
+    for index in 0..<count {
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            launchGate.wait()
+            do {
+                var result = try WebTransportProcessSupport.run(
+                    client,
+                    [
+                        "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message", "concurrent-\(index)",
+                        "--timeout-ms", "25000",
+                    ],
+                    timeout: 30
+                )
+                var attempts = 1
+                while !result.stdout.contains("connected") && attempts < 4 {
+                    attempts += 1
+                    Thread.sleep(forTimeInterval: 0.12)
+                    result = try WebTransportProcessSupport.run(
+                        client,
+                        [
+                            "--connect", "127.0.0.1:\(port)", "--transport", "packet", "--trust", "local-self-signed", "--message",
+                            "concurrent-\(index)-retry-\(attempts)", "--timeout-ms", "25000",
+                        ],
+                        timeout: 30
+                    )
+                }
+                let message =
+                    result.stdout.contains("connected")
+                    ? ""
+                    : "non-connected client #\(index) after \(attempts) attempts: exit=\(result.exitCode) stdout=\(result.stdout) stderr=\(result.stderr)"
+                capture.addResult(result, connected: result.stdout.contains("connected"), message: message)
+            } catch {
+                capture.addError("client process #\(index) failed: \(error.localizedDescription)")
+            }
+            launchGate.signal()
+            group.leave()
+        }
+    }
+    return group.wait(timeout: .now() + 180)
+}
+
+/// Collects the results of concurrently run client processes.
+private final class ConcurrentCapture: @unchecked Sendable {
+    private(set) var results: [ProcessResult] = []
+    private(set) var errors: [String] = []
+    private(set) var connectedCount = 0
+    private let lock = NSLock()
+
+    func addResult(_ result: ProcessResult, connected: Bool, message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        results.append(result)
+        if connected {
+            connectedCount += 1
+        } else if !message.isEmpty {
+            errors.append(message)
+        }
+    }
+
+    func addError(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        errors.append(message)
     }
 }
 

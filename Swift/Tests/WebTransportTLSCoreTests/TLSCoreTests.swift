@@ -696,27 +696,45 @@ private enum PromptFreeCertificateFixture {
             DERFixture.objectIdentifier([1, 2, 840, 113_549, 1, 1, 11]),
             DERFixture.null(),
         ])
-        let rsaAlgorithm = try DERFixture.sequence([
-            DERFixture.objectIdentifier([1, 2, 840, 113_549, 1, 1, 1]),
-            DERFixture.null(),
-        ])
-        let name = DERFixture.sequence([
-            DERFixture.set([
-                try DERFixture.sequence([
-                    DERFixture.objectIdentifier([2, 5, 4, 3]),
-                    DERFixture.utf8String("localhost"),
-                ])
-            ])
-        ])
+        let name = try certificateName("localhost")
         let validity = DERFixture.sequence([
             DERFixture.utcTime(Date(timeIntervalSince1970: 1_700_000_000)),
             DERFixture.utcTime(Date(timeIntervalSince1970: 1_800_000_000)),
         ])
-        let subjectPublicKeyInfo = DERFixture.sequence([
-            rsaAlgorithm,
-            DERFixture.bitString(publicKeyDER),
+        let tbsCertificate = try certificateBody(
+            publicKeyDER: publicKeyDER,
+            signatureAlgorithm: signatureAlgorithm,
+            name: name,
+            validity: validity
+        )
+        let signature = try SecurityFixture.signature(
+            privateKey: privateKey,
+            algorithm: .rsaSignatureMessagePKCS1v15SHA256,
+            data: tbsCertificate
+        )
+        return DERFixture.sequence([
+            tbsCertificate,
+            signatureAlgorithm,
+            DERFixture.bitString(signature),
         ])
-        let extensions = try DERFixture.explicit(
+    }
+
+    /// An X.501 name with a single common name, as `[2, 5, 4, 3]` spells it.
+    private static func certificateName(_ commonName: String) throws -> Data {
+        DERFixture.sequence([
+            DERFixture.set([
+                try DERFixture.sequence([
+                    DERFixture.objectIdentifier([2, 5, 4, 3]),
+                    DERFixture.utf8String(commonName),
+                ])
+            ])
+        ])
+    }
+
+    /// The two extensions this fixture carries: basic constraints and subject alternative
+    /// names. The SAN is a DNS name, context-specific form 2.
+    private static func certificateExtensions(commonName: String) throws -> Data {
+        try DERFixture.explicit(
             3,
             DERFixture.sequence([
                 DERFixture.sequence([
@@ -728,12 +746,28 @@ private enum PromptFreeCertificateFixture {
                     DERFixture.objectIdentifier([2, 5, 29, 17]),
                     DERFixture.octetString(
                         DERFixture.sequence([
-                            DERFixture.contextSpecificPrimitive(2, Data("localhost".utf8))
+                            DERFixture.contextSpecificPrimitive(2, Data(commonName.utf8))
                         ])),
                 ]),
             ]))
+    }
 
-        let tbsCertificate = DERFixture.sequence([
+    /// The TBSCertificate: version, serial, algorithms, name, validity, subject public key
+    /// info and extensions.
+    private static func certificateBody(
+        publicKeyDER: Data,
+        signatureAlgorithm: Data,
+        name: Data,
+        validity: Data
+    ) throws -> Data {
+        let subjectPublicKeyInfo = DERFixture.sequence([
+            try DERFixture.sequence([
+                DERFixture.objectIdentifier([1, 2, 840, 113_549, 1, 1, 1]),
+                DERFixture.null(),
+            ]),
+            DERFixture.bitString(publicKeyDER),
+        ])
+        return DERFixture.sequence([
             DERFixture.explicit(0, DERFixture.integer(Data([0x02]))),
             DERFixture.integer(Data([0x01])),
             signatureAlgorithm,
@@ -741,18 +775,7 @@ private enum PromptFreeCertificateFixture {
             validity,
             name,
             subjectPublicKeyInfo,
-            extensions,
-        ])
-        let signature = try SecurityFixture.signature(
-            privateKey: privateKey,
-            algorithm: .rsaSignatureMessagePKCS1v15SHA256,
-            data: tbsCertificate
-        )
-
-        return DERFixture.sequence([
-            tbsCertificate,
-            signatureAlgorithm,
-            DERFixture.bitString(signature),
+            try certificateExtensions(commonName: "localhost"),
         ])
     }
 }
