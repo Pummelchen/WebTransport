@@ -160,6 +160,7 @@ set(WT_QUIC_SOURCES
   src/quic/packet_number.c
   src/quic/frame.c
   src/quic/packet.c
+  src/quic/packet_encode.c
   src/quic/transport_parameters.c
   src/quic/connection_id.c
   src/quic/retry_token.c
