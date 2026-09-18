@@ -19,7 +19,7 @@ foreach(app wt-client-c99 wt-server-c99 wt-conformance-c99)
     # The session scenarios: two endpoints in one process, over loopback. They need the self-signed identity
     # generator and the runtime session driver, so they are the tool's own code rather than a copy of a test.
     set(WT_APP_EXTRA_SOURCES ${app}/scenario_pair.c ${app}/scenario_session.c ${app}/scenario_refusals.c ${app}/scenario_refusal_wire.c
-                              ${app}/scenario_capsules.c ${app}/../support/capsule_stream.c
+                              ${app}/scenario_capsules.c ${app}/scenario_capsules_large.c ${app}/../support/capsule_stream.c
                               ${app}/scenario_control.c ${app}/scenario_headers.c
                               ${app}/scenario_isolation.c ${app}/scenario_matrix.c
                               ${app}/scenario_datagram.c ${app}/scenario_flow.c
