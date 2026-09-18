@@ -118,13 +118,12 @@ extension WebTransportQUICPacketProbeCodec {
     }
 
     // internal because the probe codec is declared across several files
-    internal static func decodeHandshakeFlight(
+    /// The CRYPTO frames, once PADDING is skipped and the PING/ACK requirements are checked.
+    private static func cryptoFrames(
         from frames: [QUICFrame],
-        expectedTypes: [TLSHandshakeType],
         requiresPing: Bool,
-        requiresAck: Bool,
-        peerHandshakeMessages: [TLSHandshakeMessage] = []
-    ) throws -> (message: String, messages: [TLSHandshakeMessage]) {
+        requiresAck: Bool
+    ) throws -> [QUICFrame] {
         var hasPing = false
         var hasAck = false
         var cryptoFrames: [QUICFrame] = []
@@ -149,6 +148,17 @@ extension WebTransportQUICPacketProbeCodec {
         else {
             throw WebTransportNetworkRuntimeError.invalidPayload
         }
+        return cryptoFrames
+    }
+
+    internal static func decodeHandshakeFlight(
+        from frames: [QUICFrame],
+        expectedTypes: [TLSHandshakeType],
+        requiresPing: Bool,
+        requiresAck: Bool,
+        peerHandshakeMessages: [TLSHandshakeMessage] = []
+    ) throws -> (message: String, messages: [TLSHandshakeMessage]) {
+        let cryptoFrames = try cryptoFrames(from: frames, requiresPing: requiresPing, requiresAck: requiresAck)
 
         var decoder = TLSHandshakeFlightDecoder()
         let messages = try decoder.receive(frames: cryptoFrames)
