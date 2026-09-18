@@ -72,6 +72,29 @@ the only place work comes from.
 24 gates, **0 failed**. This is the run that satisfies the standard's convergence condition: the
 first sweep after the last discovery, with nothing new found.
 
+## Between sweeps 3 and 4: the §5 facade hunt added a task
+
+The L0–L7 passes are not the whole standard; §5 (facade hunt) and §6 (unused code) are their own
+passes and they had not been run. Running them found `AUD-0019`: `check-portability.sh` ended
+with "every POSIX-only name the library uses is in the inventory", but it can only check the
+names on its own hand-maintained list. Injecting `getpid()` -- a POSIX call MSVC does not have
+-- left it green and printing that sentence.
+
+Widening the list then found two calls the library really uses and the inventory did not name
+(`htons`, `clock_gettime`), and the document's own description of the check was stale ("The two
+symbols this document is checked for", listing nine, while the script checked nineteen). All
+three are fixed, and the mechanism's limit is now written down in both places with the real
+enforcement named -- the Windows jobs, verified to build the library rather than only configure
+it. Details in `AUDIT/passes.md`.
+
+The same lesson as AUD-0018 with a different instrument: a clean sweep is not the same thing as
+a complete audit, and the standard's passes find what the sweep cannot.
+
+## Sweep 4 — primary host, after the §5/§6 passes
+
+24 gates, **0 failed**. The first sweep after the last discovery, which is again the standard's
+convergence condition.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host

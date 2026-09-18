@@ -310,6 +310,23 @@
       "evidence_after": "The soak was run on the primary host as the L5 pass: 400/400 connections completed, **400 established and 400 released**, threads settled from a peak of 10 back to 2, and the harness's own verdict `SOAK PASSED: no sustained growth in resident memory or thread count` (exit 0). `check-workflows.py` parses all four workflow files with no duplicate keys, and the new workflow's triggers, job and steps were read back from the parsed YAML.",
       "commit": "14cf6da",
       "blocked_reason": ""
+    },
+    {
+      "id": "AUD-0019",
+      "severity": "S2",
+      "tier": "C",
+      "project": "P2",
+      "file_line": "C99/scripts/check-portability.sh",
+      "title": "The portability check claimed more than its hand-maintained list could verify, and the inventory had drifted",
+      "category": "docs",
+      "status": "DONE",
+      "host": "Mac14,3",
+      "discovered_by": "the \u00a75 facade hunt (AUDIT/passes.md)",
+      "evidence_before": "`check-portability.sh` ended with \"every POSIX-only name the library uses is in the inventory\", but it can only check the names on its own hard-coded list. Proven, not assumed: injecting `getpid()` -- a POSIX call MSVC does not have -- into `src/core/time.c` left the check green and printing that sentence. Widening the list to cover the whole platform seam then found two calls the library really does use and the inventory did not name: `htons` and `clock_gettime`. `docs/PORTABILITY.md` had drifted too: its section describing the check was titled \"The two symbols this document is checked for\" while its body listed nine and the script checked nineteen.",
+      "fix_summary": "Widened the list with `htons ntohs clock_gettime` -- which immediately failed on the two genuinely missing inventory entries -- added both to `docs/PORTABILITY.md` with the adaptation each needs (Winsock supplies `htons`/`ntohs` with the same names, so the adaptation is the include; Windows uses `QueryPerformanceCounter`, which `core/time.c` already branches to), replaced the stale section with a pointer to the script as the source of truth rather than a list copied into prose, and rewrote the success message to state what was actually verified. The mechanism's limit is now written down in both the script and the document, with the real enforcement named and checked: `msvc`, `clang-cl` and `windows-native` in c99-ci.yml each configure, build and ctest the library, so a call Windows does not have fails there.",
+      "evidence_after": "Deliberate violation, both directions: with `getpid()` injected the check still passes -- recorded as the documented limit rather than hidden; with the widened list and before the document was updated the check FAILED with `htons is used in the library but is not in the inventory` and `clock_gettime ...`, exit 1. After adding both rows the check passes and prints the corrected message. `docs/PORTABILITY.md` names both calls; the stale section is gone. The Windows jobs' steps were read back from the parsed workflow to confirm they build the library rather than only configure it.",
+      "commit": "PENDING",
+      "blocked_reason": ""
     }
   ]
 }

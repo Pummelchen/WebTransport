@@ -28,6 +28,8 @@ Windows is the real work. Every item below is a place where the current code ass
 | `MSG_PEEK`/`MSG_TRUNC` | `wt_udp_peek` | `MSG_PEEK` exists and travels in `WSAMSG.dwFlags` (the input flag of `WSARecvMsg`, whose prototype is five parameters); a datagram larger than the buffer comes back as the ERROR `WSAEMSGSIZE` with the sender filled, and there is no way to ask for the datagram's own length past the caller's buffer, so the peek needs the receive-then-hold shape instead (the runtime session already has the pending table an implementation would need). **This is not a Windows-only difference**, which is worth saying because this document said it was: `MSG_TRUNC` as an INPUT flag is Linux-specific, so macOS and the BSDs also report the copied count rather than the datagram's own length. `webtransport/runtime/udp.h` states the contract per platform and the POSIX suite asserts the invariants that hold on all of them |
 | Sending and receiving | `sendto`/`recvfrom` in the datagram paths | `WSASendTo` for the send, `WSARecvMsg` for the receive, and `recvfrom` as the fallback for a provider whose `WSARecvMsg` is unusable -- it reports the sender and the truncation correctly, and cannot see past the buffer on a peek |
 | `snprintf` | several | present in MSVC 2015 and later |
+| Byte order | `htons`, `ntohs` | present in Winsock (`winsock2.h`) with the same names and signatures, so the adaptation is the include rather than the call |
+| Monotonic clock | `clock_gettime(CLOCK_MONOTONIC)` | `QueryPerformanceCounter` with `QueryPerformanceFrequency`; `core/time.c` already branches on `_WIN32` and uses it |
 | OpenSSL | `tls/`, `crypto/` | a Windows build of OpenSSL 3, and a decision about which one (vcpkg, the OpenSSL installers, or a vendored build) |
 
 ## The adaptation the code needs, in order
@@ -218,9 +220,17 @@ enforced (`WT-224`), and the plan's MSVC and Clang-CL variants are the remaining
 because it teaches people to ignore CI — so the gap is named rather than guessed at, and the evidence that a
 Windows or FreeBSD runner would have something green to run is now in this document rather than in an inventory.
 
-## The two symbols this document is checked for
+## The symbols this document is checked for
 
-The checker greps for the POSIX-only calls that a port must replace: `fcntl`, `close`, `poll`, `recvmsg`,
-`sendmsg`, `recvfrom`, `sendto`, `inet_pton` and `O_NONBLOCK`. Every occurrence of a POSIX-only name in the
-library must appear in the table above, which is how the document stays complete as the code moves -- it caught
-`sendto` and `recvfrom` missing on its first run, which is exactly the rot it exists to prevent.
+`scripts/check-portability.sh` holds the list of names, and it -- not this section -- is the source of truth for
+them, because a list copied into prose is a second place to forget. The checker greps the library for each name on
+its list and fails if one is used without appearing in the table above.
+
+**The list is hand-maintained, and that is its limit.** It cannot see a platform-only call whose name nobody has
+added to it: `getpid()`, which MSVC does not have, passes the check, and that was demonstrated rather than assumed
+(AUD-0019). What catches that case is the Windows half of the matrix -- `msvc`, `clang-cl` and `windows-native` in
+`c99-ci.yml` each configure, build and ctest the library, so a call Windows does not have fails the build. This
+check keeps *this document* honest; those builds are what keep *the code* honest.
+
+It found `htons` and `clock_gettime` the first time the list was widened to cover the whole platform seam, which is
+the same way it caught `sendto` and `recvfrom` before them.

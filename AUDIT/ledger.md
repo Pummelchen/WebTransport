@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 16 |
+| DONE | 17 |
 
 Non-terminal (open): 0
-Terminal: 18
+Terminal: 19
 
 ## Tasks
 
@@ -36,6 +36,7 @@ Terminal: 18
 | AUD-0016 | S1 | A | P1 | DONE | SwiftLint redundant_void_return's fix does not compile | .swiftlint.yml |
 | AUD-0017 | S2 | B | P1 | DONE | The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage | Swift/check-api-compatibility.sh |
 | AUD-0018 | S3 | C | P1 | DONE | The connection-churn soak exists but no workflow runs it, so the resource property it verifies is unchecked | Swift/run-soak.sh |
+| AUD-0019 | S2 | C | P2 | DONE | The portability check claimed more than its hand-maintained list could verify, and the inventory had drifted | C99/scripts/check-portability.sh |
 
 ## Detail
 
@@ -220,4 +221,14 @@ Terminal: 18
 - fix: Added `.github/workflows/soak.yml`: scheduled nightly at 04:17 UTC with `workflow_dispatch` for a release to run it on demand, on the same `xcode-27` image as `swift-ci.yml`, with the toolchain asserted and the products built before the soak starts. Scheduled rather than per-pull-request because the check is timing- and memory-sensitive and a loaded shared runner can move the numbers without anything being wrong. The soak is also in the heavy set of `AUDIT/run-sweep.sh`, so a local sweep can cover it.
 - evidence after: The soak was run on the primary host as the L5 pass: 400/400 connections completed, **400 established and 400 released**, threads settled from a peak of 10 back to 2, and the harness's own verdict `SOAK PASSED: no sustained growth in resident memory or thread count` (exit 0). `check-workflows.py` parses all four workflow files with no duplicate keys, and the new workflow's triggers, job and steps were read back from the parsed YAML.
 - commit: 14cf6da
+
+### AUD-0019 — The portability check claimed more than its hand-maintained list could verify, and the inventory had drifted
+
+- severity: S2 | tier: C | project: P2 | status: DONE | host: Mac14,3
+- category: docs | discovered by: the §5 facade hunt (AUDIT/passes.md)
+- where: C99/scripts/check-portability.sh
+- evidence before: `check-portability.sh` ended with "every POSIX-only name the library uses is in the inventory", but it can only check the names on its own hard-coded list. Proven, not assumed: injecting `getpid()` -- a POSIX call MSVC does not have -- into `src/core/time.c` left the check green and printing that sentence. Widening the list to cover the whole platform seam then found two calls the library really does use and the inventory did not name: `htons` and `clock_gettime`. `docs/PORTABILITY.md` had drifted too: its section describing the check was titled "The two symbols this document is checked for" while its body listed nine and the script checked nineteen.
+- fix: Widened the list with `htons ntohs clock_gettime` -- which immediately failed on the two genuinely missing inventory entries -- added both to `docs/PORTABILITY.md` with the adaptation each needs (Winsock supplies `htons`/`ntohs` with the same names, so the adaptation is the include; Windows uses `QueryPerformanceCounter`, which `core/time.c` already branches to), replaced the stale section with a pointer to the script as the source of truth rather than a list copied into prose, and rewrote the success message to state what was actually verified. The mechanism's limit is now written down in both the script and the document, with the real enforcement named and checked: `msvc`, `clang-cl` and `windows-native` in c99-ci.yml each configure, build and ctest the library, so a call Windows does not have fails there.
+- evidence after: Deliberate violation, both directions: with `getpid()` injected the check still passes -- recorded as the documented limit rather than hidden; with the widened list and before the document was updated the check FAILED with `htons is used in the library but is not in the inventory` and `clock_gettime ...`, exit 1. After adding both rows the check passes and prints the corrected message. `docs/PORTABILITY.md` names both calls; the stale section is gone. The Windows jobs' steps were read back from the parsed workflow to confirm they build the library rather than only configure it.
+- commit: PENDING
 

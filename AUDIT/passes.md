@@ -132,3 +132,54 @@ building and *running* a consumer against it.
 **Found:** `AUD-0002` (the Phase E independent host does not exist — BLOCKED, owner named,
 options recorded), `AUD-0018` (the soak is not wired), plus the gate wiring delivered by
 `AUD-0006`, `AUD-0009`, `AUD-0010` and `AUD-0017`.
+
+## §5 — facade hunt
+
+**Question:** is there code, or a check, that looks like it does something and does not?
+
+*Markers:* zero `TODO`, `FIXME`, `XXX` or `HACK` in either project's production sources. Every
+"not implemented" or "for now" in the tree is a documented scope decision or an error-code
+description, not a placeholder -- `Server push is not implemented in this tree` in
+`http3/streams.h` and `WT_ERR_UNSUPPORTED` in `status.h` are the two that read closest, and both
+are explaining a deliberate boundary.
+
+*Tests that cannot fail:* all 401 Swift test functions were checked for an assertion, resolving
+one level of helper calls (the same-file pass flagged 22; resolving calls into other files left
+one). The survivor is
+`huffmanDecoderTerminatesOnAdversarialPadding`, which calls the decoder over adversarial inputs
+and swallows every error. It is **examined and not a finding**: the property under test is that
+the decoder terminates without trapping, so the failure modes are a crash or a hang, and the
+peer-input fuzz job runs it under AddressSanitizer. It cannot fail for a wrong *result*, and a
+wrong result is not what it claims to check.
+
+*Checks that cannot fail:* the repository's own gates, each proved against a deliberate
+violation rather than by reading it. `check-version-sync.sh` refused a perturbed version mirror
+and passed again when restored. `check-matrix.sh` refused both a symbol that does not exist and
+a test nobody registered, naming each. `check-format.sh` and `check-vectors.sh` had already
+proved themselves this round by catching real defects -- the second one caught this audit's own
+mistake. `check-portability.sh` did not, which is `AUD-0019` and is now fixed.
+
+**Found:** `AUD-0019` (a gate whose claim exceeded its mechanism, with a drifted inventory
+behind it). Fixed.
+
+## §6 — unused code
+
+**Question:** is anything in the tree dead?
+
+*C99 sources:* 86 `.c` files under `src/`, **zero** not named by a CMakeLists -- checked by
+extracting every stem and looking for it in any CMake file, after a first attempt with a
+too-naive regex produced 37 false "orphans" that were all path-referenced.
+
+*C99 tests:* 113 `.c` files, all named by a CMakeLists except three Windows probes, and each of
+the three is accounted for: `platform_probe.c` is compiled by `check-windows-platform.sh`, and
+`probe-recvfrom.c`/`probe-recvmsg-arity.c` are documented measurement programs that
+`src/runtime/udp_platform.h` cites by name so the claim they measured "can be re-run rather than
+believed". Deliberately kept evidence, not dead code.
+
+*Unused declarations:* the C99 build runs `-Wall -Wextra -Werror` (which covers unused static
+functions, variables and parameters) and is at zero warnings; SwiftLint's unused rules are on
+and the tree is at zero findings. SwiftPM compiles every file in a target directory, and
+`check-target-imports.sh` verifies that each target's declared dependencies cover its imports,
+so a Swift file cannot sit outside the build unnoticed.
+
+**Found: none.**
