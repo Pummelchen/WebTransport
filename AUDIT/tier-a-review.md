@@ -45,6 +45,7 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/http3/qpack_header_prefix.c` | **Read in full** (128 lines) and the algorithm checked against RFC 9204 section 4.5.1 — `AUD-0026` |
 | `C99/src/http3/qpack_encoder_stream.c` | **Read in full** (247 lines) — `AUD-0027` |
 | `C99/src/http3/endpoint.c` | Read in part (the QPACK decoder-state seam) — `AUD-0027` |
+| `C99/src/tls/handshake.c` | Read in part (the ClientHello parse path) — `AUD-0028` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -204,3 +205,34 @@ Two consequences for the rest of this review:
 - **The module is not deleted.** The encoder-stream decoder is correct, tested and is the wiring
   that would make dynamic-table support real; removing it would destroy work to make a metric
   look better, which is the opposite of what this audit is for.
+
+## The dead-function scan, and why 190 was the wrong number to worry about
+
+The round-28 lesson suggests a second filter: of the uncovered refusals, which sit in code no
+production path reaches? The cheapest form of that question is a call-site scan, so every
+`extern` function defined under `src/` and `apps/` was checked for a production caller.
+(`static` functions need no such check: `-Wall` includes `-Wunused-function`, and the tree builds
+clean, so the compiler already proves those are called.)
+
+**190 functions have no call site outside their own definition.** Reading the list is the whole
+lesson: all but four are **public API** -- the library's entry points, which by construction are
+called by consumers rather than by itself -- and the four are three allocator functions
+registered as function pointers (`a.alloc = wt_default_alloc;`) and one documented app-support
+observer. So there is no internal dead code of the shape `AUD-0027` found, and the scan's number
+was measuring the API surface, not rot.
+
+That is worth recording because 190 is the kind of figure that invites a wrong conclusion. The
+distinction that matters is not "no caller" but "no caller *and* nothing else could call it".
+
+## A test that passed with its own check deleted
+
+`AUD-0028` is the most useful thing this round produced, and not because of the finding. The
+ClientHello cipher-suite rule was untested, so the test looked easy: shorten the vector in the
+RFC 8448 bytes and assert the parse is refused. It passed -- and then the deliberate violation
+*also* passed, because shortening the vector misaligns the compression methods and extensions
+behind it and a later rule refuses the message. The check could be deleted with the test green.
+
+Rebuilding the message so the vector's length is its only fault fixed that: with the check
+removed, both cases now fail. The general form is worth keeping in mind for the rest of this
+worklist -- **a malformed-input test proves nothing unless the malformation is the message's only
+fault**, and the only way to know is to delete the check and watch the test fail.

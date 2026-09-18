@@ -488,6 +488,44 @@ static void test_message_refusals(void) {
                      wt_tls_client_hello_parse(message, sizeof(message), &hello));
   }
 
+  /* RFC 8446 section 4.1.2: the cipher suite vector is 2..2^16-2 bytes, so it is at least
+   * one suite and an even number of bytes. AUD-0028: that refusal had no test -- line
+   * coverage showed it never executed -- and it is reachable from the server, which parses
+   * whatever a peer sends (`session_server.c`).
+   *
+   * The message is REBUILT rather than mutated in place, and that is the point: shortening
+   * the vector inside the RFC's bytes misaligns everything after it, so a later rule refuses
+   * the message and the test would pass with this check deleted. Splicing the compression
+   * methods and extensions directly behind a length of 0 or 1 leaves a message whose ONLY
+   * fault is the vector's length, so removing the check makes both of these parse. */
+  {
+    const size_t cipher_len_at = 4U + 2U + 32U + 1U; /* the RFC's session id is empty */
+    const size_t compression_at = 4U + 2U + 32U + 1U + 2U + 6U;
+    const size_t tail_len = WT_RFC8448_CLIENT_HELLO_LEN - compression_at;
+    static const uint16_t vector_lengths[2] = {0U, 1U}; /* empty, and odd */
+    static const char *const labels[2] = {"an empty cipher suite vector is refused",
+                                          "an odd cipher suite vector length is refused"};
+    size_t i;
+
+    WT_EXPECT_U64("the RFC's cipher suite length is where this test thinks it is", 6U,
+                  (uint64_t)(((size_t)WT_RFC8448_CLIENT_HELLO[cipher_len_at] << 8) |
+                             (size_t)WT_RFC8448_CLIENT_HELLO[cipher_len_at + 1U]));
+    for (i = 0U; i < 2U; i++) {
+      size_t rebuilt_len = cipher_len_at + 2U + tail_len;
+      size_t body_len = rebuilt_len - 4U;
+
+      memcpy(message, WT_RFC8448_CLIENT_HELLO, cipher_len_at);
+      message[cipher_len_at] = (uint8_t)(vector_lengths[i] >> 8);
+      message[cipher_len_at + 1U] = (uint8_t)(vector_lengths[i] & 0xffU);
+      memcpy(message + cipher_len_at + 2U, WT_RFC8448_CLIENT_HELLO + compression_at, tail_len);
+      message[1] = (uint8_t)(body_len >> 16);
+      message[2] = (uint8_t)((body_len >> 8) & 0xffU);
+      message[3] = (uint8_t)(body_len & 0xffU);
+      WT_EXPECT_STATUS(labels[i], WT_ERR_PROTOCOL,
+                       wt_tls_client_hello_parse(message, rebuilt_len, &hello));
+    }
+  }
+
   /* Extension readers refuse a body that is not their shape. */
   {
     wt_tls_extension_t bogus;

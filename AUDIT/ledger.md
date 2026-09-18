@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 25 |
+| DONE | 26 |
 
 Non-terminal (open): 0
-Terminal: 27
+Terminal: 28
 
 ## Tasks
 
@@ -45,6 +45,7 @@ Terminal: 27
 | AUD-0025 | S2 | A | P2 | DONE | The flow-control capsule rules the header states outright were unexecuted: trailing bytes, a partial varint, and an over-long close reason | C99/src/webtransport/capsule.c:194 |
 | AUD-0026 | S2 | A | P2 | DONE | Four of RFC 9204 section 4.5.1's decoding error exits and its wrap branch were never executed | C99/src/http3/qpack_header_prefix.c:90 |
 | AUD-0027 | S2 | A | P2 | DONE | A public API accepted a QPACK decoder capacity this build cannot honour, because nothing parses the encoder stream | C99/src/http3/endpoint.c:118 |
+| AUD-0028 | S2 | A | P2 | DONE | The ClientHello cipher-suite vector rule was never executed, and the obvious test for it passes with the check deleted | C99/src/tls/handshake.c:486 |
 
 ## Detail
 
@@ -319,4 +320,14 @@ Terminal: 27
 - fix: `wt_http3_endpoint_set_decoder_capacity` refuses a non-zero capacity with `WT_ERR_UNSUPPORTED` -- the status the library defines for exactly this, "something is not implemented or not compiled in ... so a caller can degrade deliberately". The comment and the header both state what is missing (the encoder stream is never parsed) and that the tested encoder-stream decoder is what would make the call meaningful, so the gap is visible to the next reader instead of silently accepted. Capacity 0 still succeeds and still makes `max_entries` zero, which is the correct state for an endpoint that advertises no dynamic table. A test asserts the refusal AND that the endpoint keeps the capacity it had.
 - evidence after: `100% tests passed out of 97`, `check-format.sh`: all 312 C sources match. Deliberate violation: removing the refusal fails with `FAIL a capacity this build cannot fill is unsupported: want unsupported, got ok` and `FAIL and the endpoint keeps the capacity it had: want 0, got 4096` (2 of 181 checks, exit 8); restoring leaves the suite green. Not fixed by implementing the dynamic table -- that is a feature, not an audit repair, and the 247 tested lines of encoder-stream decoder are left in the tree with the wiring recorded as the remaining work rather than deleted.
 - commit: 74161c1
+
+### AUD-0028 — The ClientHello cipher-suite vector rule was never executed, and the obvious test for it passes with the check deleted
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, coverage-as-reviewer worklist (AUDIT/tier-a-review.md)
+- where: C99/src/tls/handshake.c:486
+- evidence before: RFC 8446 section 4.1.2 makes the cipher suite vector 2..2^16-2 bytes -- at least one suite and an even number of bytes -- and `wt_tls_client_hello_parse` enforces it. Line coverage showed the refusal at handshake.c:487 never executed, and it is reachable from production: `session_server.c:221` parses whatever a peer sends.
+- fix: Added the case to `test_message_refusals` in `test_tls13_handshake.c`. The first version mutated the RFC 8448 vector in place, and the deliberate violation showed it was worthless: shortening the vector misaligns everything after it, so a LATER rule refuses the message and the test passes with this check deleted. The message is now REBUILT -- header, version, random, session id, a length of 0 or 1, then the RFC's compression methods and extensions spliced directly behind it -- so the vector's length is the message's only fault. The test also asserts the offset it edits first, because a test that mutates the wrong byte passes without testing anything.
+- evidence after: With the check: `100% tests passed out of 97`. With it removed, BOTH cases fail -- `FAIL an empty cipher suite vector is refused: want protocol, got ok` and `FAIL an odd cipher suite vector length is refused: want protocol, got ok` (2 of 190 checks, exit 8) -- which is what the first version could not do. `check-format.sh`: all 312 C sources match. The same round recorded a dead-function scan: of 190 extern functions with no production call site, every one is public API or a function-pointer registration, so there is no internal dead code of the kind AUD-0027 found in the QPACK module.
+- commit: PENDING
 
