@@ -428,5 +428,5 @@ Terminal: 37
 - evidence before: `qpack_field_section.c` refuses a static index at or past the table's end in two places -- the indexed form and the literal-name-reference form -- and line coverage showed both unexecuted: every index the tests used was a valid one. The index is peer input on the field-section path.
 - fix: Added the boundary to `test_static_forms` from BOTH sides: the last entry (size - 1) is asserted to resolve, and the first invalid one (size) is asserted refused in each form, with the decompression-failure code. Asserting only the refusal would pass against a table one entry short of the right size, so the control is the point of the case rather than decoration.
 - evidence after: Removing both refusals fails exactly two checks, one per case -- `FAIL an indexed line past the static table is refused: want protocol, got ok` and `FAIL a literal naming past the static table is refused: want protocol, got ok` (2 of 83). `llvm-cov show` confirms both refusal lines now execute, and the total moved 91.93% -> **91.97%** lines. `check-format.sh`: all 312 C sources match.
-- commit: PENDING
+- commit: 636ce79
 
