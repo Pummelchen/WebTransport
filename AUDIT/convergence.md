@@ -72,17 +72,27 @@ the only place work comes from.
 24 gates, **0 failed**. This is the run that satisfies the standard's convergence condition: the
 first sweep after the last discovery, with nothing new found.
 
-## Heavy gates (`SWEEP_HEAVY=1`)
+## Heavy gates — primary host, run before Phase E
 
-These are in the script but not in the three runs above, because on the primary host they are
-serialised against each other by memory rather than by choice. Their status is recorded in
-`AUDIT/ledger.json` and the CI workflows, and they are run before Phase E:
+Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host
+(8 GB) they are serialised against each other by memory rather than by choice -- `SWEEP_HEAVY=1`
+runs them, and their results are below. Each was checked by reading its log, not by its exit
+code alone, because a gate that returns zero without doing its work is the failure mode this
+whole exercise is about:
 
-- `./Swift/build-release-apple-silicon.sh` — the two-pass reproducible arm64 release build
-- the client and server CLI conformance suites (`--scenario all`, 40 scenarios each)
-- the peer-input fuzz run under AddressSanitizer
-- the package tests under Thread Sanitizer
-- `./C99/scripts/build-and-test.sh --sanitize` — the C99 suite under ASan and UBSan
-- `./Swift/run-soak.sh` — run on the primary host as the L5 evidence (see above); in this list
-  because it is timing-sensitive and belongs on the nightly workflow rather than in front of
-  every pull request
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `WebTransportClient --scenario all` | PASS | `passed=40 failed=0 skipped=0 total=40` -- all forty, both Release scenarios included because it ran from the repository root |
+| `WebTransportServer --scenario all` | PASS | `passed=40 failed=0 skipped=0 total=40` |
+| `C99/scripts/build-and-test.sh --sanitize` | PASS | `100% tests passed out of 97` under AddressSanitizer and UndefinedBehaviorSanitizer (51 s) |
+| `swift test --sanitize=address --filter 'peerFacingParsers\|huffmanDecoder'` | PASS | 3 tests, including `peerFacingParsersNeverTrapOnArbitraryInput` |
+| `swift test --sanitize=thread --skip CLIProcess --skip ReleaseArtifacts` | PASS | 0 failures under Thread Sanitizer |
+| `./Swift/build-release-apple-silicon.sh` | PASS | `Release artifacts are reproducible` with per-binary checksums; both are `Mach-O 64-bit executable arm64` |
+
+One of them nearly read as a false alarm and is worth recording: the Thread Sanitizer log
+contains "Failed" in the *name* of a passing test
+(`udpPortReportsAFailedSetsockoptUnderItsOwnOperation`), so a `grep -i failed` over the logs
+flags a green run. The logs were read rather than grepped for a verdict.
+
+`./Swift/run-soak.sh` is the seventh heavy gate; it was run as the L5 evidence (see between
+sweeps 2 and 3 above) and is in the nightly `soak.yml` from AUD-0018.
