@@ -99,13 +99,17 @@ set(WT_UNIT_TESTS
 foreach(test IN LISTS WT_UNIT_TESTS)
   # test_quic_connection, test_runtime_session_pair and test_http3_driver were oversized files; each
   # is now a topic file per seam. The topics are separate SOURCES of the same executable, not separate
-  # tests, so the CTest name and the suite's 97 tests do not change. wt_test.c defines the harness
+  # tests, so the CTest name and the suite's 97 tests do not change.
+  # A standalone oversized file may instead be split into two standalone tests, which DOES add a
+  # CTest entry: test_http3_driver_streams, test_tls13_handshake and test_quic_frame each became
+  # two. Both shapes are in use deliberately; this list is the topic one. wt_test.c defines the harness
   # counters wt_test.h declares, which every test links (see the note there).
   if(test STREQUAL "test_quic_connection")
     set(_wt_test_sources
       unit/test_quic_connection.c
       unit/test_quic_connection_support.c
       unit/test_quic_connection_basics.c
+      unit/test_quic_connection_permissions.c
       unit/test_quic_connection_streams.c
       unit/test_quic_connection_ids.c
       unit/test_quic_connection_retry.c
