@@ -15,9 +15,8 @@
 
 #include "wt_test.h"
 
-#include "webtransport/crypto/crypto.h"
 #include "test_crypto_aead_support.h"
-
+#include "webtransport/crypto/crypto.h"
 
 static void test_aead(void) {
   /* NIST's GCM test case 3: a 16-byte key of zeros, a 12-byte IV of zeros, an

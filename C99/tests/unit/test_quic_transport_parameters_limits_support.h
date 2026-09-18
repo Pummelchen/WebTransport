@@ -20,6 +20,4 @@
 
 #include "webtransport/quic/transport_parameters.h"
 
-
-
 #endif

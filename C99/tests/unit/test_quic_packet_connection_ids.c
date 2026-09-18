@@ -19,7 +19,6 @@
 #include "rfc9001_retry.h"
 #include "test_quic_packet_connection_ids_support.h"
 
-
 /* RFC 9000 section 5.1: "A zero-length connection ID can be used when a connection ID is not needed to route to
  * the correct endpoint", and section 5.1.1: "A zero-length Destination Connection ID field is used in all packets
  * sent toward such an endpoint over any network path." A server that cannot WRITE one cannot answer a client that

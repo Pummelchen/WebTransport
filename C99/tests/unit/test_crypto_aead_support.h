@@ -24,7 +24,6 @@
 
 #include "webtransport/crypto/crypto.h"
 
-
 static inline size_t unhex(const char *hex, uint8_t *out, size_t capacity) {
   size_t length = strlen(hex);
   size_t i;
@@ -50,6 +49,5 @@ static inline size_t unhex(const char *hex, uint8_t *out, size_t capacity) {
   }
   return length / 2U;
 }
-
 
 #endif

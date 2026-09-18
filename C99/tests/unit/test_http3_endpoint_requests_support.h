@@ -26,7 +26,6 @@
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
 
-
 static inline void write_type(uint8_t *out, size_t *length, uint64_t type) {
   wt_writer_t w = wt_writer_init(out, 16U);
   uint8_t encoded[8];
@@ -35,7 +34,8 @@ static inline void write_type(uint8_t *out, size_t *length, uint64_t type) {
   *length = wt_writer_offset(&w);
 }
 
-static inline size_t build_section(uint8_t *out, size_t capacity, const char *name, const char *value) {
+static inline size_t build_section(uint8_t *out, size_t capacity, const char *name,
+                                   const char *value) {
   wt_writer_t w = wt_writer_init(out, capacity);
   wt_qpack_header_prefix_t prefix;
   wt_qpack_field_line_t line;
@@ -60,6 +60,5 @@ static inline size_t build_section(uint8_t *out, size_t capacity, const char *na
   }
   return wt_writer_offset(&w);
 }
-
 
 #endif

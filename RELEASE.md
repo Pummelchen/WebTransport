@@ -137,7 +137,7 @@ repository, so `gh release list` shows another project's releases and
 
 ## 1.8 Release notes
 
-- Full notes in `docs/release-notes-vX.Y.Z.md` (or the repository's equivalent),
+- Full notes in `docs/release-notes-vX.Y.md` (or the repository's equivalent),
   one section per user-visible change, each naming the check that backs it.
 - End with a checksum block carrying `SHA256_PENDING` and
   `ARCHIVE_BYTES_PENDING`, substituted at publish time. **Never copy a size out
@@ -148,7 +148,7 @@ repository, so `gh release list` shows another project's releases and
 - The README gets **no release callout**. It changes only when a fact it states
   changes. The release notes are the announcement.
 - **There is no separate changelog file: the release notes *are* the changelog.**
-  Each release's notes — `docs/release-notes-vX.Y.Z.md` here, and the body published
+  Each release's notes — `docs/release-notes-vX.Y.md` here, and the body published
   for the tag — are organised as `### Swift`, then `### C99`, then `### Both`, because
   the two libraries are independent and a reader of one should not have to filter the
   other's entries out. Each library's changes go under its own heading and nowhere

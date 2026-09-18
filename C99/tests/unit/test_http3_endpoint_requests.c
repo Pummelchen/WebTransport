@@ -13,13 +13,12 @@
 
 #include <string.h>
 
+#include "test_http3_endpoint_requests_support.h"
 #include "webtransport/http3/endpoint.h"
 #include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
-#include "test_http3_endpoint_requests_support.h"
-
 
 static void test_request_headers_are_decoded(void) {
   wt_http3_endpoint_t server;

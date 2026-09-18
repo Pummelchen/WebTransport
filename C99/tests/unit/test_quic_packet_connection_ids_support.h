@@ -25,6 +25,4 @@
 
 #include "rfc9001_retry.h"
 
-
-
 #endif

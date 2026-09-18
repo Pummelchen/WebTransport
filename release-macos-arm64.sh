@@ -70,8 +70,12 @@ esac
 # --- identity, from the single source (Part 1 §1.3) ---------------------------
 [ -f VERSION ] || { echo "VERSION is missing; it is the single source of the version" >&2; exit 1; }
 version=$(head -n1 VERSION | tr -d '[:space:]')
-printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
-  || { echo "VERSION must be MAJOR.MINOR.PATCH (got '$version')" >&2; exit 1; }
+# Releases are MAJOR.MINOR (Part 2, Identity). A third component is still accepted so the
+# already-published 1.5.2 line can be reconstructed from this script, but a new release must
+# not introduce one -- the C99 side prints no patch when it is 0, so a three-part release
+# would ship a version string that disagrees with its own tag.
+printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+  || { echo "VERSION must be MAJOR.MINOR (got '$version')" >&2; exit 1; }
 ./Swift/check-version-sync.sh >/dev/null \
   || { echo "the version mirrors disagree; run ./Swift/check-version-sync.sh --write" >&2; exit 1; }
 
