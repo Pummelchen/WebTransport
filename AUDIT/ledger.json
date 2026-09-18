@@ -429,7 +429,7 @@
       "evidence_after": [
         "Coverage: `capsule.c` 19 uncovered lines -> 10, and the total 91.54% -> **91.60%** lines; no file lost coverage. Deliberate violation: removing `parse_one`'s `!wt_cursor_at_end` refusal fails the new test with `FAIL a flow-control value with trailing bytes is refused: want protocol, got ok` and `FAIL as a message error: want 270, got 256` (2 of 66 checks, exit 8); restoring it leaves `100% tests passed out of 97`. The guard-like uncovered-line worklist is now 285 lines in 53 files, down from 295 in 53, which is the figure the next Tier A round starts from."
       ],
-      "commit": "PENDING",
+      "commit": "e2414e0",
       "blocked_reason": ""
     }
   ]
