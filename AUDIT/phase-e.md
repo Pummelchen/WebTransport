@@ -4,7 +4,7 @@ Phase E is the last thing the standard asks for and the only part of this audit 
 done on the primary host. This file is the runbook for it, written now so that provisioning a
 host and producing the evidence is mechanical rather than improvised.
 
-**Status: running.** The owner provided two hosts on 18 September 2026, which is option (2) of the
+**Status: run and passed on both hosts** (see `AUDIT/convergence.md`, "Phase E"). The owner provided two hosts on 18 September 2026, which is option (2) of the
 three this file listed:
 
 | Host | What it is | Toolchain | Why it is independent |
@@ -74,14 +74,12 @@ never removed from the script to make the run green.
 - **A gate cannot run:** record it as not checked with the reason. The standard is explicit that
   a check which cannot run is reported, not skipped quietly.
 
-## The decision needed
+## The decision, taken
 
-`AUD-0002` carries three options for the repository owner, and the standard says to ask before
-provisioning anything:
+`AUD-0002` offered three options and the owner took the second: two existing machines were
+nominated and access was provided. `node1` runs the full sweep on the pinned toolchain; `deltasona`
+runs the C99 half and the script gates on a different OS, kernel and architecture. What each host
+could not run is in `AUDIT/convergence.md` under "Phase E", recorded as not checked with its
+reason rather than as a pass.
 
-1. Approve a VPS or CI runner and provide access.
-2. Nominate an existing independent machine and provide access.
-3. Accept a documented waiver that Phase E ran on the primary host only.
-
-Until one of those happens, the audit is complete in every respect except this one, and saying
-otherwise would be the kind of claim this audit exists to prevent.
+The audit is complete by §12: the open count is 0 and Phase E has passed on an independent host.

@@ -218,3 +218,49 @@ flags a green run. The logs were read rather than grepped for a verdict.
 
 `./Swift/run-soak.sh` is the seventh heavy gate; it was run as the L5 evidence (see between
 sweeps 2 and 3 above) and is in the nightly `soak.yml` from AUD-0018.
+
+## Phase E — the independent hosts
+
+The owner provided two hosts, which is option (2) of the three `AUD-0002` carried. Both already
+answered an SSH key the primary host held; neither was provisioned by the audit.
+
+**`node1` — Mac mini M2, macOS 27.0, the pinned toolchain exactly.** Swift 6.4, Xcode 27.0,
+swift-format 603.0.0, SwiftLint 0.65.1, clang-format 23.1.1, cmake 4.4.3, ninja 1.13.2, python
+3.14.7, ruff 0.16.7, gitleaks 8.30.1, trivy 0.74.0, shfmt 3.14.1, and cppcheck 2.21.0 installed from
+Homebrew to make the set complete (`cppcheck` was the one tool absent). Clone at the audit branch's
+commit, `git status` clean.
+
+    AUDIT/run-sweep.sh
+    28 gates ran, 0 failed          EXIT=0
+
+**`deltasona` — Intel VPS, Debian 13 (trixie) `x86_64`, 8 cores.** A different OS, kernel and
+architecture, which the runbook says is worth more than an identical host. Toolchain, with the
+deviations the runbook asks to record rather than substitute silently: **gcc 14.2.0**, clang 19.1.7
+for the pinned 23.1.1, **cmake 3.31.6** for 4.4.3, **ninja 1.12.1** for 1.13.2, **python 3.13.5**
+for 3.14.7, OpenSSL 3.5.7. Everything ran under `/var/webtransport-phase-e/`; nothing outside that
+directory was written or removed, because the host is production.
+
+    C99 build + ctest, gcc           100% tests passed, 0 tests failed out of 97
+    C99 sanitizers (ASan/UBSan), gcc 100% tests passed, 0 tests failed out of 97   [LeakSanitizer active]
+    C99 sanitizers (ASan/UBSan), clang  97 tests, EXIT=0
+    script gates                     workflows, ledger, vectors, matrix, portability, dead locals, package -- all clean
+
+**Phase E found a defect on its first cross-platform run**: `AUD-0038`, the C99 sanitizer
+configuration could not be built with gcc at all, and CI's sanitizer step was gated to the one
+compiler that would not have said so. Fixed in `f6c7879` and re-run here.
+
+**It also caught the audit's own drift**: the first node1 sweep reported 27 of 28 with
+"report.md matches the ledger" failing, because filing `AUD-0038` had left the generated report
+describing the previous state. The freshness gate added in sweep 26 was doing exactly what it was
+added for. Regenerated in `6e19e49`; the sweep above is the re-run.
+
+### Not checked on the independent hosts, and why
+
+- **The Swift half on `deltasona`**: the Swift package is Apple-only (Network.framework, Security),
+  so no Swift gate can run on Linux. It ran in full on `node1` instead, which is the host that
+  covers it.
+- **`gitleaks`, `trivy`, `shellcheck`, `shfmt`, `cppcheck`, `clang-format`, `scan-build` on
+  `deltasona`**: not installed on that host. Installing them there was not done -- the package
+  manager would have mutated a production machine outside the directory the owner scoped the work
+  to. Their gates therefore ran on `node1` only, and the C99 gates that need `clang-format` and
+  `cppcheck` are reported here as not checked on `deltasona` rather than as passing.

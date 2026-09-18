@@ -8,8 +8,7 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 
 | status | count |
 | --- | --- |
-| BLOCKED | 1 |
-| DONE | 37 |
+| DONE | 38 |
 
 Non-terminal (open): 0
 Terminal: 38
@@ -19,7 +18,7 @@ Terminal: 38
 | id | severity | tier | project | status | title | file:line |
 | --- | --- | --- | --- | --- | --- | --- |
 | AUD-0001 | S3 | C | both | DONE | Record the pinned toolchain per language on the primary host | AUDIT/environment.md |
-| AUD-0002 | S1 | C | both | BLOCKED | Phase E needs one independent host; none is provisioned | AUDIT/environment.md |
+| AUD-0002 | S1 | C | both | DONE | Phase E needs one independent host; none is provisioned | AUDIT/environment.md |
 | AUD-0003 | S3 | C | both | DONE | Inventory, dependency graph, trust boundaries and tier table | AUDIT/inventory.md |
 | AUD-0004 | S3 | C | both | DONE | Baseline both projects on the primary host | AUDIT/baseline.md |
 | AUD-0005 | S2 | C | both | DONE | Tool-coverage and language-standard proofs for every delegated check | AUDIT/tool-coverage.md |
@@ -71,14 +70,13 @@ Terminal: 38
 
 ### AUD-0002 — Phase E needs one independent host; none is provisioned
 
-- severity: S1 | tier: C | project: both | status: BLOCKED | host: Mac14,3
+- severity: S1 | tier: C | project: both | status: DONE | host: Mac14,3
 - category: process | discovered by: phase-a
 - where: AUDIT/environment.md
 - evidence before: Only Mac14,3 exists in this session; Phase E requires a fresh clone on one independent host, and a fresh clone on the same host is not independent
-- fix: 
-- evidence after: 
-- commit: 
-- BLOCKED: owner: repository owner. No second host is available and provisioning one (VPS) requires explicit approval per the standard. Tried: nothing (not attempted, by rule). The procedure for the host is written down in `AUDIT/phase-e.md` (independence criteria, the exact commands, what counts as passing, and what a new-host failure means), so provisioning is the only step left. Options for the human: (1) approve a VPS/CI runner and provide access, (2) nominate an existing independent machine and provide access, (3) accept a documented waiver that Phase E ran on the primary host only.
+- fix: The owner took option (2) and nominated two existing hosts: `node1` (Mac mini M2, macOS 27.0, the pinned toolchain exactly plus cppcheck 2.21.0 from Homebrew) and `deltasona` (Intel VPS, Debian 13 x86_64, gcc 14.2.0 / clang 19.1.7 / cmake 3.31.6). Phase E ran on both; the record and the not-checked list are in AUDIT/convergence.md.
+- evidence after: node1: `AUDIT/run-sweep.sh` -- **28 gates ran, 0 failed**, EXIT=0, on a clean clone at the audit branch's commit. deltasona: C99 build + ctest **100% tests passed, 0 failed out of 97** with gcc; the same suite under ASan/UBSan **97/97** with gcc and with clang, the gcc run with LeakSanitizer active, which Darwin cannot do; and the workflows, ledger, vectors, matrix, portability, dead-local and package gates clean. Phase E found `AUD-0038` on its first cross-platform run (the sanitizer configuration could not be built with gcc, and CI's sanitizer step was gated to the compiler that would not have said so), fixed in f6c7879 before these runs. The Swift half and seven tools are reported not checked on deltasona, with reasons, rather than as passes.
+- commit: PENDING
 
 ### AUD-0003 — Inventory, dependency graph, trust boundaries and tier table
 

@@ -30,14 +30,14 @@
       "file_line": "AUDIT/environment.md",
       "title": "Phase E needs one independent host; none is provisioned",
       "category": "process",
-      "status": "BLOCKED",
+      "status": "DONE",
       "host": "Mac14,3",
       "discovered_by": "phase-a",
       "evidence_before": "Only Mac14,3 exists in this session; Phase E requires a fresh clone on one independent host, and a fresh clone on the same host is not independent",
-      "fix_summary": "",
-      "evidence_after": "",
-      "commit": "",
-      "blocked_reason": "owner: repository owner. No second host is available and provisioning one (VPS) requires explicit approval per the standard. Tried: nothing (not attempted, by rule). The procedure for the host is written down in `AUDIT/phase-e.md` (independence criteria, the exact commands, what counts as passing, and what a new-host failure means), so provisioning is the only step left. Options for the human: (1) approve a VPS/CI runner and provide access, (2) nominate an existing independent machine and provide access, (3) accept a documented waiver that Phase E ran on the primary host only."
+      "fix_summary": "The owner took option (2) and nominated two existing hosts: `node1` (Mac mini M2, macOS 27.0, the pinned toolchain exactly plus cppcheck 2.21.0 from Homebrew) and `deltasona` (Intel VPS, Debian 13 x86_64, gcc 14.2.0 / clang 19.1.7 / cmake 3.31.6). Phase E ran on both; the record and the not-checked list are in AUDIT/convergence.md.",
+      "evidence_after": "node1: `AUDIT/run-sweep.sh` -- **28 gates ran, 0 failed**, EXIT=0, on a clean clone at the audit branch's commit. deltasona: C99 build + ctest **100% tests passed, 0 failed out of 97** with gcc; the same suite under ASan/UBSan **97/97** with gcc and with clang, the gcc run with LeakSanitizer active, which Darwin cannot do; and the workflows, ledger, vectors, matrix, portability, dead-local and package gates clean. Phase E found `AUD-0038` on its first cross-platform run (the sanitizer configuration could not be built with gcc, and CI's sanitizer step was gated to the compiler that would not have said so), fixed in f6c7879 before these runs. The Swift half and seven tools are reported not checked on deltasona, with reasons, rather than as passes.",
+      "commit": "PENDING",
+      "blocked_reason": ""
     },
     {
       "id": "AUD-0003",
