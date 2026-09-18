@@ -185,16 +185,7 @@ func resourceLimitsCoverBufferedStreamsDatagramsDynamicTablesAndMalformedPeers()
 
 @Test
 func adversarialOrderingReplayExhaustionAndCloseResetRacesAreDeterministic() throws {
-    let clientHTTP3 = HTTP3ConnectionState(role: .client)
-    var serverHTTP3 = HTTP3ConnectionState(role: .server)
-    let clientControl = try clientHTTP3.localControlStreamBytes()
-    _ = try serverHTTP3.receivePeerControlStream(clientControl)
-    #expect(throws: Error.self) {
-        _ = try serverHTTP3.receivePeerControlStream(clientControl)
-    }
-    #expect(throws: Error.self) {
-        try serverHTTP3.receiveControlFrame(HTTP3Settings.webTransportDraft16Defaults.frame())
-    }
+    try verifyDuplicateControlStreamsAreRefused()
 
     var pair = try WebTransportHardeningSupport.makeReadyManagers()
     let sessionID = try WebTransportHardeningSupport.establishSession(client: &pair.client, server: &pair.server)
@@ -290,5 +281,20 @@ private enum WebTransportHardeningSupport {
         )
         _ = try client.receiveServerSessionResponse(streamID: 0, frame: decision.responseFrame)
         return WebTransportSessionID(rawValue: 0)
+    }
+}
+
+/// The peer control stream is accepted once and only once, and nothing but SETTINGS may
+/// follow it.
+private func verifyDuplicateControlStreamsAreRefused() throws {
+    let clientHTTP3 = HTTP3ConnectionState(role: .client)
+    var serverHTTP3 = HTTP3ConnectionState(role: .server)
+    let clientControl = try clientHTTP3.localControlStreamBytes()
+    _ = try serverHTTP3.receivePeerControlStream(clientControl)
+    #expect(throws: Error.self) {
+        _ = try serverHTTP3.receivePeerControlStream(clientControl)
+    }
+    #expect(throws: Error.self) {
+        try serverHTTP3.receiveControlFrame(HTTP3Settings.webTransportDraft16Defaults.frame())
     }
 }

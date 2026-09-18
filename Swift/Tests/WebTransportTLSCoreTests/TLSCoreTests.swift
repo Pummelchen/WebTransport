@@ -561,26 +561,7 @@ func tlsQUICConnectionStateRunsHandshakeKeysAndKeyUpdateLifecycle() throws {
     #expect(state.phase == .applicationKeysReady)
     #expect(state.applicationKeyReadiness.isReady)
     #expect(state.keyUpdateGeneration == 0)
-    let exported = try state.exportKeyingMaterial(
-        label: "EXPORTER-WebTransport",
-        context: Data("session-context".utf8),
-        outputByteCount: 32
-    )
-    #expect(exported.count == 32)
-    #expect(
-        exported
-            == (try state.exportKeyingMaterial(
-                label: "EXPORTER-WebTransport",
-                context: Data("session-context".utf8),
-                outputByteCount: 32
-            )))
-    #expect(
-        exported
-            != (try state.exportKeyingMaterial(
-                label: "EXPORTER-WebTransport",
-                context: Data("different-context".utf8),
-                outputByteCount: 32
-            )))
+    try verifyExporterDeterminism(state)
 
     let updatedSecrets = try state.updateApplicationTrafficSecrets()
     #expect(state.keyUpdateGeneration == 1)
@@ -967,4 +948,29 @@ func hkdfExpandLabelRejectsOutputBeyondTheRFCBound() throws {
     #expect(throws: (any Error).self) {
         _ = try TLS13KeySchedule.hkdfExpandLabel(secret: Data(repeating: 0x0b, count: 32), label: "test", outputByteCount: 65535)
     }
+}
+
+/// The exporter is 32 bytes, the same for the same label and context, and different for a
+/// different context.
+private func verifyExporterDeterminism(_ state: TLSQUICConnectionState) throws {
+    let exported = try state.exportKeyingMaterial(
+        label: "EXPORTER-WebTransport",
+        context: Data("session-context".utf8),
+        outputByteCount: 32
+    )
+    #expect(exported.count == 32)
+    #expect(
+        exported
+            == (try state.exportKeyingMaterial(
+                label: "EXPORTER-WebTransport",
+                context: Data("session-context".utf8),
+                outputByteCount: 32
+            )))
+    #expect(
+        exported
+            != (try state.exportKeyingMaterial(
+                label: "EXPORTER-WebTransport",
+                context: Data("different-context".utf8),
+                outputByteCount: 32
+            )))
 }
