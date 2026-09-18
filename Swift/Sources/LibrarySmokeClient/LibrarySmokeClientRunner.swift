@@ -223,170 +223,53 @@ extension LibrarySmokeRunner {
         let suiteStart = Date()
         print("client: starting smoke suite")
 
-        var start = Date()
-        do {
-            print("client: running echo streams (multi-stream)")
-            try runEchoStreamsScenario()
-            print("client: ✓ echo streams (multi-stream) in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step echo streams (multi-stream) failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running control stream reuse")
-            try runControlStreamReuseScenario()
-            print("client: ✓ control stream reuse in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step control stream reuse failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running datagram burst")
-            try runEchoDatagramBurst()
-            print("client: ✓ datagram burst in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step datagram burst failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running datagram ordering and buffer boundary")
-            try runDatagramOrderingScenario()
-            print("client: ✓ datagram ordering in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step datagram ordering failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running interleaved stream flow")
-            try runInterleavedStreamScenario()
-            print("client: ✓ interleaved stream flow in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step interleaved stream flow failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running concurrent sessions")
-            try runConcurrentSessionsScenario()
-            print("client: ✓ concurrent sessions in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step concurrent sessions failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running protocol negotiation")
-            try runProtocolNegotiationScenario()
-            print("client: ✓ protocol negotiation in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step protocol negotiation failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running flow-control capsules")
-            try runFlowControlCapsuleScenario()
-            print("client: ✓ flow-control capsules in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step flow-control capsules failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running stream identity + duplicate open")
-            try runStreamIdentityAndDuplicateOpenScenario()
-            print("client: ✓ stream identity + duplicate open in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step stream identity + duplicate open failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running malformed stream open")
-            try runMalformedStreamScenario()
-            print("client: ✓ malformed stream open in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step malformed stream open failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running datagram/session integrity")
-            try runDatagramIntegrityScenario()
-            print("client: ✓ datagram/session integrity in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step datagram/session integrity failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running malformed datagram frame")
-            try runMalformedDatagramScenario()
-            print("client: ✓ malformed datagram frame in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step malformed datagram frame failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running duplicate session request")
-            try runDuplicateSessionRequestScenario()
-            print("client: ✓ duplicate session request in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step duplicate session request failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running malformed session request")
-            try runMalformedSessionRequestScenario()
-            print("client: ✓ malformed session request in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step malformed session request failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running close/reset path")
-            try runCloseAndResetScenario()
-            print("client: ✓ close/reset path in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step close/reset path failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running session rejection")
-            try runRejectedSessionScenario()
-            print("client: ✓ session rejection in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step session rejection failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running oversized datagram rejection")
-            try runOversizedDatagramScenario()
-            print("client: ✓ oversized datagram rejection in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step oversized datagram rejection failed: \(error)")
-        }
-
-        start = Date()
-        do {
-            print("client: running malformed stream open")
-            try runMalformedFrameScenario()
-            print("client: ✓ malformed frame path in \(formatDuration(Date().timeIntervalSince(start)))s")
-        } catch {
-            throw Error.runtime("suite step malformed frame failed: \(error)")
-        }
+        try Self.runStep("echo streams (multi-stream)") { try runEchoStreamsScenario() }
+        try Self.runStep("control stream reuse") { try runControlStreamReuseScenario() }
+        try Self.runStep("datagram burst") { try runEchoDatagramBurst() }
+        try Self.runStep(
+            "datagram ordering and buffer boundary",
+            succeeded: "datagram ordering",
+            failed: "datagram ordering"
+        ) { try runDatagramOrderingScenario() }
+        try Self.runStep("interleaved stream flow") { try runInterleavedStreamScenario() }
+        try Self.runStep("concurrent sessions") { try runConcurrentSessionsScenario() }
+        try Self.runStep("protocol negotiation") { try runProtocolNegotiationScenario() }
+        try Self.runStep("flow-control capsules") { try runFlowControlCapsuleScenario() }
+        try Self.runStep("stream identity + duplicate open") { try runStreamIdentityAndDuplicateOpenScenario() }
+        try Self.runStep("malformed stream open") { try runMalformedStreamScenario() }
+        try Self.runStep("datagram/session integrity") { try runDatagramIntegrityScenario() }
+        try Self.runStep("malformed datagram frame") { try runMalformedDatagramScenario() }
+        try Self.runStep("duplicate session request") { try runDuplicateSessionRequestScenario() }
+        try Self.runStep("malformed session request") { try runMalformedSessionRequestScenario() }
+        try Self.runStep("close/reset path") { try runCloseAndResetScenario() }
+        try Self.runStep("session rejection") { try runRejectedSessionScenario() }
+        try Self.runStep("oversized datagram rejection") { try runOversizedDatagramScenario() }
+        try Self.runStep("malformed stream open", succeeded: "malformed frame path", failed: "malformed frame") { try runMalformedFrameScenario() }
 
         let elapsed = Date().timeIntervalSince(suiteStart)
         print("client: full suite checks passed in \(formatDuration(elapsed))s")
+    }
+
+    /// Runs one suite step, reporting its duration and naming it in any failure.
+    ///
+    /// The running, success and failure labels are separate because two steps genuinely
+    /// differ: "datagram ordering and buffer boundary" reports as "datagram ordering", and the
+    /// malformed-frame step is announced as "malformed stream open" but reported as
+    /// "malformed frame path". Collapsing them would have changed this tool's output.
+    private static func runStep(
+        _ running: String,
+        succeeded: String? = nil,
+        failed: String? = nil,
+        _ body: () throws -> Void
+    ) throws {
+        let start = Date()
+        print("client: running \(running)")
+        do {
+            try body()
+            print("client: ✓ \(succeeded ?? running) in \(formatDuration(Date().timeIntervalSince(start)))s")
+        } catch {
+            throw Error.runtime("suite step \(failed ?? running) failed: \(error)")
+        }
     }
 
     mutating func establishAcceptedSession(
