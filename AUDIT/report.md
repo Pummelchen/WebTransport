@@ -25,18 +25,18 @@ Phase E has not run: it needs an independent host, and the standard says to ask 
 
 ## Findings
 
-37 tasks were filed. BLOCKED 2, DONE 35.
+38 tasks were filed. BLOCKED 1, DONE 37.
 
 | severity | count |
 | --- | --- |
 | S1 | 6 |
-| S2 | 17 |
+| S2 | 18 |
 | S3 | 14 |
 
 | tier | count |
 | --- | --- |
 | A | 25 |
-| B | 3 |
+| B | 4 |
 | C | 9 |
 
 | id | sev | status | finding |
@@ -48,7 +48,7 @@ Phase E has not run: it needs an independent host, and the standard says to ask 
 | AUD-0005 | S2 | DONE | Tool-coverage and language-standard proofs for every delegated check |
 | AUD-0006 | S1 | DONE | SwiftLint is installed but has no committed config and is not run, so the mandated Swift linter is not in force |
 | AUD-0007 | S1 | DONE | Ruff has no config, so B, E722, S101 and PT are not enabled |
-| AUD-0008 | S2 | BLOCKED | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config |
+| AUD-0008 | S2 | DONE | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config |
 | AUD-0009 | S2 | DONE | No C99 coverage measurement exists, so one baseline metric is missing |
 | AUD-0010 | S3 | DONE | No committed .clang-format and the tree is not clang-format clean |
 | AUD-0011 | S3 | DONE | Repository convention says audit ledgers are not kept in the tree; this audit mandates committing one |
@@ -78,6 +78,7 @@ Phase E has not run: it needs an independent host, and the standard says to ask 
 | AUD-0035 | S3 | DONE | The quarter-ID overflow guard added for a past audit finding cannot fire from the wire, and the helper it protects still wraps silently |
 | AUD-0036 | S2 | DONE | The test for RFC 9114's no-pseudo-headers-in-trailers rule passed with the rule deleted, because the refusal came from the message decoder |
 | AUD-0037 | S3 | DONE | Both static-table index refusals were unexecuted, because every index the tests used was valid |
+| AUD-0038 | S2 | DONE | The C99 sanitizer configuration could not be built with gcc, and CI excluded the one leg that would have said so |
 
 ## Verification yardstick
 
@@ -140,7 +141,6 @@ folded into the first convergence claim.
 | id | sev | status | finding | blocked on |
 | --- | --- | --- | --- | --- |
 | AUD-0002 | S1 | BLOCKED | Phase E needs one independent host; none is provisioned | owner: repository owner. No second host is available and provisioning one (VPS) requires explicit approval per the standard. Tried: nothing (not attempted, by rule). The procedure for the host is written down in `AUDIT/phase-e.md` (independence criteria, the exact commands, what counts as passing, and what a new-host failure means), so provisioning is the only step left. Options for the human: (1) approve a VPS/CI runner and provide access, (2) nominate an existing independent machine and provide access, (3) accept a documented waiver that Phase E ran on the primary host only. |
-| AUD-0008 | S2 | BLOCKED | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | owner: repository owner. The standard says to enforce -require-explicit-sendable in build config, not per invocation. The only SwiftPM mechanism is `.unsafeFlags(["-require-explicit-sendable"])`, and it breaks the package for the consumers this repository publishes it to. Tried, not assumed: the flag was added to both manifests and `./Swift/check-api-compatibility.sh` PASSED, because that check consumes the package by PATH; SwiftPM refuses unsafe build flags only for VERSION-BASED dependencies ('The package product ... cannot be used as a dependency of this target because it uses unsafe build flags', and SwiftPM's own tests note the error is expected 'in the version-based dependency'). A published consumer reaching the package by URL would therefore be refused, and the in-repo check cannot see it. Options for the human: (1) accept unsafeFlags and drop the package's usability as a versioned dependency -- rejected as worse than the deviation; (2) keep the CI-invocation enforcement and record the deviation from the standard (current state); (3) make the API-compatibility check consume a versioned dependency first, so it can catch this whole class, and revisit the trade-off then. |
 
 **Phase E has not run.** §12 makes the audit complete when the open count is exactly 0
 (it is) *and* Phase E has passed on an independent host (it has not — there is no host).
