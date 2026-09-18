@@ -120,7 +120,7 @@ they do not follow the library version and must not be bumped with it.
   `check-package.sh` (builds a consumer of the installed package and *runs* all
   three installed tools), `check-matrix.sh`, `check-portability.sh`,
   `check-static-analysis.sh` (Clang Static Analyzer), `check-cppcheck.sh`,
-  `check-workflows.py`, and a CLI smoke step. A CMake configure fails when the
+  `check-workflows.py`, and a CLI smoke step. Three more came from the pre-production audit and run on the same legs: `check-format.sh` (every C source against the committed `.clang-format`, generated tables and RFC vectors excluded), `measure-coverage.sh` (line coverage from an instrumented build, so it is measured rather than remembered), and `check-unused-locals.py` (a local assigned and never read, hidden from `-Wunused-but-set-variable` by a `(void)` cast; an unused *parameter* is a deliberate suppression and is skipped). A CMake configure fails when the
   version mirrors disagree. Three Windows checks: `check-windows-platform.sh`,
   `check-windows-build.sh` and `check-windows-wine.sh` on the Ubuntu leg, plus the
   **enforced** `windows-native` job on `windows-latest` (MSYS2 MINGW64). Two more
