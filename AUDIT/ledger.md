@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 23 |
+| DONE | 24 |
 
 Non-terminal (open): 0
-Terminal: 25
+Terminal: 26
 
 ## Tasks
 
@@ -43,6 +43,7 @@ Terminal: 25
 | AUD-0023 | S2 | A | P2 | DONE | wt_quic_initial_token read a Version Negotiation packet as an Initial with a token, and reported no version the caller could check | C99/src/quic/packet.c:113 |
 | AUD-0024 | S2 | A | P2 | DONE | The ACK-range validator's refusal paths were never executed by the suite, and two of its guards are load-bearing | C99/src/quic/connection_loss.c:85 |
 | AUD-0025 | S2 | A | P2 | DONE | The flow-control capsule rules the header states outright were unexecuted: trailing bytes, a partial varint, and an over-long close reason | C99/src/webtransport/capsule.c:194 |
+| AUD-0026 | S2 | A | P2 | DONE | Four of RFC 9204 section 4.5.1's decoding error exits and its wrap branch were never executed | C99/src/http3/qpack_header_prefix.c:90 |
 
 ## Detail
 
@@ -297,4 +298,14 @@ Terminal: 25
 - fix: Added `test_flow_control_values_must_be_exactly_one_varint` to `test_webtransport_capsule.c`: a value with trailing bytes, a value that is not a whole varint, a two-varint capsule carrying one, one carrying three, and a close reason past WT_CAPSULE_CLOSE_MAX_REASON -- each asserting WT_ERR_PROTOCOL and the message-error code the header promises. The close case uses zero bytes on purpose, which are valid UTF-8, so the length check is what refuses it and not the well-formedness check after it.
 - evidence after: ["Coverage: `capsule.c` 19 uncovered lines -> 10, and the total 91.54% -> **91.60%** lines; no file lost coverage. Deliberate violation: removing `parse_one`'s `!wt_cursor_at_end` refusal fails the new test with `FAIL a flow-control value with trailing bytes is refused: want protocol, got ok` and `FAIL as a message error: want 270, got 256` (2 of 66 checks, exit 8); restoring it leaves `100% tests passed out of 97`. The guard-like uncovered-line worklist is now 285 lines in 53 files, down from 295 in 53, which is the figure the next Tier A round starts from."]
 - commit: e2414e0
+
+### AUD-0026 — Four of RFC 9204 section 4.5.1's decoding error exits and its wrap branch were never executed
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, coverage-as-reviewer worklist (AUDIT/tier-a-review.md)
+- where: C99/src/http3/qpack_header_prefix.c:90
+- evidence before: The field-section prefix decoder implements RFC 9204 section 4.5.1's algorithm faithfully -- the code and the RFC's pseudocode match line for line, including the `full_range < max_entries` wrap guard -- but line coverage showed four of its six error exits and its wrap branch unexecuted: the integer decode failures for the encoded count and for the delta, the `required == 0` exit, the positive-delta overflow exit, and the `required -= full_range` subtraction. The existing tests covered the three most obvious exits, so the rest could have been lost quietly. This is peer input: the prefix is the first thing decoded in a field section.
+- fix: Added `test_the_algorithm_s_refusals_are_all_reachable` to `test_qpack_header_prefix.c`, with each case aimed at one line of the algorithm rather than at "something malformed": a MaxEntries whose doubled full range wraps, an encoded count whose continuation runs past the 62-bit bound, the same for the delta after a valid count, a wrap that lands on zero, the wrap itself (six inserts known and a two-entry window, so an encoded two names nine and subtracts to five), and a positive delta that would carry the base past UINT64_MAX.
+- evidence after: Coverage: `qpack_header_prefix.c` 18 uncovered lines -> 4, and the total 91.60% -> **91.69%** lines -- above the 91.64% recorded at AUD-0009, which the audit's own added branches had pushed down. No file lost coverage. The guard-like worklist is now **277 lines in 53 files**, from 295 when the worklist started, then 285 after AUD-0025. Deliberate violation: removing the `required == 0` exit fails the new test with `FAIL a wrap that lands on zero is refused: want protocol, got ok` and `FAIL as a decompression failure: want 512, got 0` (2 of 71 checks, exit 8); restoring leaves `100% tests passed out of 97`.
+- commit: PENDING
 

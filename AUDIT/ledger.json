@@ -431,6 +431,23 @@
       ],
       "commit": "e2414e0",
       "blocked_reason": ""
+    },
+    {
+      "id": "AUD-0026",
+      "severity": "S2",
+      "tier": "A",
+      "project": "P2",
+      "file_line": "C99/src/http3/qpack_header_prefix.c:90",
+      "title": "Four of RFC 9204 section 4.5.1's decoding error exits and its wrap branch were never executed",
+      "category": "tests",
+      "status": "DONE",
+      "host": "Mac14,3",
+      "discovered_by": "Tier A review, coverage-as-reviewer worklist (AUDIT/tier-a-review.md)",
+      "evidence_before": "The field-section prefix decoder implements RFC 9204 section 4.5.1's algorithm faithfully -- the code and the RFC's pseudocode match line for line, including the `full_range < max_entries` wrap guard -- but line coverage showed four of its six error exits and its wrap branch unexecuted: the integer decode failures for the encoded count and for the delta, the `required == 0` exit, the positive-delta overflow exit, and the `required -= full_range` subtraction. The existing tests covered the three most obvious exits, so the rest could have been lost quietly. This is peer input: the prefix is the first thing decoded in a field section.",
+      "fix_summary": "Added `test_the_algorithm_s_refusals_are_all_reachable` to `test_qpack_header_prefix.c`, with each case aimed at one line of the algorithm rather than at \"something malformed\": a MaxEntries whose doubled full range wraps, an encoded count whose continuation runs past the 62-bit bound, the same for the delta after a valid count, a wrap that lands on zero, the wrap itself (six inserts known and a two-entry window, so an encoded two names nine and subtracts to five), and a positive delta that would carry the base past UINT64_MAX.",
+      "evidence_after": "Coverage: `qpack_header_prefix.c` 18 uncovered lines -> 4, and the total 91.60% -> **91.69%** lines -- above the 91.64% recorded at AUD-0009, which the audit's own added branches had pushed down. No file lost coverage. The guard-like worklist is now **277 lines in 53 files**, from 295 when the worklist started, then 285 after AUD-0025. Deliberate violation: removing the `required == 0` exit fails the new test with `FAIL a wrap that lands on zero is refused: want protocol, got ok` and `FAIL as a decompression failure: want 512, got 0` (2 of 71 checks, exit 8); restoring leaves `100% tests passed out of 97`.",
+      "commit": "PENDING",
+      "blocked_reason": ""
     }
   ]
 }

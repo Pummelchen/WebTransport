@@ -42,6 +42,7 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/core/cursor.c` | Read in full (the bounds contract every parser relies on) — no finding |
 | `C99/src/quic/connection_loss.c` | Read in part (`validate_ack`, the ACK-range chain) — `AUD-0024` |
 | `C99/src/webtransport/capsule.c` | Read in part (the close and flow-control parsers) — `AUD-0025` |
+| `C99/src/http3/qpack_header_prefix.c` | **Read in full** (128 lines) and the algorithm checked against RFC 9204 section 4.5.1 — `AUD-0026` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -162,8 +163,14 @@ down because the suite cannot detect line 89's removal.
 **AUD-0025** came from the same worklist: `capsule.h` states the flow-control rule in prose
 ("anything but exactly one varint is H3_MESSAGE_ERROR") and none of it executed. Five cases now
 assert it, `capsule.c` went from 19 uncovered lines to 10, and the total from 91.54% to 91.60%.
+**AUD-0026** is the third from the worklist and the cleanest illustration of the pattern: the
+prefix decoder matches RFC 9204 section 4.5.1's pseudocode line for line -- four of its six error
+exits and its wrap branch were simply never executed. All six are now aimed at individually, and
+the total line figure passed the baseline it had drifted below: **91.69%**, against 91.64% when
+`AUD-0009` measured it and 91.49% before this worklist began.
+
 The worklist itself is the running figure: **295 guard-like uncovered lines in 53 files at the
-start, 285 after two rounds of this** -- and it is the first thing the next Tier A round reads.
+start, 277 after three rounds of this** -- and it is the first thing the next Tier A round reads.
 
 The same filter is worth running again as more of the tier is read. It also answers a question the
 percentage cannot: **the audit's own fixes moved the figure down** (91.64% at `AUD-0009` to 91.49%
