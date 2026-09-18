@@ -332,148 +332,143 @@ extension WebTransportQUICServer {
         on accepted: InteroperableQUICAcceptedConnection,
         timeoutMilliseconds: Int32
     ) async throws -> WebTransportNetworkSession {
-        let connection = accepted.connection
+        makeSession(try await performServerHandshake(on: accepted, timeoutMilliseconds: timeoutMilliseconds))
+    }
+
+    /// The values every phase of the handshake needs, taken from the accepted connection once.
+    private struct SessionPrelude {
+        let connection: NetworkConnection<QUIC>
+        let remainingTimeout: @Sendable () -> Int32
+        let datagramFrameSizeLimit: Int
+        let inboundStreams: InteroperableQUICInboundStreamCollector
+        let inboundTask: Task<Void, Never>
+    }
+
+    /// Everything the handshake produces, ready to become a session.
+    private struct ServerHandshakeOutcome {
+        let connection: NetworkConnection<QUIC>
+        let inboundStreams: InteroperableQUICInboundStreamCollector
+        let inboundTask: Task<Void, Never>
+        let lease: InteroperableQUICConnectionLease?
+        let manager: WebTransportSessionManager
+        let decision: WebTransportServerSessionDecision
+        let localControlStream: QUIC.Stream<QUICStream>
+        let requestStream: QUIC.Stream<QUICStream>
+        let qpackStreams: [QUIC.Stream<QUICStream>]
+        let useDatagrams: Bool
+        let optimisticCapsuleBytes: Data
+        let timeoutMilliseconds: Int32
+    }
+
+    private func makeSessionPrelude(
+        accepted: InteroperableQUICAcceptedConnection,
+        timeoutMilliseconds: Int32
+    ) -> SessionPrelude {
         let started = Date()
-        let remainingTimeout: @Sendable () -> Int32 = { [timeoutMilliseconds] () -> Int32 in
-            InteroperableQUICHelpers.remainingTimeout(
-                timeoutMilliseconds: timeoutMilliseconds,
-                started: started
-            )
-        }
-
-        func runWithTimeout(_ operation: @Sendable @escaping () async throws -> Void) async throws {
-            let remaining = remainingTimeout()
-            guard remaining > 0 else {
-                throw WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds)
-            }
-            try await InteroperableQUICHelpers.withTimeout(remaining, operation)
-        }
-
-        func runWithTimeout<T: Sendable>(_ operation: @Sendable @escaping () async throws -> T) async throws -> T {
-            let remaining = remainingTimeout()
-            guard remaining > 0 else {
-                throw WebTransportNetworkRuntimeError.timeout(timeoutMilliseconds)
-            }
-            return try await InteroperableQUICHelpers.withTimeout(remaining, operation)
-        }
-
-        let datagramFrameSizeLimit = transportLimits.maxDatagramFrameSize
         InteroperableQUICDebug.log("server serveSession start")
-        // Attached at accept time, before the connection was started, so streams
-        // the peer opened during the handshake are already collected here.
-        let inboundStreams = accepted.inboundStreams
-        let inboundTask = accepted.inboundTask
+        return SessionPrelude(
+            connection: accepted.connection,
+            remainingTimeout: { [timeoutMilliseconds] () -> Int32 in
+                InteroperableQUICHelpers.remainingTimeout(
+                    timeoutMilliseconds: timeoutMilliseconds,
+                    started: started
+                )
+            },
+            datagramFrameSizeLimit: transportLimits.maxDatagramFrameSize,
+            // Attached at accept time, before the connection was started, so streams the peer
+            // opened during the handshake are already collected here.
+            inboundStreams: accepted.inboundStreams,
+            inboundTask: accepted.inboundTask
+        )
+    }
 
+    /// The server half of the handshake: control streams, SETTINGS, the CONNECT request and
+    /// the decision. Split from `acceptSession` so each phase is named and the entry point is
+    /// one line.
+    private func performServerHandshake(
+        on accepted: InteroperableQUICAcceptedConnection,
+        timeoutMilliseconds: Int32
+    ) async throws -> ServerHandshakeOutcome {
+        let prelude = makeSessionPrelude(accepted: accepted, timeoutMilliseconds: timeoutMilliseconds)
         var http3 = HTTP3ConnectionState(
             role: .server,
             localSettings: settingsValidation.localSettings
         )
-        let localControlPayload = try http3.localControlStreamBytes()
-        let localControlStream = try await runWithTimeout {
-            try await connection.openStream(directionality: .unidirectional)
-        }
-        InteroperableQUICDebug.log("server opened local control stream \(localControlStream.streamID)")
-        try await runWithTimeout {
-            try await localControlStream.send(localControlPayload, endOfStream: false)
-        }
-        InteroperableQUICDebug.log("server sent local control payload")
-        let qpackStreams = try await InteroperableQUICHelpers.openQPACKStreams(
-            on: connection,
-            role: "server",
-            timeoutMilliseconds: remainingTimeout()
-        )
-
-        let controlPayload = try await runWithTimeout {
-            try await InteroperableQUICHelpers.readPeerControlStream(
-                from: inboundStreams,
-                role: "server",
-                timeoutMilliseconds: remainingTimeout()
-            )
-        }
-        InteroperableQUICDebug.log("server control payload bytes=\(controlPayload.count)")
-        _ = try http3.receivePeerControlStream(
-            controlPayload,
-            settingsValidation: settingsValidation
-        )
-        // Peer SETTINGS identify which WebTransport revision the client speaks.
-        // Logging the decoded ids is what makes a "handshake failed" from an
-        // opaque peer such as a browser diagnosable at all.
-        InteroperableQUICDebug.log("server local settings: \(InteroperableQUICRuntime.renderSettings(http3.localSettings))")
-        if let peerSettings = http3.remoteSettings {
-            InteroperableQUICDebug.log("server peer settings: \(InteroperableQUICRuntime.renderSettings(peerSettings))")
-        }
-        // Datagram availability is a property of the negotiated SETTINGS, so it
-        // is answered after the control-stream exchange rather than assumed.
-        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(
-            localSettings: http3.localSettings,
-            remoteSettings: http3.remoteSettings
-        )
-        InteroperableQUICDebug.log("server datagrams usable=\(useDatagrams)")
-        var manager = WebTransportSessionManager(
+        let (localControlStream, qpackStreams) = try await openServerControlStreams(
+            connection: prelude.connection,
             http3: http3,
-            // Accept what the QUIC layer advertised to the peer. Leaving this at
-            // the manager's own smaller default rejects a peer that is sending
-            // exactly what it was told it could send.
-            maxDatagramFrameSize: datagramFrameSizeLimit,
-            settingsValidation: settingsValidation
+            remainingTimeout: prelude.remainingTimeout,
+            totalTimeoutMilliseconds: timeoutMilliseconds
         )
-
-        let requestStream = try await runWithTimeout {
-            try await inboundStreams.next(
-                direction: InteroperableQUICHelpers.bidirectionalStreamDirection,
-                timeoutMilliseconds: remainingTimeout()
-            )
-        }
-        InteroperableQUICDebug.log("server got request stream \(requestStream.streamID)")
-        let requestPayload = try await runWithTimeout {
-            try await InteroperableQUICHelpers.readFirstChunk(
-                requestStream,
-                timeoutMilliseconds: remainingTimeout()
-            )
-        }
-        InteroperableQUICDebug.log("server request payload bytes=\(requestPayload.count)")
-        let requestFramePayload: Data
-        if WebTransportStreamSignaling.hasStreamPrefix(requestPayload) {
-            // The peer asserted a WebTransport stream prefix, so a malformed one
-            // is a protocol violation and must propagate. Swallowing it here
-            // would silently reinterpret invalid bytes as an unprefixed CONNECT
-            // request and continue.
-            let prefixed = try WebTransportStreamSignaling.parsePrefix(requestPayload)
-            guard prefixed.form == .bidirectional else {
-                throw WebTransportDraft16Error(
-                    kind: .h3ID,
-                    message: "WebTransport CONNECT request stream carried a unidirectional stream marker"
-                )
-            }
-            requestFramePayload = prefixed.remainingPayload
-        } else {
-            // No marker: an ordinary HTTP/3 extended CONNECT request stream.
-            requestFramePayload = requestPayload
-        }
-        let requestPrefix = try HTTP3Frame.decodePrefix(requestFramePayload)
-        guard requestPrefix.frame.type == HTTP3FrameType.headers else {
-            throw WebTransportNetworkRuntimeError.unexpectedFrame
-        }
-        let optimisticCapsuleBytes = Data(requestFramePayload.dropFirst(requestPrefix.bytesConsumed))
-
-        var allowedAuthorities = Set([authority])
-        allowedAuthorities.insert("\(authority):\(localEndpoint.port)")
-        allowedAuthorities.insert(localEndpoint.host)
-        allowedAuthorities.insert("\(localEndpoint.host):\(localEndpoint.port)")
-        let policy = try WebTransportServerSessionPolicy(
-            allowedAuthorities: allowedAuthorities,
-            allowedPaths: [path],
-            allowedOrigins: allowedOrigin.map { [$0] },
-            supportedProtocols: protocols,
-            requireProtocolSelection: !protocols.isEmpty
+        let useDatagrams = try await exchangeServerControlStreams(
+            http3: &http3,
+            inboundStreams: prelude.inboundStreams,
+            settingsValidation: settingsValidation,
+            remainingTimeout: prelude.remainingTimeout,
+            totalTimeoutMilliseconds: timeoutMilliseconds
         )
+        var manager = makeSessionManager(
+            http3: http3,
+            datagramFrameSizeLimit: prelude.datagramFrameSizeLimit
+        )
+        let (requestStream, requestPayload) = try await nextRequestStreamAndFirstChunk(
+            inboundStreams: prelude.inboundStreams,
+            remainingTimeout: prelude.remainingTimeout,
+            totalTimeoutMilliseconds: timeoutMilliseconds
+        )
+        let request = try decodeRequestAndPolicy(requestPayload: requestPayload)
+        let decision = try await performConnectExchange(
+            manager: &manager,
+            requestStream: requestStream,
+            request: request,
+            remainingTimeout: prelude.remainingTimeout,
+            totalTimeoutMilliseconds: timeoutMilliseconds
+        )
+        try refuseRejectedSession(decision, inboundTask: prelude.inboundTask)
+        return ServerHandshakeOutcome(
+            connection: prelude.connection,
+            inboundStreams: prelude.inboundStreams,
+            inboundTask: prelude.inboundTask,
+            lease: accepted.lease,
+            manager: manager,
+            decision: decision,
+            localControlStream: localControlStream,
+            requestStream: requestStream,
+            qpackStreams: qpackStreams,
+            useDatagrams: useDatagrams,
+            optimisticCapsuleBytes: request.optimisticCapsuleBytes,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
+    }
 
+    /// A rejected session ends here: the inbound handler is cancelled and the rejection is
+    /// what the caller sees.
+    private func refuseRejectedSession(
+        _ decision: WebTransportServerSessionDecision,
+        inboundTask: Task<Void, Never>
+    ) throws {
+        guard let rejectionError = decision.rejectionError else {
+            return
+        }
+        inboundTask.cancel()
+        throw rejectionError
+    }
+
+    /// Hands the CONNECT request to the session manager, sends whatever it decided, and
+    /// returns the decision.
+    private func performConnectExchange(
+        manager: inout WebTransportSessionManager,
+        requestStream: QUIC.Stream<QUICStream>,
+        request: DecodedSessionRequest,
+        remainingTimeout: @escaping @Sendable () -> Int32,
+        totalTimeoutMilliseconds: Int32
+    ) async throws -> WebTransportServerSessionDecision {
         let decision: WebTransportServerSessionDecision
         do {
             decision = try manager.receiveClientSessionRequest(
                 streamID: requestStream.streamID,
-                frame: requestPrefix.frame,
-                policy: policy
+                frame: request.frame,
+                policy: request.policy
             )
         } catch {
             // Without this the reason a peer's CONNECT was refused is lost: the
@@ -482,38 +477,36 @@ extension WebTransportQUICServer {
             InteroperableQUICDebug.log("server CONNECT rejected before response: \(error)")
             throw error
         }
-        InteroperableQUICDebug.log(
-            "server CONNECT decision: session=\(decision.session.id) "
-                + "protocol=\(decision.session.selectedProtocol ?? "none") "
-                + "rejection=\(decision.rejectionError.map { "\($0)" } ?? "none")"
+        try await Self.deliverSessionDecision(
+            decision,
+            on: requestStream,
+            remainingTimeout: remainingTimeout,
+            totalTimeoutMilliseconds: totalTimeoutMilliseconds
         )
-        let responsePayload = try decision.responseFrame.encode()
-        try await runWithTimeout {
-            try await requestStream.send(responsePayload, endOfStream: false)
-        }
-        if let rejectionError = decision.rejectionError {
-            inboundTask.cancel()
-            throw rejectionError
-        }
-        return WebTransportNetworkSession(
-            connection: connection,
-            inboundStreams: inboundStreams,
-            inboundTask: inboundTask,
-            lease: accepted.lease,
-            manager: manager,
-            sessionID: decision.session.id,
-            selectedProtocol: decision.session.selectedProtocol,
-            localControlStream: localControlStream,
-            connectStream: requestStream,
-            qpackStreams: qpackStreams,
+        return decision
+    }
+
+    /// The session object the handshake produced.
+    private func makeSession(_ outcome: ServerHandshakeOutcome) -> WebTransportNetworkSession {
+        WebTransportNetworkSession(
+            connection: outcome.connection,
+            inboundStreams: outcome.inboundStreams,
+            inboundTask: outcome.inboundTask,
+            lease: outcome.lease,
+            manager: outcome.manager,
+            sessionID: outcome.decision.session.id,
+            selectedProtocol: outcome.decision.session.selectedProtocol,
+            localControlStream: outcome.localControlStream,
+            connectStream: outcome.requestStream,
+            qpackStreams: outcome.qpackStreams,
             localEndpoint: localEndpoint,
             remoteEndpoint: InteroperableQUICRuntime.networkEndpoint(
-                from: connection.remoteEndpoint,
+                from: outcome.connection.remoteEndpoint,
                 fallback: WebTransportNetworkEndpoint(host: "unknown", port: 0)
             ),
-            datagramsAvailable: useDatagrams,
-            timeoutMilliseconds: timeoutMilliseconds,
-            initialConnectCapsuleBytes: optimisticCapsuleBytes
+            datagramsAvailable: outcome.useDatagrams,
+            timeoutMilliseconds: outcome.timeoutMilliseconds,
+            initialConnectCapsuleBytes: outcome.optimisticCapsuleBytes
         )
     }
 
@@ -606,6 +599,220 @@ extension WebTransportQUICServer {
 }
 
 extension WebTransportQUICServer {
+    /// The session manager for a fresh server connection.
+    ///
+    /// The datagram frame size is what the QUIC layer advertised to the peer: leaving it at
+    /// the manager's own smaller default rejects a peer that is sending exactly what it was
+    /// told it could send.
+    private func makeSessionManager(
+        http3: HTTP3ConnectionState,
+        datagramFrameSizeLimit: Int
+    ) -> WebTransportSessionManager {
+        WebTransportSessionManager(
+            http3: http3,
+            maxDatagramFrameSize: datagramFrameSizeLimit,
+            settingsValidation: settingsValidation
+        )
+    }
+
+    /// The remaining-timeout gate every awaited step in `acceptSession` runs through.
+    private static func withCheckedTimeout<T: Sendable>(
+        _ remaining: Int32,
+        totalTimeoutMilliseconds: Int32,
+        _ operation: @Sendable @escaping () async throws -> T
+    ) async throws -> T {
+        guard remaining > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(totalTimeoutMilliseconds)
+        }
+        return try await InteroperableQUICHelpers.withTimeout(remaining, operation)
+    }
+
+    /// Reads the peer's control stream and answers whether datagrams are usable.
+    ///
+    /// Peer SETTINGS identify which WebTransport revision the client speaks, so logging the
+    /// decoded ids is what makes a "handshake failed" from an opaque peer such as a browser
+    /// diagnosable at all. Datagram availability is a property of the negotiated SETTINGS,
+    /// so it is answered after the exchange rather than assumed.
+    private func exchangeServerControlStreams(
+        http3: inout HTTP3ConnectionState,
+        inboundStreams: InteroperableQUICInboundStreamCollector,
+        settingsValidation: HTTP3WebTransportSettingsValidation,
+        remainingTimeout: @escaping @Sendable () -> Int32,
+        totalTimeoutMilliseconds: Int32
+    ) async throws -> Bool {
+        let readTimeout = remainingTimeout()
+        guard readTimeout > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(totalTimeoutMilliseconds)
+        }
+        let controlPayload = try await InteroperableQUICHelpers.withTimeout(readTimeout) {
+            try await InteroperableQUICHelpers.readPeerControlStream(
+                from: inboundStreams,
+                role: "server",
+                timeoutMilliseconds: remainingTimeout()
+            )
+        }
+        InteroperableQUICDebug.log("server control payload bytes=\(controlPayload.count)")
+        _ = try http3.receivePeerControlStream(
+            controlPayload,
+            settingsValidation: settingsValidation
+        )
+        InteroperableQUICDebug.log("server local settings: \(InteroperableQUICRuntime.renderSettings(http3.localSettings))")
+        if let peerSettings = http3.remoteSettings {
+            InteroperableQUICDebug.log("server peer settings: \(InteroperableQUICRuntime.renderSettings(peerSettings))")
+        }
+        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(
+            localSettings: http3.localSettings,
+            remoteSettings: http3.remoteSettings
+        )
+        InteroperableQUICDebug.log("server datagrams usable=\(useDatagrams)")
+        return useDatagrams
+    }
+
+    /// The peer's CONNECT request stream and its first chunk, sharing one deadline.
+    private func nextRequestStreamAndFirstChunk(
+        inboundStreams: InteroperableQUICInboundStreamCollector,
+        remainingTimeout: @escaping @Sendable () -> Int32,
+        totalTimeoutMilliseconds: Int32
+    ) async throws -> (stream: QUIC.Stream<QUICStream>, payload: Data) {
+        let streamTimeout = remainingTimeout()
+        guard streamTimeout > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(totalTimeoutMilliseconds)
+        }
+        let stream = try await InteroperableQUICHelpers.withTimeout(streamTimeout) {
+            try await inboundStreams.next(
+                direction: InteroperableQUICHelpers.bidirectionalStreamDirection,
+                timeoutMilliseconds: remainingTimeout()
+            )
+        }
+        InteroperableQUICDebug.log("server got request stream \(stream.streamID)")
+        let payloadTimeout = remainingTimeout()
+        guard payloadTimeout > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(totalTimeoutMilliseconds)
+        }
+        let payload = try await InteroperableQUICHelpers.withTimeout(payloadTimeout) {
+            try await InteroperableQUICHelpers.readFirstChunk(
+                stream,
+                timeoutMilliseconds: remainingTimeout()
+            )
+        }
+        InteroperableQUICDebug.log("server request payload bytes=\(payload.count)")
+        return (stream, payload)
+    }
+
+    /// Opens the server's local control stream, sends its SETTINGS, and opens the QPACK
+    /// streams. Each step samples the remaining deadline rather than reusing a value taken
+    /// before the previous one.
+    private func openServerControlStreams(
+        connection: NetworkConnection<QUIC>,
+        http3: HTTP3ConnectionState,
+        remainingTimeout: @escaping @Sendable () -> Int32,
+        totalTimeoutMilliseconds: Int32
+    ) async throws -> (control: QUIC.Stream<QUICStream>, qpack: [QUIC.Stream<QUICStream>]) {
+        let localControlPayload = try http3.localControlStreamBytes()
+        let openTimeout = remainingTimeout()
+        guard openTimeout > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(totalTimeoutMilliseconds)
+        }
+        let localControlStream = try await InteroperableQUICHelpers.withTimeout(openTimeout) {
+            try await connection.openStream(directionality: .unidirectional)
+        }
+        InteroperableQUICDebug.log("server opened local control stream \(localControlStream.streamID)")
+        let sendTimeout = remainingTimeout()
+        guard sendTimeout > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(totalTimeoutMilliseconds)
+        }
+        try await InteroperableQUICHelpers.withTimeout(sendTimeout) {
+            try await localControlStream.send(localControlPayload, endOfStream: false)
+        }
+        InteroperableQUICDebug.log("server sent local control payload")
+        let qpackStreams = try await InteroperableQUICHelpers.openQPACKStreams(
+            on: connection,
+            role: "server",
+            timeoutMilliseconds: remainingTimeout()
+        )
+        return (localControlStream, qpackStreams)
+    }
+
+    /// Logs and sends the server's decision.
+    ///
+    /// Without the log line the reason a peer's CONNECT was refused is lost: the throw
+    /// propagates as a transport error once the peer has already gone, which is what makes
+    /// browser handshake failures opaque.
+    private static func deliverSessionDecision(
+        _ decision: WebTransportServerSessionDecision,
+        on requestStream: QUIC.Stream<QUICStream>,
+        remainingTimeout: @escaping @Sendable () -> Int32,
+        totalTimeoutMilliseconds: Int32
+    ) async throws {
+        InteroperableQUICDebug.log(
+            "server CONNECT decision: session=\(decision.session.id) "
+                + "protocol=\(decision.session.selectedProtocol ?? "none") "
+                + "rejection=\(decision.rejectionError.map { "\($0)" } ?? "none")"
+        )
+        let responsePayload = try decision.responseFrame.encode()
+        let remaining = remainingTimeout()
+        guard remaining > 0 else {
+            throw WebTransportNetworkRuntimeError.timeout(totalTimeoutMilliseconds)
+        }
+        try await InteroperableQUICHelpers.withTimeout(remaining) {
+            try await requestStream.send(responsePayload, endOfStream: false)
+        }
+    }
+
+    /// A decoded CONNECT request: its HEADERS frame, any optimistic capsule bytes behind it,
+    /// and the policy this server applies to it.
+    private struct DecodedSessionRequest {
+        let frame: HTTP3Frame
+        let optimisticCapsuleBytes: Data
+        let policy: WebTransportServerSessionPolicy
+    }
+
+    /// The CONNECT request's HEADERS frame, any optimistic capsule bytes behind it, and the
+    /// policy this server applies to it.
+    ///
+    /// The authorities are the four spellings a client may use for this listener: the
+    /// configured authority, that authority with the port, the host, and the host with the
+    /// port. A peer that asserted a WebTransport stream prefix but sent a malformed one is a
+    /// protocol violation and must propagate: swallowing it would silently reinterpret
+    /// invalid bytes as an unprefixed CONNECT request and continue.
+    private func decodeRequestAndPolicy(requestPayload: Data) throws -> DecodedSessionRequest {
+        let requestFramePayload: Data
+        if WebTransportStreamSignaling.hasStreamPrefix(requestPayload) {
+            let prefixed = try WebTransportStreamSignaling.parsePrefix(requestPayload)
+            guard prefixed.form == .bidirectional else {
+                throw WebTransportDraft16Error(
+                    kind: .h3ID,
+                    message: "WebTransport CONNECT request stream carried a unidirectional stream marker"
+                )
+            }
+            requestFramePayload = prefixed.remainingPayload
+        } else {
+            // No marker: an ordinary HTTP/3 extended CONNECT request stream.
+            requestFramePayload = requestPayload
+        }
+        let requestPrefix = try HTTP3Frame.decodePrefix(requestFramePayload)
+        guard requestPrefix.frame.type == HTTP3FrameType.headers else {
+            throw WebTransportNetworkRuntimeError.unexpectedFrame
+        }
+
+        var allowedAuthorities = Set([authority])
+        allowedAuthorities.insert("\(authority):\(localEndpoint.port)")
+        allowedAuthorities.insert(localEndpoint.host)
+        allowedAuthorities.insert("\(localEndpoint.host):\(localEndpoint.port)")
+        let policy = try WebTransportServerSessionPolicy(
+            allowedAuthorities: allowedAuthorities,
+            allowedPaths: [path],
+            allowedOrigins: allowedOrigin.map { [$0] },
+            supportedProtocols: protocols,
+            requireProtocolSelection: !protocols.isEmpty
+        )
+        return DecodedSessionRequest(
+            frame: requestPrefix.frame,
+            optimisticCapsuleBytes: Data(requestFramePayload.dropFirst(requestPrefix.bytesConsumed)),
+            policy: policy
+        )
+    }
+
     /// The inbound collector for one accepted connection, with its handler already
     /// registered and waited for.
     private static func startInboundCollection(
