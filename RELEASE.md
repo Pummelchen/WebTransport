@@ -277,3 +277,29 @@ rule exists for.
   archives for the tag. Each archive carries a `README-binaries.txt`; the C99 one
   names the OpenSSL 3 runtime dependency of the dylib, because that library is
   deliberately not bundled with it.
+
+## The bump checklist
+
+A bump moves one authoritative value (`VERSION`) and one command writes the two
+mirrors (`./Swift/check-version-sync.sh --write`). Everything else that names the
+version is **prose**, and `--write` cannot see prose. This is the full list.
+
+**In this repository — enforced by `Swift/check-version-sync.sh`, which CI runs:**
+
+- `README.md` — the `Latest release` row's tag link, and the SwiftPM `exact:` pin.
+- `AGENTS.md` — the current-version reference in the Identity section.
+- `docs/release-notes-v<version>.md` — the notes for this release must exist.
+
+**On the wiki — checked by hand, because it is a separate repository and no gate in
+this one can read it.** This is the half that gets forgotten:
+
+- `Home.md` — the Release row.
+- `_Sidebar.md` — the Release link.
+- `Getting-Started.md` — the SwiftPM pin, and any CLI output sample that prints the version.
+- `Implementation-Status.md` and `Known-Limitations.md` — the "released at <version>" sentence.
+- `Release-and-Interoperability.md` — the current-release summary, the artifact names and the
+  checksum commands. **This one needs rewriting, not a version swap**: it describes the previous
+  release's changes, and carrying that prose forward attributes the wrong changes to the new
+  release.
+- `Repository-Guide.md` — the `VERSION` value and the release-notes list.
+- `Changelog.md` — no change needed; it names the filename pattern, not a version.

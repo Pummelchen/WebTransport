@@ -108,6 +108,23 @@ if [ "$c_abi" != "$s_abi" ]; then
     echo "error: ABI versions disagree: $C99_HEADER declares $c_abi, $SWIFT_SOURCE declares $s_abi; they must be identical on a release" >&2
     status=1
 fi
+
+# --- the documents that state the current version ----------------------------
+# The mirrors above are what `--write` propagates. A prose reference is not a
+# mirror, so nothing writes it and nothing checked it -- which is how a release
+# nearly shipped with the README and the wiki still naming the previous number.
+# These are the repository-side references; CI runs this script, so forgetting one
+# now fails a gate instead of shipping. The wiki is a separate repository and no
+# gate here can read it: RELEASE.md lists those by hand.
+notes_file="docs/release-notes-v$version.md"
+[ -f "$notes_file" ] \
+    || { echo "error: $notes_file does not exist; every release carries its notes" >&2; status=1; }
+grep -qF "releases/tag/$version" README.md \
+    || { echo "error: README.md does not link the release tag $version" >&2; status=1; }
+grep -qF "exact: \"$version\"" README.md \
+    || { echo "error: README.md's SwiftPM pin does not say $version" >&2; status=1; }
+grep -qF "\`$version\`" AGENTS.md \
+    || { echo "error: AGENTS.md does not name the current version $version" >&2; status=1; }
 if [ "$c_version" != "$version" ]; then
     echo "error: $C99_HEADER declares $c_version, but $VERSION_FILE says $version" >&2
     status=1
