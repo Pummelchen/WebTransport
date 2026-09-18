@@ -8,12 +8,12 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 
 | status | count |
 | --- | --- |
-| BLOCKED | 1 |
+| BLOCKED | 2 |
 | DONE | 12 |
-| OPEN | 3 |
+| OPEN | 2 |
 
-Non-terminal (open): 3
-Terminal: 13
+Non-terminal (open): 2
+Terminal: 14
 
 ## Tasks
 
@@ -26,7 +26,7 @@ Terminal: 13
 | AUD-0005 | S2 | C | both | DONE | Tool-coverage and language-standard proofs for every delegated check | AUDIT/tool-coverage.md |
 | AUD-0006 | S1 | A | P1 | OPEN | SwiftLint is installed but has no committed config and is not run, so the mandated Swift linter is not in force | Package.swift |
 | AUD-0007 | S1 | A | both | DONE | Ruff has no config, so B, E722, S101 and PT are not enabled | AUDIT/environment.md |
-| AUD-0008 | S2 | A | P1 | OPEN | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | Package.swift:12-17 |
+| AUD-0008 | S2 | A | P1 | BLOCKED | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | Package.swift:12-17 |
 | AUD-0009 | S2 | B | P2 | DONE | No C99 coverage measurement exists, so one baseline metric is missing | C99/scripts/measure-coverage.sh |
 | AUD-0010 | S3 | B | P2 | OPEN | No committed .clang-format and the tree is not clang-format clean | C99/ |
 | AUD-0011 | S3 | C | both | DONE | Repository convention says audit ledgers are not kept in the tree; this audit mandates committing one | AUDIT/ledger.json |
@@ -96,7 +96,7 @@ Terminal: 13
 - where: Package.swift
 - evidence before: git ls-files shows no .swiftlint.yml; no workflow step invokes swiftlint; `swiftlint lint Swift/Sources` reports 317 findings (292 warning, 25 error) that nothing consumes
 - fix: In progress. Added the committed .swiftlint.yml the standard requires: SwiftLint's default rules plus opt_in force_unwrapping, line_length aligned to the committed .swift-format 160 and file_length to the repository's documented 1000-line ceiling, with five justified rule deviations each carrying its own task (AUD-0012..AUD-0016). Fixed every non-structural finding: 10 force_unwraps and 1 force-try (production and tests), 3 lossy String(decoding:), 4 orphaned doc comments, 18 naming findings, and the mechanical correctables.
-- evidence after: Unconfigured `swiftlint lint`: 556 findings -> 69 with the committed config, and all 69 are now structural: 40 function_body_length, 18 cyclomatic_complexity, 11 type_body_length. Every other rule is at zero, including the opt-in force_unwrapping. `swift test` 400 passed; `swift format lint --strict` exits 0. The CI gate is still not wired, because it cannot be green until those 69 findings are refactored rather than configured away.
+- evidence after: Unconfigured `swiftlint lint`: 556 findings -> 58 with the committed config, and all 58 are now function-level: 40 function_body_length, 18 cyclomatic_complexity (every type_body_length finding is fixed by splitting the eleven oversized types into extensions). Every other rule is at zero, including the opt-in force_unwrapping. `swift test` 400 passed; `swift format lint --strict` exits 0. The CI gate is still not wired, because it cannot be green until those 69 findings are refactored rather than configured away.
 - commit: 
 
 ### AUD-0007 — Ruff has no config, so B, E722, S101 and PT are not enabled
@@ -111,13 +111,14 @@ Terminal: 13
 
 ### AUD-0008 — -require-explicit-sendable is enforced only per-invocation in CI, not in the build config
 
-- severity: S2 | tier: A | project: P1 | status: OPEN | host: Mac14,3
+- severity: S2 | tier: A | project: P1 | status: BLOCKED | host: Mac14,3
 - category: standards | discovered by: phase-a
 - where: Package.swift:12-17
 - evidence before: swift-ci.yml passes -Xswiftc -require-explicit-sendable; Package.swift carries strictMemorySafety and treatAllWarnings but not the flag, so a local `swift build`/`swift test` accepts a public type that omits Sendable
 - fix: 
-- evidence after: 
+- evidence after: Manifests restored and `./Swift/check-api-compatibility.sh` passes. The experiment also found a second, independent gap, recorded in this reason rather than lost: the API-compatibility check uses a path dependency, so it structurally cannot catch unsafe-flags breakage -- a new task will be filed for it.
 - commit: 
+- BLOCKED: owner: repository owner. The standard says to enforce -require-explicit-sendable in build config, not per invocation. The only SwiftPM mechanism is `.unsafeFlags(["-require-explicit-sendable"])`, and it breaks the package for the consumers this repository publishes it to. Tried, not assumed: the flag was added to both manifests and `./Swift/check-api-compatibility.sh` PASSED, because that check consumes the package by PATH; SwiftPM refuses unsafe build flags only for VERSION-BASED dependencies ('The package product ... cannot be used as a dependency of this target because it uses unsafe build flags', and SwiftPM's own tests note the error is expected 'in the version-based dependency'). A published consumer reaching the package by URL would therefore be refused, and the in-repo check cannot see it. Options for the human: (1) accept unsafeFlags and drop the package's usability as a versioned dependency -- rejected as worse than the deviation; (2) keep the CI-invocation enforcement and record the deviation from the standard (current state); (3) make the API-compatibility check consume a versioned dependency first, so it can catch this whole class, and revisit the trade-off then.
 
 ### AUD-0009 — No C99 coverage measurement exists, so one baseline metric is missing
 

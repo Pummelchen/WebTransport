@@ -103,7 +103,7 @@
       "discovered_by": "phase-a",
       "evidence_before": "git ls-files shows no .swiftlint.yml; no workflow step invokes swiftlint; `swiftlint lint Swift/Sources` reports 317 findings (292 warning, 25 error) that nothing consumes",
       "fix_summary": "In progress. Added the committed .swiftlint.yml the standard requires: SwiftLint's default rules plus opt_in force_unwrapping, line_length aligned to the committed .swift-format 160 and file_length to the repository's documented 1000-line ceiling, with five justified rule deviations each carrying its own task (AUD-0012..AUD-0016). Fixed every non-structural finding: 10 force_unwraps and 1 force-try (production and tests), 3 lossy String(decoding:), 4 orphaned doc comments, 18 naming findings, and the mechanical correctables.",
-      "evidence_after": "Unconfigured `swiftlint lint`: 556 findings -> 69 with the committed config, and all 69 are now structural: 40 function_body_length, 18 cyclomatic_complexity, 11 type_body_length. Every other rule is at zero, including the opt-in force_unwrapping. `swift test` 400 passed; `swift format lint --strict` exits 0. The CI gate is still not wired, because it cannot be green until those 69 findings are refactored rather than configured away.",
+      "evidence_after": "Unconfigured `swiftlint lint`: 556 findings -> 58 with the committed config, and all 58 are now function-level: 40 function_body_length, 18 cyclomatic_complexity (every type_body_length finding is fixed by splitting the eleven oversized types into extensions). Every other rule is at zero, including the opt-in force_unwrapping. `swift test` 400 passed; `swift format lint --strict` exits 0. The CI gate is still not wired, because it cannot be green until those 69 findings are refactored rather than configured away.",
       "commit": "",
       "blocked_reason": ""
     },
@@ -132,14 +132,14 @@
       "file_line": "Package.swift:12-17",
       "title": "-require-explicit-sendable is enforced only per-invocation in CI, not in the build config",
       "category": "standards",
-      "status": "OPEN",
+      "status": "BLOCKED",
       "host": "Mac14,3",
       "discovered_by": "phase-a",
       "evidence_before": "swift-ci.yml passes -Xswiftc -require-explicit-sendable; Package.swift carries strictMemorySafety and treatAllWarnings but not the flag, so a local `swift build`/`swift test` accepts a public type that omits Sendable",
       "fix_summary": "",
-      "evidence_after": "",
+      "evidence_after": "Manifests restored and `./Swift/check-api-compatibility.sh` passes. The experiment also found a second, independent gap, recorded in this reason rather than lost: the API-compatibility check uses a path dependency, so it structurally cannot catch unsafe-flags breakage -- a new task will be filed for it.",
       "commit": "",
-      "blocked_reason": ""
+      "blocked_reason": "owner: repository owner. The standard says to enforce -require-explicit-sendable in build config, not per invocation. The only SwiftPM mechanism is `.unsafeFlags([\"-require-explicit-sendable\"])`, and it breaks the package for the consumers this repository publishes it to. Tried, not assumed: the flag was added to both manifests and `./Swift/check-api-compatibility.sh` PASSED, because that check consumes the package by PATH; SwiftPM refuses unsafe build flags only for VERSION-BASED dependencies ('The package product ... cannot be used as a dependency of this target because it uses unsafe build flags', and SwiftPM's own tests note the error is expected 'in the version-based dependency'). A published consumer reaching the package by URL would therefore be refused, and the in-repo check cannot see it. Options for the human: (1) accept unsafeFlags and drop the package's usability as a versioned dependency -- rejected as worse than the deviation; (2) keep the CI-invocation enforcement and record the deviation from the standard (current state); (3) make the API-compatibility check consume a versioned dependency first, so it can catch this whole class, and revisit the trade-off then."
     },
     {
       "id": "AUD-0009",
