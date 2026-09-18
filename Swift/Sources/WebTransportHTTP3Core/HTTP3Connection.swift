@@ -278,43 +278,66 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
 
         let peerRole: HTTP3ConnectionRole = role == .client ? .server : .client
         let decodedSettings = try HTTP3Settings.decodeFrame(firstFrame)
-        switch settingsValidation {
+        try validatePeerSettings(
+            decodedSettings,
+            validation: settingsValidation,
+            peerRole: peerRole,
+            zeroRTTRememberedSettings: zeroRTTRememberedSettings
+        )
+        let receivedGoawayID = try scanControlFrames(frames.dropFirst(), startingFrom: self.receivedGoawayID)
+
+        remoteSettings = decodedSettings
+        self.receivedGoawayID = receivedGoawayID
+        receivedPeerControlStream = true
+        return frames
+    }
+
+    /// The three validation modes are a policy choice the caller makes, not three code
+    /// paths here.
+    private func validatePeerSettings(
+        _ settings: HTTP3Settings,
+        validation: HTTP3WebTransportSettingsValidation,
+        peerRole: HTTP3ConnectionRole,
+        zeroRTTRememberedSettings: HTTP3Settings?
+    ) throws {
+        switch validation {
         case .draft16Strict:
-            try decodedSettings.validateWebTransportDraft16Requirements(peerRole: peerRole)
+            try settings.validateWebTransportDraft16Requirements(peerRole: peerRole)
         case .interoperable, .chromiumInterop:
             // The strict validator demands SETTINGS_WT_ENABLE_WEBTRANSPORT = 1
             // from a client peer as well. Browsers do not send that setting —
             // they send the legacy SETTINGS_WEBTRANSPORT_MAX_SESSIONS — so a
             // strict server rejects browser SETTINGS on top of rejecting the
             // browser's `:protocol` token. This validator accepts either.
-            try decodedSettings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
+            try settings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
         case .pywebtransportStreamInterop:
-            try decodedSettings.validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: peerRole)
+            try settings.validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: peerRole)
         }
         if let zeroRTTRememberedSettings {
-            try decodedSettings.validateWebTransportZeroRTTCompatibility(
-                remembered: zeroRTTRememberedSettings
-            )
+            try settings.validateWebTransportZeroRTTCompatibility(remembered: zeroRTTRememberedSettings)
         }
+    }
 
-        var receivedGoawayID = self.receivedGoawayID
-        for frame in frames.dropFirst() {
+    /// Everything after SETTINGS on the control stream: GOAWAY is remembered, and the
+    /// frames that are not allowed there are refused by name.
+    private func scanControlFrames(
+        _ frames: ArraySlice<HTTP3Frame>,
+        startingFrom receivedGoawayID: UInt64?
+    ) throws -> UInt64? {
+        var goawayID = receivedGoawayID
+        for frame in frames {
             switch frame.type {
             case HTTP3FrameType.settings:
                 throw QUICCodecError.malformed("duplicate HTTP/3 SETTINGS frame")
             case HTTP3FrameType.goaway:
-                receivedGoawayID = try frame.singleVarIntPayload()
+                goawayID = try frame.singleVarIntPayload()
             case HTTP3FrameType.data, HTTP3FrameType.headers:
                 throw QUICCodecError.malformed("request-only HTTP/3 frame received on control stream")
             default:
                 break
             }
         }
-
-        remoteSettings = decodedSettings
-        self.receivedGoawayID = receivedGoawayID
-        receivedPeerControlStream = true
-        return frames
+        return goawayID
     }
 
     public mutating func receiveControlFrame(_ frame: HTTP3Frame) throws {
