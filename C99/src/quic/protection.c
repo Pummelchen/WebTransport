@@ -291,6 +291,11 @@ wt_status_t wt_quic_unprotect_header(wt_aead_t aead, const uint8_t *hp, size_t h
   /* The packet number length is in the unmasked first byte, which is why it can
    * only be read after this step. */
   pn_len = (size_t)(packet[0] & 0x03U) + 1U;
+  /* Kept as defence in depth, and recorded as UNREACHABLE so the next reader does not delete it
+   * to make a coverage figure look better: `wt_quic_header_protection_sample` above has already
+   * required `packet_len - pn_offset >= 4 + 16`, and `pn_len` is at most 4, so the comparison
+   * below cannot be true here. It would matter the moment the sample's precondition changed,
+   * which is exactly why it stays. */
   if (pn_len > packet_len - pn_offset) {
     wt_secure_zero(mask, sizeof(mask));
     return WT_ERR_TRUNCATED;

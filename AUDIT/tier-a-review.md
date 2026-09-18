@@ -262,6 +262,8 @@ rather than by deletion.
 | --- | --- |
 | `http3/qpack_encoder_stream.c` (28 refusals, 247 lines) | No production path constructs the encoder-stream decoder, so the endpoint's dynamic table can never be filled. `AUD-0027` made the consequence explicit by refusing the capacity that would enable it. Wiring the decoder into the endpoint is what would make these testable through the public API. |
 | `quic/connection_loss.c:87` (a truncated ACK range list) | The frame decoder walks the same range list before `handle_ack` sees it and refuses a truncated one, so only a hand-built frame could reach it. It is defence in depth, and `AUD-0024` records it as such rather than inventing a test that calls the validator directly. |
+| `quic/protection.c:294` (`pn_len` past the packet's end) | Unreachable by arithmetic: `wt_quic_header_protection_sample` has already required `packet_len - pn_offset >= 4 + 16` and `pn_len` is at most 4, so the comparison cannot be true. `AUD-0031` records the proof, and the code now says so where the guard is. |
+| `tls/keyshare.c:150` (an all-zero shared secret) | Unreachable with the OpenSSL backend, which fails the derivation for a small-order key instead of returning zeroes -- the code's own comment says the branch covers a backend that returns them. The contract is already tested twice. |
 
 **A peer-input filter makes the rest tractable.** Of the worklist, a `return WT_ERR_PROTOCOL` or
 `WT_ERR_TRUNCATED` is a statement about the peer's bytes, while `WT_ERR_INVALID_ARGUMENT` is a
@@ -287,3 +289,23 @@ Three rounds of this filter have produced a rule worth stating once:
    rebuilt until the malformation was the input's ONLY fault.
 3. **Some uncovered refusals cannot be reached, and saying so is the resolution** -- not a test
    that calls an internal function to raise a percentage.
+
+## A test that was written and then thrown away
+
+`AUD-0031` ends with a non-change, and it is the round's most useful result. The coverage filter
+flagged `keyshare.c:150`, the all-zero shared-secret branch behind RFC 8446 section 7.4.2's
+small-order rule, so a test was written: the all-zero public key, a real private key, expect
+`WT_ERR_PROTOCOL`. It passed.
+
+Then the deliberate violation passed too. Neutering the branch left the suite green, because
+OpenSSL refuses the small-order key **inside the derivation** and that refusal is reported as the
+same status. Changing the derive-failure status instead failed three tests -- the new one and
+**two that already existed**, asserting the same contract with a different low-order point. So:
+
+- the contract was already covered twice;
+- the uncovered branch is backend-defensive and unreachable with the only supported backend;
+- the new test proved nothing that was not already proved.
+
+**It was reverted.** Keeping it would have moved a coverage figure and added nothing, which is the
+failure mode this whole exercise is aimed at. The filter's output is a list of *questions*, not a
+list of tests to write, and one of the three verdicts this round is "no test, and here is why".

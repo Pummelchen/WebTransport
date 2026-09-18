@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 28 |
+| DONE | 29 |
 
 Non-terminal (open): 0
-Terminal: 30
+Terminal: 31
 
 ## Tasks
 
@@ -48,6 +48,7 @@ Terminal: 30
 | AUD-0028 | S2 | A | P2 | DONE | The ClientHello cipher-suite vector rule was never executed, and the obvious test for it passes with the check deleted | C99/src/tls/handshake.c:486 |
 | AUD-0029 | S3 | A | P2 | DONE | wt_quic_initial_token's two leading guards -- the header form and the packet type -- were never executed | C99/src/quic/packet.c:105 |
 | AUD-0030 | S2 | A | P2 | DONE | Neither trusting mode's 'these bytes are not a certificate' refusal had ever executed | C99/src/tls/trust.c:169 |
+| AUD-0031 | S3 | A | P2 | DONE | Three uncovered peer-input refusals are unreachable, each with a proof, and one tried to be tested twice over | C99/src/quic/protection.c:294 |
 
 ## Detail
 
@@ -352,4 +353,14 @@ Terminal: 30
 - fix: Added `test_unparseable_certificate_is_refused` to `test_tls13_trust.c`. The fingerprint is computed over the malformed bytes and used as the pin, so the pin MATCHES and the parse is the only thing that can refuse; the same certificate is then verified under the development policy with a loopback host, where the bypass applies and the parse is again the only refusal.
 - evidence after: `llvm-cov show` confirms trust.c:169-171 and :185-187 now execute (count 1 each), and the total moved 91.69% -> **91.77%** lines with the guard-like worklist at **274**, from 277. Deliberate violation, aimed at the CONTRACT rather than the branch -- a caller branches on the status, and 'malformed peer message' must not be reported as 'untrusted peer': changing both branches to WT_ERR_TRUST fails with `FAIL a matching pin over unparseable bytes is still refused: want protocol, got trust` and `FAIL the development bypass does not excuse unparseable bytes: want protocol, got trust` (2 of 79 checks). Restored, 97/97. `check-format.sh`: all 312 C sources match.
 - commit: 1cc0948
+
+### AUD-0031 — Three uncovered peer-input refusals are unreachable, each with a proof, and one tried to be tested twice over
+
+- severity: S3 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: docs | discovered by: Tier A review, peer-input coverage filter (AUDIT/tier-a-review.md)
+- where: C99/src/quic/protection.c:294
+- evidence before: The peer-input filter left ~30 uncovered `WT_ERR_PROTOCOL`/`WT_ERR_TRUNCATED` refusals. Three of them cannot be reached, and each verdict is a proof rather than a shrug: (1) `protection.c:294`, where `pn_len > packet_len - pn_offset` cannot hold because `wt_quic_header_protection_sample` has already required `packet_len - pn_offset >= 4 + 16` and `pn_len` is at most 4; (2) `connection_loss.c:87`, a truncated ACK range list, which the frame decoder refuses before `handle_ack` sees it; (3) `keyshare.c:150`, the all-zero shared-secret branch, which the code's own comment says OpenSSL does not reach because it FAILS the derivation instead.
+- fix: Recorded all three with their proofs, and added the missing one to the code: `protection.c` now carries a comment saying the guard is unreachable given the sample's precondition and is kept as defence in depth, so the next reader does not delete it to raise a coverage figure. The other two were already documented in place (the ACK one by `AUD-0024`, the key-share one by its own comment).
+- evidence after: The key-share case produced the round's most useful result, and it is a NON-change: a test was written for it, and the deliberate violation showed it proved nothing -- neutering the all-zero branch left the suite green, because OpenSSL refuses the small-order key inside the derivation. Three tests then failed when the DERIVE-FAILURE status was changed, including two that already existed (`a small-order public key is refused`, `the primitive refuses it too`), so the contract was already covered twice and the uncovered branch is backend-defensive. The new test was REVERTED rather than kept: adding a duplicate to move a percentage is the behaviour this audit exists to catch. `100% tests passed out of 97`; `check-format.sh`: all 312 C sources match.
+- commit: PENDING
 
