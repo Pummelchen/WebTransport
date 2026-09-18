@@ -66,6 +66,7 @@ gate "tree matches .clang-format" ./C99/scripts/check-format.sh
 gate "cppcheck" ./C99/scripts/check-cppcheck.sh
 gate "Clang Static Analyzer" ./C99/scripts/check-static-analysis.sh
 gate "workflow files parse" python3 C99/scripts/check-workflows.py
+gate "ledger satisfies the standard's field rules" python3 AUDIT/check-ledger.py
 
 printf '=== Security ===\n'
 # trivy needs an empty docker config on this host: the user's ~/.docker/config.json names a

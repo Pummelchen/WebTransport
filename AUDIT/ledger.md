@@ -48,7 +48,7 @@ Terminal: 19
 - evidence before: No AUDIT/environment.md existed; Xcode 27.0 / Swift 6.4 / clang / SwiftLint 0.65.1 / swift-format 603.0.0 / Ruff 0.16.7 / gitleaks 8.30.1 / trivy 0.74.0 / cppcheck 2.21.0 / llvm 23.1.1 all present but unrecorded
 - fix: Wrote AUDIT/environment.md with name, version, install method and host per tool, plus the exact build-config mapping from the mandated Xcode settings to this SwiftPM-only repository
 - evidence after: AUDIT/environment.md committed
-- commit: 
+- commit: 5265558
 
 ### AUD-0002 — Phase E needs one independent host; none is provisioned
 
@@ -69,7 +69,7 @@ Terminal: 19
 - evidence before: No committed inventory; tiers had never been assigned
 - fix: AUDIT/inventory.md: two projects, Swift target graph from dump-package, C99 layering, five cross-project contracts, seven trust boundaries, per-module tiers
 - evidence after: AUDIT/inventory.md committed
-- commit: 
+- commit: 5265558
 
 ### AUD-0004 — Baseline both projects on the primary host
 
@@ -79,7 +79,7 @@ Terminal: 19
 - evidence before: No committed baseline; the repository's own claims were the only numbers
 - fix: AUDIT/baseline.md: Swift 0 warnings / 400 tests / 90.74% line coverage; C99 0 warnings / 97 tests; gitleaks 713 commits clean; trivy clean
 - evidence after: AUDIT/baseline.md committed
-- commit: 
+- commit: 5265558
 
 ### AUD-0005 — Tool-coverage and language-standard proofs for every delegated check
 
@@ -89,7 +89,7 @@ Terminal: 19
 - evidence before: No proof that any delegated check is actually enforced; SwiftLint and Ruff are not even configured
 - fix: Proved every delegated check against a deliberate violation and recorded the tool's own output in AUDIT/tool-coverage.md: Swift 6 strict concurrency (escaping @Sendable capture -> #SendableClosureCaptures, build exit 1), C99 (implicit declaration and a GNU nested function both rejected under the project's real flags), swift-format (Indentation/Spacing errors), Ruff (B006/E722/S101/PT011), gitleaks (leaks found: 1), SwiftLint (force_unwrapping and the rest), cppcheck (arrayIndexOutOfBounds + memleak), clang --analyze (core.NullDereference) and trivy (1 secret).
 - evidence after: AUDIT/tool-coverage.md carries each violation, the exact command and the tool output. One honest correction is recorded there: the first Swift concurrency violation COMPILED, because Swift 6's region-based isolation legitimately permits transferring a uniquely referenced value into a task; the proof was replaced with a genuinely illegal escaping-capture form. A proof that passes for the wrong reason is not a proof.
-- commit: 
+- commit: 514a41e
 
 ### AUD-0006 — SwiftLint is installed but has no committed config and is not run, so the mandated Swift linter is not in force
 
@@ -130,7 +130,7 @@ Terminal: 19
 - evidence before: No gcovr/lcov installed and no coverage configuration in the CMake tree; `C99/scripts/build-and-test.sh` runs 97 tests without instrumentation
 - fix: Added C99/scripts/measure-coverage.sh: it configures an instrumented tree in its own directory (C99/out/coverage) with the mandated clang's source-based coverage flags, runs the 97-test suite, merges the profiles and reports the library's line coverage. Wired into c99-ci.yml as a `coverage` job. No new tool is installed to make the metric appear, and no threshold gate is invented: the standard asks for a baseline metric, not a policy the repository has not set.
 - evidence after: Baseline: 91.64% lines (15677 lines, 1310 missed; 87.20% regions, 99.79% functions) of libwebtransport, tests/ and third_party/ excluded. Recorded in AUDIT/baseline.md. Two measurement traps are written into the script because they produce a plausible wrong answer: `llvm-cov report` does not aggregate across several executables (it reported a 94-region total for 89 test binaries), so the report comes from the shared library, and the script asserts the dylib exists rather than reporting a clean zero.
-- commit: 
+- commit: 45674c0
 
 ### AUD-0010 — No committed .clang-format and the tree is not clang-format clean
 
@@ -150,7 +150,7 @@ Terminal: 19
 - evidence before: The wiki's Project Tracker states the audits' working material (ledgers, per-area findings, reports) is deliberately not kept in the tree, because a later audit should read the code rather than a finished pass
 - fix: Followed the audit instruction, which is the more specific and more recent authority, and recorded the conflict here and in the final report instead of silently diverging. AUDIT/ is additive and on the audit branch only
 - evidence after: This entry
-- commit: 
+- commit: 5265558
 
 ### AUD-0012 — SwiftLint inclusive_language conflicts with RFC 8446 terminology
 
@@ -160,7 +160,7 @@ Terminal: 19
 - evidence before: 8 findings, all `masterSecret` / `exporterMasterSecret` in WebTransportTLSCore
 - fix: Rule disabled in the committed config with the reason: RFC 8446 section 7.1 defines the master secret, and renaming a reference implementation's symbols away from the document it implements makes it harder to read against the spec.
 - evidence after: `swiftlint lint` reports no inclusive_language findings; the reason is in .swiftlint.yml and here
-- commit: 
+- commit: bd00d51
 
 ### AUD-0013 — SwiftLint trailing_comma and swift-format rewrote each other, breaking a green gate
 
@@ -170,7 +170,7 @@ Terminal: 19
 - evidence before: 43 trailing_comma findings; `swiftlint --fix` removed the trailing commas the committed .swift-format requires
 - fix: Rule disabled: the formatter owns comma placement. Proven rather than asserted -- after `swiftlint --fix`, `swift format lint --strict` failed with `[TrailingComma] add trailing comma to the last element`, and `swift format --in-place` restored it.
 - evidence after: `swift format lint --strict` exits 0; `swiftlint lint` reports no trailing_comma findings; 400 Swift tests pass
-- commit: 
+- commit: bd00d51
 
 ### AUD-0014 — SwiftLint opening_brace conflicts with the committed formatter's multi-line condition style
 
@@ -180,7 +180,7 @@ Terminal: 19
 - evidence before: 13 opening_brace findings that survive `swift format --in-place`
 - fix: Rule disabled: after the formatter ran in place over the tree, `swiftlint lint` still reported 13 opening_brace violations, so the two cannot both be satisfied; the formatter is the CI-enforced owner.
 - evidence after: `swift format lint --strict` exits 0 and no opening_brace findings remain
-- commit: 
+- commit: bd00d51
 
 ### AUD-0015 — identifier_name: rename what is internal, exclude only RFC-registry and public-API names
 
@@ -190,7 +190,7 @@ Terminal: 19
 - evidence before: 13 findings: `iv` x5, `aes128GCM_SHA256`, `fd`, `ok`, `i`/`z` x3, and two over-length names
 - fix: Renamed the internal identifiers for real (InteroperableQUIC* -> *, the long producer/request-stream names, fd -> descriptor, i -> index, z -> hash, ok -> accepted, the long test suite type). Excluded only `iv` (RFC 9001's own term), `aes128GCM_SHA256` and `webTransportPyWebTransportStreamInteropDefaults` (public API; renaming would break consumers and the api-compat gate), and restored SwiftLint's DEFAULT exclusion (`id`), which setting `excluded` had silently replaced -- caught because the finding count went UP, 13 -> 43.
 - evidence after: `swiftlint lint` reports zero identifier_name findings; 400 Swift tests pass; a rename that also hit the POSIX `pollfd(fd:)` label was caught by the compiler and corrected
-- commit: 
+- commit: bd00d51
 
 ### AUD-0016 — SwiftLint redundant_void_return's fix does not compile
 
@@ -200,7 +200,7 @@ Terminal: 19
 - evidence before: `swiftlint --fix` removed an explicit `-> Void` from a closure in WebTransportLoopbackTestLockTests; `swift build --build-tests` then failed with `result of call to 'withLockAsync(label:maximumWait:filePath:_:)' is unused`
 - fix: Rule disabled with the reproduction: the closure's signature participates in generic inference, so dropping `-> Void` makes `withLockAsync` return a non-Void whose result is unused under strict memory safety. The `-> Void` is restored and commented as load-bearing.
 - evidence after: `swift build --build-tests` succeeds; `swift test` 400 passed; `swift format lint --strict` accepts the restored signature
-- commit: 
+- commit: bd00d51
 
 ### AUD-0017 — The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage
 

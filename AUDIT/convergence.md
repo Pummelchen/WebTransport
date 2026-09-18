@@ -95,6 +95,17 @@ a complete audit, and the standard's passes find what the sweep cannot.
 24 gates, **0 failed**. The first sweep after the last discovery, which is again the standard's
 convergence condition.
 
+## Sweep 5 — primary host, after the §7–§10 process review
+
+25 gates, **0 failed**. The sweep grew by one: `AUDIT/check-ledger.py` now validates the
+ledger's own shape (§8) — required fields, unique well-formed ids, allowed severities and
+statuses, a fix/evidence/commit on every `DONE` task, and a named owner plus at least two
+options on every `BLOCKED` one. It was written because that check found eleven `DONE` tasks with
+no commit recorded.
+
+The process rules themselves are reviewed in `AUDIT/compliance.md`, including the two places
+they were not followed.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host
