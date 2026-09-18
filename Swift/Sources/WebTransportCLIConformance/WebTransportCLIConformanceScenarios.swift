@@ -101,7 +101,7 @@ private func sessionIdentifierScenarios() -> [CLIConformanceScenario] {
             try expectThrows {
                 _ = try WebTransportStreamSignaling.parsePrefix(prefix)
             }
-        },
+        }
     ]
 }
 
@@ -515,7 +515,7 @@ private func securityScenarios() -> [CLIConformanceScenario] {
             let wrongPin = Data(repeating: 0xaa, count: TLS13KeySchedule.sha256Length)
             let policy = try TLSPinnedCertificateTrustPolicy(allowedLeafCertificateSHA256Fingerprints: [wrongPin])
             try expectThrows { try policy.evaluate(certificateChainDER: [Data("not a certificate".utf8)]) }
-        },
+        }
     ]
 }
 

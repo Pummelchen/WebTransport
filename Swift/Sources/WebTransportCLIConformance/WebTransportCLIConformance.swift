@@ -41,38 +41,7 @@ public struct WebTransportCLIConformanceOptions: Equatable, Sendable {
         options.selectedScenarios = []
         var index = 0
         while index < arguments.count {
-            let argument = arguments[index]
-            switch argument {
-            case "--help", "-h":
-                throw WebTransportCLIConformanceExit.requestedHelp
-            case "--list":
-                throw WebTransportCLIConformanceExit.requestedList
-            case "--json":
-                options.json = true
-            case "--verbose", "-v":
-                options.verbose = true
-            case "--scenario":
-                index += 1
-                guard index < arguments.count else {
-                    throw WebTransportCLIConformanceExit.invalidArguments("--scenario requires a value")
-                }
-                options.selectedScenarios.append(contentsOf: splitScenarioList(arguments[index]))
-            case "--log-dir":
-                index += 1
-                guard index < arguments.count else {
-                    throw WebTransportCLIConformanceExit.invalidArguments("--log-dir requires a path")
-                }
-                options.logDirectory = arguments[index]
-            default:
-                if argument.hasPrefix("--scenario=") {
-                    let value = String(argument.dropFirst("--scenario=".count))
-                    options.selectedScenarios.append(contentsOf: splitScenarioList(value))
-                } else if argument.hasPrefix("--log-dir=") {
-                    options.logDirectory = String(argument.dropFirst("--log-dir=".count))
-                } else {
-                    throw WebTransportCLIConformanceExit.invalidArguments("unknown argument: \(argument)")
-                }
-            }
+            try apply(argument: arguments[index], arguments: arguments, index: &index, options: &options)
             index += 1
         }
 
@@ -80,6 +49,56 @@ public struct WebTransportCLIConformanceOptions: Equatable, Sendable {
             options.selectedScenarios = ["all"]
         }
         return options
+    }
+
+    /// One argument, one effect, so the loop above stays a loop. The `--flag=value`
+    /// spellings are separated out below; the space-separated ones need the index that
+    /// only this function has.
+    private static func apply(
+        argument: String,
+        arguments: [String],
+        index: inout Int,
+        options: inout WebTransportCLIConformanceOptions
+    ) throws {
+        switch argument {
+        case "--help", "-h":
+            throw WebTransportCLIConformanceExit.requestedHelp
+        case "--list":
+            throw WebTransportCLIConformanceExit.requestedList
+        case "--json":
+            options.json = true
+        case "--verbose", "-v":
+            options.verbose = true
+        case "--scenario":
+            index += 1
+            guard index < arguments.count else {
+                throw WebTransportCLIConformanceExit.invalidArguments("--scenario requires a value")
+            }
+            options.selectedScenarios.append(contentsOf: splitScenarioList(arguments[index]))
+        case "--log-dir":
+            index += 1
+            guard index < arguments.count else {
+                throw WebTransportCLIConformanceExit.invalidArguments("--log-dir requires a path")
+            }
+            options.logDirectory = arguments[index]
+        default:
+            try applyAssignment(argument: argument, options: &options)
+        }
+    }
+
+    /// The `--flag=value` spellings, which carry their value in the same argument.
+    private static func applyAssignment(
+        argument: String,
+        options: inout WebTransportCLIConformanceOptions
+    ) throws {
+        if argument.hasPrefix("--scenario=") {
+            options.selectedScenarios.append(
+                contentsOf: splitScenarioList(String(argument.dropFirst("--scenario=".count))))
+        } else if argument.hasPrefix("--log-dir=") {
+            options.logDirectory = String(argument.dropFirst("--log-dir=".count))
+        } else {
+            throw WebTransportCLIConformanceExit.invalidArguments("unknown argument: \(argument)")
+        }
     }
 
     private static func splitScenarioList(_ value: String) -> [String] {
@@ -141,17 +160,8 @@ public enum WebTransportCLIConformance {
 
     public static func run(options: WebTransportCLIConformanceOptions) async -> Int32 {
         let catalog = scenarioCatalog()
-        let selectedNames: [String]
-        if options.selectedScenarios.contains("all") {
-            selectedNames = catalog.map(\.name)
-        } else {
-            selectedNames = options.selectedScenarios
-        }
-
-        var scenariosByName: [String: CLIConformanceScenario] = [:]
-        for scenario in catalog {
-            scenariosByName[scenario.name] = scenario
-        }
+        let selectedNames = selectedScenarioNames(options: options, catalog: catalog)
+        let scenariosByName = scenarioIndex(catalog: catalog)
 
         var results: [WebTransportCLIConformanceResult] = []
         var failures: [String] = []
@@ -160,72 +170,16 @@ public enum WebTransportCLIConformance {
         try? FileManager.default.createDirectory(at: logURL, withIntermediateDirectories: true)
 
         for name in selectedNames {
-            guard let scenario = scenariosByName[name] else {
-                let detail = "unknown scenario: \(name)"
-                let result = WebTransportCLIConformanceResult(
-                    name: name,
-                    status: .failed,
-                    durationSeconds: 0,
-                    detail: detail
-                )
-                results.append(result)
-                failures.append(detail)
-                writeFailureLog(result: result, executableName: options.executableName, directory: logURL)
-                continue
-            }
-
-            // A scenario that needs the repository and has none is not attempted at all.
-            // It is skipped with its reason rather than failed on a missing file, so the
-            // report separates "this run was incomplete" from "this build is broken"
-            // (WT-186).
-            if let reason = scenarioSkipReason(scenario) {
-                results.append(
-                    WebTransportCLIConformanceResult(
-                        name: scenario.name,
-                        status: .skipped,
-                        durationSeconds: 0,
-                        detail: reason
-                    ))
-                if options.verbose, !options.json {
-                    printScenarioGroupHeading(scenario.group, current: &verboseGroup)
-                    print("  SKIP \(scenario.name) \(reason)")
-                }
-                continue
-            }
-
-            if options.verbose, !options.json {
-                printScenarioGroupHeading(scenario.group, current: &verboseGroup)
-                print("  RUN \(scenario.name): \(scenario.description)")
-            }
-            let started = Date()
-            do {
-                try await scenario.run()
-                let duration = Date().timeIntervalSince(started)
-                results.append(
-                    WebTransportCLIConformanceResult(
-                        name: scenario.name,
-                        status: .passed,
-                        durationSeconds: duration,
-                        detail: "passed"
-                    ))
-                if options.verbose, !options.json {
-                    print("  PASS \(scenario.name) \(format(duration))s")
-                }
-            } catch {
-                let duration = Date().timeIntervalSince(started)
-                let detail = String(describing: error)
-                let result = WebTransportCLIConformanceResult(
-                    name: scenario.name,
-                    status: .failed,
-                    durationSeconds: duration,
-                    detail: detail
-                )
-                results.append(result)
-                failures.append("\(scenario.name): \(detail)")
-                writeFailureLog(result: result, executableName: options.executableName, directory: logURL)
-                if options.verbose, !options.json {
-                    print("  FAIL \(scenario.name) \(format(duration))s \(detail)")
-                }
+            let outcome = await runScenario(
+                named: name,
+                in: scenariosByName,
+                options: options,
+                logURL: logURL,
+                verboseGroup: &verboseGroup
+            )
+            results.append(outcome.result)
+            if let failure = outcome.failure {
+                failures.append(failure)
             }
         }
 
@@ -238,6 +192,112 @@ public enum WebTransportCLIConformance {
             scenarioGroupsByName: Dictionary(uniqueKeysWithValues: catalog.map { ($0.name, $0.group) })
         )
         return exitCode(for: results)
+    }
+
+    /// `all` is the documented shorthand for the whole catalogue; anything else is a list.
+    private static func selectedScenarioNames(
+        options: WebTransportCLIConformanceOptions,
+        catalog: [CLIConformanceScenario]
+    ) -> [String] {
+        options.selectedScenarios.contains("all") ? catalog.map(\.name) : options.selectedScenarios
+    }
+
+    private static func scenarioIndex(catalog: [CLIConformanceScenario]) -> [String: CLIConformanceScenario] {
+        Dictionary(catalog.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Runs one selected name, or records why it could not run.
+    ///
+    /// The three outcomes -- unknown name, skipped, and run -- are decided in one place
+    /// each rather than inline in the loop, which is what the orchestrator above needs to
+    /// stay a loop and a summary.
+    private static func runScenario(
+        named name: String,
+        in scenariosByName: [String: CLIConformanceScenario],
+        options: WebTransportCLIConformanceOptions,
+        logURL: URL,
+        verboseGroup: inout String?
+    ) async -> (result: WebTransportCLIConformanceResult, failure: String?) {
+        guard let scenario = scenariosByName[name] else {
+            let detail = "unknown scenario: \(name)"
+            let result = WebTransportCLIConformanceResult(
+                name: name,
+                status: .failed,
+                durationSeconds: 0,
+                detail: detail
+            )
+            writeFailureLog(result: result, executableName: options.executableName, directory: logURL)
+            return (result, detail)
+        }
+
+        // A scenario that needs the repository and has none is not attempted at all.
+        // It is skipped with its reason rather than failed on a missing file, so the
+        // report separates "this run was incomplete" from "this build is broken"
+        // (WT-186).
+        if let reason = scenarioSkipReason(scenario) {
+            let result = WebTransportCLIConformanceResult(
+                name: scenario.name,
+                status: .skipped,
+                durationSeconds: 0,
+                detail: reason
+            )
+            printVerbose(options: options) {
+                printScenarioGroupHeading(scenario.group, current: &verboseGroup)
+                print("  SKIP \(scenario.name) \(reason)")
+            }
+            return (result, nil)
+        }
+
+        printVerbose(options: options) {
+            printScenarioGroupHeading(scenario.group, current: &verboseGroup)
+            print("  RUN \(scenario.name): \(scenario.description)")
+        }
+        return await execute(scenario: scenario, options: options, logURL: logURL)
+    }
+
+    /// The run itself, separated so the decision-making above stays short enough to read
+    /// in one screen.
+    private static func execute(
+        scenario: CLIConformanceScenario,
+        options: WebTransportCLIConformanceOptions,
+        logURL: URL
+    ) async -> (result: WebTransportCLIConformanceResult, failure: String?) {
+        let started = Date()
+        do {
+            try await scenario.run()
+            let duration = Date().timeIntervalSince(started)
+            printVerbose(options: options) { print("  PASS \(scenario.name) \(format(duration))s") }
+            return (
+                WebTransportCLIConformanceResult(
+                    name: scenario.name,
+                    status: .passed,
+                    durationSeconds: duration,
+                    detail: "passed"
+                ),
+                nil
+            )
+        } catch {
+            let duration = Date().timeIntervalSince(started)
+            let detail = String(describing: error)
+            let result = WebTransportCLIConformanceResult(
+                name: scenario.name,
+                status: .failed,
+                durationSeconds: duration,
+                detail: detail
+            )
+            writeFailureLog(result: result, executableName: options.executableName, directory: logURL)
+            printVerbose(options: options) { print("  FAIL \(scenario.name) \(format(duration))s \(detail)") }
+            return (result, "\(scenario.name): \(detail)")
+        }
+    }
+
+    /// Verbose printing is gated in four places; one gate keeps the condition from
+    /// drifting between them.
+    private static func printVerbose(options: WebTransportCLIConformanceOptions, _ body: () -> Void) {
+        guard options.verbose, !options.json else {
+            return
+        }
+        body()
     }
 }
 
