@@ -209,5 +209,5 @@ Terminal: 15
 - evidence before: Found while testing AUD-0008: adding `.unsafeFlags(["-require-explicit-sendable"])` to the library targets still let `./Swift/check-api-compatibility.sh` pass. SwiftPM refuses unsafe build flags only for VERSION-BASED dependencies, and the check builds a consumer with `.package(path: ...)`, so the one gate whose job is to prove a consumer still builds is structurally unable to catch a change that stops consumers building.
 - fix: Added `Swift/check-unsafe-flags.sh`, wired into `swift-ci.yml` next to the manifest-sync gate. It reads `swift package dump-package` for both manifests and fails naming every target whose settings carry `unsafeFlags`, so the class of change the path-based consumer check cannot see is now caught by a gate that reads what SwiftPM actually resolved.
 - evidence after: Proven both ways on the primary host: exit 0 with the tree as it stands, and exit 1 with `.unsafeFlags(["-require-explicit-sendable"])` added to `Swift/Package.swift`, listing all 22 affected targets (`WebTransport: -require-explicit-sendable`, ...). The deliberate violation was reverted and the gate re-run green. `shellcheck` clean; `check-workflows.py` parses the edited workflow.
-- commit: PENDING
+- commit: ad210da
 
