@@ -548,7 +548,7 @@
       "evidence_before": "Two refusals on the CONNECT-stream capsule path were unexecuted, and the code's own comments say why each exists: a DRAIN capsule whose value is not empty \"used to be ignored, which is a malformed capsule accepted in silence\", and bytes after a CLOSE in the same delivery, where \"a peer could close the session and then send another grant, which the endpoint would honour\". The existing close test covers a capsule arriving in a LATER frame, which is a different branch from the same-buffer walk.",
       "fix_summary": "Added `test_a_malformed_drain_and_bytes_after_a_close` to `test_webtransport_session.c`. The malformed DRAIN is built with the varint writer rather than through `wt_webtransport_drain_session_write`, which cannot produce it because it writes the empty value the draft requires. The second case puts a CLOSE and a flow-control grant in ONE buffer and asserts both the refusal and that the observer was never called.",
       "evidence_after": "`llvm-cov show` confirms session.c:144 and :163 now execute; the total moved 91.77% -> **91.81%** lines. Deliberate violation, each refusal's effect removed while its condition stayed (so the compiler stays quiet), and each failure shows why the check matters: without the drain check, `FAIL a drain capsule with a value is refused: want protocol, got ok` AND `FAIL and the drain is not applied: want 0, got 1` -- the malformed capsule is APPLIED. Without the after-close check, `FAIL bytes after the close are refused: want protocol, got ok` AND `FAIL and the grant behind the close is never applied: want 0, got 1` -- the peer's grant behind the close is HONOURED. Restored, 97/97.",
-      "commit": "PENDING",
+      "commit": "0438d7f",
       "blocked_reason": ""
     }
   ]
