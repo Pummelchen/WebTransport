@@ -153,6 +153,10 @@ violation.
 
 26 gates, **0 failed**.
 
+## Sweep 17 — primary host, after the trust-mode refusal tests
+
+26 gates, **0 failed**.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host

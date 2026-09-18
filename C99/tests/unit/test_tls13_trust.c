@@ -457,6 +457,45 @@ static void test_chain_validation(void) {
   }
 }
 
+/* AUD-0030. Both trusting modes reach `parse_first` with the certificate's bytes, and both had
+ * their "the bytes are not a certificate" refusal unexecuted: the PINNED path after the
+ * fingerprint matched, and the development path after the loopback name was accepted. That is
+ * the interesting case for each -- a peer that knows the pin, or that is talking to a loopback
+ * endpoint, still must send a parseable certificate, and neither mode may read past the failure.
+ * The fingerprint is computed over the malformed bytes here, so the pin MATCHES and the parse is
+ * the only thing that can refuse. */
+static void test_unparseable_certificate_is_refused(void) {
+  static const uint8_t not_a_certificate[] = {0x30U, 0x03U, 0x02U, 0x01U, 0x01U};
+  uint8_t spki[WT_TLS_SPKI_MAX];
+  size_t spki_len = 0U;
+  uint8_t digest[WT_SHA256_LEN];
+  wt_tls_certificate_t malformed;
+  wt_tls_trust_policy_t policy;
+
+  memset(&malformed, 0, sizeof(malformed));
+  malformed.entries[0].der = not_a_certificate;
+  malformed.entries[0].der_len = sizeof(not_a_certificate);
+  malformed.count = 1U;
+
+  WT_EXPECT_OK("the unparseable bytes hash",
+               wt_sha256(not_a_certificate, sizeof(not_a_certificate), digest));
+
+  /* Pinned mode: the fingerprint matches, so the refusal can only be the parse. */
+  memset(&policy, 0, sizeof(policy));
+  policy.mode = WT_TLS_TRUST_PINNED_CERTIFICATE;
+  policy.fingerprint_count = 1U;
+  memcpy(policy.fingerprints[0], digest, WT_SHA256_LEN);
+  WT_EXPECT_STATUS("a matching pin over unparseable bytes is still refused", WT_ERR_PROTOCOL,
+                   wt_tls_trust_verify(&policy, &malformed, spki, &spki_len));
+
+  /* Local development: the name is loopback, so the bypass applies and only the parse refuses. */
+  memset(&policy, 0, sizeof(policy));
+  policy.mode = WT_TLS_TRUST_LOCAL_DEVELOPMENT;
+  policy.host_name = "localhost";
+  WT_EXPECT_STATUS("the development bypass does not excuse unparseable bytes", WT_ERR_PROTOCOL,
+                   wt_tls_trust_verify(&policy, &malformed, spki, &spki_len));
+}
+
 int main(void) {
   WT_EXPECT_OK("the crypto backend initialises", wt_crypto_init());
 
@@ -465,6 +504,7 @@ int main(void) {
   test_pinned_certificate();
   test_development_policy();
   test_chain_validation();
+  test_unparseable_certificate_is_refused();
 
   WT_TEST_MAIN_END("wt_tls13_trust");
 }

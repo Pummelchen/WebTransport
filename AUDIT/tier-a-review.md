@@ -47,6 +47,7 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/http3/endpoint.c` | Read in part (the QPACK decoder-state seam) — `AUD-0027` |
 | `C99/src/tls/handshake.c` | Read in part (the ClientHello parse path) — `AUD-0028` |
 | `C99/src/quic/packet.c` | **Read in full**; the remaining uncovered guards closed — `AUD-0029` |
+| `C99/src/tls/trust.c` | Read in part (both trusting modes' certificate path) — `AUD-0030` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -253,6 +254,7 @@ rather than by deletion.
 | `http3/qpack_header_prefix.c` section 4.5.1 algorithm | `AUD-0026` |
 | `tls/handshake.c` ClientHello cipher-suite vector | `AUD-0028` |
 | `quic/packet.c` `initial_token` form and type guards | `AUD-0029` |
+| `tls/trust.c` unparseable certificate in both trusting modes | `AUD-0030` |
 
 **Unreachable, and recorded as such:**
 
@@ -260,6 +262,13 @@ rather than by deletion.
 | --- | --- |
 | `http3/qpack_encoder_stream.c` (28 refusals, 247 lines) | No production path constructs the encoder-stream decoder, so the endpoint's dynamic table can never be filled. `AUD-0027` made the consequence explicit by refusing the capacity that would enable it. Wiring the decoder into the endpoint is what would make these testable through the public API. |
 | `quic/connection_loss.c:87` (a truncated ACK range list) | The frame decoder walks the same range list before `handle_ack` sees it and refuses a truncated one, so only a hand-built frame could reach it. It is defence in depth, and `AUD-0024` records it as such rather than inventing a test that calls the validator directly. |
+
+**A peer-input filter makes the rest tractable.** Of the worklist, a `return WT_ERR_PROTOCOL` or
+`WT_ERR_TRUNCATED` is a statement about the peer's bytes, while `WT_ERR_INVALID_ARGUMENT` is a
+statement about the caller -- and only the first kind is interesting for a peer-facing audit. That
+filter narrowed 274 lines to 30 in 17 files, which is a list a review can finish; `AUD-0030` came
+from it (both trusting modes refusing an unparseable certificate), and it is the filter the next
+rounds should use.
 
 The remaining 270-odd guard-like lines are untriaged. Most are argument-validation paths on the
 public API, which no test has a reason to reach -- but the five findings above came out of this

@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 27 |
+| DONE | 28 |
 
 Non-terminal (open): 0
-Terminal: 29
+Terminal: 30
 
 ## Tasks
 
@@ -47,6 +47,7 @@ Terminal: 29
 | AUD-0027 | S2 | A | P2 | DONE | A public API accepted a QPACK decoder capacity this build cannot honour, because nothing parses the encoder stream | C99/src/http3/endpoint.c:118 |
 | AUD-0028 | S2 | A | P2 | DONE | The ClientHello cipher-suite vector rule was never executed, and the obvious test for it passes with the check deleted | C99/src/tls/handshake.c:486 |
 | AUD-0029 | S3 | A | P2 | DONE | wt_quic_initial_token's two leading guards -- the header form and the packet type -- were never executed | C99/src/quic/packet.c:105 |
+| AUD-0030 | S2 | A | P2 | DONE | Neither trusting mode's 'these bytes are not a certificate' refusal had ever executed | C99/src/tls/trust.c:169 |
 
 ## Detail
 
@@ -341,4 +342,14 @@ Terminal: 29
 - fix: Added three cases to `test_quic_packet.c`, one per condition: a short header (the long header bit clear), a long header with the fixed bit clear, and a Handshake-type long header. Each is a well-formed Initial behind the first byte, so the first byte is the message's ONLY fault -- the lesson AUD-0028 produced -- and the block asserts first that the unmodified byte (0xc0) parses, so the refusals are demonstrably about the byte and not the body.
 - evidence after: With both guards: `100% tests passed out of 97`. Deliberate violation, each guard on its own: removing the form/fixed-bit guard fails with `FAIL a short header is not an Initial: want protocol, got ok` and `FAIL a long header without the fixed bit is refused: want protocol, got ok` (2 of 218 checks); removing the type guard fails with `FAIL a Handshake long header is not an Initial: want protocol, got ok` (1 of 218). Both restored green. `check-format.sh`: all 312 C sources match.
 - commit: 427ffd4
+
+### AUD-0030 — Neither trusting mode's 'these bytes are not a certificate' refusal had ever executed
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, peer-input filter over the coverage worklist (AUDIT/tier-a-review.md)
+- where: C99/src/tls/trust.c:169
+- evidence before: Line coverage showed that in both trusting modes the refusal that follows a failed `parse_first` was unexecuted: the PINNED path at trust.c:169 -- after the fingerprint has already matched -- and the LOCAL_DEVELOPMENT path at :185, after the loopback name has been accepted. That is the interesting case for each: a peer that knows the pin, or one talking to a loopback endpoint, still has to send a parseable certificate, and the mode must report the malformed bytes rather than either reading past them or calling the peer untrusted.
+- fix: Added `test_unparseable_certificate_is_refused` to `test_tls13_trust.c`. The fingerprint is computed over the malformed bytes and used as the pin, so the pin MATCHES and the parse is the only thing that can refuse; the same certificate is then verified under the development policy with a loopback host, where the bypass applies and the parse is again the only refusal.
+- evidence after: `llvm-cov show` confirms trust.c:169-171 and :185-187 now execute (count 1 each), and the total moved 91.69% -> **91.77%** lines with the guard-like worklist at **274**, from 277. Deliberate violation, aimed at the CONTRACT rather than the branch -- a caller branches on the status, and 'malformed peer message' must not be reported as 'untrusted peer': changing both branches to WT_ERR_TRUST fails with `FAIL a matching pin over unparseable bytes is still refused: want protocol, got trust` and `FAIL the development bypass does not excuse unparseable bytes: want protocol, got trust` (2 of 79 checks). Restored, 97/97. `check-format.sh`: all 312 C sources match.
+- commit: PENDING
 
