@@ -447,25 +447,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         let timeout = overrideTimeoutMilliseconds ?? timeoutMilliseconds
         let started = Date()
         while true {
-            let stream = try await inboundStreams.next(
-                direction: InteroperableQUICHelpers.unidirectionalStreamDirection,
-                timeoutMilliseconds: InteroperableQUICHelpers.remainingTimeout(
-                    timeoutMilliseconds: timeout,
-                    started: started
-                )
-            )
-            // The budget is the caller's whole wait, so the second await in an
-            // iteration gets only what the first one left. Recomputing it here
-            // rather than reusing a value captured before `next` is what keeps
-            // one iteration — and each critical stream it retains — from
-            // spending the deadline twice.
-            let firstChunk = try await InteroperableQUICHelpers.readFirstChunk(
-                stream,
-                timeoutMilliseconds: InteroperableQUICHelpers.remainingTimeout(
-                    timeoutMilliseconds: timeout,
-                    started: started
-                ),
-                maxBytes: maximumInitialBytes
+            let (stream, firstChunk) = try await nextInboundStreamAndFirstChunk(
+                timeoutMilliseconds: timeout,
+                started: started,
+                maximumInitialBytes: maximumInitialBytes
             )
             // The peer's HTTP/3 control and QPACK streams share the
             // unidirectional direction with WebTransport streams, and
@@ -475,33 +460,10 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             // an unknown HTTP/3 stream type is discarded under RFC 9114 section
             // 6.2. Either outcome leaves the wait for a WebTransport stream
             // running.
-            guard WebTransportStreamSignaling.hasStreamPrefix(firstChunk) else {
-                switch try await InteroperableQUICHelpers.classifyPeerUnprefixedUnidirectionalStream(
-                    stream,
-                    firstBytes: firstChunk,
-                    in: inboundStreams
-                ) {
-                case .retained, .ignored:
-                    continue
-                case .unserved, .malformed:
-                    throw WebTransportNetworkRuntimeError.unexpectedFrame
-                }
+            if try await retainOrIgnoreUnprefixedStream(stream, firstChunk: firstChunk) {
+                continue
             }
-            if let foreignSessionID = InteroperableQUICHelpers.foreignSessionID(
-                inPrefixedStream: firstChunk,
-                expectedSessionID: sessionID,
-                form: .unidirectional
-            ) {
-                stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
-                InteroperableQUICDebug.log(
-                    "refusing inbound unidirectional stream \(stream.streamID): prefix names session "
-                        + "\(foreignSessionID), this connection serves \(sessionID)"
-                )
-                throw WebTransportDraft16Error(
-                    kind: .sessionGone,
-                    message: "WebTransport inbound stream names session \(foreignSessionID), not \(sessionID)"
-                )
-            }
+            try refuseForeignSession(in: firstChunk, stream: stream)
             let accepted = try await manager.withManager { manager in
                 try manager.acceptUnidirectionalStreamWithActions(
                     streamID: stream.streamID,
@@ -532,6 +494,87 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
         }
     }
 
+}
+
+extension WebTransportNetworkSession {
+    /// Refuses a prefixed stream that names a session this connection does not serve.
+    private func refuseForeignSession(in firstChunk: Data, stream: QUIC.Stream<QUICStream>) throws {
+        guard
+            let foreignSessionID = InteroperableQUICHelpers.foreignSessionID(
+                inPrefixedStream: firstChunk,
+                expectedSessionID: sessionID,
+                form: .unidirectional
+            )
+        else {
+            return
+        }
+        stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
+        InteroperableQUICDebug.log(
+            "refusing inbound unidirectional stream \(stream.streamID): prefix names session "
+                + "\(foreignSessionID), this connection serves \(sessionID)"
+        )
+        throw WebTransportDraft16Error(
+            kind: .sessionGone,
+            message: "WebTransport inbound stream names session \(foreignSessionID), not \(sessionID)"
+        )
+    }
+    /// The next inbound unidirectional stream and its first chunk, sharing one deadline.
+    ///
+    /// The budget is the caller's whole wait, so the second await in an iteration gets only
+    /// what the first one left. Recomputing the remaining time here rather than reusing a
+    /// value captured before `next` is what keeps one iteration — and each critical stream
+    /// it retains — from spending the deadline twice.
+    private func nextInboundStreamAndFirstChunk(
+        timeoutMilliseconds timeout: Int32,
+        started: Date,
+        maximumInitialBytes: Int
+    ) async throws -> (stream: QUIC.Stream<QUICStream>, firstChunk: Data) {
+        let stream = try await inboundStreams.next(
+            direction: InteroperableQUICHelpers.unidirectionalStreamDirection,
+            timeoutMilliseconds: InteroperableQUICHelpers.remainingTimeout(
+                timeoutMilliseconds: timeout,
+                started: started
+            )
+        )
+        let firstChunk = try await InteroperableQUICHelpers.readFirstChunk(
+            stream,
+            timeoutMilliseconds: InteroperableQUICHelpers.remainingTimeout(
+                timeoutMilliseconds: timeout,
+                started: started
+            ),
+            maxBytes: maximumInitialBytes
+        )
+        return (stream, firstChunk)
+    }
+
+    /// Handles a unidirectional stream that carries no WebTransport prefix.
+    ///
+    /// The peer's HTTP/3 control and QPACK streams share the unidirectional direction with
+    /// WebTransport streams, and establishment returns as soon as it reads the control
+    /// stream, so a QPACK stream that arrived behind it is still queued here. Those streams
+    /// are critical and must not be closed, so they are retained; an unknown HTTP/3 stream
+    /// type is discarded under RFC 9114 section 6.2. Either outcome leaves the wait for a
+    /// WebTransport stream running.
+    ///
+    /// Returns `true` when the caller should keep waiting.
+    private func retainOrIgnoreUnprefixedStream(
+        _ stream: QUIC.Stream<QUICStream>,
+        firstChunk: Data
+    ) async throws -> Bool {
+        guard !WebTransportStreamSignaling.hasStreamPrefix(firstChunk) else {
+            return false
+        }
+        switch try await InteroperableQUICHelpers.classifyPeerUnprefixedUnidirectionalStream(
+            stream,
+            firstBytes: firstChunk,
+            in: inboundStreams
+        ) {
+        case .retained, .ignored:
+            return true
+        case .unserved, .malformed:
+            throw WebTransportNetworkRuntimeError.unexpectedFrame
+        }
+    }
 }
 
 private actor WebTransportNetworkStreamState {
@@ -608,42 +651,62 @@ extension WebTransportNetworkSession {
                     return
                 }
                 if received.metadata.endOfStream {
-                    if decoder.hasPendingBytes {
-                        // Bytes that never completed a frame or a capsule: the
-                        // peer ended the stream mid-unit, which is a truncation
-                        // rather than the orderly close a bare FIN is.
-                        stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
-                        try? await stream.send(Data(), endOfStream: true)
-                    } else {
-                        _ = try? await manager.withManager { manager in
-                            try manager.finishConnectStream(streamID: streamID)
-                        }
-                        // The peer ended the CONNECT stream, which ends the session (draft-16 section 4.4), so the
-                        // connection has no further use either.
-                        releaseConnection()
-                    }
+                    await finishConnectStream(
+                        stream: stream,
+                        manager: manager,
+                        streamID: streamID,
+                        decoder: decoder,
+                        releaseConnection: releaseConnection
+                    )
                     return
                 }
             }
         } catch is CancellationError {
             return
         } catch {
-            // draft-ietf-webtrans-http3-16 section 5.6.2 names the code for a
-            // flow-control violation. The session manager has already closed the
-            // session with it by the time this catches, so the CONNECT stream is
-            // reset with the same code rather than a generic H3_MESSAGE_ERROR:
-            // otherwise the peer cannot tell a malformed capsule from an
-            // over-limit flow-control value, and the code the draft requires it
-            // close the session with never reaches it.
-            if let draft16Error = error as? WebTransportDraft16Error,
-                draft16Error.kind == .flowControl
-            {
-                stream.streamApplicationErrorCode =
-                    WebTransportHTTP3DraftConstants.current.wtFlowControlError
-            } else {
-                stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
-            }
+            await resetAfterReceiveFailure(error, stream: stream)
+        }
+    }
+
+    /// The reset code for a failed CONNECT-stream read.
+    ///
+    /// draft-ietf-webtrans-http3-16 section 5.6.2 names the code for a flow-control
+    /// violation. The session manager has already closed the session with it by the time
+    /// this runs, so the CONNECT stream is reset with the same code rather than a generic
+    /// H3_MESSAGE_ERROR: otherwise the peer cannot tell a malformed capsule from an
+    /// over-limit flow-control value, and the code the draft requires it close the session
+    /// with never reaches it.
+    private static func resetAfterReceiveFailure(_ error: Error, stream: QUIC.Stream<QUICStream>) async {
+        if let draft16Error = error as? WebTransportDraft16Error,
+            draft16Error.kind == .flowControl
+        {
+            stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtFlowControlError
+        } else {
+            stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
+        }
+        try? await stream.send(Data(), endOfStream: true)
+    }
+
+    /// The peer ended the CONNECT stream.
+    ///
+    /// Bytes that never completed a frame or a capsule are a truncation, and a truncation is
+    /// a reset rather than the orderly close a bare FIN is. A clean FIN ends the session
+    /// (draft-16 section 4.4), so the connection has no further use either.
+    private static func finishConnectStream(
+        stream: QUIC.Stream<QUICStream>,
+        manager: WebTransportNetworkSessionManagerState,
+        streamID: UInt64,
+        decoder: InteroperableCONNECTCapsuleDecoder,
+        releaseConnection: @Sendable () -> Void
+    ) async {
+        if decoder.hasPendingBytes {
+            stream.streamApplicationErrorCode = HTTP3ApplicationErrorCode.messageError.rawValue
             try? await stream.send(Data(), endOfStream: true)
+        } else {
+            _ = try? await manager.withManager { manager in
+                try manager.finishConnectStream(streamID: streamID)
+            }
+            releaseConnection()
         }
     }
 }

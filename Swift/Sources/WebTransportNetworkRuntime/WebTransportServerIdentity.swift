@@ -575,13 +575,8 @@ enum SelfSignedCertificate {
         dnsNames: [String],
         ipAddresses: [[UInt8]]
     ) throws -> Data {
-        let signatureAlgorithm = DER.sequence([
-            try DER.objectIdentifier([1, 2, 840, 10045, 4, 3, 2])
-        ])
-        let ecPublicKeyAlgorithm = DER.sequence([
-            try DER.objectIdentifier([1, 2, 840, 10045, 2, 1]),
-            try DER.objectIdentifier([1, 2, 840, 10045, 3, 1, 7]),
-        ])
+        let signatureAlgorithm = try signatureAlgorithmIdentifier()
+        let ecPublicKeyAlgorithm = try ecPublicKeyAlgorithmIdentifier()
         let name = DER.sequence([
             DER.set([
                 DER.sequence([
@@ -599,34 +594,7 @@ enum SelfSignedCertificate {
             DER.bitString(p256PublicKeyDER),
         ])
 
-        var generalNames: [Data] = dnsNames.map { DER.contextSpecificPrimitive(2, Data($0.utf8)) }
-        generalNames.append(contentsOf: ipAddresses.map { DER.contextSpecificPrimitive(7, Data($0)) })
-
-        let extensions = DER.explicit(
-            3,
-            DER.sequence([
-                DER.sequence([
-                    try DER.objectIdentifier([2, 5, 29, 19]),
-                    DER.boolean(true),
-                    DER.octetString(DER.sequence([DER.boolean(false)])),
-                ]),
-                DER.sequence([
-                    try DER.objectIdentifier([2, 5, 29, 15]),
-                    DER.boolean(true),
-                    DER.octetString(DER.bitString(Data([0x80]), unusedBits: 7)),
-                ]),
-                DER.sequence([
-                    try DER.objectIdentifier([2, 5, 29, 37]),
-                    DER.octetString(
-                        DER.sequence([
-                            try DER.objectIdentifier([1, 3, 6, 1, 5, 5, 7, 3, 1])
-                        ])),
-                ]),
-                DER.sequence([
-                    try DER.objectIdentifier([2, 5, 29, 17]),
-                    DER.octetString(DER.sequence(generalNames)),
-                ]),
-            ]))
+        let extensions = try certificateExtensions(dnsNames: dnsNames, ipAddresses: ipAddresses)
 
         let tbsCertificate = DER.sequence([
             DER.explicit(0, DER.integer(Data([0x02]))),
@@ -661,6 +629,57 @@ enum SelfSignedCertificate {
             signatureAlgorithm,
             DER.bitString(signature),
         ])
+    }
+
+    /// ecdsa-with-SHA256, the one signature algorithm this builder emits.
+    private static func signatureAlgorithmIdentifier() throws -> Data {
+        try DER.sequence([
+            DER.objectIdentifier([1, 2, 840, 10045, 4, 3, 2])
+        ])
+    }
+
+    /// id-ecPublicKey with the prime256v1 curve, matching the P-256 key the caller passes.
+    private static func ecPublicKeyAlgorithmIdentifier() throws -> Data {
+        try DER.sequence([
+            DER.objectIdentifier([1, 2, 840, 10045, 2, 1]),
+            DER.objectIdentifier([1, 2, 840, 10045, 3, 1, 7]),
+        ])
+    }
+
+    /// The four X.509 extensions this development certificate carries: basic constraints,
+    /// key usage, extended key usage (`serverAuth`) and subject alternative names.
+    ///
+    /// The SANs are the caller's DNS names and IP addresses, encoded as the context-specific
+    /// primitive forms 2 and 7 the extension defines.
+    private static func certificateExtensions(dnsNames: [String], ipAddresses: [[UInt8]]) throws -> Data {
+        var generalNames: [Data] = dnsNames.map { DER.contextSpecificPrimitive(2, Data($0.utf8)) }
+        generalNames.append(contentsOf: ipAddresses.map { DER.contextSpecificPrimitive(7, Data($0)) })
+
+        return try DER.explicit(
+            3,
+            DER.sequence([
+                DER.sequence([
+                    DER.objectIdentifier([2, 5, 29, 19]),
+                    DER.boolean(true),
+                    DER.octetString(DER.sequence([DER.boolean(false)])),
+                ]),
+                DER.sequence([
+                    DER.objectIdentifier([2, 5, 29, 15]),
+                    DER.boolean(true),
+                    DER.octetString(DER.bitString(Data([0x80]), unusedBits: 7)),
+                ]),
+                DER.sequence([
+                    DER.objectIdentifier([2, 5, 29, 37]),
+                    DER.octetString(
+                        DER.sequence([
+                            DER.objectIdentifier([1, 3, 6, 1, 5, 5, 7, 3, 1])
+                        ])),
+                ]),
+                DER.sequence([
+                    DER.objectIdentifier([2, 5, 29, 17]),
+                    DER.octetString(DER.sequence(generalNames)),
+                ]),
+            ]))
     }
 
     /// A CSPRNG failure is fatal to certificate generation.

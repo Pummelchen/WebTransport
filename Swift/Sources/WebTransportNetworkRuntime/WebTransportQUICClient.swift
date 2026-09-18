@@ -143,28 +143,7 @@ public struct WebTransportQUICClient: Sendable {
             try await InteroperableQUICHelpers.withTimeout(remaining, operation)
         }
 
-        // Registered before the connection is started, not after it is ready.
-        // The peer opens its control stream the instant its own side completes
-        // the handshake, so a handler installed after `start()` races that
-        // stream and loses it outright — see `InteroperableQUICInboundRegistration`.
-        let inboundStreams = InteroperableQUICInboundStreamCollector()
-        let inboundRegistration = InteroperableQUICInboundRegistration()
-        let inboundTask = Task {
-            do {
-                await inboundRegistration.markEntered()
-                try await connection.inboundStreams { stream in
-                    await InteroperableQUICHelpers.enqueueInboundStream(
-                        stream,
-                        into: inboundStreams,
-                        role: "client"
-                    )
-                }
-            } catch {
-                await inboundRegistration.markEntered()
-                await inboundStreams.fail(error, role: "client")
-            }
-        }
-        await inboundRegistration.waitUntilEntered()
+        let (inboundStreams, inboundTask) = await startInboundCollection(connection: connection)
 
         // Cancel the inbound handler on every failure path, not only the
         // rejected-session one below. The handler task strongly retains the connection,
@@ -208,27 +187,12 @@ public struct WebTransportQUICClient: Sendable {
             timeoutMilliseconds: remainingTimeout()
         )
 
-        let peerControlBytes = try await InteroperableQUICHelpers.readPeerControlStream(
-            from: inboundStreams,
-            role: "client",
+        let useDatagrams = try await exchangeControlStreams(
+            http3: &http3,
+            inboundStreams: inboundStreams,
+            settingsValidation: settingsValidation,
             timeoutMilliseconds: remainingTimeout()
         )
-        InteroperableQUICDebug.log("client peer control bytes=\(peerControlBytes.count)")
-        _ = try http3.receivePeerControlStream(
-            peerControlBytes,
-            settingsValidation: settingsValidation
-        )
-        InteroperableQUICDebug.log("client local settings: \(InteroperableQUICRuntime.renderSettings(http3.localSettings))")
-        if let peerSettings = http3.remoteSettings {
-            InteroperableQUICDebug.log("client peer settings: \(InteroperableQUICRuntime.renderSettings(peerSettings))")
-        }
-        // Datagram availability is a property of the negotiated SETTINGS, so it
-        // is answered after the control-stream exchange rather than assumed.
-        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(
-            localSettings: http3.localSettings,
-            remoteSettings: http3.remoteSettings
-        )
-        InteroperableQUICDebug.log("client datagrams usable=\(useDatagrams)")
         var manager = WebTransportSessionManager(
             http3: http3,
             // makeClientQUIC advertises the default limits, so enforce the same
@@ -343,6 +307,69 @@ extension InteroperableQUICRuntime {
 
 extension WebTransportQUICClient {
     @discardableResult
+
+    /// Starts the inbound-stream handler and waits until it is registered.
+    ///
+    /// Registered before the connection is started, not after it is ready. The peer opens
+    /// its control stream the instant its own side completes the handshake, so a handler
+    /// installed after `start()` races that stream and loses it outright — see
+    /// `InteroperableQUICInboundRegistration`.
+    private func startInboundCollection(
+        connection: NetworkConnection<QUIC>
+    ) async -> (streams: InteroperableQUICInboundStreamCollector, task: Task<Void, Never>) {
+        let inboundStreams = InteroperableQUICInboundStreamCollector()
+        let inboundRegistration = InteroperableQUICInboundRegistration()
+        let inboundTask = Task {
+            do {
+                await inboundRegistration.markEntered()
+                try await connection.inboundStreams { stream in
+                    await InteroperableQUICHelpers.enqueueInboundStream(
+                        stream,
+                        into: inboundStreams,
+                        role: "client"
+                    )
+                }
+            } catch {
+                await inboundRegistration.markEntered()
+                await inboundStreams.fail(error, role: "client")
+            }
+        }
+        await inboundRegistration.waitUntilEntered()
+        return (inboundStreams, inboundTask)
+    }
+
+    /// Reads the peer's control stream and answers whether datagrams are usable.
+    ///
+    /// Datagram availability is a property of the negotiated SETTINGS, so it is answered
+    /// after the control-stream exchange rather than assumed.
+    private func exchangeControlStreams(
+        http3: inout HTTP3ConnectionState,
+        inboundStreams: InteroperableQUICInboundStreamCollector,
+        settingsValidation: HTTP3WebTransportSettingsValidation,
+        timeoutMilliseconds: Int32
+    ) async throws -> Bool {
+        let peerControlBytes = try await InteroperableQUICHelpers.readPeerControlStream(
+            from: inboundStreams,
+            role: "client",
+            timeoutMilliseconds: timeoutMilliseconds
+        )
+        InteroperableQUICDebug.log("client peer control bytes=\(peerControlBytes.count)")
+        _ = try http3.receivePeerControlStream(
+            peerControlBytes,
+            settingsValidation: settingsValidation
+        )
+        InteroperableQUICDebug.log("client local settings: \(InteroperableQUICRuntime.renderSettings(http3.localSettings))")
+        if let peerSettings = http3.remoteSettings {
+            InteroperableQUICDebug.log("client peer settings: \(InteroperableQUICRuntime.renderSettings(peerSettings))")
+        }
+        let useDatagrams = InteroperableQUICHelpers.datagramsUsable(
+            localSettings: http3.localSettings,
+            remoteSettings: http3.remoteSettings
+        )
+        InteroperableQUICDebug.log("client datagrams usable=\(useDatagrams)")
+        return useDatagrams
+    }
+
     public func run(
         to endpoint: WebTransportNetworkEndpoint,
         message: String,
