@@ -143,7 +143,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         transportLimits: WebTransportTransportLimits = .default
     ) throws {
         InteroperableQUICDebug.log("server init endpoint=\(endpoint.commandLineValue)")
-        let admission = try Self.resolvedAdmission(admission, maxConcurrentConnections: maxConcurrentConnections)
+        let admission = try WebTransportServerRequestHandling.resolvedAdmission(admission, maxConcurrentConnections: maxConcurrentConnections)
         let transportLimits = try transportLimits.validated()
         self.admission = admission
         self.rateLimiter = ConnectionRateLimiter(policy: admission)
@@ -390,10 +390,7 @@ extension WebTransportQUICServer {
         timeoutMilliseconds: Int32
     ) async throws -> ServerHandshakeOutcome {
         let prelude = makeSessionPrelude(accepted: accepted, timeoutMilliseconds: timeoutMilliseconds)
-        var http3 = HTTP3ConnectionState(
-            role: .server,
-            localSettings: settingsValidation.localSettings
-        )
+        var http3 = HTTP3ConnectionState(role: .server, localSettings: settingsValidation.localSettings)
         let (localControlStream, qpackStreams) = try await openServerControlStreams(
             connection: prelude.connection,
             http3: http3,
@@ -416,7 +413,10 @@ extension WebTransportQUICServer {
             remainingTimeout: prelude.remainingTimeout,
             totalTimeoutMilliseconds: timeoutMilliseconds
         )
-        let request = try decodeRequestAndPolicy(requestPayload: requestPayload)
+        let inputs = WebTransportServerRequestHandling.RequestPolicyInputs(
+            authority: authority, path: path, allowedOrigin: allowedOrigin, protocols: protocols)
+        let request = try WebTransportServerRequestHandling.decodeRequestAndPolicy(
+            inputs: inputs, localEndpoint: localEndpoint, requestPayload: requestPayload)
         let decision = try await performConnectExchange(
             manager: &manager,
             requestStream: requestStream,
@@ -459,7 +459,7 @@ extension WebTransportQUICServer {
     private func performConnectExchange(
         manager: inout WebTransportSessionManager,
         requestStream: QUIC.Stream<QUICStream>,
-        request: DecodedSessionRequest,
+        request: WebTransportServerRequestHandling.DecodedSessionRequest,
         remainingTimeout: @escaping @Sendable () -> Int32,
         totalTimeoutMilliseconds: Int32
     ) async throws -> WebTransportServerSessionDecision {
@@ -477,7 +477,7 @@ extension WebTransportQUICServer {
             InteroperableQUICDebug.log("server CONNECT rejected before response: \(error)")
             throw error
         }
-        try await Self.deliverSessionDecision(
+        try await WebTransportServerRequestHandling.deliverSessionDecision(
             decision,
             on: requestStream,
             remainingTimeout: remainingTimeout,
@@ -661,86 +661,6 @@ extension WebTransportQUICServer {
         return (localControlStream, qpackStreams)
     }
 
-    /// Logs and sends the server's decision.
-    ///
-    /// Without the log line the reason a peer's CONNECT was refused is lost: the throw
-    /// propagates as a transport error once the peer has already gone, which is what makes
-    /// browser handshake failures opaque.
-    private static func deliverSessionDecision(
-        _ decision: WebTransportServerSessionDecision,
-        on requestStream: QUIC.Stream<QUICStream>,
-        remainingTimeout: @escaping @Sendable () -> Int32,
-        totalTimeoutMilliseconds: Int32
-    ) async throws {
-        InteroperableQUICDebug.log(
-            "server CONNECT decision: session=\(decision.session.id) "
-                + "protocol=\(decision.session.selectedProtocol ?? "none") "
-                + "rejection=\(decision.rejectionError.map { "\($0)" } ?? "none")"
-        )
-        let responsePayload = try decision.responseFrame.encode()
-        let remaining = remainingTimeout()
-        guard remaining > 0 else {
-            throw WebTransportNetworkRuntimeError.timeout(totalTimeoutMilliseconds)
-        }
-        try await InteroperableQUICHelpers.withTimeout(remaining) {
-            try await requestStream.send(responsePayload, endOfStream: false)
-        }
-    }
-
-    /// A decoded CONNECT request: its HEADERS frame, any optimistic capsule bytes behind it,
-    /// and the policy this server applies to it.
-    private struct DecodedSessionRequest {
-        let frame: HTTP3Frame
-        let optimisticCapsuleBytes: Data
-        let policy: WebTransportServerSessionPolicy
-    }
-
-    /// The CONNECT request's HEADERS frame, any optimistic capsule bytes behind it, and the
-    /// policy this server applies to it.
-    ///
-    /// The authorities are the four spellings a client may use for this listener: the
-    /// configured authority, that authority with the port, the host, and the host with the
-    /// port. A peer that asserted a WebTransport stream prefix but sent a malformed one is a
-    /// protocol violation and must propagate: swallowing it would silently reinterpret
-    /// invalid bytes as an unprefixed CONNECT request and continue.
-    private func decodeRequestAndPolicy(requestPayload: Data) throws -> DecodedSessionRequest {
-        let requestFramePayload: Data
-        if WebTransportStreamSignaling.hasStreamPrefix(requestPayload) {
-            let prefixed = try WebTransportStreamSignaling.parsePrefix(requestPayload)
-            guard prefixed.form == .bidirectional else {
-                throw WebTransportDraft16Error(
-                    kind: .h3ID,
-                    message: "WebTransport CONNECT request stream carried a unidirectional stream marker"
-                )
-            }
-            requestFramePayload = prefixed.remainingPayload
-        } else {
-            // No marker: an ordinary HTTP/3 extended CONNECT request stream.
-            requestFramePayload = requestPayload
-        }
-        let requestPrefix = try HTTP3Frame.decodePrefix(requestFramePayload)
-        guard requestPrefix.frame.type == HTTP3FrameType.headers else {
-            throw WebTransportNetworkRuntimeError.unexpectedFrame
-        }
-
-        var allowedAuthorities = Set([authority])
-        allowedAuthorities.insert("\(authority):\(localEndpoint.port)")
-        allowedAuthorities.insert(localEndpoint.host)
-        allowedAuthorities.insert("\(localEndpoint.host):\(localEndpoint.port)")
-        let policy = try WebTransportServerSessionPolicy(
-            allowedAuthorities: allowedAuthorities,
-            allowedPaths: [path],
-            allowedOrigins: allowedOrigin.map { [$0] },
-            supportedProtocols: protocols,
-            requireProtocolSelection: !protocols.isEmpty
-        )
-        return DecodedSessionRequest(
-            frame: requestPrefix.frame,
-            optimisticCapsuleBytes: Data(requestFramePayload.dropFirst(requestPrefix.bytesConsumed)),
-            policy: policy
-        )
-    }
-
     /// The inbound collector for one accepted connection, with its handler already
     /// registered and waited for.
     private static func startInboundCollection(
@@ -845,31 +765,4 @@ extension WebTransportQUICServer {
         }
     }
 
-    /// The admission policy with the legacy `maxConcurrentConnections` override applied.
-    ///
-    /// `maxConcurrentConnections` predates the admission policy. An explicit value overrides
-    /// whatever the policy carries, and `nil` (the argument not being supplied) leaves the
-    /// policy's own limit alone.
-    ///
-    /// The override used to be tied to the default argument `16`, so an operator who
-    /// explicitly asked for 16 while supplying another policy got the policy's number
-    /// instead — 256 for `.publicFacing`. Representing "not supplied" as `nil` rather than as
-    /// a valid value is what makes the two distinguishable. The value is validated on the
-    /// same terms as the policy field, so an out-of-range override is refused rather than
-    /// accepted here and rejected elsewhere.
-    private static func resolvedAdmission(
-        _ admission: WebTransportAdmissionPolicy,
-        maxConcurrentConnections: Int?
-    ) throws -> WebTransportAdmissionPolicy {
-        var resolved = try admission.validated()
-        if let maxConcurrentConnections {
-            guard maxConcurrentConnections > 0 else {
-                throw WebTransportNetworkRuntimeError.invalidTransport(
-                    "maxConcurrentConnections must be positive"
-                )
-            }
-            resolved.maxConcurrentConnections = maxConcurrentConnections
-        }
-        return resolved
-    }
 }
