@@ -9,9 +9,9 @@ numbered, justified task.
 | --- | --- | --- |
 | Build | `swift build` — success, **0 warnings** (`.treatAllWarnings(as: .error)` in both manifests) | `C99/scripts/build-and-test.sh` — success, **0 warnings**, 0 errors (`-Werror` + the `WTCompilerWarnings.cmake` set) |
 | Tests | `swift test` — **400 passed, 0 failed, 0 skipped**, exit 0 | `ctest` — **97 passed, 0 failed**, exit 0 (`100% tests passed out of 97`) |
-| Coverage | **90.74% lines** (12051 lines, 1116 missed), union of the 7 test bundles, `Tests/` and `.build/` excluded | **not measured** — see below |
-| Formatter | `swift format lint --strict` — clean | `clang-format` is installed but **the tree is not formatted with it and no `.clang-format` is committed** → finding (AUD-00xx) |
-| Linter | `swiftlint` installed, **no committed config, not run anywhere** → finding (AUD-0006) | `cppcheck` (repo script) — clean; `scan-build` — clean (both re-run in Phase B) |
+| Coverage | **90.74% lines** (12051 lines, 1116 missed), union of the 7 test bundles, `Tests/` and `.build/` excluded | **91.64% lines** (15677 lines, 1310 missed) of the library dylib, `tests/` and `third_party/` excluded — measured by `C99/scripts/measure-coverage.sh` (added for AUD-0009) |
+| Formatter | `swift format lint --strict` — clean | `clang-format` is installed but **the tree is not formatted with it and no `.clang-format` is committed** → finding (AUD-0010) |
+| Linter | `swiftlint` config committed; 556 findings at baseline, 69 left and all structural → AUD-0006 | `cppcheck` (repo script) — clean; `scan-build` — clean (both re-run in Phase B) |
 | Type checker | Swift 6 language mode (tools-version default), complete concurrency — proven in `tool-coverage.md` | `-std=c99 -pedantic-errors` equivalent (`-Wpedantic -Werror`) — proven in `tool-coverage.md` |
 | Dependency CVEs | `trivy fs --config .trivy.yaml .` — **clean** (exit 0) | same scan covers the tree; the system OpenSSL is not vendored and cannot be inventoried (recorded in `SECURITY.md`) |
 | Secrets | `gitleaks git --no-banner --redact --config .gitleaks.toml .` — **no leaks** in 713 commits | same |
@@ -51,10 +51,15 @@ DOCKER_CONFIG=/tmp/audit-docker-empty trivy fs --config .trivy.yaml .   # clean
 
 ## Gaps recorded rather than smoothed over
 
-1. **C99 coverage is not measured.** No `gcovr`/`lcov` is installed and the C99 CMake tree
-   has no coverage configuration, so a coverage % cannot be produced without adding one.
-   This is recorded as a task (AUD-0009) rather than reported as "n/a"; it is a baseline
-   metric the standard asks for.
+1. **C99 coverage was not measurable at baseline and is now** (AUD-0009, closed):
+   `C99/scripts/measure-coverage.sh` builds an instrumented tree in its own directory with
+   the mandated clang's source-based coverage, runs the suite, and reports the library's
+   lines. Baseline: **91.64%** (15677 lines, 1310 missed). Two things learned while adding
+   it are written into the script, not just the log: `llvm-cov report` does not aggregate
+   across several executables (89 test binaries and one both produced a 94-region total), so
+   the report is taken from the shared library — which is the right subject anyway, since
+   every test links it; and a measurement that silently reads one object looks like a clean
+   zero, which is why the script now asserts the dylib exists.
 2. **The two linters are installed but not in force.** `swiftlint` has no committed config
    and nothing runs it; `ruff` has no config, so the rules the Python standard names
    (B, E722, S101, PT) are not enabled. Both are findings, not baseline zeroes — a

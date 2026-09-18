@@ -244,6 +244,23 @@ jobs:
       - name: Check the Python is formatted
         run: ruff format --check .
 
+  # AUD-0009: the audit baseline needs a coverage number for the C99 library, and before this
+  # job the tree could not produce one. It is a report rather than a threshold gate -- a
+  # threshold is a policy decision the repository has not made -- but it fails if the
+  # measurement itself breaks, which is what keeps the number from quietly becoming a zero.
+  coverage:
+    name: C99 / coverage
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install Ninja and CMake
+        run: brew install ninja cmake
+
+      - name: Measure the library's line coverage
+        run: ./C99/scripts/measure-coverage.sh
+
   # A second Linux DISTRIBUTION, not a renamed Ubuntu job (WT-225). The plan's Phase 12 matrix names Debian 13
   # and every other Linux leg runs GitHub's `ubuntu-24.04` image, so nothing here would notice what Debian
   # ships: a different GCC, a different OpenSSL 3 minor, or a libc that changes what the portability inventory

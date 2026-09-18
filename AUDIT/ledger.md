@@ -9,11 +9,11 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 1 |
-| DONE | 11 |
-| OPEN | 4 |
+| DONE | 12 |
+| OPEN | 3 |
 
-Non-terminal (open): 4
-Terminal: 12
+Non-terminal (open): 3
+Terminal: 13
 
 ## Tasks
 
@@ -27,7 +27,7 @@ Terminal: 12
 | AUD-0006 | S1 | A | P1 | OPEN | SwiftLint is installed but has no committed config and is not run, so the mandated Swift linter is not in force | Package.swift |
 | AUD-0007 | S1 | A | both | DONE | Ruff has no config, so B, E722, S101 and PT are not enabled | AUDIT/environment.md |
 | AUD-0008 | S2 | A | P1 | OPEN | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | Package.swift:12-17 |
-| AUD-0009 | S2 | B | P2 | OPEN | No C99 coverage measurement exists, so one baseline metric is missing | C99/CMakeLists.txt |
+| AUD-0009 | S2 | B | P2 | DONE | No C99 coverage measurement exists, so one baseline metric is missing | C99/scripts/measure-coverage.sh |
 | AUD-0010 | S3 | B | P2 | OPEN | No committed .clang-format and the tree is not clang-format clean | C99/ |
 | AUD-0011 | S3 | C | both | DONE | Repository convention says audit ledgers are not kept in the tree; this audit mandates committing one | AUDIT/ledger.json |
 | AUD-0012 | S2 | A | P1 | DONE | SwiftLint inclusive_language conflicts with RFC 8446 terminology | .swiftlint.yml |
@@ -121,12 +121,12 @@ Terminal: 12
 
 ### AUD-0009 — No C99 coverage measurement exists, so one baseline metric is missing
 
-- severity: S2 | tier: B | project: P2 | status: OPEN | host: Mac14,3
+- severity: S2 | tier: B | project: P2 | status: DONE | host: Mac14,3
 - category: tests | discovered by: phase-a
-- where: C99/CMakeLists.txt
+- where: C99/scripts/measure-coverage.sh
 - evidence before: No gcovr/lcov installed and no coverage configuration in the CMake tree; `C99/scripts/build-and-test.sh` runs 97 tests without instrumentation
-- fix: 
-- evidence after: 
+- fix: Added C99/scripts/measure-coverage.sh: it configures an instrumented tree in its own directory (C99/out/coverage) with the mandated clang's source-based coverage flags, runs the 97-test suite, merges the profiles and reports the library's line coverage. Wired into c99-ci.yml as a `coverage` job. No new tool is installed to make the metric appear, and no threshold gate is invented: the standard asks for a baseline metric, not a policy the repository has not set.
+- evidence after: Baseline: 91.64% lines (15677 lines, 1310 missed; 87.20% regions, 99.79% functions) of libwebtransport, tests/ and third_party/ excluded. Recorded in AUDIT/baseline.md. Two measurement traps are written into the script because they produce a plausible wrong answer: `llvm-cov report` does not aggregate across several executables (it reported a 94-region total for 89 test binaries), so the report comes from the shared library, and the script asserts the dylib exists rather than reporting a clean zero.
 - commit: 
 
 ### AUD-0010 — No committed .clang-format and the tree is not clang-format clean
