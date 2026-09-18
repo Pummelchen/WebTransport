@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 21 |
+| DONE | 22 |
 
 Non-terminal (open): 0
-Terminal: 23
+Terminal: 24
 
 ## Tasks
 
@@ -41,6 +41,7 @@ Terminal: 23
 | AUD-0021 | S3 | A | P2 | DONE | Dead local variables were hidden from the compiler by (void) casts, so the earlier unused-code pass could not see them | C99/src/quic/transport_parameters.c:151 |
 | AUD-0022 | S3 | A | P2 | DONE | NEW_TOKEN stored the wire's unvalidated length in a public field that nothing reads, before knowing the token was taken | C99/src/quic/frame.c:259 |
 | AUD-0023 | S2 | A | P2 | DONE | wt_quic_initial_token read a Version Negotiation packet as an Initial with a token, and reported no version the caller could check | C99/src/quic/packet.c:113 |
+| AUD-0024 | S2 | A | P2 | DONE | The ACK-range validator's refusal paths were never executed by the suite, and two of its guards are load-bearing | C99/src/quic/connection_loss.c:85 |
 
 ## Detail
 
@@ -275,4 +276,14 @@ Terminal: 23
 - fix: Read the version in `wt_quic_initial_token` and refuse version zero with WT_ERR_PROTOCOL, mirroring the guard and the comment `wt_quic_protected_pn_offset` already had. Added a regression test to `test_quic_packet.c` with a full Version Negotiation packet -- connection IDs and a version list, unlike the existing five-byte fixture which is too short to reach the token -- asserting that the packet is classified as version negotiation AND refused as an Initial, with no token and no token length.
 - evidence after: The probe, before: `initial_token -> 0 (WT_OK)`, `token_length accepted -> 1`. After: `initial_token -> 4` (WT_ERR_PROTOCOL), `token_length accepted -> 0`, with `packet_kind` still reporting VERSION_NEGOTIATION. The regression test was proved by deliberate violation: against the unfixed code it fails with `FAIL a version negotiation is not an Initial: want protocol, got ok` (3 of 210 checks, 1 of 97 tests, exit 8), and with the fix `100% tests passed out of 97`. `check-format.sh`: all 312 C sources match.
 - commit: 80f5b1c
+
+### AUD-0024 — The ACK-range validator's refusal paths were never executed by the suite, and two of its guards are load-bearing
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, using line coverage as a reviewer (AUDIT/tier-a-review.md)
+- where: C99/src/quic/connection_loss.c:85
+- evidence before: Line coverage was used to ask WHICH lines are unexecuted rather than how many: `llvm-cov show` over the instrumented library listed 295 uncovered guard-like lines, and `validate_ack` in `connection_loss.c` -- RFC 9000 section 19.3.1's range chain, reached from `handle_ack` on every ACK a peer sends -- had its whole refusal block (lines 85-94) unexecuted. Every ACK in the suite was a well-formed one, so the three checks could have been deleted with CI green.
+- fix: Added `test_a_malformed_ack_range_is_refused` to `test_quic_connection_loss.c`, which encodes three malformed ACK frames, sends each in a real packet over the socket pair and asserts the client closes with FRAME_ENCODING_ERROR -- which is what a failed `validate_ack` produces, and deliberately NOT the PROTOCOL_VIOLATION an acknowledgement of an unsent packet gets, so the test cannot pass by reaching the wrong check. The three cases target the zero-length range, a gap past the smallest acknowledged packet, and a range longer than the acknowledgement.
+- evidence after: Coverage before the test: `connection_loss.c` had 64 uncovered lines; after: 55, and the total moved 91.49% to 91.54% lines. `llvm-cov show` confirms lines 89, 90 and 92 now execute. Deliberate violation, and it produced a finding rather than a confirmation: removing the `range.length - 1U > largest` check fails with `FAIL with a frame encoding error: want 7, got 10`, so that guard is genuinely pinned -- but removing the `range.length == 0U` check changes NOTHING, because `length - 1U` underflows to UINT64_MAX and the next guard refuses the same input. **Line 89 is therefore redundant with line 92**, and the underflow in line 92 is load-bearing: a future reader who 'fixes' it to `range.length > largest + 1U` would let a zero-length range through with a wrapped `smallest`. Both lines are kept -- an explicit RFC rule beside the arithmetic that enforces it is defence in depth -- but the redundancy is written down here because the suite cannot detect its removal.
+- commit: PENDING
 

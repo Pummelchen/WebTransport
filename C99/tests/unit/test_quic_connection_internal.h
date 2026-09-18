@@ -137,6 +137,7 @@ void test_round_trip(wt_udp_family_t family);
 void test_short_packet_is_padded(wt_udp_family_t family);
 void test_packet_threshold_loss(void);
 void test_ack_for_unsent_packet(void);
+void test_a_malformed_ack_range_is_refused(void);
 void test_close_paths(void);
 void test_discards(void);
 void test_garbage(wt_udp_family_t family);

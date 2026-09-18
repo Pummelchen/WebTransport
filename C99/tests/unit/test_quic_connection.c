@@ -32,6 +32,7 @@ int main(void) {
   test_short_initial_datagram_is_discarded();
   test_packet_threshold_loss();
   test_ack_for_unsent_packet();
+  test_a_malformed_ack_range_is_refused();
   test_close_paths();
   test_a_refusal_leaves_a_readable_close(WT_UDP_IPV4);
   test_a_refusal_leaves_a_readable_close(WT_UDP_IPV6);

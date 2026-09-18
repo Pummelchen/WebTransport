@@ -296,3 +296,78 @@ void test_only_retransmittable_frames_keep_a_slot(void) {
 
   close_pair(&pair);
 }
+
+/* AUD-0024. `validate_ack` is RFC 9000 section 19.3.1's chain, and its REFUSALS had no test at all: every ACK in
+ * the suite was well formed, so the three checks below could be deleted without CI noticing. Measured, not
+ * guessed -- line coverage showed lines 85 to 94 of `connection_loss.c` never executed.
+ *
+ * Each malformed range is encoded into a real packet and sent over the socket pair, so the refusal is exercised
+ * through the public receive path exactly as a peer's frame would be. The expected close reason is
+ * FRAME_ENCODING_ERROR, which is what `handle_ack` raises for a failed `validate_ack` -- and NOT the
+ * PROTOCOL_VIOLATION an acknowledgement of an unsent packet gets, so a test that reached the wrong check cannot
+ * pass by accident.
+ */
+void test_a_malformed_ack_range_is_refused(void) {
+  /* Each case names the check it is aimed at. */
+  static const struct {
+    const char *label;
+    uint64_t largest;
+    uint64_t first_range;
+    uint8_t ranges[4];
+    size_t ranges_len;
+  } cases[] = {
+      /* Section 19.3.1: the Length of a range is at least one, so a zero-length range is malformed. */
+      {"a zero-length range", 10U, 0U, {0x00U, 0x00U}, 2U},
+      /* A Gap that would put `smallest` below zero: the chain is `smallest = largest - gap - 2`. */
+      {"a gap past the smallest acknowledged", 1U, 0U, {0x00U, 0x00U}, 2U},
+      /* A range that reaches past the largest acknowledged packet number. */
+      /* 99 is a TWO-byte QUIC varint (0b01 prefix), so it is 0x40,0x63 -- not one byte. */
+      {"a range longer than the acknowledgement", 10U, 0U, {0x00U, 0x40U, 0x63U}, 3U},
+  };
+  size_t i;
+
+  for (i = 0U; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    connection_pair_t pair;
+    wt_quic_frame_t ack = wt_quic_frame_make(WT_QUIC_FRAME_KIND_ACK);
+    uint8_t payload[64];
+    uint8_t datagram[128];
+    wt_writer_t w = wt_writer_init(payload, sizeof(payload));
+    wt_quic_packet_build_t build;
+    size_t payload_len;
+    size_t datagram_len = 0U;
+    uint64_t now = 30000000U + ((uint64_t)i * 1000000U);
+
+    open_pair(WT_UDP_IPV4, &pair);
+    ack.as.ack.largest = cases[i].largest;
+    ack.as.ack.delay = 0U;
+    ack.as.ack.first_range = cases[i].first_range;
+    ack.as.ack.range_count = 1U;
+    ack.as.ack.ranges = cases[i].ranges;
+    ack.as.ack.ranges_len = cases[i].ranges_len;
+    WT_EXPECT_OK(cases[i].label, wt_quic_frame_encode(&w, &ack));
+    payload_len = wt_writer_offset(&w);
+
+    memset(&build, 0, sizeof(build));
+    build.type = WT_QUIC_PACKET_INITIAL;
+    build.version = WT_QUIC_VERSION_1;
+    build.destination_connection_id = k_dcid;
+    build.destination_connection_id_len = sizeof(k_dcid);
+    build.source_connection_id = k_server_scid;
+    build.source_connection_id_len = sizeof(k_server_scid);
+    build.packet_number = 0U;
+    build.packet_number_length = 1U;
+    build.payload = payload;
+    build.payload_len = payload_len;
+    build.keys = &pair.server.keys_out[WT_QUIC_SPACE_INITIAL];
+    WT_EXPECT_OK("  the packet builds",
+                 wt_quic_packet_build(&build, datagram, sizeof(datagram), &datagram_len));
+    WT_EXPECT_OK("  the peer sends it",
+                 wt_udp_send(&pair.server_socket, &pair.client_address, datagram, datagram_len));
+
+    receive_on(&pair.client, &pair.client_socket, now);
+    WT_EXPECT_INT("  and the client closes", 1, wt_quic_connection_is_closed(&pair.client));
+    WT_EXPECT_U64("  with a frame encoding error", (uint64_t)WT_QUIC_FRAME_ENCODING_ERROR,
+                  pair.client.close.error_code);
+    close_pair(&pair);
+  }
+}

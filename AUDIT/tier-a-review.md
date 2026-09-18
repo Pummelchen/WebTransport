@@ -36,6 +36,11 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/quic/packet.c` | **Read in full** (680 lines) — `AUD-0023` |
 | `C99/src/quic/{connection_receive,connection_send,stream}.c` | Read in the structural refactors (packet-range merge, STREAM receive); not yet in full |
 | `C99/src/http3/qpack_encoder_stream.c` | Read around the finding — `AUD-0021`; not yet in full |
+| `C99/src/http3/qpack_primitives.c` | **Read in full** (143 lines) — no finding |
+| `C99/src/http3/qpack_dynamic.c` | **Read in full** (162 lines) — no finding |
+| `C99/src/http3/qpack_field_section.c` | Read in part (the index-resolution path) — no finding |
+| `C99/src/core/cursor.c` | Read in full (the bounds contract every parser relies on) — no finding |
+| `C99/src/quic/connection_loss.c` | Read in part (`validate_ack`, the ACK-range chain) — `AUD-0024` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -133,3 +138,27 @@ refuse a non-zero length with a null pointer rather than letting `wt_writer_byte
 (WT-239), the Length field is computed rather than taken from the caller, and the Retry encoder
 writes zero into the `Unused (4)` field while the decoder must ignore whatever it finds there,
 because RFC 9001's own A.4 example writes `0xf` (WT-227).
+
+## Using coverage as a reviewer, not a score
+
+The C99 line figure is measured (`AUD-0009`), and 91.5% says nothing about *which* lines are
+missing. `llvm-cov show` lists them, and filtering to lines that contain a `return WT_ERR_` or an
+`if (` turns the metric into a worklist: **295 uncovered guard-like lines in 53 files**. Many are
+argument-validation paths a test has no reason to reach, but a refusal on the *untrusted-input*
+path that nothing executes is a check nobody knows still works.
+
+That is how `AUD-0024` was found: `validate_ack` -- RFC 9000 section 19.3.1's range chain, run on
+every ACK a peer sends -- had its entire refusal block unexecuted.
+
+**The deliberate violation then corrected the test's own claim.** Removing the
+`range.length - 1U > largest` guard fails the new test (`want 7, got 10`), so that guard is
+pinned. Removing the `range.length == 0U` guard beside it changes *nothing*: `length - 1U`
+underflows to `UINT64_MAX` and the next guard refuses the same input. So the two checks are not
+peers -- one is the enforcement and the other is the RFC rule stated beside it -- and the
+underflow in line 92 is load-bearing rather than a bug. Both are kept; the redundancy is written
+down because the suite cannot detect line 89's removal.
+
+The same filter is worth running again as more of the tier is read. It also answers a question the
+percentage cannot: **the audit's own fixes moved the figure down** (91.64% at `AUD-0009` to 91.49%
+before `AUD-0024`), because they added executable branches the suite did not cover. A baseline
+nobody re-measures is a claim, not a measurement.
