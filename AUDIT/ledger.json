@@ -582,7 +582,7 @@
       "evidence_before": "Two items. (1) `qpack_huffman.c`'s `bits > 30` guard bounds the `bits - 1U` index into the thirty-entry range table, so without it a crafted string would read past the array -- but no test executed it. (2) The empty `:method` refusal in `message.c` (RFC 9114 section 4.3.1) had no test; the file's existing empty-value test covers `:path`, which is a DIFFERENT branch of the same function.",
       "fix_summary": "(1) Proved the guard unreachable and wrote the proof where the guard is. The RFC 7541 table is a COMPLETE prefix code: its Kraft sum is exactly 1 over 257 symbols, so every bit path resolves to a symbol within thirty bits and a run that never matches cannot exist. A search of the whole code space (DFS over unmatched prefixes, 30 levels) finds no 31-bit path, confirming it independently. The comment now says so, and why the guard is kept anyway: it is the bound that would matter if the table were regenerated with a code missing. (2) Added the empty `:method` case to `test_empty_values_and_blocked`, with `:scheme` and `:path` present so the method is the message's ONLY fault.",
       "evidence_after": "Coverage: message.c:137 now executes and the total moved 91.85% -> **91.87%** lines. The Huffman guard stays at zero -- and the run gives it an empirical edge to the proof: the range lookup line executed **31.3 million times** without the guard ever firing, which is what a complete code looks like. Deliberate violation on the empty-method check: removing it fails with `FAIL an empty :method is refused: want protocol, got ok` (1 of 77 checks); restored, 97/97. `check-format.sh`: all 312 C sources match.",
-      "commit": "PENDING",
+      "commit": "6e1eb3b",
       "blocked_reason": ""
     }
   ]
