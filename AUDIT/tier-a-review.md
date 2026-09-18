@@ -41,6 +41,7 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/http3/qpack_field_section.c` | Read in part (the index-resolution path) — no finding |
 | `C99/src/core/cursor.c` | Read in full (the bounds contract every parser relies on) — no finding |
 | `C99/src/quic/connection_loss.c` | Read in part (`validate_ack`, the ACK-range chain) — `AUD-0024` |
+| `C99/src/webtransport/capsule.c` | Read in part (the close and flow-control parsers) — `AUD-0025` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -157,6 +158,12 @@ underflows to `UINT64_MAX` and the next guard refuses the same input. So the two
 peers -- one is the enforcement and the other is the RFC rule stated beside it -- and the
 underflow in line 92 is load-bearing rather than a bug. Both are kept; the redundancy is written
 down because the suite cannot detect line 89's removal.
+
+**AUD-0025** came from the same worklist: `capsule.h` states the flow-control rule in prose
+("anything but exactly one varint is H3_MESSAGE_ERROR") and none of it executed. Five cases now
+assert it, `capsule.c` went from 19 uncovered lines to 10, and the total from 91.54% to 91.60%.
+The worklist itself is the running figure: **295 guard-like uncovered lines in 53 files at the
+start, 285 after two rounds of this** -- and it is the first thing the next Tier A round reads.
 
 The same filter is worth running again as more of the tier is read. It also answers a question the
 percentage cannot: **the audit's own fixes moved the figure down** (91.64% at `AUD-0009` to 91.49%

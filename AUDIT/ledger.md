@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 22 |
+| DONE | 23 |
 
 Non-terminal (open): 0
-Terminal: 24
+Terminal: 25
 
 ## Tasks
 
@@ -42,6 +42,7 @@ Terminal: 24
 | AUD-0022 | S3 | A | P2 | DONE | NEW_TOKEN stored the wire's unvalidated length in a public field that nothing reads, before knowing the token was taken | C99/src/quic/frame.c:259 |
 | AUD-0023 | S2 | A | P2 | DONE | wt_quic_initial_token read a Version Negotiation packet as an Initial with a token, and reported no version the caller could check | C99/src/quic/packet.c:113 |
 | AUD-0024 | S2 | A | P2 | DONE | The ACK-range validator's refusal paths were never executed by the suite, and two of its guards are load-bearing | C99/src/quic/connection_loss.c:85 |
+| AUD-0025 | S2 | A | P2 | DONE | The flow-control capsule rules the header states outright were unexecuted: trailing bytes, a partial varint, and an over-long close reason | C99/src/webtransport/capsule.c:194 |
 
 ## Detail
 
@@ -286,4 +287,14 @@ Terminal: 24
 - fix: Added `test_a_malformed_ack_range_is_refused` to `test_quic_connection_loss.c`, which encodes three malformed ACK frames, sends each in a real packet over the socket pair and asserts the client closes with FRAME_ENCODING_ERROR -- which is what a failed `validate_ack` produces, and deliberately NOT the PROTOCOL_VIOLATION an acknowledgement of an unsent packet gets, so the test cannot pass by reaching the wrong check. The three cases target the zero-length range, a gap past the smallest acknowledged packet, and a range longer than the acknowledgement.
 - evidence after: Coverage before the test: `connection_loss.c` had 64 uncovered lines; after: 55, and the total moved 91.49% to 91.54% lines. `llvm-cov show` confirms lines 89, 90 and 92 now execute. Deliberate violation, and it produced a finding rather than a confirmation: removing the `range.length - 1U > largest` check fails with `FAIL with a frame encoding error: want 7, got 10`, so that guard is genuinely pinned -- but removing the `range.length == 0U` check changes NOTHING, because `length - 1U` underflows to UINT64_MAX and the next guard refuses the same input. **Line 89 is therefore redundant with line 92**, and the underflow in line 92 is load-bearing: a future reader who 'fixes' it to `range.length > largest + 1U` would let a zero-length range through with a wrapped `smallest`. Both lines are kept -- an explicit RFC rule beside the arithmetic that enforces it is defence in depth -- but the redundancy is written down here because the suite cannot detect its removal.
 - commit: 913fa5e
+
+### AUD-0025 — The flow-control capsule rules the header states outright were unexecuted: trailing bytes, a partial varint, and an over-long close reason
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, coverage-as-reviewer worklist (AUDIT/tier-a-review.md)
+- where: C99/src/webtransport/capsule.c:194
+- evidence before: `include/webtransport/webtransport/capsule.h` states the contract in prose -- "Parse the one-varint capsules. Anything but exactly one varint is H3_MESSAGE_ERROR: a flow-control value that is not a number is not a limit" -- and line coverage showed none of it executed: `parse_one`'s and `parse_two`'s refusals (trailing bytes, a partial varint, a missing second varint) and the over-long close reason were all at zero. Every capsule in the suite was a well-formed one, so those refusals could have been deleted with CI green. Capsules are peer input on WebTransport's own protocol layer.
+- fix: Added `test_flow_control_values_must_be_exactly_one_varint` to `test_webtransport_capsule.c`: a value with trailing bytes, a value that is not a whole varint, a two-varint capsule carrying one, one carrying three, and a close reason past WT_CAPSULE_CLOSE_MAX_REASON -- each asserting WT_ERR_PROTOCOL and the message-error code the header promises. The close case uses zero bytes on purpose, which are valid UTF-8, so the length check is what refuses it and not the well-formedness check after it.
+- evidence after: ["Coverage: `capsule.c` 19 uncovered lines -> 10, and the total 91.54% -> **91.60%** lines; no file lost coverage. Deliberate violation: removing `parse_one`'s `!wt_cursor_at_end` refusal fails the new test with `FAIL a flow-control value with trailing bytes is refused: want protocol, got ok` and `FAIL as a message error: want 270, got 256` (2 of 66 checks, exit 8); restoring it leaves `100% tests passed out of 97`. The guard-like uncovered-line worklist is now 285 lines in 53 files, down from 295 in 53, which is the figure the next Tier A round starts from."]
+- commit: PENDING
 

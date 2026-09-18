@@ -133,6 +133,10 @@ violation.
 
 26 gates, **0 failed**.
 
+## Sweep 12 — primary host, after the capsule refusal tests
+
+26 gates, **0 failed**.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host

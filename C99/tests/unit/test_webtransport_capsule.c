@@ -223,10 +223,69 @@ static void test_incomplete_unknown_and_bounds(void) {
   }
 }
 
+/* AUD-0025. The header states this contract outright -- "Anything but exactly one varint is
+ * H3_MESSAGE_ERROR: a flow-control value that is not a number is not a limit" -- and no test
+ * exercised it: line coverage showed both `parse_one`'s and `parse_two`'s refusals unexecuted, as
+ * was the over-long close reason. A flow-control capsule is peer input, so these are the paths a
+ * malformed capsule from a peer takes, and the refusals could have been deleted with CI green. */
+static void test_flow_control_values_must_be_exactly_one_varint(void) {
+  wt_webtransport_capsule_t capsule;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  uint64_t value = 0U;
+  uint64_t stream_id = 0U;
+  static const uint8_t trailing[] = {0x01U, 0x02U};             /* one varint, then junk */
+  static const uint8_t truncated[] = {0x40U};                   /* a two-byte varint, one byte */
+  static const uint8_t one_varint[] = {0x01U};                  /* the second is missing */
+  static const uint8_t three_varints[] = {0x01U, 0x02U, 0x03U}; /* one too many */
+
+  capsule.type = WT_CAPSULE_MAX_DATA;
+  capsule.value = trailing;
+  capsule.value_length = sizeof(trailing);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a flow-control value with trailing bytes is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_data_parse(&capsule, &value, &error));
+  WT_EXPECT_U64("  as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+
+  capsule.value = truncated;
+  capsule.value_length = sizeof(truncated);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a value that is not a whole varint is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_data_parse(&capsule, &value, &error));
+
+  capsule.type = WT_CAPSULE_MAX_STREAM_DATA;
+  capsule.value = one_varint;
+  capsule.value_length = sizeof(one_varint);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a two-varint capsule carrying one is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_stream_data_parse(&capsule, &stream_id, &value, &error));
+
+  capsule.value = three_varints;
+  capsule.value_length = sizeof(three_varints);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("and one carrying three is refused too", WT_ERR_PROTOCOL,
+                   wt_webtransport_max_stream_data_parse(&capsule, &stream_id, &value, &error));
+
+  /* A close reason past the bound is malformed rather than merely large, so it is a message error and
+   * not the excessive-load limit this endpoint imposes on itself. Zero bytes are valid UTF-8, so the
+   * length check is what refuses this and not the well-formedness one after it. */
+  {
+    static uint8_t long_reason[4U + WT_CAPSULE_CLOSE_MAX_REASON + 1U];
+    uint32_t code = 0U;
+    capsule.type = WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION;
+    capsule.value = long_reason;
+    capsule.value_length = sizeof(long_reason);
+    error = WT_HTTP3_NO_ERROR;
+    WT_EXPECT_STATUS("a close reason past the bound is refused", WT_ERR_PROTOCOL,
+                     wt_webtransport_close_session_parse(&capsule, &code, NULL, NULL, &error));
+    WT_EXPECT_U64("  as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
+  }
+}
+
 int main(void) {
   test_the_close_reason_is_utf8();
   test_drain_and_close();
   test_close_edges();
   test_incomplete_unknown_and_bounds();
+  test_flow_control_values_must_be_exactly_one_varint();
   WT_TEST_MAIN_END("wt_webtransport_capsule");
 }
