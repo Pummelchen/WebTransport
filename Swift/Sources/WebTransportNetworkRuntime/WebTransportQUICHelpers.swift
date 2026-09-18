@@ -379,20 +379,22 @@ enum InteroperableQUICHelpers {
         )
     }
 
-    static func waitForReady(
+    /// The states that are already decided, checked before any wait is set up.
+    ///
+    /// Returns whether the wait should be skipped entirely. A failed or cancelled
+    /// connection throws instead of returning, because neither can become ready.
+    private static func connectionIsAlreadySettled(
         connection: NetworkConnection<QUIC>,
-        role: String = "client",
-        start: (@Sendable () -> Void)? = nil,
-        allowSetupProceed: Bool = false,
-        timeoutMilliseconds: Int32
-    ) async throws {
+        role: String,
+        allowSetupProceed: Bool
+    ) throws -> Bool {
         if connection.state == .ready {
             InteroperableQUICDebug.log("\(role) connection already ready")
-            return
+            return true
         }
         if allowSetupProceed, case .setup = connection.state {
             InteroperableQUICDebug.log("\(role) connection in setup state; proceeding to stream negotiation")
-            return
+            return true
         }
         if case .failed(let error) = connection.state {
             InteroperableQUICDebug.log("\(role) connection already failed: \(error)")
@@ -401,6 +403,20 @@ enum InteroperableQUICHelpers {
         if case .cancelled = connection.state {
             InteroperableQUICDebug.log("\(role) connection already cancelled")
             throw WebTransportNetworkRuntimeError.timeout(0)
+        }
+        return false
+    }
+
+    static func waitForReady(
+        connection: NetworkConnection<QUIC>,
+        role: String = "client",
+        start: (@Sendable () -> Void)? = nil,
+        allowSetupProceed: Bool = false,
+        timeoutMilliseconds: Int32
+    ) async throws {
+        guard try !connectionIsAlreadySettled(connection: connection, role: role, allowSetupProceed: allowSetupProceed)
+        else {
+            return
         }
 
         try await withTimeout(timeoutMilliseconds) {

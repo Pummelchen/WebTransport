@@ -195,6 +195,27 @@ enum ServerIdentityResolver {
 
     // MARK: - PKCS#12
 
+    /// The public error for a Security.framework exception the shim caught.
+    ///
+    /// Only the exception name is carried; the reason is deliberately dropped. It is a fixed
+    /// string from Security.framework that says nothing a caller can act on, and the trust
+    /// rules keep framework-supplied text out of public errors. What a caller needs is the
+    /// cause and the remedy, which this message states.
+    private static func pkcs12ExceptionError(raisedName name: String) -> WebTransportNetworkRuntimeError {
+        WebTransportNetworkRuntimeError.invalidTransport(
+            """
+            PKCS#12 identity could not be constructed: Security.framework could not \
+            build the identity from this bundle\(name.isEmpty ? "" : ", raising \(name)"). \
+            This usually means the bundle's certificate uses explicit elliptic-curve \
+            parameters rather than a named curve, which this platform cannot import. \
+            Regenerate the certificate against a named curve (for example with \
+            `openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256` using a tool \
+            that emits a named curve, or convert with \
+            `openssl ec -param_enc named_curve`), or use an RSA identity.
+            """
+        )
+    }
+
     private static func makeFromPKCS12(data: Data, passphrase: String) throws -> ResolvedServerIdentity {
         guard !data.isEmpty else {
             throw WebTransportNetworkRuntimeError.invalidTransport("PKCS#12 bundle is empty")
@@ -244,26 +265,13 @@ enum ServerIdentityResolver {
 
         if raisedException != 0 {
             // Only the exception name is carried into the public error; the reason is
-            // deliberately dropped. It is a fixed string from Security.framework that
-            // says nothing a caller can act on, and the trust rules keep
-            // framework-supplied text out of public errors. What a caller needs is the
-            // cause and the remedy, which this message states.
+            // deliberately dropped, and the C pointer is read here so that no unsafe
+            // value crosses the function boundary.
             var name = ""
             if let pointer = unsafe exceptionName {
                 name = unsafe String(cString: pointer)
             }
-            throw WebTransportNetworkRuntimeError.invalidTransport(
-                """
-                PKCS#12 identity could not be constructed: Security.framework could not \
-                build the identity from this bundle\(name.isEmpty ? "" : ", raising \(name)"). \
-                This usually means the bundle's certificate uses explicit elliptic-curve \
-                parameters rather than a named curve, which this platform cannot import. \
-                Regenerate the certificate against a named curve (for example with \
-                `openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256` using a tool \
-                that emits a named curve, or convert with \
-                `openssl ec -param_enc named_curve`), or use an RSA identity.
-                """
-            )
+            throw Self.pkcs12ExceptionError(raisedName: name)
         }
 
         guard status == errSecSuccess else {

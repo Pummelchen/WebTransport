@@ -364,7 +364,6 @@ extension WebTransportQUICClient {
             timeoutMilliseconds: timeoutMilliseconds
         )
 
-        let responseMessage: String
         let preferStreams = settingsValidation == .pywebtransportStreamInterop
         let useDatagrams: Bool
         switch exchangeMode {
@@ -376,32 +375,21 @@ extension WebTransportQUICClient {
             useDatagrams = true
         }
 
-        if useDatagrams {
-            InteroperableQUICDebug.log("client using datagram path")
-            try await session.sendDatagram(
-                Data(message.utf8),
-                requireAvailability: exchangeMode != .datagram,
-                timeoutMilliseconds: timeoutMilliseconds
-            )
-            InteroperableQUICDebug.log("client sent datagram")
-            let responsePayload = try await session.receiveDatagram(
-                requireAvailability: exchangeMode != .datagram,
-                timeoutMilliseconds: timeoutMilliseconds
-            )
-            guard let responseMessageValue = String(data: responsePayload, encoding: .utf8) else {
-                throw WebTransportNetworkRuntimeError.invalidPayload
+        let responseMessage =
+            if useDatagrams {
+                try await exchangeOverDatagram(
+                    session: session,
+                    message: message,
+                    exchangeMode: exchangeMode,
+                    timeoutMilliseconds: timeoutMilliseconds
+                )
+            } else {
+                try await exchangeOverStream(
+                    session: session,
+                    message: message,
+                    timeoutMilliseconds: timeoutMilliseconds
+                )
             }
-            responseMessage = responseMessageValue
-        } else {
-            InteroperableQUICDebug.log("client using stream fallback path")
-            let fallbackStream = try await session.openBidirectionalStream(timeoutMilliseconds: timeoutMilliseconds)
-            try await fallbackStream.send(Data(message.utf8), endOfStream: true, timeoutMilliseconds: timeoutMilliseconds)
-            let fallbackResponse = try await fallbackStream.receive(timeoutMilliseconds: timeoutMilliseconds)
-            guard let responseMessageValue = String(data: fallbackResponse, encoding: .utf8) else {
-                throw WebTransportNetworkRuntimeError.invalidPayload
-            }
-            responseMessage = responseMessageValue
-        }
 
         return WebTransportNetworkSessionResult(
             localEndpoint: session.localEndpoint,
@@ -410,5 +398,45 @@ extension WebTransportQUICClient {
             transport: .packet,
             sessionEstablished: true
         )
+    }
+    /// The datagram exchange, including the two availability checks the exchange mode sets.
+    private func exchangeOverDatagram(
+        session: WebTransportNetworkSession,
+        message: String,
+        exchangeMode: WebTransportNetworkExchangeMode,
+        timeoutMilliseconds: Int32
+    ) async throws -> String {
+        InteroperableQUICDebug.log("client using datagram path")
+        try await session.sendDatagram(
+            Data(message.utf8),
+            requireAvailability: exchangeMode != .datagram,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
+        InteroperableQUICDebug.log("client sent datagram")
+        let responsePayload = try await session.receiveDatagram(
+            requireAvailability: exchangeMode != .datagram,
+            timeoutMilliseconds: timeoutMilliseconds
+        )
+        guard let response = String(data: responsePayload, encoding: .utf8) else {
+            throw WebTransportNetworkRuntimeError.invalidPayload
+        }
+        return response
+    }
+
+    /// The bidirectional-stream exchange, used when datagrams are unavailable or the peer
+    /// asked for the stream interop profile.
+    private func exchangeOverStream(
+        session: WebTransportNetworkSession,
+        message: String,
+        timeoutMilliseconds: Int32
+    ) async throws -> String {
+        InteroperableQUICDebug.log("client using stream fallback path")
+        let stream = try await session.openBidirectionalStream(timeoutMilliseconds: timeoutMilliseconds)
+        try await stream.send(Data(message.utf8), endOfStream: true, timeoutMilliseconds: timeoutMilliseconds)
+        let response = try await stream.receive(timeoutMilliseconds: timeoutMilliseconds)
+        guard let responseMessage = String(data: response, encoding: .utf8) else {
+            throw WebTransportNetworkRuntimeError.invalidPayload
+        }
+        return responseMessage
     }
 }
