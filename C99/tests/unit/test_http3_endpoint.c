@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "webtransport/http3/endpoint.h"
+#include "webtransport/http3/qpack.h"
 #include "webtransport/quic/varint.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session_request.h"
@@ -421,10 +422,14 @@ static void test_request_headers_are_decoded(void) {
   WT_EXPECT_OK("a decoder capacity is set", wt_http3_endpoint_set_decoder_capacity(&server, 0U));
   WT_EXPECT_OK("and setting it again is not a reconfiguration",
                wt_http3_endpoint_set_decoder_capacity(&server, 0U));
-  /* AUD-0027: a capacity this build cannot honour is refused rather than accepted in silence.
-   * Nothing parses the QPACK encoder stream, so the table could never be filled, and an endpoint
-   * that believed otherwise would read every field-section prefix against an empty window. */
-  WT_EXPECT_STATUS("a capacity this build cannot fill is unsupported", WT_ERR_UNSUPPORTED,
+  /* AUD-0027 refused a NON-ZERO capacity here, because nothing applied the encoder stream and a
+   * table that could never be filled would make every dynamic reference in a peer's field
+   * section fail with a decompression error that blamed the peer. Both halves exist now -- the
+   * encoder stream is applied and the insertions are acknowledged -- so a capacity means what it
+   * says. What is still refused is changing it after the fact: the peer has been inserting
+   * against the old number, and the refusal that protects against silently discarding those
+   * insertions is the part of AUD-0027 that survives. */
+  WT_EXPECT_STATUS("a different capacity afterwards is a state error", WT_ERR_STATE,
                    wt_http3_endpoint_set_decoder_capacity(&server, 4096U));
   WT_EXPECT_U64("and the endpoint keeps the capacity it had", 0U,
                 (uint64_t)server.decoder_table.capacity);
@@ -688,6 +693,107 @@ static void test_a_client_writes_the_request_it_means(void) {
   WT_EXPECT_U64("and nothing written", 0U, (uint64_t)wt_writer_offset(&w));
 }
 
+/* The receive half of the QPACK dynamic table: the peer's encoder stream fills the table this
+ * endpoint advertised a capacity for, and the insertions are acknowledged. */
+static void test_the_dynamic_table_is_filled_and_acknowledged(void) {
+  wt_http3_endpoint_t server;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+  wt_writer_t w;
+  uint8_t instructions[256];
+  uint8_t acks[64];
+  size_t length;
+  size_t consumed = 0U;
+  uint64_t inserts = 0U;
+
+  wt_http3_endpoint_init(&server, WT_HTTP3_ROLE_SERVER);
+
+  /* The capacity in SETTINGS is the grant, and the encoder stream is the only place an
+   * instruction may arrive. Neither exists yet, so there is nothing to fill. */
+  WT_EXPECT_STATUS("an insert before the stream exists is refused", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_qpack_encoder_bytes(&server, instructions, 8U, &consumed,
+                                                            &inserts, &error));
+  WT_EXPECT_OK("the caller grants a capacity",
+               wt_http3_endpoint_set_decoder_capacity(&server, 4096U));
+  WT_EXPECT_U64("which the table takes", 4096U, (uint64_t)server.decoder_table.capacity);
+  WT_EXPECT_STATUS("instructions still need the stream that carries them", WT_ERR_PROTOCOL,
+                   wt_http3_endpoint_on_qpack_encoder_bytes(&server, instructions, 8U, &consumed,
+                                                            &inserts, &error));
+
+  {
+    const uint8_t type_prefix[1] = {0x02U};
+    wt_http3_endpoint_stream_kind_t kind = WT_HTTP3_ENDPOINT_STREAM_CONTROL;
+    size_t prefix_consumed = 0U;
+    WT_EXPECT_OK("the peer opens its QPACK encoder stream",
+                 wt_http3_endpoint_on_uni_stream(&server, 2U, type_prefix, sizeof(type_prefix),
+                                                 &prefix_consumed, &kind, &error));
+    WT_EXPECT_U64("classified as the encoder stream",
+                  (uint64_t)WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER, (uint64_t)kind);
+  }
+
+  /* One insert, built by this tree's own encoder so the test cannot drift from the wire format. */
+  w = wt_writer_init(instructions, sizeof(instructions));
+  WT_EXPECT_OK("an insert instruction is built",
+               wt_qpack_encoder_stream_write_insert_literal(&w, (const uint8_t *)"x-a", 3U,
+                                                            (const uint8_t *)"one", 3U));
+  length = wt_writer_offset(&w);
+  WT_EXPECT_OK("the peer's insert is applied",
+               wt_http3_endpoint_on_qpack_encoder_bytes(&server, instructions, length, &consumed,
+                                                        &inserts, &error));
+  WT_EXPECT_U64("the whole instruction was consumed", (uint64_t)length, (uint64_t)consumed);
+  WT_EXPECT_U64("and one insertion is counted", 1U, inserts);
+  WT_EXPECT_U64("the table holds it", 1U, (uint64_t)server.decoder_table.count);
+
+  /* An instruction may span two chunks of the stream. The tail stays with the caller, which is
+   * why this reports how much it consumed instead of buffering the bytes itself. */
+  w = wt_writer_init(instructions, sizeof(instructions));
+  WT_EXPECT_OK("a second insert is built",
+               wt_qpack_encoder_stream_write_insert_literal(&w, (const uint8_t *)"x-b", 3U,
+                                                            (const uint8_t *)"two", 3U));
+  length = wt_writer_offset(&w);
+  WT_EXPECT_OK("the first half of it changes nothing",
+               wt_http3_endpoint_on_qpack_encoder_bytes(&server, instructions, length - 1U,
+                                                        &consumed, &inserts, &error));
+  WT_EXPECT_U64("and consumes nothing", 0U, (uint64_t)consumed);
+  WT_EXPECT_U64("with the count unchanged", 1U, inserts);
+  WT_EXPECT_OK("the whole instruction applies once the tail arrives",
+               wt_http3_endpoint_on_qpack_encoder_bytes(&server, instructions, length, &consumed,
+                                                        &inserts, &error));
+  WT_EXPECT_U64("consuming all of it", (uint64_t)length, (uint64_t)consumed);
+  WT_EXPECT_U64("and counting the second insertion", 2U, inserts);
+
+  /* What the peer is owed. An increment for the insertions, and a section acknowledgement when
+   * the caller says the section it decoded named the table. */
+  w = wt_writer_init(acks, sizeof(acks));
+  WT_EXPECT_OK("the insertions are acknowledged",
+               wt_http3_endpoint_write_qpack_decoder_acks(&server, 0U, 0, &w));
+  WT_EXPECT_TRUE("with bytes written", wt_writer_offset(&w) > 0U);
+  w = wt_writer_init(acks, sizeof(acks));
+  WT_EXPECT_OK("a second call owes nothing",
+               wt_http3_endpoint_write_qpack_decoder_acks(&server, 0U, 0, &w));
+  WT_EXPECT_U64("and writes nothing", 0U, (uint64_t)wt_writer_offset(&w));
+  w = wt_writer_init(acks, sizeof(acks));
+  WT_EXPECT_OK("a section that named the table is acknowledged when asked",
+               wt_http3_endpoint_write_qpack_decoder_acks(&server, 0U, 1, &w));
+  WT_EXPECT_TRUE("with bytes written", wt_writer_offset(&w) > 0U);
+  w = wt_writer_init(acks, sizeof(acks));
+  WT_EXPECT_OK("and not when it is not",
+               wt_http3_endpoint_write_qpack_decoder_acks(&server, 0U, 0, &w));
+  WT_EXPECT_U64("nothing", 0U, (uint64_t)wt_writer_offset(&w));
+
+  /* The capacity is fixed once the peer has inserted against it. */
+  WT_EXPECT_STATUS("a different capacity afterwards is refused", WT_ERR_STATE,
+                   wt_http3_endpoint_set_decoder_capacity(&server, 8192U));
+  WT_EXPECT_OK("the same one again is not a reconfiguration",
+               wt_http3_endpoint_set_decoder_capacity(&server, 4096U));
+  /* Before anything was granted, zero is the ordinary case and stays legal. */
+  {
+    wt_http3_endpoint_t fresh;
+    wt_http3_endpoint_init(&fresh, WT_HTTP3_ROLE_CLIENT);
+    WT_EXPECT_OK("a client with no dynamic table",
+                 wt_http3_endpoint_set_decoder_capacity(&fresh, 0U));
+  }
+}
+
 int main(void) {
   test_our_own_streams_exist_once();
   test_peer_streams_are_classified();
@@ -696,5 +802,6 @@ int main(void) {
   test_request_streams_follow_the_roles();
   test_request_headers_are_decoded();
   test_a_client_writes_the_request_it_means();
+  test_the_dynamic_table_is_filled_and_acknowledged();
   WT_TEST_MAIN_END("wt_http3_endpoint");
 }

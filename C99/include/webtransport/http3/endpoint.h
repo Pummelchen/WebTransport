@@ -108,6 +108,9 @@ typedef struct wt_http3_endpoint {
    * be read without it and a connection has exactly one of each. */
   wt_qpack_dynamic_table_t decoder_table;
   uint64_t decoder_insert_count;
+  /* How many of those insertions the peer has been told about. An acknowledgement is the only
+   * thing that lets the peer evict, so the difference between the two is what is owed to it. */
+  uint64_t decoder_acked_insert_count;
   int decoder_capacity_set;
 } wt_http3_endpoint_t;
 
@@ -252,6 +255,33 @@ size_t wt_http3_endpoint_request_count(const wt_http3_endpoint_t *endpoint);
  * (`wt_qpack_encoder_stream_apply`); wiring it in is what would make this call
  * meaningful, and until then 0 is the only capacity that describes this endpoint. */
 wt_status_t wt_http3_endpoint_set_decoder_capacity(wt_http3_endpoint_t *endpoint, size_t capacity);
+
+/* The peer's QPACK encoder stream -- the instructions that fill the dynamic table this endpoint
+ * advertised a capacity for. `out_consumed` is how much of `bytes` was made up of COMPLETE
+ * instructions: an instruction may span two chunks of the stream, so the caller keeps the
+ * remainder and passes it again with the next chunk rather than this endpoint buffering it.
+ * `out_insert_count` is the number of insertions received so far, which is what an
+ * acknowledgement is measured against. A malformed instruction is
+ * QPACK_ENCODER_STREAM_ERROR. Requires the stream to have been opened by the peer and a
+ * capacity to have been set: an instruction that arrives before either is not a table update. */
+wt_status_t wt_http3_endpoint_on_qpack_encoder_bytes(wt_http3_endpoint_t *endpoint,
+                                                     const uint8_t *bytes, size_t length,
+                                                     size_t *out_consumed,
+                                                     uint64_t *out_insert_count,
+                                                     wt_http3_error_t *out_error);
+
+/* Write the decoder-stream instructions the peer is owed: one Insert Count Increment covering
+ * every insertion not yet acknowledged, and, when `acknowledge_section` is non-zero, a Section
+ * Acknowledgment for `section_stream_id`.
+ *
+ * The caller owns the second decision because it is a property of the section it just decoded:
+ * RFC 9204 section 4.4.1 requires the acknowledgement exactly when the section's prefix
+ * Required Insert Count is non-zero, and a Section Acknowledgment for a section that referenced
+ * nothing is itself a QPACK_DECODER_STREAM_ERROR. The bytes are written to the caller's writer
+ * for the QPACK decoder stream it opened with `write_prefix`. */
+wt_status_t wt_http3_endpoint_write_qpack_decoder_acks(wt_http3_endpoint_t *endpoint,
+                                                       uint64_t section_stream_id,
+                                                       int acknowledge_section, wt_writer_t *w);
 
 /* A HEADERS frame's payload on a tracked request stream: the ordering rule first, then the
  * field section decoded against this endpoint's decoder state. The decoded message is what
