@@ -494,3 +494,152 @@ func listenerReportsDevelopmentCertificateUsage() throws {
     #expect(!injected.usesDevelopmentCertificate)
     #expect(injected.certificateSHA256 == Data(SHA256.hash(data: material.chainDER[0])))
 }
+
+// MARK: - Identity resolution is keychain-free (WT-262)
+
+/// WT-262: the identity the resolver builds from a PKCS#12 bundle must be servable.
+///
+/// The bug was found because a locked keychain made resolution fail, so the fix has to be
+/// proved past the resolver: `SecPKCS12Import` can hand back an identity whose private key
+/// the TLS stack cannot use, and a test that stopped at `leafCertificateDER` would not
+/// notice. This binds a listener with the fixture identity and completes a real session
+/// against it, and it pins that the certificate the listener presents is the fixture's
+/// leaf rather than the development one.
+@Test
+func pkcs12IdentityServesALoopbackSession() async throws {
+    let bundle = try identityFixture(named: "libressl-rsa-identity")
+    let resolved = try ServerIdentityResolver.resolve(
+        .pkcs12(data: bundle, passphrase: "pw"),
+        endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 0),
+        authority: "localhost",
+        localOnly: true
+    )
+
+    let server = try WebTransportQUICServer(
+        endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 0),
+        authority: "localhost",
+        path: "/wt",
+        allowedOrigin: "https://localhost",
+        protocols: ["demo.v1"],
+        localOnly: true,
+        identity: .pkcs12(data: bundle, passphrase: "pw"),
+        admission: WebTransportAdmissionPolicy(maxConcurrentConnections: 2)
+    )
+    defer { server.shutdown() }
+
+    #expect(!server.usesDevelopmentCertificate, "the fixture identity must be the one presented")
+    #expect(
+        server.certificateSHA256 == Data(SHA256.hash(data: resolved.leafCertificateDER)),
+        "the listener must present the bundle's leaf certificate"
+    )
+
+    let endpoint = try await server.waitForListening(timeoutMilliseconds: 5_000)
+    async let accepted = server.acceptSession(timeoutMilliseconds: 10_000)
+    // Held for the whole test: dropping the client half releases its connection, which ends
+    // the server's session before the assertions run.
+    var clientSession: WebTransportNetworkSession? =
+        try await WebTransportQUICClient(trustPolicy: .localDevelopmentSelfSigned).connectSession(
+            to: endpoint,
+            authority: "localhost",
+            path: "/wt",
+            origin: "https://localhost",
+            protocols: ["demo.v1"],
+            optimisticCapsules: [],
+            settingsValidation: .draft16Strict,
+            timeoutMilliseconds: 8_000
+        )
+    let serverSession = try await accepted
+    #expect(serverSession.selectedProtocol == "demo.v1")
+    #expect(clientSession != nil)
+    clientSession = nil
+}
+
+/// WT-262: resolving a bundle must leave the keychain exactly as it found it.
+///
+/// macOS's `SecPKCS12Import` files the identity into the DEFAULT KEYCHAIN unless the
+/// memory-only option is passed, which was both the failure on a host without an unlocked
+/// keychain and a silent side effect on a host with one: a caller who asked this runtime to
+/// serve from their own bundle got a copy of their private key filed in their login keychain
+/// for it. The count is taken before and after so that a machine which already carries the
+/// item from an earlier build is not read as a pass, and the leaf is read with a memory-only
+/// import of its own so that taking the measurement cannot be what files it.
+@Test
+func pkcs12ResolutionAddsNothingToTheKeychain() throws {
+    let bundle = try identityFixture(named: "libressl-rsa-identity")
+    let leafDER = try memoryOnlyLeafCertificateDER(of: bundle, passphrase: "pw")
+
+    let before = keychainIdentityCount(matchingLeafDER: leafDER)
+    let resolved = try ServerIdentityResolver.resolve(
+        .pkcs12(data: bundle, passphrase: "pw"),
+        endpoint: WebTransportNetworkEndpoint(host: "127.0.0.1", port: 4433),
+        authority: "localhost",
+        localOnly: false
+    )
+    let after = keychainIdentityCount(matchingLeafDER: leafDER)
+
+    #expect(resolved.leafCertificateDER == leafDER, "the resolver must return the bundle's leaf")
+    #expect(
+        after == before,
+        "resolving a PKCS#12 identity changed the number of keychain identities for its certificate (\(before) -> \(after))"
+    )
+}
+
+// MARK: - Keychain probes for the WT-262 tests
+
+/// Reads the leaf certificate with its own memory-only import.
+///
+/// The measurement must not be the thing that files the identity, so the helper cannot go
+/// through the code under test.
+private func memoryOnlyLeafCertificateDER(of bundle: Data, passphrase: String) throws -> Data {
+    var items: CFArray?
+    let options: [CFString: Any] = [
+        kSecImportExportPassphrase: passphrase,
+        kSecImportToMemoryOnly: true,
+    ]
+    let status = unsafe SecPKCS12Import(bundle as CFData, options as CFDictionary, &items)
+    guard
+        status == errSecSuccess,
+        let first = (items as? [[CFString: Any]])?.first,
+        let chain = first[kSecImportItemCertChain] as? [SecCertificate],
+        let leaf = chain.first
+    else {
+        throw WebTransportNetworkRuntimeError.invalidTransport("fixture import failed with status \(status)")
+    }
+    return SecCertificateCopyData(leaf) as Data
+}
+
+/// Counts the keychain identities carrying `leafDER`.
+///
+/// A keychain that cannot be read — locked, or absent — answers zero, because nothing can
+/// have been filed into a keychain that cannot be listed; `check-pkcs12-keychain-free.sh`
+/// is what covers that state.
+private func keychainIdentityCount(matchingLeafDER leafDER: Data) -> Int {
+    let query: [CFString: Any] = [
+        kSecClass: kSecClassIdentity,
+        kSecMatchLimit: kSecMatchLimitAll,
+        kSecReturnRef: true,
+    ]
+    var result: CFTypeRef?
+    guard
+        unsafe SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+        let identities = result as? [Any]
+    else {
+        return 0
+    }
+
+    var count = 0
+    for item in identities {
+        let identity = unsafe unsafeDowncast(item as AnyObject, to: SecIdentity.self)
+        var certificate: SecCertificate?
+        guard
+            unsafe SecIdentityCopyCertificate(identity, &certificate) == errSecSuccess,
+            let certificate
+        else {
+            continue
+        }
+        if SecCertificateCopyData(certificate) as Data == leafDER {
+            count += 1
+        }
+    }
+    return count
+}

@@ -112,6 +112,12 @@ jobs:
           -Xswiftc -strict-concurrency=complete
           -Xswiftc -require-explicit-sendable
 
+      # WT-262: a runner's keychain is unlocked, so the PKCS#12 suites pass whether or not
+      # the import is memory-only. This gives them a LOCKED default keychain -- the state
+      # that failed on a headless host -- and restores the runner's keychain afterwards.
+      - name: Verify PKCS#12 identity resolution is keychain-free
+        run: ./Swift/check-pkcs12-keychain-free.sh
+
       # F-repo-ops-16: the nested manifest's test targets that the root manifest also
       # declares compile the same sources -- `Swift/check-manifest-sync.sh` proves the
       # shared targets agree on path, type and dependencies -- so running the whole

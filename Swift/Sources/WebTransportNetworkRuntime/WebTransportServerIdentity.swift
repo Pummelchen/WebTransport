@@ -56,6 +56,15 @@ public enum WebTransportPrivateKeyKind: Equatable, Sendable {
 /// ``developmentSelfSigned`` is a development affordance and is refused on any
 /// non-loopback bind address.
 ///
+/// - Important: Resolving any case of this type is **keychain-free and prompt-free**. It
+///   reads no keychain, writes none, and cannot raise a user-interaction prompt, so a server
+///   starts on a host where no login keychain is unlocked — a headless daemon, a CI job with
+///   no login session. A PKCS#12 bundle is imported into process memory
+///   (`kSecImportToMemoryOnly`) instead of being filed in the default keychain; an identity
+///   that could only be built through the keychain would be a defect (`WT-262`). The
+///   invariant is enforced by `Swift/check-pkcs12-keychain-free.sh`, which resolves an
+///   identity while the default keychain is locked.
+///
 /// - Important: A PKCS#12 bundle can only be imported when the certificate inside it
 ///   names its elliptic curve. macOS cannot build an identity from a certificate
 ///   whose ``SubjectPublicKeyInfo`` carries explicit curve parameters instead of a
@@ -191,7 +200,23 @@ enum ServerIdentityResolver {
             throw WebTransportNetworkRuntimeError.invalidTransport("PKCS#12 bundle is empty")
         }
 
-        let options: [CFString: Any] = [kSecImportExportPassphrase: passphrase]
+        // The import is deliberately MEMORY-ONLY. On macOS `SecPKCS12Import` files the
+        // identity into the DEFAULT KEYCHAIN unless told otherwise -- the header is explicit
+        // that its "normal behavior ... is to import items into process memory on iOS, and
+        // into the default keychain on macOS" -- and this runtime only ever hands the
+        // identity to Network.framework inside this process, so the keychain was never part
+        // of the contract: filing a copy of the caller's private key there was an
+        // unrequested side effect. On a host with no unlocked keychain (a headless server, a
+        // CI job with no login session) it was also fatal: the import decoded the bundle and
+        // then failed with an undocumented `OSStatus -26276`, which is WT-262. Memory-only
+        // is the platform's own spelling of "I want an in-process identity" and the header
+        // notes that with it "keychain-related import options are ignored since the keychain
+        // will not be used". It is available since macOS 15 and the package floor is macOS
+        // 26, so it needs no availability guard.
+        let options: [CFString: Any] = [
+            kSecImportExportPassphrase: passphrase,
+            kSecImportToMemoryOnly: true,
+        ]
         var rawItems: CFArray?
         var status: OSStatus = errSecSuccess
         var exceptionName: UnsafePointer<CChar>?
@@ -242,9 +267,7 @@ enum ServerIdentityResolver {
         }
 
         guard status == errSecSuccess else {
-            throw WebTransportNetworkRuntimeError.invalidTransport(
-                "PKCS#12 import failed (OSStatus \(status)); check the passphrase and bundle format"
-            )
+            throw WebTransportNetworkRuntimeError.invalidTransport(Self.pkcs12ImportFailure(status: status))
         }
         guard let items = rawItems as? [[CFString: Any]], let first = items.first else {
             throw WebTransportNetworkRuntimeError.invalidTransport("PKCS#12 bundle contained no items")
@@ -277,6 +300,44 @@ enum ServerIdentityResolver {
 
         let chain = (first[kSecImportItemCertChain] as? [SecCertificate]) ?? []
         return try finish(identity: identity, chain: chain)
+    }
+
+    /// The status a macOS keychain returns when it is asked to file an identity and cannot.
+    ///
+    /// It has no `errSec*` name in `SecBase.h`, and the only code path here that could
+    /// produce it is the default-keychain filing `kSecImportToMemoryOnly` removes, so it is
+    /// named as the regression signal it is (`WT-262`).
+    private static let pkcs12KeychainRefusalStatus: OSStatus = -26276
+
+    /// Names what an import status means, and what the caller can do about it.
+    ///
+    /// One "check the passphrase and bundle format" sentence was wrong for every cause but
+    /// one, and that is what made `WT-262` expensive to find: the status was the default
+    /// keychain refusing the identity while the message pointed at the passphrase. Each
+    /// branch now names its own cause and the remedy for it.
+    private static func pkcs12ImportFailure(status: OSStatus) -> String {
+        switch status {
+        case errSecAuthFailed:
+            return """
+                PKCS#12 import failed (OSStatus \(status), errSecAuthFailed): the passphrase is wrong, \
+                or the bundle is damaged and failed its integrity check.
+                """
+        case errSecDecode:
+            return """
+                PKCS#12 import failed (OSStatus \(status), errSecDecode): the bundle is malformed, \
+                truncated, or uses a container this platform does not read -- legacy RC2 encryption is \
+                the usual one. Re-export it with a current tool (PBES2/PBKDF2, AES-CBC, SHA-256 MAC).
+                """
+        case errSecNoDefaultKeychain, errSecNoSuchKeychain, errSecInteractionNotAllowed, pkcs12KeychainRefusalStatus:
+            return """
+                PKCS#12 import failed (OSStatus \(status)) because the DEFAULT KEYCHAIN refused the \
+                identity. That is a defect rather than a bad bundle: this import is memory-only \
+                (`kSecImportToMemoryOnly`) and must not touch a keychain at all. Report it with this \
+                status.
+                """
+        default:
+            return "PKCS#12 import failed (OSStatus \(status))"
+        }
     }
 
     // MARK: - Explicit DER chain
