@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 17 |
+| DONE | 18 |
 
 Non-terminal (open): 0
-Terminal: 19
+Terminal: 20
 
 ## Tasks
 
@@ -37,6 +37,7 @@ Terminal: 19
 | AUD-0017 | S2 | B | P1 | DONE | The API-compatibility check consumes the package by path, so it cannot catch unsafe-flags breakage | Swift/check-api-compatibility.sh |
 | AUD-0018 | S3 | C | P1 | DONE | The connection-churn soak exists but no workflow runs it, so the resource property it verifies is unchecked | Swift/run-soak.sh |
 | AUD-0019 | S2 | C | P2 | DONE | The portability check claimed more than its hand-maintained list could verify, and the inventory had drifted | C99/scripts/check-portability.sh |
+| AUD-0020 | S2 | C | P1 | DONE | The Swift address-sanitizer job ran three tests, not the suite, so the standard's 'sanitizers run the suite' was only partly true | .github/workflows/swift-ci.yml |
 
 ## Detail
 
@@ -231,4 +232,14 @@ Terminal: 19
 - fix: Widened the list with `htons ntohs clock_gettime` -- which immediately failed on the two genuinely missing inventory entries -- added both to `docs/PORTABILITY.md` with the adaptation each needs (Winsock supplies `htons`/`ntohs` with the same names, so the adaptation is the include; Windows uses `QueryPerformanceCounter`, which `core/time.c` already branches to), replaced the stale section with a pointer to the script as the source of truth rather than a list copied into prose, and rewrote the success message to state what was actually verified. The mechanism's limit is now written down in both the script and the document, with the real enforcement named and checked: `msvc`, `clang-cl` and `windows-native` in c99-ci.yml each configure, build and ctest the library, so a call Windows does not have fails there.
 - evidence after: Deliberate violation, both directions: with `getpid()` injected the check still passes -- recorded as the documented limit rather than hidden; with the widened list and before the document was updated the check FAILED with `htons is used in the library but is not in the inventory` and `clock_gettime ...`, exit 1. After adding both rows the check passes and prints the corrected message. `docs/PORTABILITY.md` names both calls; the stale section is gone. The Windows jobs' steps were read back from the parsed workflow to confirm they build the library rather than only configure it.
 - commit: bc0e51f
+
+### AUD-0020 — The Swift address-sanitizer job ran three tests, not the suite, so the standard's 'sanitizers run the suite' was only partly true
+
+- severity: S2 | tier: C | project: P1 | status: DONE | host: Mac14,3
+- category: tests | discovered by: the §1 tool-coverage review
+- where: .github/workflows/swift-ci.yml
+- evidence before: The standard asks sanitizers to run the suite. C99 did (`--sanitize` → 97/97 under ASan+UBSan) and the Swift thread-sanitizer job did (everything but `CLIProcess`/`ReleaseArtifacts`), but the Swift address-sanitizer job ran `swift test --sanitize=address --filter 'peerFacingParsers|huffmanDecoder'` -- three tests. A memory error anywhere else in the package was outside the run. `AUDIT/tool-coverage.md`, the document the standard names for tool-coverage proofs, had no sanitizer section at all, so the gap was not written down either.
+- fix: Ran the whole suite under AddressSanitizer on the primary host first: `swift test --sanitize=address --skip CLIProcess --skip ReleaseArtifacts` → 379 passed, 0 failed, no sanitizer reports, exit 0. Then added an `address-sanitizer` job to swift-ci.yml running exactly that, with the two skipped suites and the reason (they spawn non-instrumented binaries a sanitizer runtime cannot observe) in the job's own comment, and added the same run to `AUDIT/run-sweep.sh`'s heavy set. AGENTS.md's gate list now names the job. `AUDIT/tool-coverage.md` gained a sanitizer section stating what each of the four runs covers, so the distinction between running the suite and running part of it is written down rather than assumed.
+- evidence after: `swift test --sanitize=address --skip CLIProcess --skip ReleaseArtifacts`: `passed: 379 failed: 0`, 0 AddressSanitizer reports, exit 0. `check-workflows.py` parses all four workflow files with no duplicate keys; the new job's name, runner and steps were read back from the parsed YAML. The peer-input fuzz run (the 20000-iteration ASan job) is left as it is, because it exists for adversarial input rather than coverage, and the new section says so.
+- commit: PENDING
 

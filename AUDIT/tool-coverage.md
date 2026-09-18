@@ -127,3 +127,30 @@ the ledger (SwiftLint under AUD-0006; the SAST and trivy proofs under AUD-0005).
 `Swift/check-pkcs12-keychain-free.sh` (added in the previous release) was checked the same
 way: run against the pre-fix tree it exits 1 with `OSStatus -26276`, and against the fixed
 tree it exits 0. That is a gate that has been seen to fail, not one assumed to work.
+
+## Sanitizers — what each one actually runs
+
+The standard asks for sanitizers to run *the suite*, and the difference between running the
+suite and running part of it is the whole point of a sanitizer: a memory error in a path the
+run never reaches is not found. This section exists because that distinction was not written
+down anywhere until `AUD-0020`, and one of the four runs was on the wrong side of it.
+
+| Run | Coverage | Evidence |
+| --- | --- | --- |
+| C99 ASan + UBSan | **the whole suite** | `C99/scripts/build-and-test.sh --sanitize` → `100% tests passed out of 97` |
+| Swift ASan | **the whole suite** (since AUD-0020) | `swift test --sanitize=address --skip CLIProcess --skip ReleaseArtifacts` → 379 passed, 0 failed, no sanitizer reports |
+| Swift TSan | **the whole suite** | `swift test --sanitize=thread --skip CLIProcess --skip ReleaseArtifacts` → 0 failures |
+| Swift ASan, peer-input fuzz | the three fuzz tests, on purpose | the 20000-iteration run, which exists for adversarial input rather than coverage |
+
+The two skipped suites are skipped by both Swift sanitizer runs for the same reason:
+`CLIProcess` and `ReleaseArtifacts` spawn binaries that are not instrumented, so a sanitizer
+runtime in the test process cannot observe them and reports on them spuriously. They are named
+in the command rather than excluded from the suite, so what is *not* checked is visible.
+
+**A gate that runs part of the suite and is described as running the suite is the failure mode
+this document exists to catch**, and it is worth being exact about which it was: the Swift ASan
+job ran `--filter 'peerFacingParsers|huffmanDecoder'` -- three tests -- while the thread
+sanitizer beside it ran everything but two suites. The capability was there and passing; the
+gate simply did not use it. It does now (`AUD-0020`), and the full-suite run was executed on
+the primary host before the gate was added, so the CI job was written with its evidence already
+in hand rather than hoped for.

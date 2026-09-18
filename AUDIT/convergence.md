@@ -106,6 +106,11 @@ no commit recorded.
 The process rules themselves are reviewed in `AUDIT/compliance.md`, including the two places
 they were not followed.
 
+## Sweep 6 — primary host, after the sanitizer-coverage fix
+
+25 gates, **0 failed**. The heavy set grew: it now runs the whole Swift suite under
+AddressSanitizer rather than the three-test fuzz filter, which is what AUD-0020 found and fixed.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host
@@ -120,6 +125,7 @@ whole exercise is about:
 | `WebTransportServer --scenario all` | PASS | `passed=40 failed=0 skipped=0 total=40` |
 | `C99/scripts/build-and-test.sh --sanitize` | PASS | `100% tests passed out of 97` under AddressSanitizer and UndefinedBehaviorSanitizer (51 s) |
 | `swift test --sanitize=address --filter 'peerFacingParsers\|huffmanDecoder'` | PASS | 3 tests, including `peerFacingParsersNeverTrapOnArbitraryInput` |
+| `swift test --sanitize=address --skip CLIProcess --skip ReleaseArtifacts` | PASS | **the whole suite** under ASan: 379 passed, 0 failed, no sanitizer reports (added by AUD-0020) |
 | `swift test --sanitize=thread --skip CLIProcess --skip ReleaseArtifacts` | PASS | 0 failures under Thread Sanitizer |
 | `./Swift/build-release-apple-silicon.sh` | PASS | `Release artifacts are reproducible` with per-binary checksums; both are `Mach-O 64-bit executable arm64` |
 

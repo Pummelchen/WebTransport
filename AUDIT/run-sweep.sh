@@ -80,6 +80,7 @@ if [ "$heavy" = "1" ]; then
   gate "client CLI conformance" swift run WebTransportClient --scenario all
   gate "server CLI conformance" swift run WebTransportServer --scenario all
   gate "peer-input fuzz under AddressSanitizer" swift test --sanitize=address --filter 'peerFacingParsers|huffmanDecoder'
+  gate "suite under AddressSanitizer" swift test --sanitize=address --skip CLIProcess --skip ReleaseArtifacts
   gate "tests under Thread Sanitizer" swift test --sanitize=thread --skip CLIProcess --skip ReleaseArtifacts
   gate "C99 sanitizer build and tests" ./C99/scripts/build-and-test.sh --sanitize
   gate "connection-churn soak" ./Swift/run-soak.sh

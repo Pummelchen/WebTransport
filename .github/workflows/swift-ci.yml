@@ -190,6 +190,28 @@ jobs:
           swift test --sanitize=address
           --filter 'peerFacingParsers|huffmanDecoder'
 
+  # AUD-0020. The standard asks for sanitizers to run *the suite*, and the address-sanitizer job
+  # ran three fuzz tests: the memory sanitizer's coverage of this package was a fraction of what
+  # it could be, while the thread sanitizer next to it ran everything but two suites. The full
+  # suite was run on the primary host first -- 379 passed, 0 failed, no sanitizer reports -- so
+  # this gate is added with its evidence already in hand rather than hoped for.
+  #
+  # The two skipped suites are the same two the thread-sanitizer job skips, for the same reason:
+  # `CLIProcess` and `ReleaseArtifacts` spawn non-instrumented binaries, which a sanitizer
+  # runtime in this process cannot observe and would report on spuriously.
+  address-sanitizer:
+    name: Address Sanitizer
+    runs-on: xcode-27
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Assert mandated toolchain (Swift 6.4 / Xcode 27)
+        run: ./Swift/check-toolchain.sh 6.4 27.0
+
+      - name: Run the suite under Address Sanitizer
+        run: swift test --sanitize=address --skip CLIProcess --skip ReleaseArtifacts
+
   thread-sanitizer:
     name: Thread Sanitizer / in-process tests
     runs-on: xcode-27
