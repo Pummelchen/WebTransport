@@ -160,134 +160,168 @@ extension LibrarySmokeServer {
         mutating func handle(_ envelope: Phase11Envelope) throws -> Phase11Envelope? {
             switch envelope.kind {
             case .hello:
-                return Phase11Envelope(
-                    scenario: envelope.scenario,
-                    kind: .helloAck,
-                    message: "hello"
-                )
+                return helloResponse(to: envelope)
             case .control:
-                guard let payload = envelope.payload else {
-                    throw LibrarySmokeServerError.runtime("control envelope missing payload")
-                }
-                _ = try manager.receivePeerControlStream(payload)
-                let localControl = try manager.http3.localControlStreamBytes()
-                return Phase11Envelope(
-                    scenario: envelope.scenario,
-                    kind: .controlAck,
-                    payload: localControl,
-                    message: "control synchronized"
-                )
+                return try controlResponse(to: envelope)
             case .sessionRequest:
-                guard let requestStreamID = envelope.requestStreamID,
-                    let payload = envelope.payload
-                else {
-                    throw LibrarySmokeServerError.runtime("sessionRequest envelope missing stream id or payload")
-                }
-                let requestFrame = try Phase11FramePacket.decodeHTTP3Frame(payload)
-                let decision = try manager.receiveClientSessionRequest(
-                    streamID: requestStreamID,
-                    frame: requestFrame,
-                    policy: policy
-                )
-                let status: UInt16?
-                if case .rejected(let code) = decision.session.state {
-                    status = code
-                } else {
-                    status = nil
-                }
-                let responseFrame = try Phase11FramePacket.encodeHTTP3Frame(decision.responseFrame)
-                return Phase11Envelope(
-                    scenario: envelope.scenario,
-                    kind: .sessionResponse,
-                    requestStreamID: requestStreamID,
-                    sessionID: decision.session.id.rawValue,
-                    status: status,
-                    success: status == nil,
-                    payload: responseFrame,
-                    message: status == nil ? "session accepted" : "session rejected"
-                )
+                return try sessionRequestResponse(to: envelope)
             case .streamOpen:
-                guard let streamID = envelope.streamID,
-                    let streamKind = envelope.streamKind,
-                    let payload = envelope.payload
-                else {
-                    throw LibrarySmokeServerError.runtime("streamOpen envelope missing fields")
-                }
-                switch streamKind {
-                case .bidirectional:
-                    _ = try manager.acceptBidirectionalStream(streamID: streamID, firstBytes: payload)
-                case .unidirectional:
-                    _ = try manager.acceptUnidirectionalStream(streamID: streamID, firstBytes: payload)
-                }
-                return Phase11Envelope(
-                    scenario: envelope.scenario,
-                    kind: .streamOpenAck,
-                    streamID: streamID,
-                    success: true,
-                    message: "stream opened"
-                )
+                return try streamOpenResponse(to: envelope)
             case .streamData:
-                guard let streamID = envelope.streamID, let payload = envelope.payload else {
-                    throw LibrarySmokeServerError.runtime("streamData envelope missing stream id or payload")
-                }
-                try manager.receiveStreamPayload(streamID: streamID, payload: payload)
-                let echoed = manager.popStreamPayload(streamID: streamID) ?? Data()
-                return Phase11Envelope(
-                    scenario: envelope.scenario,
-                    kind: .streamEcho,
-                    streamID: streamID,
-                    payload: echoed,
-                    message: "stream echoed"
-                )
+                return try streamDataResponse(to: envelope)
             case .datagram:
-                guard let payload = envelope.payload else {
-                    throw LibrarySmokeServerError.runtime("datagram envelope missing payload")
-                }
-                do {
-                    let frame = try Phase11FramePacket.decodeQUICFrame(payload)
-                    let sessionID = try manager.receiveDatagramFrame(frame)
-                    let echoed = manager.popDatagramPayload(sessionID: sessionID) ?? Data()
-                    return Phase11Envelope(
-                        scenario: envelope.scenario,
-                        kind: .datagramEcho,
-                        sessionID: sessionID.rawValue,
-                        payload: echoed,
-                        message: "datagram echoed"
-                    )
-                } catch {
-                    return Phase11Envelope(
-                        scenario: envelope.scenario,
-                        kind: .error,
-                        success: false,
-                        message: "datagram rejected: \(error)"
-                    )
-                }
+                return try datagramResponse(to: envelope)
             case .streamReset:
-                guard let streamID = envelope.streamID else {
-                    throw LibrarySmokeServerError.runtime("missing stream id for reset")
-                }
-                let errorCode = envelope.errorCode ?? 0
-                let resetFrame = try manager.resetStream(streamID: streamID, applicationErrorCode: errorCode)
-                let payload = try Phase11FramePacket.encodeQUICFrame(resetFrame)
-                return Phase11Envelope(
-                    scenario: envelope.scenario,
-                    kind: .streamResetAck,
-                    streamID: streamID,
-                    errorCode: errorCode,
-                    success: true,
-                    payload: payload,
-                    message: "stream reset"
-                )
+                return try streamResetResponse(to: envelope)
             case .result:
-                return Phase11Envelope(
-                    scenario: envelope.scenario,
-                    kind: .result,
-                    success: envelope.success ?? true,
-                    message: envelope.message ?? (config.suiteMode ? "running" : "complete")
-                )
+                return resultResponse(to: envelope)
             case .helloAck, .controlAck, .sessionResponse, .streamOpenAck, .streamEcho, .streamResetAck, .datagramEcho, .resetReceived, .scenarioDone, .error:
                 return nil
             }
+        }
+
+        /// One envelope kind, one response. The dispatcher above is a list; each of these
+        /// carries the validation and the answer for its own kind.
+        private func helloResponse(to envelope: Phase11Envelope) -> Phase11Envelope {
+            Phase11Envelope(
+                scenario: envelope.scenario,
+                kind: .helloAck,
+                message: "hello"
+            )
+        }
+
+        private mutating func controlResponse(to envelope: Phase11Envelope) throws -> Phase11Envelope {
+            guard let payload = envelope.payload else {
+                throw LibrarySmokeServerError.runtime("control envelope missing payload")
+            }
+            _ = try manager.receivePeerControlStream(payload)
+            let localControl = try manager.http3.localControlStreamBytes()
+            return Phase11Envelope(
+                scenario: envelope.scenario,
+                kind: .controlAck,
+                payload: localControl,
+                message: "control synchronized"
+            )
+        }
+
+        private mutating func sessionRequestResponse(to envelope: Phase11Envelope) throws -> Phase11Envelope {
+            guard let requestStreamID = envelope.requestStreamID,
+                let payload = envelope.payload
+            else {
+                throw LibrarySmokeServerError.runtime("sessionRequest envelope missing stream id or payload")
+            }
+            let requestFrame = try Phase11FramePacket.decodeHTTP3Frame(payload)
+            let decision = try manager.receiveClientSessionRequest(
+                streamID: requestStreamID,
+                frame: requestFrame,
+                policy: policy
+            )
+            let status: UInt16?
+            if case .rejected(let code) = decision.session.state {
+                status = code
+            } else {
+                status = nil
+            }
+            let responseFrame = try Phase11FramePacket.encodeHTTP3Frame(decision.responseFrame)
+            return Phase11Envelope(
+                scenario: envelope.scenario,
+                kind: .sessionResponse,
+                requestStreamID: requestStreamID,
+                sessionID: decision.session.id.rawValue,
+                status: status,
+                success: status == nil,
+                payload: responseFrame,
+                message: status == nil ? "session accepted" : "session rejected"
+            )
+        }
+
+        private mutating func streamOpenResponse(to envelope: Phase11Envelope) throws -> Phase11Envelope {
+            guard let streamID = envelope.streamID,
+                let streamKind = envelope.streamKind,
+                let payload = envelope.payload
+            else {
+                throw LibrarySmokeServerError.runtime("streamOpen envelope missing fields")
+            }
+            switch streamKind {
+            case .bidirectional:
+                _ = try manager.acceptBidirectionalStream(streamID: streamID, firstBytes: payload)
+            case .unidirectional:
+                _ = try manager.acceptUnidirectionalStream(streamID: streamID, firstBytes: payload)
+            }
+            return Phase11Envelope(
+                scenario: envelope.scenario,
+                kind: .streamOpenAck,
+                streamID: streamID,
+                success: true,
+                message: "stream opened"
+            )
+        }
+
+        private mutating func streamDataResponse(to envelope: Phase11Envelope) throws -> Phase11Envelope {
+            guard let streamID = envelope.streamID, let payload = envelope.payload else {
+                throw LibrarySmokeServerError.runtime("streamData envelope missing stream id or payload")
+            }
+            try manager.receiveStreamPayload(streamID: streamID, payload: payload)
+            let echoed = manager.popStreamPayload(streamID: streamID) ?? Data()
+            return Phase11Envelope(
+                scenario: envelope.scenario,
+                kind: .streamEcho,
+                streamID: streamID,
+                payload: echoed,
+                message: "stream echoed"
+            )
+        }
+
+        private mutating func datagramResponse(to envelope: Phase11Envelope) throws -> Phase11Envelope {
+            guard let payload = envelope.payload else {
+                throw LibrarySmokeServerError.runtime("datagram envelope missing payload")
+            }
+            do {
+                let frame = try Phase11FramePacket.decodeQUICFrame(payload)
+                let sessionID = try manager.receiveDatagramFrame(frame)
+                let echoed = manager.popDatagramPayload(sessionID: sessionID) ?? Data()
+                return Phase11Envelope(
+                    scenario: envelope.scenario,
+                    kind: .datagramEcho,
+                    sessionID: sessionID.rawValue,
+                    payload: echoed,
+                    message: "datagram echoed"
+                )
+            } catch {
+                return Phase11Envelope(
+                    scenario: envelope.scenario,
+                    kind: .error,
+                    success: false,
+                    message: "datagram rejected: \(error)"
+                )
+            }
+        }
+
+        private mutating func streamResetResponse(to envelope: Phase11Envelope) throws -> Phase11Envelope {
+            guard let streamID = envelope.streamID else {
+                throw LibrarySmokeServerError.runtime("missing stream id for reset")
+            }
+            let errorCode = envelope.errorCode ?? 0
+            let resetFrame = try manager.resetStream(streamID: streamID, applicationErrorCode: errorCode)
+            let payload = try Phase11FramePacket.encodeQUICFrame(resetFrame)
+            return Phase11Envelope(
+                scenario: envelope.scenario,
+                kind: .streamResetAck,
+                streamID: streamID,
+                errorCode: errorCode,
+                success: true,
+                payload: payload,
+                message: "stream reset"
+            )
+        }
+
+        private func resultResponse(to envelope: Phase11Envelope) -> Phase11Envelope {
+            Phase11Envelope(
+                scenario: envelope.scenario,
+                kind: .result,
+                success: envelope.success ?? true,
+                message: envelope.message ?? (config.suiteMode ? "running" : "complete")
+            )
         }
 
         private func send(_ envelope: Phase11Envelope, to endpoint: QUICUDPEndpoint) throws {

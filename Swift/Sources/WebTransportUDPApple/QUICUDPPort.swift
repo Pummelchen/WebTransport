@@ -172,6 +172,24 @@ public final class QUICUDPPort: @unchecked Sendable {
         }
     }
 
+    /// Waits for the descriptor to become readable.
+    ///
+    /// A zero result is the timeout the caller asked for; anything else non-positive is the
+    /// platform's error. Kept apart from `receive` because the receive path is dominated by
+    /// the `recvmsg` safety argument, and mixing the two hides the poll's own contract.
+    private func waitForReadable(timeoutMilliseconds: Int32) throws {
+        // `fd:` is the POSIX `pollfd` field name, not this type's renamed property.
+        var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+        // SAFETY: poll receives one initialized pollfd for the declared count.
+        let pollResult = unsafe Darwin.poll(&pollDescriptor, 1, timeoutMilliseconds)
+        guard pollResult > 0 else {
+            if pollResult == 0 {
+                throw QUICUDPError.timeout
+            }
+            throw QUICUDPError.posix(operation: "poll", code: errno)
+        }
+    }
+
     public func receive(maximumBytes: Int = 65_535, timeoutMilliseconds: Int32 = 1_000) throws -> (Data, QUICUDPEndpoint) {
         guard maximumBytes > 0 && maximumBytes <= Self.maximumUDPDatagramBytes else {
             throw QUICUDPError.invalidReceiveConfiguration("maximumBytes must be in 1...\(Self.maximumUDPDatagramBytes)")
@@ -183,16 +201,7 @@ public final class QUICUDPPort: @unchecked Sendable {
         receiveLock.lock()
         defer { receiveLock.unlock() }
 
-        // `fd:` is the POSIX `pollfd` field name, not this type's renamed property.
-        var pollDescriptor = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-        // SAFETY: poll receives one initialized pollfd for the declared count.
-        let pollResult = unsafe Darwin.poll(&pollDescriptor, 1, timeoutMilliseconds)
-        guard pollResult > 0 else {
-            if pollResult == 0 {
-                throw QUICUDPError.timeout
-            }
-            throw QUICUDPError.posix(operation: "poll", code: errno)
-        }
+        try waitForReadable(timeoutMilliseconds: timeoutMilliseconds)
 
         var storage = sockaddr_storage()
         if receiveBuffer.count < maximumBytes {
