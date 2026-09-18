@@ -68,6 +68,10 @@ gate "cppcheck" ./C99/scripts/check-cppcheck.sh
 gate "Clang Static Analyzer" ./C99/scripts/check-static-analysis.sh
 gate "workflow files parse" python3 C99/scripts/check-workflows.py
 gate "ledger satisfies the standard's field rules" python3 AUDIT/check-ledger.py
+# A generated artifact that has drifted from its source is a small facade: the file looks like the
+# record and is not. Both are regenerated and compared, so the committed copy is the current one.
+gate "ledger.md matches the ledger" sh -c './AUDIT/render-ledger.sh /tmp/audit-ledger-check.md >/dev/null && diff -q /tmp/audit-ledger-check.md AUDIT/ledger.md'
+gate "report.md matches the ledger" sh -c './AUDIT/render-report.py | diff -q - AUDIT/report.md'
 
 printf '=== Security ===\n'
 # trivy needs an empty docker config on this host: the user's ~/.docker/config.json names a

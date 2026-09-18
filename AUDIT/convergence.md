@@ -185,6 +185,14 @@ violation.
 
 26 gates, **0 failed**.
 
+## Sweep 26 — primary host, after the report generator and the freshness gates
+
+**28 gates, 0 failed.** Two gates are new, and both guard a *generated* artifact: `AUDIT/ledger.md`
+and `AUDIT/report.md` are re-rendered to a temporary file and compared with the committed copy. A
+generated file that has drifted from its source is a small facade -- it looks like the record
+without being it -- and until this sweep nothing would have noticed. `render-ledger.sh` took an
+optional output path to make that possible without disturbing its default.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host

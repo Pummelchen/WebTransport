@@ -8,10 +8,19 @@ set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ledger="$root/ledger.json"
-out="$root/ledger.md"
+# The output path may be given as the first argument, which is how `run-sweep.sh` re-renders to a
+# temporary file and compares it with the committed one: a generated artifact that has drifted from
+# its source looks like the record without being it.
+out="${1:-$root/ledger.md}"
 
-[ -f "$ledger" ] || { echo "missing $ledger" >&2; exit 1; }
-command -v jq >/dev/null 2>&1 || { echo "jq is required to render the ledger" >&2; exit 1; }
+[ -f "$ledger" ] || {
+  echo "missing $ledger" >&2
+  exit 1
+}
+command -v jq >/dev/null 2>&1 || {
+  echo "jq is required to render the ledger" >&2
+  exit 1
+}
 
 {
   jq -r '
@@ -50,6 +59,6 @@ command -v jq >/dev/null 2>&1 || { echo "jq is required to render the ledger" >&
       (if .blocked_reason != "" then "- BLOCKED: \(.blocked_reason)" else empty end),
       "")
   ' "$ledger"
-} > "$out"
+} >"$out"
 
 echo "rendered $out"
