@@ -9,11 +9,11 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 1 |
-| DONE | 10 |
-| OPEN | 5 |
+| DONE | 11 |
+| OPEN | 4 |
 
-Non-terminal (open): 5
-Terminal: 11
+Non-terminal (open): 4
+Terminal: 12
 
 ## Tasks
 
@@ -23,7 +23,7 @@ Terminal: 11
 | AUD-0002 | S1 | C | both | BLOCKED | Phase E needs one independent host; none is provisioned | AUDIT/environment.md |
 | AUD-0003 | S3 | C | both | DONE | Inventory, dependency graph, trust boundaries and tier table | AUDIT/inventory.md |
 | AUD-0004 | S3 | C | both | DONE | Baseline both projects on the primary host | AUDIT/baseline.md |
-| AUD-0005 | S2 | C | both | OPEN | Tool-coverage and language-standard proofs for every delegated check | AUDIT/tool-coverage.md |
+| AUD-0005 | S2 | C | both | DONE | Tool-coverage and language-standard proofs for every delegated check | AUDIT/tool-coverage.md |
 | AUD-0006 | S1 | A | P1 | OPEN | SwiftLint is installed but has no committed config and is not run, so the mandated Swift linter is not in force | Package.swift |
 | AUD-0007 | S1 | A | both | DONE | Ruff has no config, so B, E722, S101 and PT are not enabled | AUDIT/environment.md |
 | AUD-0008 | S2 | A | P1 | OPEN | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | Package.swift:12-17 |
@@ -81,12 +81,12 @@ Terminal: 11
 
 ### AUD-0005 — Tool-coverage and language-standard proofs for every delegated check
 
-- severity: S2 | tier: C | project: both | status: OPEN | host: Mac14,3
+- severity: S2 | tier: C | project: both | status: DONE | host: Mac14,3
 - category: process | discovered by: phase-a
 - where: AUDIT/tool-coverage.md
 - evidence before: No proof that any delegated check is actually enforced; SwiftLint and Ruff are not even configured
-- fix: In progress: Swift language-standard, C language-standard, swift-format, Ruff and gitleaks proofs recorded in AUDIT/tool-coverage.md. Outstanding: SwiftLint (blocked on AUD-0006), and cppcheck/scan-build/trivy coverage proofs.
-- evidence after: 
+- fix: Proved every delegated check against a deliberate violation and recorded the tool's own output in AUDIT/tool-coverage.md: Swift 6 strict concurrency (escaping @Sendable capture -> #SendableClosureCaptures, build exit 1), C99 (implicit declaration and a GNU nested function both rejected under the project's real flags), swift-format (Indentation/Spacing errors), Ruff (B006/E722/S101/PT011), gitleaks (leaks found: 1), SwiftLint (force_unwrapping and the rest), cppcheck (arrayIndexOutOfBounds + memleak), clang --analyze (core.NullDereference) and trivy (1 secret).
+- evidence after: AUDIT/tool-coverage.md carries each violation, the exact command and the tool output. One honest correction is recorded there: the first Swift concurrency violation COMPILED, because Swift 6's region-based isolation legitimately permits transferring a uniquely referenced value into a task; the proof was replaced with a genuinely illegal escaping-capture form. A proof that passes for the wrong reason is not a proof.
 - commit: 
 
 ### AUD-0006 — SwiftLint is installed but has no committed config and is not run, so the mandated Swift linter is not in force
