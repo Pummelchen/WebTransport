@@ -154,6 +154,14 @@ set(WT_CRYPTO_SOURCES
   src/crypto/crypto_openssl.c
 )
 
+# Kept under 500 lines where that can be done without exporting internal symbols or moving
+# nearly a whole file. `connection_receive.c` (581 code lines) is the one exception in this
+# list: its frame-visiting group calls the path handlers and the close handler, and
+# `process_packet` calls `visit_frame`, so every candidate seam crosses a file-static
+# boundary. Splitting it would mean giving those helpers external linkage -- new exported
+# symbols in the shared library, which is an ABI change -- or moving almost the entire file,
+# which is not a split. `packet.c` and `frame.c` had seams that crossed nothing, and were
+# split where this one cannot be.
 set(WT_QUIC_SOURCES
   src/quic/error.c
   src/quic/varint.c
