@@ -165,6 +165,10 @@ violation.
 
 26 gates, **0 failed**.
 
+## Sweep 20 — primary host, after the section 7.3 client-half tests
+
+26 gates, **0 failed**.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host

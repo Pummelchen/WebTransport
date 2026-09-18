@@ -190,5 +190,6 @@ void test_a_path_challenge_is_echoed_immediately(void);
 void test_a_path_is_validated_by_its_own_response(void);
 void test_a_path_that_does_not_answer_is_given_up_on(void);
 void test_quic_space_names(void);
+void test_the_client_half_of_section_7_3(void);
 
 #endif /* WT_TEST_QUIC_CONNECTION_INTERNAL_H */

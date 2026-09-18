@@ -49,6 +49,7 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | `C99/src/quic/packet.c` | **Read in full**; the remaining uncovered guards closed — `AUD-0029` |
 | `C99/src/tls/trust.c` | Read in part (both trusting modes' certificate path) — `AUD-0030` |
 | `C99/src/webtransport/session.c` | Read in part (the CONNECT-stream capsule walk) — `AUD-0032` |
+| `C99/src/quic/connection.c` | Read in part (the section 7.2/7.3 connection-ID parameter checks) — `AUD-0033` |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
 
@@ -257,6 +258,7 @@ rather than by deletion.
 | `quic/packet.c` `initial_token` form and type guards | `AUD-0029` |
 | `tls/trust.c` unparseable certificate in both trusting modes | `AUD-0030` |
 | `webtransport/session.c` malformed DRAIN and bytes after a CLOSE | `AUD-0032` |
+| `quic/connection.c` section 7.3 client half (all three refusals) | `AUD-0033` |
 
 **Unreachable, and recorded as such:**
 

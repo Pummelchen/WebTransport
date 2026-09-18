@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 30 |
+| DONE | 31 |
 
 Non-terminal (open): 0
-Terminal: 32
+Terminal: 33
 
 ## Tasks
 
@@ -50,6 +50,7 @@ Terminal: 32
 | AUD-0030 | S2 | A | P2 | DONE | Neither trusting mode's 'these bytes are not a certificate' refusal had ever executed | C99/src/tls/trust.c:169 |
 | AUD-0031 | S3 | A | P2 | DONE | Three uncovered peer-input refusals are unreachable, each with a proof, and one tried to be tested twice over | C99/src/quic/protection.c:294 |
 | AUD-0032 | S2 | A | P2 | DONE | Two WebTransport capsule refusals a previous audit added had no test, and both are honest regressions | C99/src/webtransport/session.c:144 |
+| AUD-0033 | S2 | A | P2 | DONE | RFC 9000 section 7.3's client half -- the check that stops an injected connection ID -- had all three refusals unexecuted | C99/src/quic/connection.c:175 |
 
 ## Detail
 
@@ -374,4 +375,14 @@ Terminal: 32
 - fix: Added `test_a_malformed_drain_and_bytes_after_a_close` to `test_webtransport_session.c`. The malformed DRAIN is built with the varint writer rather than through `wt_webtransport_drain_session_write`, which cannot produce it because it writes the empty value the draft requires. The second case puts a CLOSE and a flow-control grant in ONE buffer and asserts both the refusal and that the observer was never called.
 - evidence after: `llvm-cov show` confirms session.c:144 and :163 now execute; the total moved 91.77% -> **91.81%** lines. Deliberate violation, each refusal's effect removed while its condition stayed (so the compiler stays quiet), and each failure shows why the check matters: without the drain check, `FAIL a drain capsule with a value is refused: want protocol, got ok` AND `FAIL and the drain is not applied: want 0, got 1` -- the malformed capsule is APPLIED. Without the after-close check, `FAIL bytes after the close are refused: want protocol, got ok` AND `FAIL and the grant behind the close is never applied: want 0, got 1` -- the peer's grant behind the close is HONOURED. Restored, 97/97.
 - commit: 0438d7f
+
+### AUD-0033 — RFC 9000 section 7.3's client half -- the check that stops an injected connection ID -- had all three refusals unexecuted
+
+- severity: S2 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: tests | discovered by: Tier A review, peer-input coverage filter (AUDIT/tier-a-review.md)
+- where: C99/src/quic/connection.c:175
+- evidence before: The code states the stake of these three refusals: "Without this a client would accept a connection whose connection IDs an attacker who injected packets could have influenced, which is the attack the parameters exist to close." Line coverage showed all three unexecuted -- a missing or mismatched original_destination_connection_id, a retry_source_connection_id when no Retry was received, and a missing or mismatched one when a Retry WAS received. They are reachable: a peer's transport parameters arrive through `wt_quic_connection_set_peer_parameters`.
+- fix: Added `test_the_client_half_of_section_7_3` to `test_quic_connection_ids.c`. Every case differs from an ACCEPTED one only in the value under test -- the matching original destination id is asserted accepted first, and so is the matching Retry pair -- so a parameter that is merely absent from a message cannot pass for the wrong reason. `retry_accepted` and the source id it records are the state `wt_quic_connection_retry` leaves behind; the id the client addressed is set through the public `wt_quic_connection_set_original_destination_id`.
+- evidence after: `llvm-cov show` confirms connection.c:175, :185 and :188 now execute (counts 2, 2 and 1); the total moved 91.81% -> **91.85%** lines. Deliberate violation, one refusal at a time, each effect removed while its condition stayed: removing the original-destination check fails on BOTH its cases (`want protocol, got ok` twice); removing the Retry-mismatch check fails on both of its cases; removing the no-Retry-present check fails on its case -- 2, 2 and 1 failures of 2464 checks respectively. Restored, 97/97.
+- commit: PENDING
 

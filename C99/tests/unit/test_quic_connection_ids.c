@@ -625,3 +625,110 @@ void test_a_retire_prior_to_replaces_the_id_in_use(void) {
 
   close_pair(&pair);
 }
+
+/* RFC 9000 section 7.3's client half, whose stake the code states: "Without this a client would accept a
+ * connection whose connection IDs an attacker who injected packets could have influenced, which is the attack
+ * the parameters exist to close." Three refusals had no test (AUD-0033). Every case differs from an ACCEPTED
+ * one only in the value under test, so a parameter that is merely absent from a message cannot pass for the
+ * wrong reason. */
+void test_the_client_half_of_section_7_3(void) {
+  connection_pair_t pair;
+  wt_quic_transport_parameters_t params;
+  uint8_t payload[128];
+  static const uint8_t odcid[8] = {1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U};
+  static const uint8_t other_odcid[8] = {8U, 7U, 6U, 5U, 4U, 3U, 2U, 1U};
+  static const uint8_t retry_scid[4] = {9U, 10U, 11U, 12U};
+  static const uint8_t other_retry_scid[4] = {12U, 11U, 10U, 9U};
+  wt_writer_t w;
+
+  open_pair(WT_UDP_IPV4, &pair);
+  WT_EXPECT_OK("the client is told the id it first addressed",
+               wt_quic_connection_set_original_destination_id(&pair.client, odcid, sizeof(odcid)));
+
+  /* The matching parameter is accepted, which is what makes the refusals below about the VALUE. */
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("the id it sent is echoed back",
+               wt_quic_transport_parameters_add_bytes(
+                   &params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, odcid, sizeof(odcid)));
+  w = wt_writer_init(payload, sizeof(payload));
+  WT_EXPECT_OK("the parameters encode", wt_quic_transport_parameters_encode(&w, &params));
+  WT_EXPECT_OK("and are accepted",
+               wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&w)));
+
+  /* ABSENCE counts: the section makes a missing original_destination_connection_id an error. */
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("parameters without it", wt_quic_transport_parameters_add_integer(
+                                            &params, WT_QUIC_TP_MAX_IDLE_TIMEOUT, 1000U));
+  w = wt_writer_init(payload, sizeof(payload));
+  WT_EXPECT_OK("encode", wt_quic_transport_parameters_encode(&w, &params));
+  WT_EXPECT_STATUS(
+      "a missing original destination id is refused", WT_ERR_PROTOCOL,
+      wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&w)));
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("a different id", wt_quic_transport_parameters_add_bytes(
+                                     &params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID,
+                                     other_odcid, sizeof(other_odcid)));
+  w = wt_writer_init(payload, sizeof(payload));
+  WT_EXPECT_OK("encode", wt_quic_transport_parameters_encode(&w, &params));
+  WT_EXPECT_STATUS(
+      "a mismatched original destination id is refused", WT_ERR_PROTOCOL,
+      wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&w)));
+
+  /* A retry_source_connection_id when no Retry was received is the peer naming a Retry this client never
+   * answered. */
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("the echoed id",
+               wt_quic_transport_parameters_add_bytes(
+                   &params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, odcid, sizeof(odcid)));
+  WT_EXPECT_OK("and a retry source id",
+               wt_quic_transport_parameters_add_bytes(
+                   &params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID, retry_scid, sizeof(retry_scid)));
+  w = wt_writer_init(payload, sizeof(payload));
+  WT_EXPECT_OK("encode", wt_quic_transport_parameters_encode(&w, &params));
+  WT_EXPECT_STATUS(
+      "a retry source id without a Retry is refused", WT_ERR_PROTOCOL,
+      wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&w)));
+
+  /* Now the state accepting a Retry leaves behind: required, and it must match. */
+  pair.client.retry_accepted = 1;
+  memcpy(pair.client.retry_source_connection_id, retry_scid, sizeof(retry_scid));
+  pair.client.retry_source_connection_id_length = sizeof(retry_scid);
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("only the echoed id",
+               wt_quic_transport_parameters_add_bytes(
+                   &params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, odcid, sizeof(odcid)));
+  w = wt_writer_init(payload, sizeof(payload));
+  WT_EXPECT_OK("encode", wt_quic_transport_parameters_encode(&w, &params));
+  WT_EXPECT_STATUS(
+      "a Retry the parameters do not name is refused", WT_ERR_PROTOCOL,
+      wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&w)));
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("the echoed id",
+               wt_quic_transport_parameters_add_bytes(
+                   &params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, odcid, sizeof(odcid)));
+  WT_EXPECT_OK("and the Retry's own source id",
+               wt_quic_transport_parameters_add_bytes(
+                   &params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID, retry_scid, sizeof(retry_scid)));
+  w = wt_writer_init(payload, sizeof(payload));
+  WT_EXPECT_OK("encode", wt_quic_transport_parameters_encode(&w, &params));
+  WT_EXPECT_OK("the matching pair is accepted",
+               wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&w)));
+
+  wt_quic_transport_parameters_init(&params);
+  WT_EXPECT_OK("the echoed id",
+               wt_quic_transport_parameters_add_bytes(
+                   &params, WT_QUIC_TP_ORIGINAL_DESTINATION_CONNECTION_ID, odcid, sizeof(odcid)));
+  WT_EXPECT_OK("and a DIFFERENT source id", wt_quic_transport_parameters_add_bytes(
+                                                &params, WT_QUIC_TP_RETRY_SOURCE_CONNECTION_ID,
+                                                other_retry_scid, sizeof(other_retry_scid)));
+  w = wt_writer_init(payload, sizeof(payload));
+  WT_EXPECT_OK("encode", wt_quic_transport_parameters_encode(&w, &params));
+  WT_EXPECT_STATUS(
+      "a mismatched retry source id is refused", WT_ERR_PROTOCOL,
+      wt_quic_connection_set_peer_parameters(&pair.client, payload, wt_writer_offset(&w)));
+
+  close_pair(&pair);
+}
