@@ -130,14 +130,8 @@ private func deterministicVarIntCorpus() -> [UInt64] {
 /// value the RFC makes a `TRANSPORT_PARAMETER_ERROR`.
 @Test
 func transportParameterValidationEnforcesRFC9000Section18Point2() throws {
-    func parameters(_ configure: (inout QUICTransportParameters) throws -> Void) throws -> QUICTransportParameters {
-        var values = QUICTransportParameters()
-        try configure(&values)
-        return values
-    }
-
     // A well-formed set passes.
-    let valid = try parameters {
+    let valid = try transportParameters {
         try $0.setInteger(1_200, for: QUICTransportParameterID.maxUDPPayloadSize)
         try $0.setInteger(3, for: QUICTransportParameterID.ackDelayExponent)
         try $0.setInteger(25, for: QUICTransportParameterID.maxAckDelay)
@@ -146,77 +140,13 @@ func transportParameterValidationEnforcesRFC9000Section18Point2() throws {
     try valid.validated()
 
     // Each violation is rejected.
-    let cases: [(String, QUICTransportParameters)] = [
-        (
-            "max_udp_payload_size below 1200",
-            try parameters {
-                try $0.setInteger(1_199, for: QUICTransportParameterID.maxUDPPayloadSize)
-            }
-        ),
-        (
-            "ack_delay_exponent above 20",
-            try parameters {
-                try $0.setInteger(21, for: QUICTransportParameterID.ackDelayExponent)
-            }
-        ),
-        (
-            "max_ack_delay at 2^14",
-            try parameters {
-                try $0.setInteger(1 << 14, for: QUICTransportParameterID.maxAckDelay)
-            }
-        ),
-        (
-            "active_connection_id_limit below 2",
-            try parameters {
-                try $0.setInteger(1, for: QUICTransportParameterID.activeConnectionIDLimit)
-            }
-        ),
-        (
-            "stateless_reset_token not 16 bytes",
-            try parameters {
-                $0[QUICTransportParameterID.statelessResetToken] = Data(repeating: 0xab, count: 8)
-            }
-        ),
-        (
-            "original_destination_connection_id of zero length",
-            try parameters {
-                $0[QUICTransportParameterID.originalDestinationConnectionID] = Data()
-            }
-        ),
-        (
-            "connection ID longer than 20",
-            try parameters {
-                $0[QUICTransportParameterID.retrySourceConnectionID] = Data(repeating: 0x01, count: 21)
-            }
-        ),
-        // RFC 9000 section 4.6: a max_streams value above 2^60 allows a stream ID that cannot be expressed as
-        // a variable-length integer, and receiving one is a TRANSPORT_PARAMETER_ERROR. The validator enforced
-        // every other section 18.2 rule and missed both of these (`WT-250`).
-        (
-            "initial_max_streams_bidi above 2^60",
-            try parameters {
-                try $0.setInteger((1 << 60) + 1, for: QUICTransportParameterID.initialMaxStreamsBidi)
-            }
-        ),
-        (
-            "initial_max_streams_uni above 2^60",
-            try parameters {
-                try $0.setInteger((1 << 60) + 1, for: QUICTransportParameterID.initialMaxStreamsUni)
-            }
-        ),
-    ]
-    for (name, value) in cases {
-        #expect(throws: (any Error).self, "expected \(name) to be rejected") {
-            try value.validated()
-        }
-    }
 
     // These are conforming and must be accepted. RFC 9000 section 7.3: "If a zero-length
     // connection ID is selected, the corresponding transport parameter is included with
     // a zero-length value." RFC 9221 section 3 makes an explicit zero
     // max_datagram_frame_size mean "DATAGRAM frames are not supported", which is also
     // the absent-parameter default.
-    let conforming = try parameters {
+    let conforming = try transportParameters {
         $0[QUICTransportParameterID.initialSourceConnectionID] = Data()
         $0[QUICTransportParameterID.retrySourceConnectionID] = Data()
         try $0.setInteger(0, for: QUICTransportParameterID.maxDatagramFrameSize)
@@ -225,6 +155,7 @@ func transportParameterValidationEnforcesRFC9000Section18Point2() throws {
         try $0.setInteger(1 << 60, for: QUICTransportParameterID.initialMaxStreamsUni)
     }
     try conforming.validated()
+    try expectTransportParameterViolationsRejected()
 }
 
 // MARK: - Long header validity
@@ -414,5 +345,97 @@ func everyFrameTypeRoundTrips() throws {
     for frame in frames {
         let encoded = try frame.encode()
         #expect(try QUICFrame.decodeFrames(encoded) == [frame], "\(frame)")
+    }
+}
+
+/// Builds a transport-parameter set from a configuration closure.
+private func transportParameters(
+    _ configure: (inout QUICTransportParameters) throws -> Void
+) throws -> QUICTransportParameters {
+    var values = QUICTransportParameters()
+    try configure(&values)
+    return values
+}
+
+/// Every RFC 9000 section 18.2 violation, as (name, parameters) pairs.
+private func transportParameterViolationCases() throws -> [(String, QUICTransportParameters)] {
+    try numericTransportParameterViolations() + identifierTransportParameterViolations()
+}
+
+/// The numeric bounds of RFC 9000 section 18.2.
+private func numericTransportParameterViolations() throws -> [(String, QUICTransportParameters)] {
+    [
+        (
+            "max_udp_payload_size below 1200",
+            try transportParameters {
+                try $0.setInteger(1_199, for: QUICTransportParameterID.maxUDPPayloadSize)
+            }
+        ),
+        (
+            "ack_delay_exponent above 20",
+            try transportParameters {
+                try $0.setInteger(21, for: QUICTransportParameterID.ackDelayExponent)
+            }
+        ),
+        (
+            "max_ack_delay at 2^14",
+            try transportParameters {
+                try $0.setInteger(1 << 14, for: QUICTransportParameterID.maxAckDelay)
+            }
+        ),
+        (
+            "active_connection_id_limit below 2",
+            try transportParameters {
+                try $0.setInteger(1, for: QUICTransportParameterID.activeConnectionIDLimit)
+            }
+        ),
+    ]
+}
+
+/// The connection-ID and token shapes of the same section.
+private func identifierTransportParameterViolations() throws -> [(String, QUICTransportParameters)] {
+    [
+        (
+            "stateless_reset_token not 16 bytes",
+            try transportParameters {
+                $0[QUICTransportParameterID.statelessResetToken] = Data(repeating: 0xab, count: 8)
+            }
+        ),
+        (
+            "original_destination_connection_id of zero length",
+            try transportParameters {
+                $0[QUICTransportParameterID.originalDestinationConnectionID] = Data()
+            }
+        ),
+        (
+            "connection ID longer than 20",
+            try transportParameters {
+                $0[QUICTransportParameterID.retrySourceConnectionID] = Data(repeating: 0x01, count: 21)
+            }
+        ),
+        // RFC 9000 section 4.6: a max_streams value above 2^60 allows a stream ID that cannot be expressed as
+        // a variable-length integer, and receiving one is a TRANSPORT_PARAMETER_ERROR. The validator enforced
+        // every other section 18.2 rule and missed both of these (`WT-250`).
+        (
+            "initial_max_streams_bidi above 2^60",
+            try transportParameters {
+                try $0.setInteger((1 << 60) + 1, for: QUICTransportParameterID.initialMaxStreamsBidi)
+            }
+        ),
+        (
+            "initial_max_streams_uni above 2^60",
+            try transportParameters {
+                try $0.setInteger((1 << 60) + 1, for: QUICTransportParameterID.initialMaxStreamsUni)
+            }
+        ),
+    ]
+}
+
+/// Asserts each violation is rejected.
+private func expectTransportParameterViolationsRejected() throws {
+    for (name, value) in try transportParameterViolationCases() {
+        #expect(throws: (any Error).self, "expected \(name) to be rejected") {
+            try value.validated()
+        }
     }
 }
