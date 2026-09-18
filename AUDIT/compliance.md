@@ -18,6 +18,27 @@ record that only lists successes is the same kind of document as a check that ca
 | No scope-narrowing to close a task | Every task's `fix_summary` names what was changed, and the sweeps re-run the whole gate set rather than the subset a change touched. |
 | If in doubt, write the doubt down | `AUDIT/convergence.md` carries the two near-misses (a generated file broken by the reformat, a soak nobody ran); this file carries the two process deviations below. |
 
+## §1 — the build-configuration mandate: **one deviation, recorded**
+
+The standard asks for the language standard to be enforced in the build configuration rather than on
+a command line that happens to pass it. Two of the three Swift settings are there:
+`strictSwiftSettings` in both manifests carries `.strictMemorySafety()` and
+`.treatAllWarnings(as: .error)`, so a new warning fails `swift build` for a contributor and for CI
+alike.
+
+**`-require-explicit-sendable` is not, and cannot be.** SwiftPM exposes no first-class SwiftSetting
+for it (checked against `PackageDescription`'s own interface for tools 6.4: there is
+`strictMemorySafety`, `treatAllWarnings`, `swiftLanguageMode`, `unsafeFlags` and no equivalent). The
+only mechanism is `.unsafeFlags`, and SwiftPM refuses a dependency that uses unsafe build flags —
+for **remote** dependencies only, which is the part that makes a local check impossible: a `file://`
+URL is resolved as a local dependency, so a versioned-consumer check in this repository builds
+happily with `.unsafeFlags` present. That was implemented, measured and dropped rather than shipped
+as a check that could not see what it claimed to.
+
+The result is that the flag stays on the CI command line and this file records the deviation. The
+alternative — putting it in the manifest — breaks the package for every consumer that reaches it by
+version, which is worse than the deviation it would remove. `AUD-0008` carries the experiment.
+
 ## §7 — severity ordering: **one deviation, recorded**
 
 The standard says findings are fixed in severity order S0 → S3. Two S2 tasks were closed while

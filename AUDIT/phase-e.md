@@ -4,7 +4,22 @@ Phase E is the last thing the standard asks for and the only part of this audit 
 done on the primary host. This file is the runbook for it, written now so that provisioning a
 host and producing the evidence is mechanical rather than improvised.
 
-**Status: not run. No independent host exists** (`AUD-0002`, BLOCKED, owner: repository owner).
+**Status: running.** The owner provided two hosts on 18 September 2026, which is option (2) of the
+three this file listed:
+
+| Host | What it is | Toolchain | Why it is independent |
+| --- | --- | --- | --- |
+| `node1` | Mac mini M2, 8 GB, macOS 27.0 | the pinned set exactly: Swift 6.4 / Xcode 27.0 / swift-format 603.0.0 / SwiftLint 0.65.1 / clang-format 23.1.1 / cmake 4.4.3 / ninja 1.13.2 / python 3.14.7 / ruff 0.16.7 / gitleaks 8.30.1 / trivy 0.74.0 / shfmt 3.14.1 — only `cppcheck` absent | a different physical machine, and it can run both libraries, so the full 28-gate sweep runs there |
+| `deltasona` | Intel VPS, Debian 13 (trixie) `x86_64`, 8 cores | gcc 14.2.0, clang 19.1.7, cmake 3.31.6, ninja 1.12.1, python 3.13.5, OpenSSL 3.5.7 — deviations from the pinned set, recorded as the runbook requires | **a different OS, kernel and architecture**, which this file says is worth more than an identical host; it can run the C99 half plus the LeakSanitizer path Darwin does not have |
+
+Neither host was provisioned by the audit: both existed and answered an SSH key the primary host
+already held. The VPS is production, so everything there happens under `/var/webtransport-phase-e/`
+and nothing outside it is written or removed.
+
+**Phase E found a defect on its first cross-platform run** — `AUD-0038`: the C99 sanitizer
+configuration could not be built with gcc at all, and CI's sanitizer step was gated to clang, which
+is the one leg that would have said so. Fixed on the audit branch (`f6c7879`) before the runs below,
+because the runbook says a gate that fails on a second host is fixed and then re-run.
 
 ## Why the primary host cannot stand in
 
