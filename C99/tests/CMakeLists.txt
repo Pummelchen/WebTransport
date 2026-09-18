@@ -101,6 +101,14 @@ set(WT_UNIT_TESTS
   test_qpack_encoder_state
 )
 
+# A test source is kept under 500 code lines like any other, with one exception: unit/
+# test_quic_handshake.c is 560 and stays. It holds two tests, one several hundred lines, and
+# 26 top-level declarations they share -- types, fixtures, helpers -- so splitting it means
+# relocating all of them, and telling a top-level declaration from a local one cannot be done
+# by scanning lines. Five attempts each broke on a different construct: a local read as a
+# fixture, a prototype dropped, a type left behind, a CMake fixture path the new target did
+# not inherit. Safely needs a parse rather than a scan, which costs more than the 60 lines it
+# would save. `src/quic/connection_receive.c` is the C source exception, for its own reason.
 foreach(test IN LISTS WT_UNIT_TESTS)
   # test_quic_connection, test_runtime_session_pair and test_http3_driver were oversized files; each
   # is now a topic file per seam. The topics are separate SOURCES of the same executable, not separate
