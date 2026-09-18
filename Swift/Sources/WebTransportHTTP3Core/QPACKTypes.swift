@@ -280,4 +280,3 @@ public struct QPACKDecoderStreamState: Equatable, Sendable {
         }
     }
 }
-
