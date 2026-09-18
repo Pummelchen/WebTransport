@@ -62,6 +62,7 @@ gate "RFC vectors match the documents" ./C99/scripts/check-vectors.sh
 gate "installed package consumer" ./C99/scripts/check-package.sh
 gate "compliance matrix against the tree" ./C99/scripts/check-matrix.sh
 gate "portability inventory against the tree" ./C99/scripts/check-portability.sh
+gate "no dead locals hidden by a (void) cast" python3 C99/scripts/check-unused-locals.py
 gate "tree matches .clang-format" ./C99/scripts/check-format.sh
 gate "cppcheck" ./C99/scripts/check-cppcheck.sh
 gate "Clang Static Analyzer" ./C99/scripts/check-static-analysis.sh

@@ -173,7 +173,6 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
   /* A capsule whose value is over the bound is refused with the excessive-load code rather than buffered. */
   {
     uint8_t bytes[16];
-    wt_writer_t w = wt_writer_init(bytes, sizeof(bytes));
     wt_cursor_t cursor;
     wt_webtransport_capsule_t capsule;
     wt_http3_error_t capsule_error = WT_HTTP3_NO_ERROR;
@@ -191,7 +190,6 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
         capsule_error == WT_HTTP3_EXCESSIVE_LOAD) {
       ok = 1;
     }
-    (void)w;
     add(report, "capsule-over-bound", ok,
         ok != 0 ? "a capsule value over the bound is refused as excessive load"
                 : "a capsule over the bound was not refused with the load code");

@@ -167,6 +167,11 @@ jobs:
         # The inventory lists what a Windows or FreeBSD build needs; this fails if the library uses a POSIX-only
         # call the inventory does not name, which is how such a document stays true.
         run: C99/scripts/check-portability.sh
+      - name: Check for dead locals hidden by a (void) cast
+        # AUD-0021. `(void)name;` is the right way to silence an unused *parameter* and the wrong way to
+        # silence the compiler about a local that is assigned and never read: it counts as a use, so
+        # `-Wunused-but-set-variable` never fires. This separates the two cases and fails on the second.
+        run: python3 C99/scripts/check-unused-locals.py
       - name: Run the Clang Static Analyzer over the library and the tools
         # Phase 13 asks for static analysis, and the Definition of Done's "sanitizers and static checks are clean"
         # criterion was carried by warnings-as-errors alone: this is symbolic execution over every source, which

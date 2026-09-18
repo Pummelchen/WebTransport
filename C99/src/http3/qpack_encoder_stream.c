@@ -65,10 +65,8 @@ wt_status_t wt_qpack_encoder_stream_apply(wt_qpack_encoder_stream_t *stream, wt_
     const uint8_t *value = NULL;
     size_t value_length = 0U;
     int value_huffman = 0;
-    const wt_qpack_static_entry_t *unused = NULL;
     wt_qpack_static_entry_t entry;
 
-    (void)unused;
     {
       wt_status_t status = wt_qpack_integer_decode(c, 6U, &index);
       if (status == WT_ERR_TRUNCATED) return WT_ERR_TRUNCATED;

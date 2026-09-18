@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 18 |
+| DONE | 19 |
 
 Non-terminal (open): 0
-Terminal: 20
+Terminal: 21
 
 ## Tasks
 
@@ -38,6 +38,7 @@ Terminal: 20
 | AUD-0018 | S3 | C | P1 | DONE | The connection-churn soak exists but no workflow runs it, so the resource property it verifies is unchecked | Swift/run-soak.sh |
 | AUD-0019 | S2 | C | P2 | DONE | The portability check claimed more than its hand-maintained list could verify, and the inventory had drifted | C99/scripts/check-portability.sh |
 | AUD-0020 | S2 | C | P1 | DONE | The Swift address-sanitizer job ran three tests, not the suite, so the standard's 'sanitizers run the suite' was only partly true | .github/workflows/swift-ci.yml |
+| AUD-0021 | S3 | A | P2 | DONE | Dead local variables were hidden from the compiler by (void) casts, so the earlier unused-code pass could not see them | C99/src/quic/transport_parameters.c:151 |
 
 ## Detail
 
@@ -242,4 +243,14 @@ Terminal: 20
 - fix: Ran the whole suite under AddressSanitizer on the primary host first: `swift test --sanitize=address --skip CLIProcess --skip ReleaseArtifacts` → 379 passed, 0 failed, no sanitizer reports, exit 0. Then added an `address-sanitizer` job to swift-ci.yml running exactly that, with the two skipped suites and the reason (they spawn non-instrumented binaries a sanitizer runtime cannot observe) in the job's own comment, and added the same run to `AUDIT/run-sweep.sh`'s heavy set. AGENTS.md's gate list now names the job. `AUDIT/tool-coverage.md` gained a sanitizer section stating what each of the four runs covers, so the distinction between running the suite and running part of it is written down rather than assumed.
 - evidence after: `swift test --sanitize=address --skip CLIProcess --skip ReleaseArtifacts`: `passed: 379 failed: 0`, 0 AddressSanitizer reports, exit 0. `check-workflows.py` parses all four workflow files with no duplicate keys; the new job's name, runner and steps were read back from the parsed YAML. The peer-input fuzz run (the 20000-iteration ASan job) is left as it is, because it exists for adversarial input rather than coverage, and the new section says so.
 - commit: 94530c9
+
+### AUD-0021 — Dead local variables were hidden from the compiler by (void) casts, so the earlier unused-code pass could not see them
+
+- severity: S3 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: unused | discovered by: the Tier A deep review (AUDIT/tier-a-review.md)
+- where: C99/src/quic/transport_parameters.c:151
+- evidence before: The §6 unused-code pass reported none, because it relied on `-Wall -Wextra -Werror`: `(void)name;` counts as a use, so a local that is assigned and never read raises no warning at all. Four such locals existed: `start` and `start_offset` in `transport_parameters.c` (computed from the cursor and dropped, with `(void)` casts three lines later), `unused` in `qpack_encoder_stream.c`, and `w` in `scenario_refusals.c`, whose bytes are written by hand while a `wt_writer_t` was initialised and never used. Adding `-Wunused-but-set-variable` does NOT catch them: recompiling `transport_parameters.c` with it and `-Werror` exits 0, which was tested rather than assumed.
+- fix: Removed all four dead locals and the casts that hid them, so the compiler is no longer silenced: if any of the code is revived it will be warned about again. Added `C99/scripts/check-unused-locals.py`, which separates the two cases `(void)` is used for -- a name appearing in a function parameter list is a deliberate unused-parameter suppression and is skipped, anything else is a local and is reported when nothing but its declaration, its assignments and the cast mention it. Wired into `c99-ci.yml` and into `AUDIT/run-sweep.sh`.
+- evidence after: `python3 C99/scripts/check-unused-locals.py` reports the four before the fix and `no dead locals hidden by a (void) cast` after; re-injecting one into `qpack_encoder_stream.c` makes it fail with `C99/src/http3/qpack_encoder_stream.c:70: (void)unused; -- local, set but never read`, and restoring leaves it clean. The parameter suppressions it must NOT flag are in `apps/support/session_loop.c` (`stream_id`, `unidirectional`, `quarter_stream_id`) and it correctly skips them. `./C99/scripts/build-and-test.sh` after the removals: `100% tests passed out of 97`, no warnings. ruff and ruff-format clean on the new script; check-workflows.py parses all four workflows.
+- commit: PENDING
 

@@ -40,12 +40,21 @@ the only target that touches the OS — is what put it in Tier A.
 
 **Question:** does each module do what it says, at the depth its tier requires?
 
-Depth was applied by tier. Tier A (every parsing, crypto, native-memory and network-facing
-module in both projects) was read manually and in full; that reading is what produced the
-structural findings, and the refactors that closed them are the proof it happened — the frame
-codec, the QPACK field-line decoder, the flow-control capsule parser, the packet-range merge,
-the STREAM receive path, the two handshake paths and the UDP receive path were each taken apart
-and put back with the suite green. Tier B (`WebTransportCLIConformance`) was tool-first: it is
+Depth was applied by tier. **The claim that Tier A was "read manually and in full" was written
+here too early, and is corrected rather than left standing.** Tier A is 274 files and roughly
+63,000 lines; the audit *touched* 182 of them, but most of that was the mechanical
+`clang-format` reformat, and a reformat is not a reading. What is actually substantiated is the
+list of modules taken apart and put back with the suite green — the frame codec, the QPACK
+field-line decoder, the flow-control capsule parser, the packet-range merge, the STREAM receive
+path, the two handshake paths and the UDP receive path — plus the modules the findings
+themselves forced open.
+
+That is a real deep review of the highest-risk paths, and it is not the whole tier. The
+remaining Tier A files are being read and recorded module by module in
+`AUDIT/tier-a-review.md`, which names what was read and what was found; the tier is only
+"covered" when that file says so for every module in the table, and until then this pass is
+incomplete rather than done. The overclaim was found by measuring the tier against the
+evidence, which is the same test this audit applies to the repository. Tier B (`WebTransportCLIConformance`) was tool-first: it is
 exercised by the CLI suites rather than read line by line. Tier C (tests, scripts, docs,
 workflows) was scanner-only, and this is disclosed rather than implied.
 

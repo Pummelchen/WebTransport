@@ -111,6 +111,10 @@ they were not followed.
 25 gates, **0 failed**. The heavy set grew: it now runs the whole Swift suite under
 AddressSanitizer rather than the three-test fuzz filter, which is what AUD-0020 found and fixed.
 
+## Sweep 7 — primary host, after the dead-local fix
+
+26 gates, **0 failed**. The new gate is `C99/scripts/check-unused-locals.py` (AUD-0021).
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host

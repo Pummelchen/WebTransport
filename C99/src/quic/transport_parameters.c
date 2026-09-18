@@ -148,8 +148,6 @@ wt_status_t wt_quic_transport_parameters_decode(const uint8_t *data, size_t leng
 
   c = wt_cursor_init(data, length);
   while (wt_cursor_remaining(&c) > 0U) {
-    const uint8_t *start;
-    size_t start_offset;
     uint64_t id = 0U;
     uint64_t value_len = 0U;
     size_t value_len_size = 0U;
@@ -159,8 +157,6 @@ wt_status_t wt_quic_transport_parameters_decode(const uint8_t *data, size_t leng
       if (out_error != NULL) *out_error = WT_QUIC_TRANSPORT_PARAMETER_ERROR;
       return WT_ERR_PROTOCOL;
     }
-    start = c.data + c.offset;
-    start_offset = c.offset;
     if (wt_quic_varint_decode(&c, &id) != WT_OK) return WT_ERR_TRUNCATED;
     if (wt_quic_varint_decode_sized(&c, &value_len, &value_len_size) != WT_OK) {
       return WT_ERR_TRUNCATED;
@@ -189,8 +185,6 @@ wt_status_t wt_quic_transport_parameters_decode(const uint8_t *data, size_t leng
     if (out->count > 1U && out->entries[out->count - 2U].id > out->entries[out->count - 1U].id) {
       out->sorted = 0;
     }
-    (void)start;
-    (void)start_offset;
   }
 
   /* Duplicates, which RFC 9000 section 7.4 makes a TRANSPORT_PARAMETER_ERROR.
