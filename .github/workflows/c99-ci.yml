@@ -220,6 +220,30 @@ jobs:
             exit 1
           fi
 
+  # The Python rule set, in one place rather than repeated on three matrix legs. Python
+  # here is test and glue code (Tier C in AUDIT/inventory.md), so the standard keeps it
+  # cheap: one pinned Ruff, `--fix` available to a contributor, and the rules the audit
+  # standard names (B, E722, S101, PT) enabled in the committed `ruff.toml`. A config
+  # nothing runs is not a standard, which is exactly what AUD-0007 recorded.
+  python-lint:
+    name: Python / Ruff
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Install the pinned Ruff
+        run: |
+          set -euo pipefail
+          command -v ruff >/dev/null || python3 -m pip install --user 'ruff==0.16.7'
+          ruff --version
+
+      - name: Lint the Python
+        run: ruff check .
+
+      - name: Check the Python is formatted
+        run: ruff format --check .
+
   # A second Linux DISTRIBUTION, not a renamed Ubuntu job (WT-225). The plan's Phase 12 matrix names Debian 13
   # and every other Linux leg runs GitHub's `ubuntu-24.04` image, so nothing here would notice what Debian
   # ships: a different GCC, a different OpenSSL 3 minor, or a libc that changes what the portability inventory

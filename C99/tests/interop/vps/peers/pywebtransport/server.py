@@ -5,7 +5,10 @@ the Swift client can validate it with platform system trust over a routable
 network path. That is the property this matrix exists to prove and the one the
 loopback container matrix cannot cover.
 """
-import asyncio, logging, os
+
+import asyncio
+import logging
+import os
 
 from pywebtransport import ServerApp, ServerConfig
 
@@ -16,12 +19,14 @@ KEYFILE = os.environ["KEYFILE"]
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("echo")
 
-app = ServerApp(config=ServerConfig(
-    bind_host="0.0.0.0",
-    bind_port=PORT,
-    certfile=CERTFILE,
-    keyfile=KEYFILE,
-))
+app = ServerApp(
+    config=ServerConfig(
+        bind_host="0.0.0.0",
+        bind_port=PORT,
+        certfile=CERTFILE,
+        keyfile=KEYFILE,
+    )
+)
 
 
 @app.route("/")

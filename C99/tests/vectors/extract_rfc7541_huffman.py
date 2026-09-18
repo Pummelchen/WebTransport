@@ -48,9 +48,7 @@ MAX_BITS = 30
 # parentheses, the code as a bit string, the same code as hex, and the length in
 # brackets. The ASCII column is matched loosely: it contains quotes, an escaped
 # quote and -- for symbol 124 -- a pipe, so any tighter pattern loses a row.
-ROW = re.compile(
-    r"^\s*(.*?)\s*\(\s*(\d+)\)\s+\|([01|]+?)\s+([0-9a-fA-F]+)\s+\[\s*(\d+)\]\s*$"
-)
+ROW = re.compile(r"^\s*(.*?)\s*\(\s*(\d+)\)\s+\|([01|]+?)\s+([0-9a-fA-F]+)\s+\[\s*(\d+)\]\s*$")
 # One or more hex groups, including a lone byte: the dump wraps, so the last
 # line of a block is often a single group.
 HEX_DUMP = re.compile(r"^\s*([0-9a-fA-F]{2,4}(?:\s+[0-9a-fA-F]{2,4})*)\s+\|")
@@ -120,9 +118,7 @@ def canonical_index(rows: list[tuple[int, int, int]]):
         ranges.append((code, offset, len(entries)))
         for index, (_, entry_code, _) in enumerate(entries):
             if entry_code != code + index:
-                raise ValueError(
-                    f"length {length}: code {entry_code:x} breaks the canonical order at offset {index}"
-                )
+                raise ValueError(f"length {length}: code {entry_code:x} breaks the canonical order at offset {index}")
         code = (code + len(entries)) << 1
         offset += len(entries)
     if offset != SYMBOLS:
@@ -163,7 +159,7 @@ def extract_example(text: str) -> tuple[bytes, bytes]:
     length_byte = block[4]
     if (length_byte & 0x80) == 0:
         raise ValueError("C.4.1's :authority string is not marked Huffman-coded")
-    length = length_byte & 0x7f
+    length = length_byte & 0x7F
     if len(block) != 5 + length:
         raise ValueError(f"C.4.1's block is {len(block)} bytes for a {length}-byte string")
     coded = block[5:]
@@ -187,22 +183,19 @@ def c_bytes(values, per_line: int, indent: str = "    ") -> str:
 
 
 def render(rows, sorted_rows, ranges, coded: bytes, plaintext: bytes) -> str:
-    code_lines = "\n".join(
-        "    {0x%08xU, %dU}," % (code, length) for (_, code, length) in rows
-    )
+    code_lines = "\n".join("    {0x%08xU, %dU}," % (code, length) for (_, code, length) in rows)
     sorted_lines = "\n".join(
-        "    {0x%08xU, %dU, %dU}," % (code, length, symbol)
-        for (symbol, code, length) in sorted_rows
+        "    {0x%08xU, %dU, %dU}," % (code, length, symbol) for (symbol, code, length) in sorted_rows
     )
     index_lines = "\n".join(
         "    /* length %2d */ {0x%08xU, %dU, %dU}," % (length, entry[0], entry[1], entry[2])
         for length, entry in enumerate(ranges, start=1)
     )
-    coded_lines = "\n".join(
+    "\n".join(
         "    " + ", ".join(f"0x{value:02x}U" for value in coded[index : index + 8]) + ","
         for index in range(0, len(coded), 8)
     )
-    plaintext_lines = "\n".join(
+    "\n".join(
         "    " + ", ".join(f"0x{value:02x}U" for value in plaintext[index : index + 8]) + ","
         for index in range(0, len(plaintext), 8)
     )

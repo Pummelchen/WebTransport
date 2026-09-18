@@ -9,11 +9,11 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 1 |
-| DONE | 4 |
-| OPEN | 6 |
+| DONE | 5 |
+| OPEN | 5 |
 
-Non-terminal (open): 6
-Terminal: 5
+Non-terminal (open): 5
+Terminal: 6
 
 ## Tasks
 
@@ -25,7 +25,7 @@ Terminal: 5
 | AUD-0004 | S3 | C | both | DONE | Baseline both projects on the primary host | AUDIT/baseline.md |
 | AUD-0005 | S2 | C | both | OPEN | Tool-coverage and language-standard proofs for every delegated check | AUDIT/tool-coverage.md |
 | AUD-0006 | S1 | A | P1 | OPEN | SwiftLint is installed but has no committed config and is not run, so the mandated Swift linter is not in force | Package.swift |
-| AUD-0007 | S1 | A | both | OPEN | Ruff has no config, so B, E722, S101 and PT are not enabled | AUDIT/environment.md |
+| AUD-0007 | S1 | A | both | DONE | Ruff has no config, so B, E722, S101 and PT are not enabled | AUDIT/environment.md |
 | AUD-0008 | S2 | A | P1 | OPEN | -require-explicit-sendable is enforced only per-invocation in CI, not in the build config | Package.swift:12-17 |
 | AUD-0009 | S2 | B | P2 | OPEN | No C99 coverage measurement exists, so one baseline metric is missing | C99/CMakeLists.txt |
 | AUD-0010 | S3 | B | P2 | OPEN | No committed .clang-format and the tree is not clang-format clean | C99/ |
@@ -80,7 +80,7 @@ Terminal: 5
 - category: process | discovered by: phase-a
 - where: AUDIT/tool-coverage.md
 - evidence before: No proof that any delegated check is actually enforced; SwiftLint and Ruff are not even configured
-- fix: 
+- fix: In progress: Swift language-standard, C language-standard, swift-format, Ruff and gitleaks proofs recorded in AUDIT/tool-coverage.md. Outstanding: SwiftLint (blocked on AUD-0006), and cppcheck/scan-build/trivy coverage proofs.
 - evidence after: 
 - commit: 
 
@@ -96,12 +96,12 @@ Terminal: 5
 
 ### AUD-0007 — Ruff has no config, so B, E722, S101 and PT are not enabled
 
-- severity: S1 | tier: A | project: both | status: OPEN | host: Mac14,3
+- severity: S1 | tier: A | project: both | status: DONE | host: Mac14,3
 - category: standards | discovered by: phase-a
 - where: AUDIT/environment.md
 - evidence before: No ruff.toml/pyproject.toml; `ruff check` over the 16 tracked Python files reports 22 findings from the default rule set only, which does not include the bare-except, assert or pytest-style rules the standard names
-- fix: 
-- evidence after: 
+- fix: Added ruff.toml: one pinned interpreter, line-length 120, and an explicit select of E/F/W plus the standard's B, E722, S101, PT, plus EXE (a tool-default rule that flags a shebang without an exec bit). Fixed the 5 findings the configured set reports (1 F401 unused import, 1 E401 multiple imports, 3 F841 dead variables - two of which were dead duplicates of the real render_vectors output, not missing output), ran ruff format over the tree (12 files), and set 7 exec bits. Added a python-lint job to c99-ci.yml running ruff check . and ruff format --check . so the config is in force rather than decorative.
+- evidence after: ruff check . -> 'All checks passed!'; ruff format --check . -> '48 files already formatted'; C99/scripts/check-vectors.sh -> all 5 vectors still reproduce after the reformat; rule proofs (B006/E722/S101/PT011) in AUDIT/tool-coverage.md; workflows parse (C99/scripts/check-workflows.py)
 - commit: 
 
 ### AUD-0008 — -require-explicit-sendable is enforced only per-invocation in CI, not in the build config

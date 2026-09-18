@@ -65,7 +65,7 @@ def extract(text: str) -> list[tuple[str, str]]:
     start_match = re.search(r"^Appendix A\.  Static Table$", text, re.MULTILINE)
     if start_match is None:
         raise ValueError("the RFC text has no Appendix A heading")
-    end_match = re.search(r"^Appendix B\.", text[start_match.end():], re.MULTILINE)
+    end_match = re.search(r"^Appendix B\.", text[start_match.end() :], re.MULTILINE)
     if end_match is None:
         raise ValueError("the RFC text has no Appendix B heading after Appendix A")
     start = start_match.end()

@@ -145,9 +145,7 @@ def positional_values(lines: list[str]) -> list[tuple[str, bytes]]:
                 continue
             token = BARE.match(follow)
             if token is None:
-                raise SystemExit(
-                    f"the value under {found.group(1)!r} is not hex: {follow!r}"
-                )
+                raise SystemExit(f"the value under {found.group(1)!r} is not hex: {follow!r}")
             values.append((found.group(1), bytes.fromhex(token.group(1))))
             break
     return values
@@ -172,14 +170,9 @@ def extract(rfc: str) -> dict[str, bytes]:
         expected_labels = ("Input scalar", "Input u-coordinate", "Output u-coordinate")
         for offset, label in enumerate(expected_labels):
             if wanted[base + offset][0] != label:
-                raise SystemExit(
-                    f"5.2 vector {index + 1}: expected {label!r}, found "
-                    f"{wanted[base + offset][0]!r}"
-                )
+                raise SystemExit(f"5.2 vector {index + 1}: expected {label!r}, found {wanted[base + offset][0]!r}")
             if len(wanted[base + offset][1]) != 32:
-                raise SystemExit(
-                    f"5.2 vector {index + 1}: {label!r} is not 32 bytes"
-                )
+                raise SystemExit(f"5.2 vector {index + 1}: {label!r} is not 32 bytes")
         out[f"SCALAR_{index + 1}"] = wanted[base][1]
         out[f"U_COORDINATE_{index + 1}"] = wanted[base + 1][1]
         out[f"OUTPUT_{index + 1}"] = wanted[base + 2][1]
@@ -187,9 +180,7 @@ def extract(rfc: str) -> dict[str, bytes]:
     # Section 6.1's Diffie-Hellman example, stopped at the X448 subsection, whose labels
     # are word for word the same.
     example = section(lines, "6.1.  Curve25519", None)
-    x448_at = next(
-        (i for i, line in enumerate(example) if "X448" in line), len(example)
-    )
+    x448_at = next((i for i, line in enumerate(example) if "X448" in line), len(example))
     example = example[:x448_at]
     out["ALICE_PRIVATE"] = labelled(example, "Alice's private key, a")
     out["ALICE_PUBLIC"] = labelled(example, "Alice's public key, X25519(a, 9)")
@@ -210,8 +201,7 @@ def self_check(values: dict[str, bytes]) -> None:
         got = x25519(values[f"SCALAR_{index}"], values[f"U_COORDINATE_{index}"])
         if got != values[f"OUTPUT_{index}"]:
             raise SystemExit(
-                f"the ladder does not reproduce output {index}: "
-                f"{got.hex()} != {values[f'OUTPUT_{index}'].hex()}"
+                f"the ladder does not reproduce output {index}: {got.hex()} != {values[f'OUTPUT_{index}'].hex()}"
             )
 
     # And the example: both public keys from their private keys, and the shared secret
@@ -261,28 +251,25 @@ def render(values: dict[str, bytes]) -> str:
         "#include <stdint.h>\n\n"
         + "\n".join(
             [
-                c_array("SCALAR_1", values["SCALAR_1"],
-                        "RFC 7748 5.2: the first input scalar."),
-                c_array("U_COORDINATE_1", values["U_COORDINATE_1"],
-                        "RFC 7748 5.2: with SCALAR_1, the first input u-coordinate."),
-                c_array("OUTPUT_1", values["OUTPUT_1"],
-                        "RFC 7748 5.2: the output for the first pair."),
-                c_array("SCALAR_2", values["SCALAR_2"],
-                        "RFC 7748 5.2: the second input scalar (2^255 - 1 + 1)."),
-                c_array("U_COORDINATE_2", values["U_COORDINATE_2"],
-                        "RFC 7748 5.2: with SCALAR_2, the second input u-coordinate."),
-                c_array("OUTPUT_2", values["OUTPUT_2"],
-                        "RFC 7748 5.2: the output for the second pair."),
-                c_array("ALICE_PRIVATE", values["ALICE_PRIVATE"],
-                        "RFC 7748 6.1: Alice's private key."),
-                c_array("ALICE_PUBLIC", values["ALICE_PUBLIC"],
-                        "RFC 7748 6.1: X25519(ALICE_PRIVATE, 9)."),
-                c_array("BOB_PRIVATE", values["BOB_PRIVATE"],
-                        "RFC 7748 6.1: Bob's private key."),
-                c_array("BOB_PUBLIC", values["BOB_PUBLIC"],
-                        "RFC 7748 6.1: X25519(BOB_PRIVATE, 9)."),
-                c_array("SHARED_SECRET", values["SHARED_SECRET"],
-                        "RFC 7748 6.1: the shared secret, either way round."),
+                c_array("SCALAR_1", values["SCALAR_1"], "RFC 7748 5.2: the first input scalar."),
+                c_array(
+                    "U_COORDINATE_1",
+                    values["U_COORDINATE_1"],
+                    "RFC 7748 5.2: with SCALAR_1, the first input u-coordinate.",
+                ),
+                c_array("OUTPUT_1", values["OUTPUT_1"], "RFC 7748 5.2: the output for the first pair."),
+                c_array("SCALAR_2", values["SCALAR_2"], "RFC 7748 5.2: the second input scalar (2^255 - 1 + 1)."),
+                c_array(
+                    "U_COORDINATE_2",
+                    values["U_COORDINATE_2"],
+                    "RFC 7748 5.2: with SCALAR_2, the second input u-coordinate.",
+                ),
+                c_array("OUTPUT_2", values["OUTPUT_2"], "RFC 7748 5.2: the output for the second pair."),
+                c_array("ALICE_PRIVATE", values["ALICE_PRIVATE"], "RFC 7748 6.1: Alice's private key."),
+                c_array("ALICE_PUBLIC", values["ALICE_PUBLIC"], "RFC 7748 6.1: X25519(ALICE_PRIVATE, 9)."),
+                c_array("BOB_PRIVATE", values["BOB_PRIVATE"], "RFC 7748 6.1: Bob's private key."),
+                c_array("BOB_PUBLIC", values["BOB_PUBLIC"], "RFC 7748 6.1: X25519(BOB_PRIVATE, 9)."),
+                c_array("SHARED_SECRET", values["SHARED_SECRET"], "RFC 7748 6.1: the shared secret, either way round."),
             ]
         )
         + "\n#endif /* WT_RFC7748_VECTORS_H */\n"

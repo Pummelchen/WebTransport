@@ -20,6 +20,7 @@ the WebTransport handshake) should stay exactly as the library wrote it.
 
 Run from the quinn peer's source directory (the one holding Cargo.toml and src/main.rs).
 """
+
 import pathlib
 import shutil
 import subprocess
@@ -75,9 +76,15 @@ def main() -> int:
         tmp.parent.mkdir(parents=True, exist_ok=True)
         archive = tmp.parent / f"{CRATE}-{VERSION}.crate"
         subprocess.run(
-            ["curl", "-sL", "-A", "interop-vendor/1.0",
-             f"https://static.crates.io/crates/{CRATE}/{CRATE}-{VERSION}.crate",
-             "-o", str(archive)],
+            [
+                "curl",
+                "-sL",
+                "-A",
+                "interop-vendor/1.0",
+                f"https://static.crates.io/crates/{CRATE}/{CRATE}-{VERSION}.crate",
+                "-o",
+                str(archive),
+            ],
             check=True,
         )
         subprocess.run(["tar", "xzf", str(archive), "-C", str(tmp.parent)], check=True)
