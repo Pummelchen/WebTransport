@@ -123,6 +123,12 @@ AddressSanitizer rather than the three-test fuzz filter, which is what AUD-0020 
 
 26 gates, **0 failed**.
 
+## Sweep 10 — primary host, after pinning the version-negotiation answers
+
+26 gates, **0 failed**. Test-only change: the three long-header walkers' answers for a Version
+Negotiation packet are now all asserted, and both guards that refuse were proved by deliberate
+violation.
+
 ## Heavy gates — primary host, run before Phase E
 
 Six gates, **6 passed**. They are kept out of the per-round sweep because on the primary host

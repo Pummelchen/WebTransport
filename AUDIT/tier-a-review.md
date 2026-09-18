@@ -33,7 +33,7 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | --- | --- |
 | `C99/src/quic/transport_parameters.c` | **Read in full** (485 lines) — `AUD-0021` |
 | `C99/src/quic/frame.c` | **Read in full** (726 lines) — `AUD-0022` |
-| `C99/src/quic/packet.c` | **Read in part** (1-256 of 669: the classification, peek and long-header paths) — `AUD-0023` |
+| `C99/src/quic/packet.c` | **Read in full** (680 lines) — `AUD-0023` |
 | `C99/src/quic/{connection_receive,connection_send,stream}.c` | Read in the structural refactors (packet-range merge, STREAM receive); not yet in full |
 | `C99/src/http3/qpack_encoder_stream.c` | Read around the finding — `AUD-0021`; not yet in full |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
@@ -96,23 +96,40 @@ that was found and is now documented where the next person will read it.
 was known to have succeeded, and read by nothing in the tree. Fixed without an ABI change, with a
 regression test that was checked to fail against the unfixed code.
 
-## `C99/src/quic/packet.c` — read in part (the untrusted-input front half)
+## `C99/src/quic/packet.c` — read in full
 
-Lines 1-256: packet classification, the two connection-ID peeks, the Initial token peek and
-`wt_quic_protected_pn_offset`. The encode half and the Retry parser are not read yet.
+680 lines: classification, the two peeks, both header decoders, the Retry parser and the three
+encoders.
 
-Three functions walk the same long header and two of them skip the version unread. That
-asymmetry is the finding. `wt_quic_protected_pn_offset` refuses version zero and says why in a
-comment; `wt_quic_initial_token` and `wt_quic_long_header_connection_ids` did not, and the first
-of those is the one that matters because it reports no version to its caller -- so the caller
-cannot make the decision itself, which is exactly what `wt_quic_long_header_decode` allows by
-putting the version in its output structure.
+**Three functions walk the same long header, and two of them skipped the version unread.** That
+asymmetry is `AUD-0023`. It is worth recording how each one is answered now, because the class is
+only closed if all three are pinned, which they are in `test_quic_packet.c`:
 
-**Found:** `AUD-0023` — a Version Negotiation packet read as an Initial with a token, proven with
-a probe against the built library rather than argued from the RFC text. Fixed and regression-
-tested.
+| Walker | Version zero | Why |
+| --- | --- | --- |
+| `wt_quic_packet_kind` | reports `VERSION_NEGOTIATION` | it is the classifier; the caller wants to know |
+| `wt_quic_protected_pn_offset` | refuses (`WT_ERR_INVALID_ARGUMENT`) | the walk would read the version list as a Length field -- the guard existed, with a comment, and had **no test** until this review added one |
+| `wt_quic_initial_token` | refuses (`WT_ERR_PROTOCOL`) | the fix: it reports no version, so the caller cannot decide for itself |
+| `wt_quic_long_header_connection_ids` | accepts, deliberately | RFC 9000 section 17.2.1 puts a VN's connection IDs at the same offsets, and this function reports no version -- the decision belongs to the token reader above it |
+| `wt_quic_long_header_decode` | reports the version in its output | the caller can decide, and on this path it does not have to: the payload is AEAD-verified next, so a VN packet fails authentication and is discarded |
 
-The bounds work in the same half is otherwise careful: `wt_quic_initial_token` guards its
-subtraction with `c.offset > length` before computing `length - c.offset`, the connection-ID
-reader refuses a length above twenty, and the short-header path checks
-`local_connection_id_len > WT_QUIC_MAX_CID_LEN` before using it in an offset.
+Each answer is now asserted, and the two that refuse were each proved by deliberate violation:
+removing the `initial_token` guard fails with `FAIL a version negotiation is not an Initial: want
+protocol, got ok`, and removing the older `protected_pn_offset` guard fails with `FAIL and the
+packet-number walk refuses it: want invalid-argument, got truncated`. A guard with no test is a
+guard nobody knows is still there.
+
+**The Swift mirror has no equivalent path**, checked rather than assumed: `wt_quic_initial_token`
+exists because a C99 listener may hold only the front of a 1200-byte Initial, and the Swift
+decoder has no such peek -- `VersionNegotiation` appears once in `Swift/Sources`, as the list of
+versions this endpoint supports, not as a parse of an incoming VN packet. The finding is
+C99-specific.
+
+The rest of the file is careful in the ways the tier asks for. The Retry parser refuses a zero or
+over-long connection ID, and its comment records the memory-safety defect an earlier audit found
+here -- `length - header_len - 16` underflowing for a datagram whose header ran into the tag, so
+the token view pointed past the buffer while the function returned `WT_OK` (WT-203). The encoders
+refuse a non-zero length with a null pointer rather than letting `wt_writer_bytes` dereference it
+(WT-239), the Length field is computed rather than taken from the caller, and the Retry encoder
+writes zero into the `Unused (4)` field while the decoder must ignore whatever it finds there,
+because RFC 9001's own A.4 example writes `0xf` (WT-227).

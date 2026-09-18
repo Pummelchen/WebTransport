@@ -300,6 +300,35 @@ int main(void) {
                                              &token_length));
       WT_EXPECT_INT("  leaving no token length", 0, (long)token_length);
       WT_EXPECT_TRUE("  and no token", token == NULL);
+      /* The third long-header walker refuses version zero too, and that guard is older than this
+       * test -- it is the one `wt_quic_initial_token` was missing. Pinned here so all three
+       * walkers' answers for a Version Negotiation are asserted in one place. */
+      {
+        size_t offset = 0U;
+        size_t total = 0U;
+        int short_header = 1;
+        WT_EXPECT_STATUS("and the packet-number walk refuses it", WT_ERR_INVALID_ARGUMENT,
+                         wt_quic_protected_pn_offset(full_version_negotiation,
+                                                     sizeof(full_version_negotiation), 0U, &offset,
+                                                     &total, &short_header));
+      }
+      /* The connection-ID reader accepts it, deliberately: RFC 9000 section 17.2.1 puts a Version
+       * Negotiation's connection IDs at the same offsets as any other long header, so reading them
+       * is correct -- and this function reports no version, so it is not the place that decides.
+       * The decision belongs to `wt_quic_initial_token` above, which is why the two are asserted
+       * together. */
+      {
+        const uint8_t *destination = NULL;
+        const uint8_t *source = NULL;
+        size_t destination_length = 0U;
+        size_t source_length = 0U;
+        WT_EXPECT_STATUS("the connection-ID reader reads its IDs", WT_OK,
+                         wt_quic_long_header_connection_ids(
+                             full_version_negotiation, sizeof(full_version_negotiation),
+                             &destination, &destination_length, &source, &source_length));
+        WT_EXPECT_INT("  the destination as the VN packet spells it", 4, (long)destination_length);
+        WT_EXPECT_INT("  and the source", 4, (long)source_length);
+      }
     }
   }
 
