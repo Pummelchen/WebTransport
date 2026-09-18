@@ -516,6 +516,16 @@ static void test_frame_refusals(void) {
                        wt_quic_frame_decode(&c, &decoded, &error));
       WT_EXPECT_BYTES("  with its eight bytes", whole + 1, decoded.as.path_challenge.data, 8U);
     }
+    /* AUD-0022: the refused NEW_TOKEN above must leave the whole frame zeroed, not a NULL
+     * token beside the wire's unvalidated length. The status is the contract -- a caller that
+     * checks it never reads this -- but a frame with no valid token in it should not carry a
+     * length that looks like one. */
+    c = wt_cursor_init((const uint8_t *)"\x07\x04\x01", 3U);
+    WT_EXPECT_STATUS("a NEW_TOKEN with a missing body is refused", WT_ERR_TRUNCATED,
+                     wt_quic_frame_decode(&c, &decoded, &error));
+    WT_EXPECT_U64("  and leaves no length behind for the token it did not get", 0U,
+                  decoded.as.new_token.token_length);
+    WT_EXPECT_U64("  nor a size", 0U, (uint64_t)decoded.as.new_token.length);
   }
 
   /* Each field whose value the RFC gives a rule. */

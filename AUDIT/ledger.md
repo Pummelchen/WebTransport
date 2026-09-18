@@ -9,10 +9,10 @@ Branch `audit/2026-09-18` | primary host Mac14,3 (macOS 27.0, Xcode 27.0, Swift 
 | status | count |
 | --- | --- |
 | BLOCKED | 2 |
-| DONE | 19 |
+| DONE | 20 |
 
 Non-terminal (open): 0
-Terminal: 21
+Terminal: 22
 
 ## Tasks
 
@@ -39,6 +39,7 @@ Terminal: 21
 | AUD-0019 | S2 | C | P2 | DONE | The portability check claimed more than its hand-maintained list could verify, and the inventory had drifted | C99/scripts/check-portability.sh |
 | AUD-0020 | S2 | C | P1 | DONE | The Swift address-sanitizer job ran three tests, not the suite, so the standard's 'sanitizers run the suite' was only partly true | .github/workflows/swift-ci.yml |
 | AUD-0021 | S3 | A | P2 | DONE | Dead local variables were hidden from the compiler by (void) casts, so the earlier unused-code pass could not see them | C99/src/quic/transport_parameters.c:151 |
+| AUD-0022 | S3 | A | P2 | DONE | NEW_TOKEN stored the wire's unvalidated length in a public field that nothing reads, before knowing the token was taken | C99/src/quic/frame.c:259 |
 
 ## Detail
 
@@ -253,4 +254,14 @@ Terminal: 21
 - fix: Removed all four dead locals and the casts that hid them, so the compiler is no longer silenced: if any of the code is revived it will be warned about again. Added `C99/scripts/check-unused-locals.py`, which separates the two cases `(void)` is used for -- a name appearing in a function parameter list is a deliberate unused-parameter suppression and is skipped, anything else is a local and is reported when nothing but its declaration, its assignments and the cast mention it. Wired into `c99-ci.yml` and into `AUDIT/run-sweep.sh`.
 - evidence after: `python3 C99/scripts/check-unused-locals.py` reports the four before the fix and `no dead locals hidden by a (void) cast` after; re-injecting one into `qpack_encoder_stream.c` makes it fail with `C99/src/http3/qpack_encoder_stream.c:70: (void)unused; -- local, set but never read`, and restoring leaves it clean. The parameter suppressions it must NOT flag are in `apps/support/session_loop.c` (`stream_id`, `unidirectional`, `quarter_stream_id`) and it correctly skips them. `./C99/scripts/build-and-test.sh` after the removals: `100% tests passed out of 97`, no warnings. ruff and ruff-format clean on the new script; check-workflows.py parses all four workflows.
 - commit: c522caf
+
+### AUD-0022 — NEW_TOKEN stored the wire's unvalidated length in a public field that nothing reads, before knowing the token was taken
+
+- severity: S3 | tier: A | project: P2 | status: DONE | host: Mac14,3
+- category: unused | discovered by: the Tier A deep review (AUDIT/tier-a-review.md)
+- where: C99/src/quic/frame.c:259
+- evidence before: `out->as.new_token.token_length = length;` was assigned from the wire's 64-bit length immediately after `wt_quic_take`, before the status said whether the token had actually been taken. Every other field in that decoder is assigned only after its value is validated. A scan of `new_token.` across src, include, apps and tests found exactly one write (this line) and no reader: the round-trip test sets `token` and `length`, and the encoder writes `length`. So the field is write-only, and on a refused frame it held an unvalidated 64-bit length beside a NULL token and a zero `length`.
+- fix: Assign it only when the take succeeded, so a refused frame is left zeroed like every other field, and documented the field in `frame.h`: read `length` (the narrowed size that bounds `token` and that the encoder writes), nothing reads `token_length`, and it is kept because removing a field from a public structure is an ABI change under `WT_ABI_VERSION`'s own rule -- a maintainer's decision, not an audit cleanup. Added a regression test to `test_quic_frame.c` beside the existing truncation cases: a NEW_TOKEN whose body is missing must be refused AND must leave no length behind.
+- evidence after: The new check fails against the unfixed code -- `wt_quic_frame: 1 of 1334 checks FAILED`, 1 of 97 tests failing, exit 8 -- and passes with the fix restored: `100% tests passed out of 97`. That is the deliberate-violation proof for the test itself, not just for the code. `check-format.sh` reports all 312 C sources match .clang-format.
+- commit: PENDING
 

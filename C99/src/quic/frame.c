@@ -256,7 +256,11 @@ wt_status_t wt_quic_frame_decode(wt_cursor_t *c, wt_quic_frame_t *out, wt_quic_e
         return wt_quic_decode_fail(out_error, WT_QUIC_FRAME_ENCODING_ERROR);
       }
       status = wt_quic_take(c, length, &out->as.new_token.token, &out->as.new_token.length);
-      out->as.new_token.token_length = length;
+      /* Assigned only when the take succeeded, so a refused frame is left zeroed like every
+       * other field rather than holding the wire's unvalidated 64-bit length next to a NULL
+       * token. `length` is the field to read; nothing in this library reads `token_length`, and
+       * it cannot be removed because the structure is public ABI (see frame.h). */
+      if (status == WT_OK) out->as.new_token.token_length = length;
       return status;
     }
 

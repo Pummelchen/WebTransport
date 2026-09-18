@@ -168,6 +168,11 @@ typedef struct wt_quic_frame {
     } stream;
 
     struct {
+      /* The wire's own 64-bit length, set only when `token` and `length` were taken
+       * successfully. Read `length` instead: it is the narrowed size that actually bounds
+       * `token`, it is what the encoder writes, and it is what every caller in this tree uses.
+       * Nothing reads `token_length`, and it is kept only because removing a field from a
+       * public structure is an ABI change (`WT_ABI_VERSION`). */
       uint64_t token_length;
       const uint8_t *token;
       size_t length;

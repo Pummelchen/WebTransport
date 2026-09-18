@@ -32,7 +32,8 @@ the checks that were applied, because "no findings" is only meaningful next to w
 | Tier A module | State |
 | --- | --- |
 | `C99/src/quic/transport_parameters.c` | **Read in full** (485 lines) — `AUD-0021` |
-| `C99/src/quic/{frame,connection_receive,packet,connection_send,stream}.c` | Read in the structural refactors (frame dispatch, packet-range merge, STREAM receive) |
+| `C99/src/quic/frame.c` | **Read in full** (726 lines) — `AUD-0022` |
+| `C99/src/quic/{connection_receive,packet,connection_send,stream}.c` | Read in the structural refactors (packet-range merge, STREAM receive); not yet in full |
 | `C99/src/http3/qpack_encoder_stream.c` | Read around the finding — `AUD-0021`; not yet in full |
 | Everything else under `C99/src`, `C99/apps`, `C99/include` | **Not yet read in this review** |
 | `Swift/Sources/**` (77 files) | **Not yet read in this review** |
@@ -66,3 +67,30 @@ is harmless on every implementation that matters.
 **Found:** `AUD-0021` — `start` and `start_offset` were declared, computed and never read, with
 `(void)` casts suppressing the warning; the same pattern in two other files. Fixed, and now
 checked by `C99/scripts/check-unused-locals.py`.
+
+## `C99/src/quic/frame.c` — read in full
+
+726 lines, the whole file, against the same four questions.
+
+**Untrusted input.** Every length that comes off the wire goes through `wt_quic_take`, which
+narrows the 64-bit value with `wt_checked_narrow_u64_to_size` *before* comparing it against the
+cursor, so a 2^40 length is `WT_ERR_TRUNCATED` and not a walk off the end. Minimal encoding of
+the frame type is enforced against the encoding's own size, and an unknown type is a
+`FRAME_ENCODING_ERROR` rather than a guess at its length.
+
+The ACK range walk is the subtlest thing in the file and it is correct: `consumed` accumulates
+each probe's offset and cannot exceed `available`, because a probe's offset is bounded by its own
+length, so `available - consumed` cannot underflow; and because every iteration consumes at
+least two bytes, a peer-supplied `range_count` of 2^62 terminates through the truncation path
+rather than by looping. The RFC boundaries are on the right side throughout — 2^60 is legal and
+2^60+1 is not, `retire_prior_to > sequence` is refused, a connection ID of 0 or 21 bytes is
+refused, and `reliable_size > final_size` is refused on both the decode and the encode side.
+
+**Native memory.** `wt_quic_frame_make` and the decoder both memset the whole structure, and the
+comment records why: the first version cleared one byte, and a mostly-uninitialised union copied
+differently at `-O2` than at `-O0`, which failed only in Release. That is a memory-safety bug
+that was found and is now documented where the next person will read it.
+
+**Found:** `AUD-0022` — `new_token.token_length`, assigned from unvalidated input before the take
+was known to have succeeded, and read by nothing in the tree. Fixed without an ABI change, with a
+regression test that was checked to fail against the unfixed code.
