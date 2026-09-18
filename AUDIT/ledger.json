@@ -616,7 +616,7 @@
       "evidence_before": "endpoint.c's trailer rule (RFC 9114 section 4.1: \"Trailers MUST NOT contain pseudo-header fields\") was unexecuted, and the file contained a test that says it covers it: \"A trailer may not carry pseudo-headers (section 4.1)\", sending a trailer with `:path` and asserting a refusal. The refusal was real but came from somewhere else -- the message decoder refuses a section with no `:method` -- so the endpoint's rule could be DELETED with that test green. This is the same defect the review has been finding in its own new tests, sitting in the repository.",
       "fix_summary": "The trailer now carries a COMPLETE request section -- `:method GET` (static 17), `:scheme https` (23) and `:path /` (1) -- so it decodes cleanly and the trailer rule is the only thing that can refuse it, and the test's comment says why that matters. The section stays in the position that demonstrably passes the frame-ordering check: an earlier attempt to insert a second trailer case before it was refused with `FRAME_UNEXPECTED`, which is the ordering rule rather than the section's, and that is recorded rather than worked around.",
       "evidence_after": "Deliberate violation: removing the trailer rule now fails with `FAIL and is refused: want protocol, got ok` (1 of 181 checks), where before this change the same removal left the suite GREEN. `llvm-cov show` confirms endpoint.c:190-196 all execute (count 1 each) and the total moved 91.88% -> **91.93%** lines, the largest single-round gain of the review. `check-format.sh`: all 312 C sources match.",
-      "commit": "PENDING",
+      "commit": "77ded8e",
       "blocked_reason": ""
     }
   ]
