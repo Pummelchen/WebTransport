@@ -367,3 +367,52 @@ func retryPacketAcceptsTheRFCsOwnPacketAndBuildsItsPseudoPacket() throws {
         )
     }
 }
+
+/// Every frame type, not a sample.
+///
+/// `QUICFrame.encode` and `QUICFrame.decode` both dispatch on the frame's type, and a case
+/// added to the enum but missed by one of them is a wire bug that only a test over the
+/// whole enum catches. The count is asserted so that a new case cannot quietly arrive
+/// without a frame here.
+@Test
+func everyFrameTypeRoundTrips() throws {
+    let frames: [QUICFrame] = [
+        .padding,
+        .ping,
+        .ack(largestAcknowledged: 64, ackDelay: 3, firstAckRange: 1, ranges: [QUICAckRange(gap: 0, length: 1)]),
+        .crypto(offset: 7, data: Data("crypto".utf8)),
+        .stream(id: 4, offset: nil, fin: false, data: Data("stream".utf8)),
+        .stream(id: 4, offset: 12, fin: true, data: Data("stream".utf8)),
+        .resetStream(id: 4, applicationErrorCode: 0x1234, finalSize: 6),
+        .resetStreamAt(id: 4, applicationErrorCode: 0x1234, finalSize: 6, reliableSize: 6),
+        .stopSending(id: 4, applicationErrorCode: 0x1235),
+        .maxData(4096),
+        .maxStreamData(id: 4, maximum: 4096),
+        .maxStreams(direction: .bidirectional, maximum: 16),
+        .maxStreams(direction: .unidirectional, maximum: 16),
+        .dataBlocked(4096),
+        .streamDataBlocked(id: 4, offset: 12),
+        .streamsBlocked(direction: .bidirectional, maximum: 16),
+        .streamsBlocked(direction: .unidirectional, maximum: 16),
+        .newConnectionID(
+            sequence: 3,
+            retirePriorTo: 1,
+            connectionID: Data([0x01, 0x02, 0x03, 0x04]),
+            statelessResetToken: Data(repeating: 0xAB, count: 16)
+        ),
+        .retireConnectionID(sequence: 3),
+        .connectionClose(errorCode: 0x100, frameType: 0x01, reason: Data("close".utf8)),
+        .connectionClose(errorCode: 0x100, frameType: nil, reason: Data()),
+        .handshakeDone,
+        .datagram(Data("datagram".utf8)),
+    ]
+
+    // Nineteen cases in the enum; both stream directions and both `stream` forms are the
+    // deliberate extra entries, so this is 23 frames covering all of them.
+    #expect(frames.count == 23)
+
+    for frame in frames {
+        let encoded = try frame.encode()
+        #expect(try QUICFrame.decodeFrames(encoded) == [frame], "\(frame)")
+    }
+}
