@@ -9,3 +9,7 @@ Swift/.build/
 
 # Release staging (the archive and its digest; never committed).
 /dist/
+
+# Python bytecode: a local compile check must not reach the tree
+__pycache__/
+*.pyc
