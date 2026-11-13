@@ -62,14 +62,31 @@ read -r base_rss base_threads <<<"$(sample)"
 echo "baseline: rss=${base_rss}KB threads=${base_threads}"
 
 succeeded=0
+failed=0
+# The client's own output is the only witness for WHY an attempt failed, and a
+# run that non-establishes is precisely the run that needs it (WT-272: three CI
+# runs burned 400 attempts each with the reason discarded to /dev/null). The
+# first few failures are printed in full; the rest are counted.
+attempt_log="$(mktemp -t wt-soak-attempt)"
+trap 'rm -f "$attempt_log"' EXIT
+if ! command -v timeout >/dev/null 2>&1; then
+    echo "note: timeout(1) is not on PATH; attempts run under the client's own --timeout-ms"
+fi
 for i in $(seq 1 "$CONNECTIONS"); do
     if timeout 30 ./.build/debug/WebTransportClient \
         --connect "127.0.0.1:$PORT" \
         --transport packet \
         --trust local-self-signed \
         --message "soak-$i" \
-        --timeout-ms 15000 >/dev/null 2>&1; then
+        --timeout-ms 15000 >"$attempt_log" 2>&1; then
         succeeded=$((succeeded + 1))
+    else
+        status=$?
+        failed=$((failed + 1))
+        if [ "$failed" -le 3 ]; then
+            echo "  attempt $i failed (exit $status):"
+            sed 's/^/    /' "$attempt_log"
+        fi
     fi
     if [ $((i % SAMPLE_EVERY)) -eq 0 ]; then
         read -r rss threads <<<"$(sample)"
@@ -80,7 +97,7 @@ done
 
 peak_rss=$(sample | cut -d' ' -f1)
 echo
-echo "connections completed: $succeeded/$CONNECTIONS"
+echo "connections completed: $succeeded/$CONNECTIONS (failed: $failed)"
 
 # Idle settle: bounded retention drains here, a leak does not.
 SETTLE_SECONDS="${WEBTRANSPORT_SOAK_SETTLE_SECONDS:-45}"
