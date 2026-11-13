@@ -52,12 +52,18 @@ wt_status_t wt_tls_self_signed_generate(wt_tls_self_signed_t *out, const char *c
   if (X509_gmtime_adj(X509_getm_notAfter(certificate), 60L * 60L * 24L * 7L) == NULL) goto fail;
   if (X509_set_pubkey(certificate, key) != 1) goto fail;
 
-  name = X509_get_subject_name(certificate);
+  /* An OWNED subject name, not the certificate's accessor: OpenSSL 4 returns the
+   * subject as const -- the certificate owns its name -- and mutating through the
+   * accessor was never the contract. The name is built separately, copied into the
+   * certificate with X509_set_subject_name (which copies), and the same name is the
+   * issuer, which is what self-signed means. The owned copy is freed on every exit. */
+  name = X509_NAME_new();
   if (name == NULL) goto fail;
   if (X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char *)common_name, -1,
                                  -1, 0) != 1) {
     goto fail;
   }
+  if (X509_set_subject_name(certificate, name) != 1) goto fail;
   /* Self-signed: the issuer is the subject, which is what makes the pin the only thing to trust. */
   if (X509_set_issuer_name(certificate, name) != 1) goto fail;
 
@@ -98,6 +104,7 @@ wt_status_t wt_tls_self_signed_generate(wt_tls_self_signed_t *out, const char *c
   out->private_key_len = (size_t)written;
 
   X509_free(certificate);
+  X509_NAME_free(name);
   EVP_PKEY_free(key);
 
   if (wt_sha256(out->certificate, out->certificate_len, out->fingerprint) != WT_OK) {
@@ -107,6 +114,7 @@ wt_status_t wt_tls_self_signed_generate(wt_tls_self_signed_t *out, const char *c
   return WT_OK;
 
 fail:
+  X509_NAME_free(name);
   X509_free(certificate);
   EVP_PKEY_free(key);
   memset(out, 0, sizeof(*out));

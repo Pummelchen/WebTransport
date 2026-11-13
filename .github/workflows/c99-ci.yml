@@ -267,9 +267,16 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install the pinned clang-format
+        # Always install and always put the pinned binary FIRST on PATH: the
+        # ubuntu-24.04 image now ships its own clang-format (18.1.3), and a
+        # `command -v || install` guard made the gate run whatever the image
+        # happened to carry -- measured 13 November 2026, when that silently
+        # changed under a tree that satisfies the pin and the gate failed on a
+        # file the pin accepts.
         run: |
           set -euo pipefail
-          command -v clang-format >/dev/null || python3 -m pip install --user 'clang-format==23.1.5'
+          python3 -m pip install --user 'clang-format==23.1.5'
+          echo "$(python3 -m site --user-base)/bin" >> "$GITHUB_PATH"
           clang-format --version
 
       - name: Check the tree matches .clang-format
