@@ -282,6 +282,29 @@ static void test_the_section_7_1_selection_matrix(void) {
                wt_webtransport_version_select(&settings, &version, &error));
   WT_EXPECT_INT("the final version too", (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
 
+  /* A client that sent ONLY the earlier drafts' advertisement is a LEGACY client, and the legacy
+   * session is what its era agreed to: the wt2 server-direction peers (pywebtransport, quic-go)
+   * advertise exactly this, measured against the deployed peers on 13 November 2026. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, 1U);
+  WT_EXPECT_OK("a legacy-enabled client selects",
+               wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("the legacy version", (int)WT_WEBTRANSPORT_VERSION_LEGACY, (int)version);
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS, 1U);
+  WT_EXPECT_OK("and so does one that advertised only the max-sessions setting",
+               wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("the legacy version again", (int)WT_WEBTRANSPORT_VERSION_LEGACY, (int)version);
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, 1U);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U);
+  WT_EXPECT_OK("a legacy client that also sent the draft-16 codepoint selects",
+               wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("the draft-16 version over the legacy one", (int)WT_WEBTRANSPORT_VERSION_DRAFT16,
+                (int)version);
+
   /* Both codepoints together: the section 9.2 one wins, which is the highest version both support. */
   wt_http3_settings_init(&settings);
   (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
@@ -351,9 +374,99 @@ static void test_the_client_version_matrix(void) {
       "a draft-16 codepoint that is not 1 enables nothing", WT_ERR_STATE,
       wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
 
+  /* The earlier drafts' advertisement, and nothing newer: a pre-draft-16 server. Every third-party
+   * peer this tree interoperates with advertises exactly this -- measured against the five deployed
+   * VPS peers on 13 November 2026, all five carrying 0x2b603742=1 and two of them 0xc671706a=1 -- so
+   * the DUAL profile serves it as the LEGACY session it is. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, 1U);
+  WT_EXPECT_OK(
+      "a legacy-enabled server enables a DUAL client",
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
+  WT_EXPECT_INT("at the legacy version", (int)WT_WEBTRANSPORT_VERSION_LEGACY, (int)version);
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS, 1U);
+  WT_EXPECT_OK(
+      "and so does one that advertised only the max-sessions setting",
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
+  WT_EXPECT_INT("at the legacy version again", (int)WT_WEBTRANSPORT_VERSION_LEGACY, (int)version);
+
+  /* A FINAL profile keeps its word: the strict posture serves the version the section 9.2 codepoint
+   * names, and the earlier drafts' advertisement does not enable WebTransport for it. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, 1U);
+  WT_EXPECT_STATUS(
+      "a legacy-only server does not enable a FINAL client", WT_ERR_STATE,
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_FINAL, &version, &error));
+
   WT_EXPECT_STATUS(
       "a NULL settings is refused", WT_ERR_INVALID_ARGUMENT,
       wt_webtransport_client_version(NULL, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
+}
+
+/* What version a peer's SETTINGS advertise, without a profile -- the one question the flow-control
+ * baseline needs answered about the same parsed SETTINGS before either endpoint knows its role. */
+static void test_the_peer_advertised_version_matrix(void) {
+  wt_http3_settings_t settings;
+  wt_webtransport_version_t version;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+  WT_EXPECT_OK("the section 9.2 codepoint advertises",
+               wt_webtransport_peer_advertised_version(&settings, &version, &error));
+  WT_EXPECT_INT("the final version", (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 7U);
+  WT_EXPECT_OK("a section 9.2 value a client would refuse still advertises",
+               wt_webtransport_peer_advertised_version(&settings, &version, &error));
+  WT_EXPECT_INT("the final version, its value being the server's business",
+                (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U);
+  WT_EXPECT_OK("the draft-16 codepoint advertises",
+               wt_webtransport_peer_advertised_version(&settings, &version, &error));
+  WT_EXPECT_INT("the draft-16 version", (int)WT_WEBTRANSPORT_VERSION_DRAFT16, (int)version);
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, 1U);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS, 1U);
+  WT_EXPECT_OK("the earlier drafts' settings advertise",
+               wt_webtransport_peer_advertised_version(&settings, &version, &error));
+  WT_EXPECT_INT("the legacy version", (int)WT_WEBTRANSPORT_VERSION_LEGACY, (int)version);
+
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_STATUS("an empty SETTINGS advertises nothing", WT_ERR_STATE,
+                   wt_webtransport_peer_advertised_version(&settings, &version, &error));
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 2U);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a draft-16 codepoint that is not 1 is the connection error", WT_ERR_PROTOCOL,
+                   wt_webtransport_peer_advertised_version(&settings, &version, &error));
+  WT_EXPECT_INT("with H3_SETTINGS_ERROR", (int)WT_HTTP3_SETTINGS_ERROR, (int)error);
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 2U);
+  WT_EXPECT_OK("a section 9.2 value greater than 1 still classifies as final",
+               wt_webtransport_peer_advertised_version(&settings, &version, &error));
+  WT_EXPECT_INT("its value being the 2xx gate's rule, not the rule selector's",
+                (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
+
+  /* But a final advertisement beside a broken draft one is still final: the higher version is what
+   * section 7.1 selects, and the final codepoint is checked before the draft's value. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 2U);
+  WT_EXPECT_OK("a final codepoint beside a broken draft one advertises",
+               wt_webtransport_peer_advertised_version(&settings, &version, &error));
+  WT_EXPECT_INT("the final version", (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
+
+  WT_EXPECT_STATUS("a NULL settings is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_webtransport_peer_advertised_version(NULL, &version, &error));
 }
 
 /* An authority a real client sends carries the port, and a policy names a HOST: RFC 9114 section 4.3.1 makes
@@ -481,6 +594,7 @@ int main(void) {
   test_the_settings_a_webtransport_endpoint_advertises();
   test_the_section_7_1_selection_matrix();
   test_the_client_version_matrix();
+  test_the_peer_advertised_version_matrix();
   test_an_authority_may_name_the_port_it_is_talking_to();
   test_both_protocol_tokens_are_accepted_and_distinct();
   WT_TEST_MAIN_END("wt_webtransport_session_request");

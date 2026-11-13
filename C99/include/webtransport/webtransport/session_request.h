@@ -218,7 +218,13 @@ typedef enum wt_webtransport_version {
   /* This document, draft-17. */
   WT_WEBTRANSPORT_VERSION_FINAL = 0,
   /* The draft-16 codepoint's version. */
-  WT_WEBTRANSPORT_VERSION_DRAFT16 = 1
+  WT_WEBTRANSPORT_VERSION_DRAFT16 = 1,
+  /* A pre-draft-16 peer: WebTransport advertised only by the earlier drafts' settings
+   * (WT_ENABLE_DEPRECATED 0x2b603742, or the max-sessions codepoints), which every
+   * third-party implementation this tree interoperates with still sends. The session
+   * runs the pre-draft-17 rules: no SETTINGS baseline under the flow-control grants,
+   * and a grant is refused only when it goes BACKWARDS, not when it repeats. */
+  WT_WEBTRANSPORT_VERSION_LEGACY = 2
 } wt_webtransport_version_t;
 
 /* What a WebTransport endpoint advertises for one profile (section 3.1's list, section 7.1's draft
@@ -235,8 +241,12 @@ wt_status_t wt_webtransport_settings_apply_profile(wt_http3_settings_t *settings
  * A client that sent the section 9.2 codepoint -- whatever its value, which a server MUST ignore
  * (section 3.1) -- selected the final version. Otherwise a client that sent the draft-16 codepoint
  * selected draft-16, and being a draft-16 client it MUST have sent the value 1: any other value is
- * WT_ERR_PROTOCOL with H3_SETTINGS_ERROR. A client that sent neither is a final client (final clients
- * send no SETTINGS_WT_ENABLED), so the final version is selected.
+ * WT_ERR_PROTOCOL with H3_SETTINGS_ERROR. Otherwise a client that sent one of the earlier drafts'
+ * WebTransport settings (the LEGACY advertisement) selected that era's session: it is not a final
+ * client -- those send no SETTINGS_WT_ENABLED at all -- and it is not a draft-16 client either, and
+ * treating it as either would enforce rules its implementation never agreed to. A client that sent
+ * none of the four is a final client (final clients send no SETTINGS_WT_ENABLED), so the final
+ * version is selected.
  *
  * WT_OK with `out_version` set on every selection. WT_ERR_INVALID_ARGUMENT for a null settings. */
 wt_status_t wt_webtransport_version_select(const wt_http3_settings_t *client_settings,
@@ -246,18 +256,32 @@ wt_status_t wt_webtransport_version_select(const wt_http3_settings_t *client_set
 /* The client's half of sections 3.1 and 7.1: what the SERVER's SETTINGS say.
  *
  * WT_OK with `out_version` naming the version when WebTransport is enabled: the section 9.2 codepoint
- * with the value 1, or -- DUAL profiles only -- the draft-16 codepoint with the value 1. A server that
- * sent neither does not serve WebTransport, which is WT_ERR_STATE: the client MUST NOT attempt a
- * session, and section 3.1 lets it close the connection with WT_REQUIREMENTS_NOT_MET to aid debugging.
- * The section 9.2 codepoint with a value greater than 1 is the connection error section 3.1 names:
- * WT_ERR_PROTOCOL with H3_SETTINGS_ERROR.
+ * with the value 1, or -- DUAL profiles only -- the draft-16 codepoint with the value 1, or -- again
+ * DUAL profiles only -- one of the earlier drafts' WebTransport settings with the value 1
+ * (WT_ENABLE_DEPRECATED 0x2b603742, WT_MAX_SESSIONS 0xc671706a), which is the advertisement every
+ * pre-draft-16 peer this tree interoperates with sends: LEGACY. A server that sent none of them does
+ * not serve WebTransport, which is WT_ERR_STATE: the client MUST NOT attempt a session, and section 3.1
+ * lets it close the connection with WT_REQUIREMENTS_NOT_MET to aid debugging. The section 9.2 codepoint
+ * with a value greater than 1 is the connection error section 3.1 names: WT_ERR_PROTOCOL with
+ * H3_SETTINGS_ERROR.
  *
  * A FINAL profile requires the section 9.2 codepoint: the draft-16 codepoint alone does not enable
- * WebTransport for it. */
+ * WebTransport for it, and neither do the earlier drafts'. */
 wt_status_t wt_webtransport_client_version(const wt_http3_settings_t *server_settings,
                                            wt_webtransport_version_profile_t profile,
                                            wt_webtransport_version_t *out_version,
                                            wt_http3_error_t *out_error);
+
+/* What version a PEER's SETTINGS advertise, without a profile -- the one question both halves of a
+ * connection need answered about the same parsed SETTINGS before either knows its own role in it: which
+ * wire-era rules govern the session this peer is about to join. The section 9.2 codepoint with the value
+ * 1 names FINAL; the draft-16 codepoint with the value 1 names DRAFT16; the earlier drafts' WebTransport
+ * settings name LEGACY; no advertisement at all is WT_ERR_STATE. A FINAL-profile caller still gates the
+ * session on `wt_webtransport_client_version` / `wt_webtransport_version_select` -- this answers only
+ * "which rules apply", which is what the flow-control baseline needs and the 2xx gate does not. */
+wt_status_t wt_webtransport_peer_advertised_version(const wt_http3_settings_t *peer_settings,
+                                                    wt_webtransport_version_t *out_version,
+                                                    wt_http3_error_t *out_error);
 
 #ifdef __cplusplus
 }

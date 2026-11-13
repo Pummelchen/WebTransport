@@ -337,12 +337,29 @@ extension WebTransportSessionManager {
         sessionIDsByRequestStreamID[session.requestStreamID] = session.id
         datagramsBySessionID[session.id] = datagramsBySessionID[session.id] ?? []
         let negotiated = webTransportFlowControlNegotiated
+        // Which era's refusal rule this session runs is decided by what the PEER
+        // advertised, not by this endpoint's profile: a FINAL advertisement seeds the
+        // §5.5 SETTINGS baseline and the draft-17 strictly-increasing rule; a DRAFT16
+        // or LEGACY advertisement (or no advertisement at all — that refusal is the
+        // settings gate's to make) seeds no baseline and keeps a repeat of a received
+        // grant legal, because that era's rule refused only a grant that went
+        // BACKWARDS, and the peers still speaking it rely on that.
+        let advertised = (http3.remoteSettings ?? .webTransportDraft17Defaults)
+            .webTransportAdvertisedVersion()
         flowControlStateBySessionID[session.id] =
             flowControlStateBySessionID[session.id]
-            ?? WebTransportFlowControlState(
-                settings: http3.remoteSettings ?? .webTransportDraft17Defaults,
-                isEnabled: negotiated
-            )
+            ?? (advertised == .final
+                ? WebTransportFlowControlState(
+                    settings: http3.remoteSettings ?? .webTransportDraft17Defaults,
+                    isEnabled: negotiated
+                )
+                : WebTransportFlowControlState(
+                    maxData: nil,
+                    maxStreamsBidi: nil,
+                    maxStreamsUni: nil,
+                    isEnabled: negotiated,
+                    refusesRepeats: false
+                ))
         receiveFlowControlStateBySessionID[session.id] =
             receiveFlowControlStateBySessionID[session.id]
             ?? WebTransportFlowControlState(settings: http3.localSettings, isEnabled: negotiated)

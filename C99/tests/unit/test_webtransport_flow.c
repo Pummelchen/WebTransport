@@ -314,11 +314,60 @@ static void test_the_settings_baseline_anchors_the_first_grant(void) {
   WT_EXPECT_U64("with the flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
 }
 
+/* The DRAFT16 and LEGACY sessions run their own era's rule, which the §7.1 negotiation selects: the
+ * SETTINGS baselines do not apply -- the era's sections 5.6 never anchored a grant to a setting, and
+ * the peers this tree interoperates with grant at their SETTINGS value and repeat grants freely --
+ * and a capsule is the flow-control error only when it goes BACKWARDS. Measured against the five
+ * deployed VPS peers on 13 November 2026: every one advertises the earlier drafts' settings, and a
+ * FINAL-session rule applied to them closed sessions the peers considered healthy. */
+static void test_the_legacy_rule_refuses_only_a_grant_that_goes_backwards(void) {
+  wt_webtransport_flow_limits_t limits;
+  uint64_t error = 0U;
+
+  wt_webtransport_flow_limits_init(&limits);
+  wt_webtransport_flow_limits_set_rule(&limits, 1);
+
+  /* A first grant with no baseline recorded is the ordinary grant it is, whatever its size: the era's
+   * rule never anchored a capsule to a setting. */
+  WT_EXPECT_OK("a first grant is accepted under the legacy rule",
+               wt_webtransport_flow_on_max_data(&limits, 100000U, &error));
+  WT_EXPECT_U64("and recorded", 100000U, limits.max_data);
+
+  /* A repeat of the received grant is that era's legal re-grant, not a peer that lost track. */
+  WT_EXPECT_OK("a repeat of the received grant is accepted",
+               wt_webtransport_flow_on_max_data(&limits, 100000U, &error));
+  WT_EXPECT_U64("still the same limit", 100000U, limits.max_data);
+
+  /* And a grant that goes backwards is the refusal it always was. */
+  error = 0U;
+  WT_EXPECT_STATUS("a grant below the received one is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_data(&limits, 99999U, &error));
+  WT_EXPECT_U64("with WT_FLOW_CONTROL_ERROR", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+
+  /* The same shape for the stream counts: establish, repeat, then go backwards. */
+  WT_EXPECT_OK("a first stream grant is accepted",
+               wt_webtransport_flow_on_max_streams(&limits, 1, 8U, &error));
+  WT_EXPECT_OK("its repeat too", wt_webtransport_flow_on_max_streams(&limits, 1, 8U, &error));
+  error = 0U;
+  WT_EXPECT_STATUS("and one that goes backwards is not", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_streams(&limits, 1, 4U, &error));
+  WT_EXPECT_U64("with the flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+
+  /* The unidirectional rule is the same one: establish, then refuse a step backwards. */
+  WT_EXPECT_OK("a unidirectional grant is accepted too",
+               wt_webtransport_flow_on_max_streams(&limits, 0, 3U, &error));
+  error = 0U;
+  WT_EXPECT_STATUS("and one that goes backwards is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_streams(&limits, 0, 2U, &error));
+  WT_EXPECT_U64("with the flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+}
+
 int main(void) {
   test_round_trips();
   test_malformed_values();
   test_limits_only_grow();
   test_the_stream_count_ceiling();
   test_the_settings_baseline_anchors_the_first_grant();
+  test_the_legacy_rule_refuses_only_a_grant_that_goes_backwards();
   WT_TEST_MAIN_END("wt_webtransport_flow");
 }

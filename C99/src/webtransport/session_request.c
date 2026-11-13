@@ -283,7 +283,11 @@ wt_status_t wt_webtransport_version_select(const wt_http3_settings_t *client_set
                                            wt_http3_error_t *out_error) {
   int final_present = 0;
   int draft_present = 0;
+  int legacy_enable_present = 0;
+  int legacy_sessions_present = 0;
   uint64_t draft_value = 0U;
+  uint64_t legacy_enable_value = 0U;
+  uint64_t legacy_sessions_value = 0U;
 
   if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
   if (client_settings == NULL || out_version == NULL) return WT_ERR_INVALID_ARGUMENT;
@@ -291,6 +295,10 @@ wt_status_t wt_webtransport_version_select(const wt_http3_settings_t *client_set
   (void)wt_http3_settings_get(client_settings, WT_HTTP3_SETTING_WT_ENABLED, &final_present);
   draft_value =
       wt_http3_settings_get(client_settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, &draft_present);
+  legacy_enable_value = wt_http3_settings_get(
+      client_settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, &legacy_enable_present);
+  legacy_sessions_value = wt_http3_settings_get(client_settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS,
+                                                &legacy_sessions_present);
 
   /* The draft-16 codepoint names its sender a draft-16 client, and a draft client sends the value 1 --
    * the value is how the era's `SETTINGS_WT_ENABLED` said "this endpoint serves WebTransport". A value
@@ -309,6 +317,15 @@ wt_status_t wt_webtransport_version_select(const wt_http3_settings_t *client_set
   if (draft_present != 0) {
     /* Only a draft-16 client sends only the draft-16 codepoint, so the draft-16 version is selected. */
     *out_version = WT_WEBTRANSPORT_VERSION_DRAFT16;
+    return WT_OK;
+  }
+  if ((legacy_enable_present != 0 && legacy_enable_value == 1U) ||
+      (legacy_sessions_present != 0 && legacy_sessions_value == 1U)) {
+    /* The earlier drafts' advertisement, and nothing newer: a pre-draft-16 client, which is not a
+     * final client -- those send no SETTINGS_WT_ENABLED at all -- and is not a draft-16 client either.
+     * The session runs that era's rules; the wt2 server-direction proofs are exactly such clients
+     * (pywebtransport, quic-go), measured against the deployed peers on 13 November 2026. */
+    *out_version = WT_WEBTRANSPORT_VERSION_LEGACY;
     return WT_OK;
   }
   /* No codepoint at all is a FINAL client: section 3.1's client list carries no SETTINGS_WT_ENABLED,
@@ -353,7 +370,76 @@ wt_status_t wt_webtransport_client_version(const wt_http3_settings_t *server_set
     *out_version = WT_WEBTRANSPORT_VERSION_DRAFT16;
     return WT_OK;
   }
+  if (profile != WT_WEBTRANSPORT_PROFILE_FINAL) {
+    int legacy_enable_present = 0;
+    int legacy_sessions_present = 0;
+    uint64_t legacy_enable_value = 0U;
+    uint64_t legacy_sessions_value = 0U;
+
+    legacy_enable_value = wt_http3_settings_get(
+        server_settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED, &legacy_enable_present);
+    legacy_sessions_value = wt_http3_settings_get(server_settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS,
+                                                  &legacy_sessions_present);
+    if ((legacy_enable_present != 0 && legacy_enable_value == 1U) ||
+        (legacy_sessions_present != 0 && legacy_sessions_value == 1U)) {
+      /* The earlier drafts' advertisement, and no newer codepoint: a pre-draft-16 server. The DUAL
+       * profile serves it -- every third-party peer this tree interoperates with still advertises
+       * exactly this (measured against the five deployed peers on 13 November 2026) -- and the
+       * session runs that era's rules. A FINAL profile does not: the strict posture means what it
+       * says. */
+      *out_version = WT_WEBTRANSPORT_VERSION_LEGACY;
+      return WT_OK;
+    }
+  }
   /* The default value of SETTINGS_WT_ENABLED is 0, "meaning that the server does not support
    * WebTransport" (section 3.1): no session may be attempted on this connection. */
+  return WT_ERR_STATE;
+}
+
+wt_status_t wt_webtransport_peer_advertised_version(const wt_http3_settings_t *peer_settings,
+                                                    wt_webtransport_version_t *out_version,
+                                                    wt_http3_error_t *out_error) {
+  int final_present = 0;
+  int draft_present = 0;
+  int legacy_enable_present = 0;
+  int legacy_sessions_present = 0;
+  uint64_t draft_value = 0U;
+  uint64_t legacy_enable_value = 0U;
+  uint64_t legacy_sessions_value = 0U;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (peer_settings == NULL || out_version == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  (void)wt_http3_settings_get(peer_settings, WT_HTTP3_SETTING_WT_ENABLED, &final_present);
+  draft_value =
+      wt_http3_settings_get(peer_settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, &draft_present);
+  legacy_enable_value = wt_http3_settings_get(peer_settings, WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED,
+                                              &legacy_enable_present);
+  legacy_sessions_value = wt_http3_settings_get(peer_settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS,
+                                                &legacy_sessions_present);
+
+  if (final_present != 0) {
+    /* FINAL, and the codepoint's VALUE is not this function's business: section 3.1 makes
+     * SETTINGS_WT_ENABLED meaningless from a client, so the server side ignores it, and the
+     * client side's >1 connection error is the 2xx gate's rule
+     * (`wt_webtransport_client_version`), not the rule selector's. */
+    *out_version = WT_WEBTRANSPORT_VERSION_FINAL;
+    return WT_OK;
+  }
+  if (draft_present != 0 && draft_value != 1U) {
+    /* A draft advertisement carries its era's "supported" value, 1; anything else is the
+     * connection error, which both halves' gates also enforce. */
+    if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
+  if (draft_present != 0) {
+    *out_version = WT_WEBTRANSPORT_VERSION_DRAFT16;
+    return WT_OK;
+  }
+  if ((legacy_enable_present != 0 && legacy_enable_value == 1U) ||
+      (legacy_sessions_present != 0 && legacy_sessions_value == 1U)) {
+    *out_version = WT_WEBTRANSPORT_VERSION_LEGACY;
+    return WT_OK;
+  }
   return WT_ERR_STATE;
 }

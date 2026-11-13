@@ -372,6 +372,12 @@ void wt_webtransport_flow_limits_init(wt_webtransport_flow_limits_t *limits) {
   limits->baseline_streams_bidi = 0U;
   limits->baseline_streams_uni_set = 0;
   limits->baseline_streams_uni = 0U;
+  limits->legacy_rule = 0;
+}
+
+void wt_webtransport_flow_limits_set_rule(wt_webtransport_flow_limits_t *limits, int legacy_rule) {
+  if (limits == NULL) return;
+  limits->legacy_rule = legacy_rule != 0 ? 1 : 0;
 }
 
 wt_status_t wt_webtransport_flow_baseline_data(wt_webtransport_flow_limits_t *limits,
@@ -399,22 +405,26 @@ wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limi
                                              uint64_t maximum, uint64_t *out_error) {
   if (out_error != NULL) *out_error = 0U;
   if (limits == NULL) return WT_ERR_INVALID_ARGUMENT;
-  if (limits->max_data_set && maximum <= limits->max_data) {
+  if (limits->max_data_set &&
+      ((limits->legacy_rule != 0) ? maximum < limits->max_data : maximum <= limits->max_data)) {
     /* Section 5.1: the limits strictly increase. A limit that shrinks would invalidate
      * data already sent against the old one, and a limit that repeats says the peer has
      * lost track of what it granted; both are flow-control errors rather than new
-     * limits. */
+     * limits. Under the legacy rule a REPEAT is that era's legal re-grant -- its sections
+     * 5.6 refused only a value that went backwards -- so only a strictly smaller one is
+     * refused. */
     if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
     return WT_ERR_PROTOCOL;
   }
-  if (limits->max_data_set == 0 && limits->baseline_data_set != 0 &&
+  if (limits->legacy_rule == 0 && limits->max_data_set == 0 && limits->baseline_data_set != 0 &&
       maximum <= limits->baseline_data) {
-    /* Section 5.5 with 5.6.4: while no capsule of this type has been received, the
-     * SETTINGS_WT_INITIAL_MAX_DATA value stands in for "the Maximum Data value previously
-     * received", and 5.6.4 closes the session on a capsule that "does not increase" it.
-     * The settings themselves already granted that value, so the first capsule must be
-     * strictly ABOVE the baseline; from the first capsule on, the strictly increasing
-     * rule above governs alone. */
+    /* Section 5.5 with 5.6.4, FINAL sessions only: while no capsule of this type has been
+     * received, the SETTINGS_WT_INITIAL_MAX_DATA value stands in for "the Maximum Data value
+     * previously received", and 5.6.4 closes the session on a capsule that "does not increase"
+     * it. The settings themselves already granted that value, so the first capsule must be
+     * strictly ABOVE the baseline; from the first capsule on, the strictly increasing rule
+     * above governs alone. A DRAFT16 or LEGACY session never anchors a grant to a setting --
+     * that anchor is this draft's own addition. */
     if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
     return WT_ERR_PROTOCOL;
   }
@@ -435,12 +445,16 @@ wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *l
     return WT_ERR_PROTOCOL;
   }
   if (bidirectional) {
-    if (limits->max_streams_bidi_set && maximum <= limits->max_streams_bidi) {
+    if (limits->max_streams_bidi_set &&
+        ((limits->legacy_rule != 0) ? maximum < limits->max_streams_bidi
+                                    : maximum <= limits->max_streams_bidi)) {
       if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
       return WT_ERR_PROTOCOL;
     }
-    if (limits->max_streams_bidi_set == 0 && limits->baseline_streams_bidi_set != 0 &&
-        maximum <= limits->baseline_streams_bidi) {
+    if (limits->legacy_rule == 0 && limits->max_streams_bidi_set == 0 &&
+        limits->baseline_streams_bidi_set != 0 && maximum <= limits->baseline_streams_bidi) {
+      /* FINAL sessions only: the SETTINGS baseline anchors the first grant (section 5.5 with
+       * 5.6.2), and a capsule that does not increase it closes the session. */
       if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
       return WT_ERR_PROTOCOL;
     }
@@ -448,12 +462,14 @@ wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *l
     limits->max_streams_bidi_set = 1;
     return WT_OK;
   }
-  if (limits->max_streams_uni_set && maximum <= limits->max_streams_uni) {
+  if (limits->max_streams_uni_set &&
+      ((limits->legacy_rule != 0) ? maximum < limits->max_streams_uni
+                                  : maximum <= limits->max_streams_uni)) {
     if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
     return WT_ERR_PROTOCOL;
   }
-  if (limits->max_streams_uni_set == 0 && limits->baseline_streams_uni_set != 0 &&
-      maximum <= limits->baseline_streams_uni) {
+  if (limits->legacy_rule == 0 && limits->max_streams_uni_set == 0 &&
+      limits->baseline_streams_uni_set != 0 && maximum <= limits->baseline_streams_uni) {
     if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
     return WT_ERR_PROTOCOL;
   }

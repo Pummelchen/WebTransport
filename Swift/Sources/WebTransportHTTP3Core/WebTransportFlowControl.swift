@@ -266,10 +266,57 @@ extension HTTP3Settings {
         webTransportFlowControlEnabled(constants: constants)
             && peer.webTransportFlowControlEnabled(constants: constants)
     }
+
+    /// Which version the peer's SETTINGS advertise, classified the way the §7.1
+    /// negotiation reads them. This answers only "which era's rules govern this
+    /// session" — the value rules (a §9.2 codepoint greater than 1 is the §3.1
+    /// connection error; a draft-16 codepoint other than 1 is no advertisement)
+    /// belong to the settings-validation gates, which run before a session is
+    /// established.
+    ///
+    /// The final codepoint, whatever its value (a server MUST ignore the value §3.1
+    /// gives no meaning; the client's gate enforces it) is FINAL. The draft-16
+    /// codepoint with the value 1 is DRAFT16. The earlier drafts' enable settings are
+    /// LEGACY — the advertisement every pre-draft-16 peer this tree interoperates
+    /// with sends, measured against the five deployed VPS peers on 13 November 2026.
+    /// No advertisement at all also classifies as LEGACY: no baseline can be read
+    /// from settings that were never sent, and the pre-draft-17 rule is the safe
+    /// default for a session the gates may refuse anyway.
+    public func webTransportAdvertisedVersion(
+        constants: WebTransportHTTP3DraftConstants = .current
+    ) -> WebTransportPeerAdvertisedVersion {
+        if self[constants.settingsWTEnabled] != nil { return .final }
+        if self[constants.settingsWTEnabledDraft16] == 1 { return .draft16 }
+        if self[HTTP3SettingID.legacyEnableWebTransport] == 1
+            || self[HTTP3SettingID.legacyWebTransportMaxSessions] == 1
+        {
+            return .legacy
+        }
+        return .legacy
+    }
+}
+
+/// The version classification `HTTP3Settings.webTransportAdvertisedVersion` answers.
+public enum WebTransportPeerAdvertisedVersion: Equatable, Sendable {
+    /// This document, draft-17: the SETTINGS baselines anchor the first grant.
+    case `final`
+    /// The draft-16 codepoint's version: the era's own refusal rule.
+    case draft16
+    /// A pre-draft-16 advertisement, or no advertisement at all: the era's rule, with
+    /// no SETTINGS baseline and repeats of a received grant left legal.
+    case legacy
 }
 
 public struct WebTransportFlowControlState: Equatable, Sendable {
     public private(set) var isEnabled: Bool
+    /// Whether a grant that REPEATS the previously received value is the session-
+    /// closing flow-control error. This is the draft-17 rule (§5.6: a capsule that
+    /// "does not increase" the value previously received — or the §5.5 SETTINGS value
+    /// while none has arrived — closes the session), and it is the default. A session
+    /// whose §7.1 negotiation selected DRAFT16 or LEGACY runs its era's rule instead,
+    /// which refused only a grant that went BACKWARDS: a repeat was that era's legal
+    /// re-grant, and the peers still speaking that era rely on it.
+    public private(set) var refusesRepeats: Bool
     public private(set) var maxDataState: WebTransportFlowControlLimitState
     public private(set) var maxStreamsBidiState: WebTransportFlowControlLimitState
     public private(set) var maxStreamsUniState: WebTransportFlowControlLimitState
@@ -293,9 +340,11 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         maxData: UInt64?,
         maxStreamsBidi: UInt64?,
         maxStreamsUni: UInt64?,
-        isEnabled: Bool = true
+        isEnabled: Bool = true,
+        refusesRepeats: Bool = true
     ) {
         self.isEnabled = isEnabled
+        self.refusesRepeats = refusesRepeats
         self.maxDataState = WebTransportFlowControlLimitState(maxData, isEnabled: isEnabled)
         self.maxStreamsBidiState = WebTransportFlowControlLimitState(maxStreamsBidi, isEnabled: isEnabled)
         self.maxStreamsUniState = WebTransportFlowControlLimitState(maxStreamsUni, isEnabled: isEnabled)
@@ -304,12 +353,17 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         self.openedUniStreams = 0
     }
 
+    /// Seeds the limits from the peer's SETTINGS. This is the FINAL-session seed: the
+    /// §5.5 values stand in for the "value previously received" while no capsule of a
+    /// type has arrived, so the first grant must strictly exceed what the settings
+    /// already granted.
     public init(
         settings: HTTP3Settings,
         isEnabled: Bool? = nil,
         constants: WebTransportHTTP3DraftConstants = .current
     ) {
         self.isEnabled = isEnabled ?? settings.webTransportFlowControlEnabled(constants: constants)
+        self.refusesRepeats = true
         self.maxDataState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxData] ?? 0, isEnabled: self.isEnabled)
         self.maxStreamsBidiState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxStreamsBidi] ?? 0, isEnabled: self.isEnabled)
         self.maxStreamsUniState = WebTransportFlowControlLimitState(settings[constants.settingsWTInitialMaxStreamsUni] ?? 0, isEnabled: self.isEnabled)
@@ -324,7 +378,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
 
     public mutating func setMaxData(_ value: UInt64) throws {
         guard isEnabled else { return }
-        try setMonotonicLimit(&maxDataState, value: value, label: "WT_MAX_DATA")
+        try setMonotonicLimit(&maxDataState, value: value, refusesRepeats: refusesRepeats, label: "WT_MAX_DATA")
     }
 
     public mutating func setMaxStreamsBidi(_ value: UInt64) throws {
@@ -332,7 +386,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
             throw WebTransportDraft17Error(kind: .flowControl, message: "WT_MAX_STREAMS_BIDI exceeds the draft-17 2^60 maximum")
         }
-        try setMonotonicLimit(&maxStreamsBidiState, value: value, label: "WT_MAX_STREAMS_BIDI")
+        try setMonotonicLimit(&maxStreamsBidiState, value: value, refusesRepeats: refusesRepeats, label: "WT_MAX_STREAMS_BIDI")
     }
 
     public mutating func setMaxStreamsUni(_ value: UInt64) throws {
@@ -340,7 +394,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
         guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
             throw WebTransportDraft17Error(kind: .flowControl, message: "WT_MAX_STREAMS_UNI exceeds the draft-17 2^60 maximum")
         }
-        try setMonotonicLimit(&maxStreamsUniState, value: value, label: "WT_MAX_STREAMS_UNI")
+        try setMonotonicLimit(&maxStreamsUniState, value: value, refusesRepeats: refusesRepeats, label: "WT_MAX_STREAMS_UNI")
     }
 
     public mutating func apply(_ capsule: WebTransportFlowCapsule) throws {
@@ -405,6 +459,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
 private func setMonotonicLimit(
     _ current: inout WebTransportFlowControlLimitState,
     value: UInt64,
+    refusesRepeats: Bool,
     label: String
 ) throws {
     // `.unlimited` deliberately carries no number: it means "no limit has been
@@ -414,11 +469,13 @@ private func setMonotonicLimit(
     let normalized = WebTransportFlowControlLimitState(value, isEnabled: true)
     if let currentValue = current.asUInt64,
         let newValue = normalized.asUInt64,
-        newValue <= currentValue
+        refusesRepeats ? newValue <= currentValue : newValue < currentValue
     {
         throw WebTransportDraft17Error(
             kind: .flowControl,
-            message: "\(label) must strictly increase"
+            message: refusesRepeats
+                ? "\(label) must strictly increase"
+                : "\(label) must not go backwards"
         )
     }
     current = normalized

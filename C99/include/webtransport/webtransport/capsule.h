@@ -146,13 +146,21 @@ typedef struct wt_webtransport_flow_limits {
    * capsule of the corresponding type has been received. The draft closes the session on a
    * capsule that "does not increase" the previously received value, and the baseline stands
    * in for that value -- so a first capsule AT or below its baseline is the flow-control
-   * error, and from the first capsule on the strictly-increasing rule governs alone. */
+   * error, and from the first capsule on the strictly-increasing rule governs alone. All of
+   * this is DRAFT-17 rule, and it applies only to a session the §7.1 negotiation selected
+   * as FINAL: a DRAFT16 or LEGACY session runs the era's own rule, which is why the flag
+   * below exists. */
   int baseline_data_set;
   uint64_t baseline_data;
   int baseline_streams_bidi_set;
   uint64_t baseline_streams_bidi;
   int baseline_streams_uni_set;
   uint64_t baseline_streams_uni;
+  /* Non-zero when the negotiated version is DRAFT16 or LEGACY: the SETTINGS baselines do not
+   * apply (the era's sections 5.6 never anchored a grant to a setting), and a grant is refused
+   * only when it goes BACKWARDS -- a repeat of the previously received value is that era's
+   * legal "re-grant what you already gave me", not a flow-control error. */
+  int legacy_rule;
 } wt_webtransport_flow_limits_t;
 
 void wt_webtransport_flow_limits_init(wt_webtransport_flow_limits_t *limits);
@@ -164,11 +172,19 @@ wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *l
 
 /* Record the PEER's SETTINGS initial values (section 5.5) as the baselines the first capsule of
  * each type must exceed. A setting the peer omitted carries no baseline, exactly as it carries no
- * grant. */
+ * grant. Baselines are a FINAL-session rule: a caller sets them only when the §7.1 negotiation
+ * selected the final version. */
 wt_status_t wt_webtransport_flow_baseline_data(wt_webtransport_flow_limits_t *limits,
                                                uint64_t initial_max_data);
 wt_status_t wt_webtransport_flow_baseline_streams(wt_webtransport_flow_limits_t *limits,
                                                   int bidirectional, uint64_t initial_max_streams);
+
+/* Select which era's refusal rule the limits enforce. Non-zero puts the limits under the
+ * pre-draft-17 rule -- no SETTINGS baseline, and only a grant that goes BACKWARDS is the
+ * flow-control error, a repeat being that era's legal re-grant. Zero (the default from
+ * `wt_webtransport_flow_limits_init`) is the draft-17 rule: the baselines anchor the first
+ * capsule and every grant must strictly increase the one before it. */
+void wt_webtransport_flow_limits_set_rule(wt_webtransport_flow_limits_t *limits, int legacy_rule);
 
 #ifdef __cplusplus
 }

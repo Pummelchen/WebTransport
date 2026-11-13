@@ -427,6 +427,71 @@ func draft17FlowControlGrantAtSettingsInitialAlsoClosesTheSession() throws {
         "a WT_MAX_STREAMS grant at the peer's SETTINGS initial value does not increase it and must close the session")
 }
 
+/// draft-17 sections 5.5 with 5.6: which era's flow rule a session runs is decided
+/// by what the peer ADVERTISED, and the classifier reads it straight off the parsed
+/// SETTINGS — the final codepoint is FINAL whatever its value (the value rules are
+/// the settings gate's), the draft-16 codepoint at 1 is DRAFT16, and the earlier
+/// drafts' enable settings are LEGACY, which is what every pre-draft-16 peer this
+/// tree interoperates with sends (measured against the five deployed VPS peers on
+/// 13 November 2026).
+@Test
+func draft17AdvertisedVersionClassificationFollowsThePeerSettings() throws {
+    let constants = WebTransportHTTP3DraftConstants.current
+    var settings = try HTTP3Settings()
+    try settings.set(1, for: constants.settingsWTEnabled)
+    #expect(settings.webTransportAdvertisedVersion() == .final)
+    try settings.set(7, for: constants.settingsWTEnabled)
+    #expect(
+        settings.webTransportAdvertisedVersion() == .final,
+        "the section 9.2 codepoint's value is the settings gate's rule, not the classifier's")
+    var draft = try HTTP3Settings()
+    try draft.set(1, for: constants.settingsWTEnabledDraft16)
+    #expect(draft.webTransportAdvertisedVersion() == .draft16)
+    var legacy = try HTTP3Settings()
+    try legacy.set(1, for: HTTP3SettingID.legacyEnableWebTransport)
+    try legacy.set(1, for: HTTP3SettingID.legacyWebTransportMaxSessions)
+    #expect(
+        legacy.webTransportAdvertisedVersion() == .legacy,
+        "the advertisement every pre-draft-16 peer sends classifies as legacy")
+    #expect(try HTTP3Settings().webTransportAdvertisedVersion() == .legacy)
+}
+
+/// A DRAFT16 or LEGACY session runs its era's own rule: no SETTINGS baseline, and a
+/// REPEAT of the previously received grant is that era's legal re-grant — only a
+/// grant that goes BACKWARDS is the flow-control error. A FINAL session keeps the
+/// draft-17 rule, where even a repeat closes the session.
+/// A DRAFT16 or LEGACY session runs its era's own rule, which the §7.1 negotiation
+/// selected: no SETTINGS baseline, and a REPEAT of the previously received grant is
+/// that era's legal re-grant — only a grant that goes BACKWARDS is the flow-control
+/// error. A FINAL session keeps the draft-17 rule, where even a repeat closes it.
+@Test
+func draft17LegacyAdvertisementRunsTheErasOwnFlowRule() throws {
+    var legacy = WebTransportFlowControlState(
+        maxData: nil,
+        maxStreamsBidi: nil,
+        maxStreamsUni: nil,
+        isEnabled: true,
+        refusesRepeats: false
+    )
+    try legacy.setMaxData(100)
+    try legacy.setMaxData(100)
+    #expect(legacy.maxData == 100, "a repeat of the received grant is that era's legal re-grant")
+    #expect(throws: WebTransportDraft17Error.self) { try legacy.setMaxData(99) }
+    try legacy.setMaxStreamsBidi(8)
+    try legacy.setMaxStreamsBidi(8)
+    #expect(throws: WebTransportDraft17Error.self) { try legacy.setMaxStreamsBidi(4) }
+
+    var strict = WebTransportFlowControlState(
+        maxData: nil,
+        maxStreamsBidi: nil,
+        maxStreamsUni: nil,
+        isEnabled: true
+    )
+    try strict.setMaxData(100)
+    #expect(throws: WebTransportDraft17Error.self) {
+        try strict.setMaxData(100)
+    }
+}
 /// draft-17 section 4.4: an error code outside the WT_APPLICATION_ERROR range
 /// still resets the stream, but it maps to no application error code — a reset
 /// with no application error code, and never a session error.

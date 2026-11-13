@@ -64,30 +64,44 @@ wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, cons
      * and the loops read them from here (session_loop_server.c, session_loop_client.c). */
     stream->peer_settings_parsed = parsed;
     stream->peer_settings_received = 1;
-    /* Section 5.5 with 5.6.2 and 5.6.4: the peer's SETTINGS carry the session's INITIAL limits, and
-     * those values are the monotonicity BASELINE -- while no capsule of a type has been received, the
-     * SETTINGS value stands in for "the value previously received", and a capsule that does not
-     * increase it MUST close the session with WT_FLOW_CONTROL_ERROR. Recorded as a baseline rather
-     * than as a received grant, so the rule is the same one the draft words: the first capsule must
-     * strictly exceed what the settings already granted, and every later capsule must strictly exceed
-     * the one before it. A setting the peer omitted carries no baseline, exactly as it carries no
-     * grant. */
+    /* Which era's flow-control rule this session runs is decided by what the peer ADVERTISED, not by
+     * this endpoint's profile: a FINAL advertisement selects the draft-17 rule, where sections 5.5
+     * with 5.6.2 and 5.6.4 make the peer's SETTINGS_WT_INITIAL_MAX_* values the monotonicity BASELINE
+     * -- while no capsule of a type has been received, the SETTINGS value stands in for "the value
+     * previously received", and a capsule that does not increase it MUST close the session with
+     * WT_FLOW_CONTROL_ERROR, so the first capsule must strictly exceed what the settings already
+     * granted. A DRAFT16 or LEGACY advertisement selects that era's own rule -- its sections 5.6 never
+     * anchored a grant to a setting, and refused only a grant that went BACKWARDS -- so the baselines
+     * are not recorded and a repeat of a received grant stays legal. A setting the peer omitted carries
+     * no baseline either way, exactly as it carries no grant. A peer with no WT advertisement at all is
+     * the caller's refusal to make (session_loop_client's 2xx gate, the server's own validation); the
+     * legacy rule is set here too, so a stray grant cannot close a session that is about to be refused
+     * anyway. */
     {
-      int present = 0;
-      uint64_t value = 0U;
+      wt_webtransport_version_t advertised = WT_WEBTRANSPORT_VERSION_FINAL;
+      wt_http3_error_t version_error = WT_HTTP3_NO_ERROR;
 
-      value = wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, &present);
-      if (present != 0 && value > 0U) {
-        (void)wt_webtransport_flow_baseline_data(&stream->peer_limits, value);
-      }
-      value =
-          wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_BIDI, &present);
-      if (present != 0 && value > 0U) {
-        (void)wt_webtransport_flow_baseline_streams(&stream->peer_limits, 1, value);
-      }
-      value = wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI, &present);
-      if (present != 0 && value > 0U) {
-        (void)wt_webtransport_flow_baseline_streams(&stream->peer_limits, 0, value);
+      if (wt_webtransport_peer_advertised_version(&parsed, &advertised, &version_error) == WT_OK &&
+          advertised == WT_WEBTRANSPORT_VERSION_FINAL) {
+        int present = 0;
+        uint64_t value = 0U;
+
+        value = wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, &present);
+        if (present != 0 && value > 0U) {
+          (void)wt_webtransport_flow_baseline_data(&stream->peer_limits, value);
+        }
+        value =
+            wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_BIDI, &present);
+        if (present != 0 && value > 0U) {
+          (void)wt_webtransport_flow_baseline_streams(&stream->peer_limits, 1, value);
+        }
+        value =
+            wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI, &present);
+        if (present != 0 && value > 0U) {
+          (void)wt_webtransport_flow_baseline_streams(&stream->peer_limits, 0, value);
+        }
+      } else {
+        wt_webtransport_flow_limits_set_rule(&stream->peer_limits, 1);
       }
     }
   }
