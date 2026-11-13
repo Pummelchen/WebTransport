@@ -14,7 +14,7 @@
 public enum WebTransportVersion {
     /// The library version, `MAJOR.MINOR` -- releases carry no third component. Mirrors
     /// `VERSION`.
-    public static let library = "1.7"
+    public static let library = "1.8"
 
     /// The ABI version this build exposes.
     ///
