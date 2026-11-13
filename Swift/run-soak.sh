@@ -69,16 +69,31 @@ failed=0
 # first few failures are printed in full; the rest are counted.
 attempt_log="$(mktemp -t wt-soak-attempt)"
 trap 'rm -f "$attempt_log"' EXIT
-if ! command -v timeout >/dev/null 2>&1; then
-    echo "note: timeout(1) is not on PATH; attempts run under the client's own --timeout-ms"
-fi
+
+# A wall-clock backstop WITHOUT timeout(1), which macOS does not ship and which
+# cost the CI job every one of its attempts with exit 127 (WT-272). The client's
+# own --timeout-ms is the first line of defence; the watchdog exists for the
+# hang that ignores it, which an unattended scheduled job cannot be allowed to
+# sit through.
+run_client() {
+    ./.build/debug/WebTransportClient "$@" >"$attempt_log" 2>&1 &
+    local pid=$!
+    ( sleep 30; kill "$pid" 2>/dev/null ) &
+    local watchdog=$!
+    wait "$pid"
+    local status=$?
+    kill "$watchdog" 2>/dev/null || true
+    wait "$watchdog" 2>/dev/null || true
+    return "$status"
+}
+
 for i in $(seq 1 "$CONNECTIONS"); do
-    if timeout 30 ./.build/debug/WebTransportClient \
+    if run_client \
         --connect "127.0.0.1:$PORT" \
         --transport packet \
         --trust local-self-signed \
         --message "soak-$i" \
-        --timeout-ms 15000 >"$attempt_log" 2>&1; then
+        --timeout-ms 15000; then
         succeeded=$((succeeded + 1))
     else
         status=$?
