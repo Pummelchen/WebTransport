@@ -64,7 +64,7 @@ jobs:
             cc: clang
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The workflow files themselves, checked before anything else runs: a step with two `env:` blocks is a
       # workflow GitHub rejects outright, and the failure has no job list and only "This run likely failed because
@@ -238,12 +238,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install the pinned Ruff
         run: |
           set -euo pipefail
-          command -v ruff >/dev/null || python3 -m pip install --user 'ruff==0.16.7'
+          command -v ruff >/dev/null || python3 -m pip install --user 'ruff==0.17.5'
           ruff --version
 
       - name: Lint the Python
@@ -264,12 +264,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install the pinned clang-format
         run: |
           set -euo pipefail
-          command -v clang-format >/dev/null || python3 -m pip install --user 'clang-format==23.1.1'
+          command -v clang-format >/dev/null || python3 -m pip install --user 'clang-format==23.1.5'
           clang-format --version
 
       - name: Check the tree matches .clang-format
@@ -284,7 +284,7 @@ jobs:
     runs-on: macos-26
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Ninja and CMake
         run: brew install ninja cmake
@@ -312,7 +312,7 @@ jobs:
           apt-get install -y --no-install-recommends git ca-certificates
 
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install cmake, Ninja, GCC and OpenSSL 3
         # The Ubuntu legs inherit a toolchain from their runner image; this one starts from the bare Debian
@@ -346,7 +346,7 @@ jobs:
     name: C99 / FreeBSD (VM, clang)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build and test on FreeBSD
         uses: vmactions/freebsd-vm@4469451fe39bee80be4066836c5170362e9349f3 # v1.5.7
@@ -373,7 +373,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Ninja, the cross-compiler, Wine and zstd
         # `wine64` is the package Ubuntu ships and the binary inside it is /usr/lib/wine/wine64 -- there is no
@@ -428,7 +428,7 @@ jobs:
         shell: msys2 {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up MSYS2 with the MINGW64 toolchain
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
@@ -503,7 +503,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # `cl` is not on PATH in a fresh step; this puts the Visual Studio developer environment there.
       - name: Set up the MSVC environment
@@ -530,7 +530,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Clang-CL needs the MSVC headers and libraries, so the MSVC environment comes first and the compiler is
       # overridden on the CMake command line.

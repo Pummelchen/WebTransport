@@ -163,7 +163,7 @@ as a version mismatch. `check-version-sync.sh` fails on it.
   **enforced** `windows-native` job on `windows-latest` (MSYS2 MINGW64). Two more
   Windows jobs run the same configure, build and ctest under the compilers the plan's
   Phase 12 matrix names: `msvc` and `clang-cl`.
-- `security-scan.yml`: gitleaks 8.30.1 over full history, trivy 0.74.0.
+- `security-scan.yml`: gitleaks 8.30.1 over full history, trivy 0.76.2.
 - `soak.yml`: the connection-churn soak (`./Swift/run-soak.sh`) nightly and on
   manual dispatch — it watches resident memory and thread count for *sustained*
   growth across 400 connections, which is the shape a per-connection leak takes.
