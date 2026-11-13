@@ -6,6 +6,12 @@ for the parts a program is written against, and it says what is NOT there yet as
 as what is, because a documented absence is a design decision and an undocumented one is a
 bug report waiting to happen.
 
+Three headers under `include/webtransport/` are deliberately outside the install set:
+`webtransport/error.h`, `runtime/server_retry.h` and `quic/retry_token.h`. They carry
+the internal diagnostics and the Retry-token machinery, nothing installed includes them,
+and the installed surface stays exactly what this document describes -- which is why 67
+headers live in the tree and 64 install.
+
 The API is the consumer's view of draft-ietf-webtrans-http3-17. It is not a protocol
 library with a public face bolted on: the layers below (`quic/`, `tls/`, `http3/`,
 `webtransport/`) are public too, and a program that wants to drive QUIC itself can. What

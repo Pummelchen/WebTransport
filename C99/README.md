@@ -1,8 +1,8 @@
 # C99 WebTransport
 
-Protocol reference: IETF `draft-ietf-webtrans-http3-16`, dated 2026-07-06.
+Protocol reference: IETF `draft-ietf-webtrans-http3-17`, dated 2026-11-02.
 
-Draft-16 score: **39 of 40 requirements exercised by a test in this tree**, the remaining one
+Draft-17 score: **42 of 43 requirements exercised by a test in this tree**, the remaining one
 `partial` (Origin policy, which the library exposes and leaves to the application).
 The number is measured rather than remembered: `scripts/score-matrix.sh` counts it from
 `docs/COMPLIANCE-MATRIX.md`, and `scripts/check-matrix.sh` fails the build if a symbol the
@@ -24,9 +24,9 @@ tools (`wt-client-c99`, `wt-server-c99`, `wt-conformance-c99`) and an install tr
 `find_package`, and it carries the whole stack: the core utilities, a QUIC wire core and crypto
 layer whose vectors are extracted from the RFCs rather than transcribed, a TLS 1.3 handshake that
 runs end to end over CRYPTO frames, the QUIC connection runtime, HTTP/3, QPACK including its
-dynamic table, the draft-16 WebTransport session layer, and the public consumer API.
+dynamic table, the draft-17 WebTransport session layer, and the public consumer API.
 
-**97 CTest tests pass on macOS 26, on Ubuntu 24.04** (the two `ubuntu-24.04` CI legs), **under
+**105 CTest tests pass on macOS 26, on Ubuntu 24.04** (the two `ubuntu-24.04` CI legs), **under
 MSVC and Clang-CL on Windows**, and on **FreeBSD 15.1**. The tree also *runs* on Windows: 85 test
 executables executed under Wine, 85 passing, plus a Windows-only test of the datagram layer itself.
 Running the Windows branch is what
@@ -79,7 +79,7 @@ What is here:
     to remember at every call site.
   - `time.h` — a monotonic clock and deadline arithmetic that cannot wrap.
   - `version.h` — library identity.
-- The `ctest` suite (97 tests, the count `ctest` itself reports), plus a 200,000-input parser fuzz run, run by
+- The `ctest` suite (105 tests, the count `ctest` itself reports), plus a 200,000-input parser fuzz run, run by
   `ctest` and again under
   AddressSanitizer and UndefinedBehaviorSanitizer. Most of the checks are the
   malformed-input corpus, which drives every parser with a fixed pseudo-random
@@ -154,7 +154,7 @@ What is here:
   treatment the QUIC parsers already had — a deterministic pseudo-random byte stream fed to the
   frame decoder, the SETTINGS parser, the capsule decoder and its value parsers, the datagram
   parser, the QPACK field-section decoder with **no dynamic table** (the strictest configuration)
-  and the draft-16 request validator, plus the HTTP/3 driver's stream classifier and frame-boundary
+  and the draft-17 request validator, plus the HTTP/3 driver's stream classifier and frame-boundary
   reassembler. The assertion is that a refusal is a STATUS and never a crash — under ASan+UBSan a
   read past a buffer is a failure rather than a plausible value — and the corpus also asserts that
   it refuses *and* accepts, because a generator change that made every input valid would turn the
@@ -164,7 +164,7 @@ What is here:
   drives the WHOLE WebTransport handshake-over-HTTP/3 path — two sessions complete a TLS 1.3
   handshake inside QUIC, the client opens HTTP/3's control and QPACK streams and sends an
   extended CONNECT as a QPACK field section, and the server assembles that section from the
-  pieces the driver reports, decodes it off the wire, and accepts it with the draft-16
+  pieces the driver reports, decodes it off the wire, and accepts it with the draft-17
   validator. The bug that had blocked it for several rounds was a missing RECEIVE credit: the
   connection's flow account started at zero because nothing paired the `initial_max_data` each
   endpoint ADVERTISES with the local grant that enforces it, so the first stream frame was
@@ -321,7 +321,7 @@ What is here:
   runtime refuses to make it rather than inventing one. IPv4 is asserted unconditionally and
   IPv6 is available-or-skipped, because a test that fails without an IPv6 loopback is a test
   about the machine.
-- **A draft-16 compliance matrix for this tree** (`docs/COMPLIANCE-MATRIX.md`): every requirement the
+- **A draft-17 compliance matrix for this tree** (`docs/COMPLIANCE-MATRIX.md`): every requirement the
   draft places on a WebTransport endpoint — the extended CONNECT and its refusals, the response, the
   session-as-a-request-stream rules, WebTransport streams and their prefixes (including a prefix that
   arrives in pieces), datagrams and their advertisement, the capsules with the strict-increase and
@@ -367,7 +367,7 @@ What is here:
   Debian: the same POSIX calls, a toolchain and OpenSSL-package decision.
 
 - **Where this stands, measured** — the score the plan's Definition of Done asks for, from
-  `scripts/score-matrix.sh` rather than from memory: **39 of 40 draft-16 requirements in
+  `scripts/score-matrix.sh` rather than from memory: **42 of 43 draft-17 requirements in
   `docs/COMPLIANCE-MATRIX.md` are exercised by a test in this tree, one is `partial`, and all 9 of the plan's
   completion criteria are met.** The matrix coverage is 100% *of the matrix*,
   which is not the same as being done. Every platform the CI criterion names is a job: macOS, Ubuntu,
@@ -466,7 +466,7 @@ What is here:
   the fix is in — see `IMPLEMENTATION_PLAN.md`. Registered with CTest.
 - **The conformance tool runs real sessions** (Phase 9): `wt-conformance-c99 --scenario all`
   stands up two endpoints in **one process** over loopback — a generated, pinned identity, a real
-  TLS 1.3 handshake inside QUIC, an extended CONNECT accepted by the draft-16 layer, the response,
+  TLS 1.3 handshake inside QUIC, an extended CONNECT accepted by the draft-17 layer, the response,
   an 11-byte message on a WebTransport stream and a message as a datagram — on **IPv4 and IPv6**,
   and reports every scenario as passed in its machine-readable output
   (`"summary"` with `"failed":0` and `"unsupported":0`, exit 0). IPv6 reports
@@ -581,7 +581,7 @@ What is here:
     request: the endpoint owns the decoder state (the dynamic table its peer's encoder
     stream fills, and the insertion count), a capacity below 32 makes `MaxEntries` zero
     so no section may reference a dynamic table this endpoint never advertised, and the
-    draft-16 layer then decides whether the decoded pseudo-headers are a WebTransport
+    draft-17 layer then decides whether the decoded pseudo-headers are a WebTransport
     request — the endpoint deliberately does not know what one is. The RFC's "trailers
     MUST NOT contain pseudo-header fields" is enforced here, because the message
     decoder has one request shape and one response shape and cannot tell a trailer from
@@ -595,7 +595,7 @@ What is here:
     length is written. The lines are literal (always valid, never needing a dynamic
     table, larger on the wire than a static-table reference would be), and the round
     trip is the test: what a client writes is fed to a server's decode path and then to
-    the draft-16 validator, so the two directions cannot disagree without a test
+    the draft-17 validator, so the two directions cannot disagree without a test
     failing.
   - `api/endpoint.h` — which side this program is, the name the peer's certificate
     must be valid for, and how it is judged, so a trust misconfiguration is a return
@@ -786,7 +786,7 @@ What is here:
   the message (four bytes it could only have got through the parking path) in both exchange modes, and that the
   flag is refused with exit 2 where it means nothing. Registered with CTest as `wt_cli_early_stream` and
   `wt_cli_early_stream_datagram`.
-- **A terminated session resets its streams** (WT-182): draft-16 section 6's MUST -- "Upon learning that the session
+- **A terminated session resets its streams** (WT-182): section 6's MUST -- "Upon learning that the session
   has been terminated, the endpoint MUST reset the send side and abort reading on the receive side of all
   unidirectional and bidirectional streams associated with the session ... using the `WT_SESSION_GONE` error code;
   it MUST NOT send any new datagrams or open any new streams." The session object records that a session ended and

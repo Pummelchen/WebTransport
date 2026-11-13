@@ -2,7 +2,7 @@
 
 This directory contains the native Swift implementation and its implementation-level tools. The repository root is the supported SwiftPM integration point for applications.
 
-The protocol target is [draft-ietf-webtrans-http3-16](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/16/), published 6 July 2026. The implementation is actively developed as a reference-quality codebase; conformance results are engineering evidence, not a standards certification.
+The protocol target is [draft-ietf-webtrans-http3-17](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/17/), published 2 November 2026. The implementation is actively developed as a reference-quality codebase; conformance results are engineering evidence, not a standards certification.
 
 ## Requirements
 

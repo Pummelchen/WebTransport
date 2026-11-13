@@ -13,7 +13,7 @@
 
 A native Swift reference implementation of WebTransport over HTTP/3.
 
-The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, and TLS modules, command-line peers, conformance scenarios, and independent interoperability tooling. The current protocol target is [`draft-ietf-webtrans-http3-16`](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/), published on 6 July 2026.
+The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, and TLS modules, command-line peers, conformance scenarios, and independent interoperability tooling. The current protocol target is [`draft-ietf-webtrans-http3-17`](https://datatracker.ietf.org/doc/draft-ietf-webtrans-http3/), published on 2 November 2026.
 
 <p align="center"><em>Conceptual overview of WebTransport. Project-specific implementation coverage and limitations are documented below.</em></p>
 
@@ -27,9 +27,9 @@ The project provides a high-level Swift concurrency API, layered HTTP/3, QUIC, a
 | Platform | macOS 26 or later |
 | Toolchain | Xcode 27 or later, Swift 6.4 or later, Swift language mode 6 |
 | Runtime | Network.framework QUIC with Apple Security and CryptoKit |
-| Protocol | WebTransport over HTTP/3, draft 16 |
+| Protocol | WebTransport over HTTP/3, draft 17 |
 
-Both libraries implement the draft-16 session layer, and both are exercised against independent
+Both libraries implement the draft-17 session layer -- and keep serving draft-16 and legacy-era peers through the draft's section 7.1 version selection -- and both are exercised against independent
 implementations rather than only against themselves: the Swift conformance matrix passes in full,
 the C99 suite is 105 CTest tests plus a 57-scenario conformance tool, and the C99 client completes
 sessions and message exchanges against five third-party implementations on a routable host with
@@ -94,13 +94,13 @@ let server = WebTransportServer(configuration: WebTransportServerConfiguration(
 ```
 
 Serving browsers additionally requires `settingsValidation: .interoperable`. The
-default is `.draft16Strict`, which is the point of this implementation but
+default is `.draft17Strict`, which is the point of this implementation but
 rejects peers still on earlier revisions — browsers among them.
 
 ## What is implemented
 
 - WebTransport extended CONNECT, protocol negotiation, streams, datagrams, close, and drain.
-- Draft-16 optimistic capsules, close-message limits, and TLS exporter binding.
+- Draft-17 optimistic capsules, close-message limits, TLS exporter binding, and the §7.1 version selection that keeps draft-16 and legacy-era peers working.
 - Directional flow control implemented and conformance-tested in `WebTransportHTTP3Core`; the Network.framework runtime does not negotiate the `SETTINGS_WT_INITIAL_MAX_*` limits and serves one WebTransport session per connection.
 - HTTP/3 settings and frames, QPACK, QUIC wire/state primitives, and TLS 1.3 handshake support.
 - A Network.framework-backed client/server runtime with sanitized logging and public error surfaces.
