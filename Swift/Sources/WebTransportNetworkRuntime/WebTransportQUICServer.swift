@@ -108,7 +108,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft17Strict,
         localOnly: Bool = false,
         identity: WebTransportServerIdentity = .developmentSelfSigned,
         admission: WebTransportAdmissionPolicy = .default,
@@ -136,7 +136,7 @@ public final class WebTransportQUICServer: @unchecked Sendable {
         path: String = "/wt",
         allowedOrigin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft17Strict,
         localOnly: Bool = false,
         identity: WebTransportServerIdentity = .developmentSelfSigned,
         admission: WebTransportAdmissionPolicy = .default,
@@ -377,7 +377,7 @@ extension WebTransportQUICServer {
         timeoutMilliseconds: Int32
     ) async throws -> WebTransportServerSessionSetup.ServerHandshakeOutcome {
         let prelude = makeSessionPrelude(accepted: accepted, timeoutMilliseconds: timeoutMilliseconds)
-        var http3 = HTTP3ConnectionState(role: .server, localSettings: settingsValidation.localSettings)
+        var http3 = HTTP3ConnectionState(role: .server, localSettings: settingsValidation.localSettings(for: .server))
         let (localControlStream, qpackStreams) = try await WebTransportServerSessionSetup.openServerControlStreams(
             connection: prelude.connection,
             http3: http3,

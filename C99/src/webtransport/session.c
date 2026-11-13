@@ -1,4 +1,4 @@
-/* A WebTransport session's lifecycle (draft-ietf-webtrans-http3-16 sections 3 to 5). */
+/* A WebTransport session's lifecycle (draft-ietf-webtrans-http3-17 sections 3 to 5). */
 
 #include "webtransport/webtransport/session.h"
 

@@ -26,14 +26,14 @@ func webTransportClientServerProcessesOptimisticCapsulesAfterAcceptance() async 
     let (result, serverResult) = try await WebTransportProcessSupport.withExclusiveProcessExecution {
         try await runLoopbackPublicAPIExchange(
             protocols: ["demo.v1"],
-            message: "optimistic-draft16",
+            message: "optimistic-draft17",
             optimisticCapsules: [.drainSession]
         )
     }
     #expect(result.sessionEstablished)
     #expect(serverResult.sessionEstablished)
-    #expect(result.message == "optimistic-draft16")
-    #expect(serverResult.message == "optimistic-draft16")
+    #expect(result.message == "optimistic-draft17")
+    #expect(serverResult.message == "optimistic-draft17")
 }
 
 @Test
@@ -126,7 +126,7 @@ func webTransportPublicAPIRejectsUnsupportedTransportConfiguration() async throw
 
 @Test
 func webTransportPublicErrorSurfaceRedactsPeerControlledDetail() {
-    let draftError = WebTransportDraft16Error(kind: .requirementsNotMet, message: "secret-origin https://internal.example")
+    let draftError = WebTransportDraft17Error(kind: .requirementsNotMet, message: "secret-origin https://internal.example")
     #expect(WebTransportErrorSurface.publicDescription(for: draftError) == "WebTransport peer requirements were not met")
 
     let codecError = QUICCodecError.malformed("secret packet bytes 010203")

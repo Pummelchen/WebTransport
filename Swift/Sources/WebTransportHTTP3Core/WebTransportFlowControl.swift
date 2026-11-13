@@ -63,7 +63,7 @@ public enum WebTransportFlowCapsuleCodec {
             capsule = try parseCloseSession(payload)
             return WebTransportFlowCapsuleEnvelope(capsule: capsule, bytesConsumed: bytesConsumed, payload: payload)
         case constants.wtMaxStreamDataCapsule, constants.wtStreamDataBlockedCapsule:
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .flowControl,
                 message: "per-stream flow-control capsules are prohibited over HTTP/3"
             )
@@ -190,9 +190,9 @@ public enum WebTransportFlowCapsuleCodec {
             || label == "wt-streams-blocked-uni"
         {
             guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
-                throw WebTransportDraft16Error(
+                throw WebTransportDraft17Error(
                     kind: .flowControl,
-                    message: "\(label) exceeds the draft-16 2^60 maximum"
+                    message: "\(label) exceeds the draft-17 2^60 maximum"
                 )
             }
         }
@@ -330,7 +330,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     public mutating func setMaxStreamsBidi(_ value: UInt64) throws {
         guard isEnabled else { return }
         guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
-            throw WebTransportDraft16Error(kind: .flowControl, message: "WT_MAX_STREAMS_BIDI exceeds the draft-16 2^60 maximum")
+            throw WebTransportDraft17Error(kind: .flowControl, message: "WT_MAX_STREAMS_BIDI exceeds the draft-17 2^60 maximum")
         }
         try setMonotonicLimit(&maxStreamsBidiState, value: value, label: "WT_MAX_STREAMS_BIDI")
     }
@@ -338,7 +338,7 @@ public struct WebTransportFlowControlState: Equatable, Sendable {
     public mutating func setMaxStreamsUni(_ value: UInt64) throws {
         guard isEnabled else { return }
         guard value <= WebTransportHTTP3DraftConstants.current.maximumMaxStreamsValue else {
-            throw WebTransportDraft16Error(kind: .flowControl, message: "WT_MAX_STREAMS_UNI exceeds the draft-16 2^60 maximum")
+            throw WebTransportDraft17Error(kind: .flowControl, message: "WT_MAX_STREAMS_UNI exceeds the draft-17 2^60 maximum")
         }
         try setMonotonicLimit(&maxStreamsUniState, value: value, label: "WT_MAX_STREAMS_UNI")
     }
@@ -416,7 +416,7 @@ private func setMonotonicLimit(
         let newValue = normalized.asUInt64,
         newValue <= currentValue
     {
-        throw WebTransportDraft16Error(
+        throw WebTransportDraft17Error(
             kind: .flowControl,
             message: "\(label) must strictly increase"
         )

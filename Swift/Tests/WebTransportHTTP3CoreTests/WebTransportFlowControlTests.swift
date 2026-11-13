@@ -287,18 +287,18 @@ func webTransportFlowControlRejectsDecreasingMaxUpdates() throws {
             bytes: try WebTransportFlowCapsuleCodec.serialize(.maxData(limit: 4))
         )
         Issue.record("decreasing WT_MAX_DATA should throw")
-    } catch let error as WebTransportDraft16Error {
+    } catch let error as WebTransportDraft17Error {
         #expect(error.kind == .flowControl)
         #expect(error.code == WebTransportHTTP3DraftConstants.current.wtFlowControlError)
     }
 
-    #expect(throws: WebTransportDraft16Error.self) {
+    #expect(throws: WebTransportDraft17Error.self) {
         _ = try pair.client.receiveFlowControlCapsule(
             sessionID: sessionID,
             bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsBidi(limit: 1))
         )
     }
-    #expect(throws: WebTransportDraft16Error.self) {
+    #expect(throws: WebTransportDraft17Error.self) {
         _ = try pair.client.receiveFlowControlCapsule(
             sessionID: sessionID,
             bytes: try WebTransportFlowCapsuleCodec.serialize(.maxStreamsUni(limit: 1))
@@ -337,7 +337,7 @@ func webTransportFlowControlRejectsMaliciousOrderUpdatesWithoutMutatingState() t
         .maxStreamsBidi(limit: 3),
         .maxStreamsUni(limit: 4),
     ] {
-        #expect(throws: WebTransportDraft16Error.self) {
+        #expect(throws: WebTransportDraft17Error.self) {
             _ = try pair.client.receiveFlowControlCapsule(
                 sessionID: sessionID,
                 bytes: try WebTransportFlowCapsuleCodec.serialize(capsule)
@@ -362,10 +362,10 @@ func webTransportFlowControlClosedSessionRejectsPostCloseAccounting() throws {
         bytes: try WebTransportFlowCapsuleCodec.serialize(.closeSession(applicationErrorCode: 1, message: "closed"))
     )
 
-    #expect(throws: WebTransportDraft16Error.self) {
+    #expect(throws: WebTransportDraft17Error.self) {
         try pair.server.receiveStreamPayload(streamID: 4, payload: Data("x".utf8))
     }
-    #expect(throws: WebTransportDraft16Error.self) {
+    #expect(throws: WebTransportDraft17Error.self) {
         _ = try pair.server.receiveDatagramFrame(
             .datagram(
                 try WebTransportDatagramSignaling.serialize(sessionID: sessionID.rawValue, payload: Data("x".utf8))
@@ -386,8 +386,8 @@ private enum WebTransportFlowControlTestSupport {
         maxStreamReceiveBufferBytes: Int = 64 * 1024
     ) throws -> (client: WebTransportSessionManager, server: WebTransportSessionManager) {
         let constants = WebTransportHTTP3DraftConstants.current
-        var clientSettings = HTTP3Settings.webTransportDraft16Defaults
-        var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+        var clientSettings = HTTP3Settings.webTransportDraft17Defaults
+        var serverSettings = HTTP3Settings.webTransportDraft17Defaults
 
         let enablesFlowControl =
             (maxStreamsBidi ?? 0) > 0

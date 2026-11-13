@@ -88,7 +88,7 @@ struct UnidirectionalStreamAcceptTests {
             do {
                 _ = try await serverSession.acceptUnidirectionalStream(timeoutMilliseconds: 15_000)
                 Issue.record("a unidirectional stream naming a foreign session must be refused")
-            } catch let error as WebTransportDraft16Error {
+            } catch let error as WebTransportDraft17Error {
                 #expect(error.kind == .sessionGone)
             }
 

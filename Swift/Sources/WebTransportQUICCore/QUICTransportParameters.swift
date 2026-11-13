@@ -155,7 +155,7 @@ public enum QUICTransportParameterID {
     public static let retrySourceConnectionID: UInt64 = 0x10
     public static let maxDatagramFrameSize: UInt64 = 0x20
     // The registered identifier of the reliable-stream-reset extension
-    // (draft-ietf-quic-reliable-stream-reset-09 section 8.1), which draft-16 requires of both roles.
+    // (draft-ietf-quic-reliable-stream-reset-09 section 8.1), which draft-17 requires of both roles.
     // The pre-registration value 0x17f7_586d_2cb5_71 is greased, so it must not be what is advertised.
     public static let resetStreamAt: UInt64 = 0x1d
 }

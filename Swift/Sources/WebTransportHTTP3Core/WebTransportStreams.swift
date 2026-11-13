@@ -96,7 +96,7 @@ public enum WebTransportStreamSignaling {
         do {
             sessionID = try WebTransportSessionID.fromRequestStreamID(sessionRaw)
         } catch {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .h3ID,
                 message: "invalid WebTransport stream session ID"
             )

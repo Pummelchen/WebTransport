@@ -148,7 +148,7 @@ typedef struct hostile_act {
 /* What the peer watches for before performing certain acts: the client's CONNECT arrives as STREAM frames, and an
  * act that depends on the client's session EXISTING has to wait for them -- otherwise it races the client's own
  * first flight, and a test whose subject is the refusal would sometimes measure the parking rule instead
- * (draft-16 section 4.6). */
+ * (draft-17 section 4.6). */
 typedef struct hostile_watch {
   unsigned stream_frames;
 } hostile_watch_t;

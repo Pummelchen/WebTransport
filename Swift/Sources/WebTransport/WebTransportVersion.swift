@@ -32,5 +32,5 @@ public enum WebTransportVersion {
 
     /// The protocol draft this implementation targets, as a `User-Agent` or
     /// diagnostic string. Mirrors `wt_protocol_draft()` in the C99 library.
-    public static let protocolDraft = "draft-ietf-webtrans-http3-16"
+    public static let protocolDraft = "draft-ietf-webtrans-http3-17"
 }

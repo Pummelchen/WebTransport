@@ -60,6 +60,36 @@ wt_status_t wt_capsule_stream_on_peer_settings(wt_capsule_stream_t *stream, cons
       return WT_OK;
     }
     stream->flow_advertised_peer = wt_session_flow_advertised(&parsed);
+    /* Kept parsed, because the WT_ENABLED codepoints it carries are the version negotiation's answer
+     * and the loops read them from here (session_loop_server.c, session_loop_client.c). */
+    stream->peer_settings_parsed = parsed;
+    stream->peer_settings_received = 1;
+    /* Section 5.5 with 5.6.2 and 5.6.4: the peer's SETTINGS carry the session's INITIAL limits, and
+     * those values are the monotonicity BASELINE -- while no capsule of a type has been received, the
+     * SETTINGS value stands in for "the value previously received", and a capsule that does not
+     * increase it MUST close the session with WT_FLOW_CONTROL_ERROR. Recorded as a baseline rather
+     * than as a received grant, so the rule is the same one the draft words: the first capsule must
+     * strictly exceed what the settings already granted, and every later capsule must strictly exceed
+     * the one before it. A setting the peer omitted carries no baseline, exactly as it carries no
+     * grant. */
+    {
+      int present = 0;
+      uint64_t value = 0U;
+
+      value = wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, &present);
+      if (present != 0 && value > 0U) {
+        (void)wt_webtransport_flow_baseline_data(&stream->peer_limits, value);
+      }
+      value =
+          wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_BIDI, &present);
+      if (present != 0 && value > 0U) {
+        (void)wt_webtransport_flow_baseline_streams(&stream->peer_limits, 1, value);
+      }
+      value = wt_http3_settings_get(&parsed, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI, &present);
+      if (present != 0 && value > 0U) {
+        (void)wt_webtransport_flow_baseline_streams(&stream->peer_limits, 0, value);
+      }
+    }
   }
   return WT_OK;
 }

@@ -17,7 +17,7 @@
  *     SECOND control stream, a second QPACK stream, or a push stream this endpoint never
  *     asked for commits the connection to an error with the code the RFC names.
  *
- *   - the draft-16 WebTransport unidirectional stream (`0x54`), which is not HTTP/3's to
+ *   - the WebTransport unidirectional stream (`0x54`), which is not HTTP/3's to
  *     interpret. It is classified and handed to the layer above; the HTTP/3 core must not
  *     treat it as unknown-and-ignored, or a session's own streams would silently disappear.
  *
@@ -60,7 +60,7 @@ typedef enum wt_http3_endpoint_stream_kind {
   WT_HTTP3_ENDPOINT_STREAM_PUSH = 1,
   WT_HTTP3_ENDPOINT_STREAM_QPACK_ENCODER = 2,
   WT_HTTP3_ENDPOINT_STREAM_QPACK_DECODER = 3,
-  /* The draft-16 WebTransport unidirectional stream (0x54). */
+  /* The WebTransport unidirectional stream (0x54). */
   WT_HTTP3_ENDPOINT_STREAM_WEBTRANSPORT = 4,
   /* A type this build does not know. Section 6.2.1: ignore the stream, do not fail. */
   WT_HTTP3_ENDPOINT_STREAM_UNKNOWN = 5

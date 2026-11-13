@@ -1,7 +1,7 @@
 /* The public session handle (Phase 8).
  *
  * This is the first header of the consumer-facing API, and it is deliberately thin: it
- * owns a draft-16 session's state and its error, and everything else -- the connection,
+ * owns a draft-17 session's state and its error, and everything else -- the connection,
  * the streams, the datagrams -- arrives in later parts. What it establishes is the SHAPE
  * the rest of the API follows:
  *

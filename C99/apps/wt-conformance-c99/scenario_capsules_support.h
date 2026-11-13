@@ -105,7 +105,7 @@ static inline int capsules_open_session(scenario_pair_t *pair, int advertise_flo
   policy.wt_enabled = 1;
   if (wt_webtransport_session_request_validate(&decoded, &policy, &decision, &h3_error) != WT_OK ||
       decision.outcome != WT_WEBTRANSPORT_REQUEST_ACCEPT) {
-    scenario_detail_set(detail, detail_size, "the draft-16 layer did not accept the CONNECT");
+    scenario_detail_set(detail, detail_size, "the draft-17 layer did not accept the CONNECT");
     return 0;
   }
   /* The server accepts: the request's HEADERS has been read, so its capsules begin here -- and the session is

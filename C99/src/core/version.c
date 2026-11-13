@@ -26,5 +26,5 @@ int wt_abi_version(void) {
 }
 
 const char *wt_protocol_draft(void) {
-  return "draft-ietf-webtrans-http3-16";
+  return "draft-ietf-webtrans-http3-17";
 }

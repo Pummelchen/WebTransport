@@ -357,7 +357,7 @@ private struct NetworkServerOptionsBuilder {
     var path = "/wt"
     var allowedOrigin: String? = "https://localhost"
     var protocols = ["demo.v1"]
-    var settingsValidation = HTTP3WebTransportSettingsValidation.draft16Strict
+    var settingsValidation = HTTP3WebTransportSettingsValidation.draft17Strict
     var pkcs12Path: String?
     var pkcs12Passphrase = ""
 

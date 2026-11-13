@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "session_internal.h"
+#include "webtransport/webtransport/error.h"
 #include "webtransport/webtransport/framing.h"
 
 wt_status_t wt_session_set_callbacks(wt_session_t *session,
@@ -129,18 +130,34 @@ wt_status_t wt_session_on_stream_data(wt_session_t *session, uint64_t stream_id,
 
 wt_status_t wt_session_on_stream_reset(wt_session_t *session, uint64_t stream_id,
                                        uint64_t error_code) {
+  uint64_t delivered;
+
   if (session == NULL) return WT_ERR_INVALID_ARGUMENT;
   if (wt_session_find_stream(session, stream_id) == NULL) {
     wt_session_set_error(session, WT_ERR_STATE, 0U);
     return WT_ERR_STATE;
   }
 
+  /* Section 4.4: a code in the WT_APPLICATION_ERROR range is delivered as the application error it
+   * carries, and a code OUTSIDE the range -- one of the draft's own protocol codes, or anything else
+   * -- is "still considered reset, but the error code is not mapped to a WebTransport application
+   * error code"; the implementation SHOULD deliver it as a stream reset with no application error
+   * code. The stream is reset either way, and no session or stream error is raised for the
+   * out-of-range case: an unmappable code is not a violation, it is information the application
+   * surface cannot carry. */
+  if (wt_webtransport_error_is_application_range(error_code)) {
+    uint32_t application_error = 0U;
+    (void)wt_webtransport_error_from_http3(error_code, &application_error);
+    delivered = (uint64_t)application_error;
+  } else {
+    delivered = WT_SESSION_RESET_NO_APPLICATION_ERROR;
+  }
+
   /* Settled before the callback, for the reason the stream-data path above records. */
   wt_session_forget_stream(session, stream_id);
-  wt_session_set_error(session, WT_OK, error_code);
+  wt_session_set_error(session, WT_OK, delivered);
   if (session->callbacks.on_stream_reset != NULL) {
-    /* The peer's code, unchanged: a refusal keeps the peer's code at this surface too. */
-    session->callbacks.on_stream_reset(session->callbacks.context, stream_id, error_code);
+    session->callbacks.on_stream_reset(session->callbacks.context, stream_id, delivered);
   }
   return WT_OK;
 }

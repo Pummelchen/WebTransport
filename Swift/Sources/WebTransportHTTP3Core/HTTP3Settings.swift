@@ -78,31 +78,52 @@ public struct HTTP3Settings: Equatable, Sendable {
         }
     }
 
-    public static let webTransportDraft16Defaults = HTTP3Settings(unchecked: [
+    /// The strict draft-17 set.
+    ///
+    /// A final-version server advertises `SETTINGS_WT_ENABLED` (§9.2 codepoint, value 1) with
+    /// `SETTINGS_ENABLE_CONNECT_PROTOCOL` and `SETTINGS_H3_DATAGRAM`. A final-version *client*
+    /// sends no `SETTINGS_WT_ENABLED` at all (§3.1: it has no meaning from a client), so the
+    /// client sends this set unchanged — the extra identifier is only ever inspected on the
+    /// server's side, where it is required.
+    public static let webTransportDraft17Defaults = HTTP3Settings(unchecked: [
         WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
         WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
         WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1,
     ])
 
-    /// Draft-16 settings plus the pre-draft-16 identifiers deployed peers look for.
+    /// What a final-version *client* sends: everything in ``webTransportDraft17Defaults``
+    /// except `SETTINGS_WT_ENABLED`, which §3.1 gives no meaning to from a client and
+    /// which the draft requires a final client not to send.
+    public static let webTransportDraft17ClientDefaults = HTTP3Settings(unchecked: [
+        WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
+        WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
+    ])
+
+    /// Draft-16-era settings plus the pre-draft-16 identifiers deployed peers look for.
     ///
-    /// The draft-16 set is sent unchanged and in full; the legacy identifiers are
-    /// added, never substituted. A conforming draft-16 peer ignores the extras
-    /// per RFC 9114 §7.2.4.1, so this changes nothing for a peer that speaks the
-    /// current draft — it only makes the server visible to peers that speak an
-    /// earlier one. Current Chromium requires `legacyWebTransportMaxSessions`
-    /// and closes the connection before CONNECT without it.
+    /// The final §9.2 `SETTINGS_WT_ENABLED` codepoint is sent unchanged; the draft-16
+    /// codepoint (`settingsWTEnabledDraft16`) is added for the draft-16-era peers this
+    /// profile serves, alongside the legacy identifiers those peers look for. A peer that
+    /// ignores the extras per RFC 9114 §7.2.4.1 sees the same draft-16-era set it always
+    /// did; a draft-17 peer sees the final codepoint. Deployed Chromium builds require
+    /// `legacyWebTransportMaxSessions` and close the connection before CONNECT without it.
     public static let webTransportChromiumInteropDefaults = HTTP3Settings(unchecked: [
         WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
         WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
         WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1,
+        WebTransportHTTP3DraftConstants.current.settingsWTEnabledDraft16: 1,
         HTTP3SettingID.legacyEnableWebTransport: 1,
         HTTP3SettingID.legacyWebTransportMaxSessionsDraft02: 1,
         HTTP3SettingID.legacyWebTransportMaxSessions: 1,
         HTTP3SettingID.legacyH3DatagramDraft04: 1,
     ])
 
+    /// The pywebtransport stream-interop set: the draft-16-era peer's stream path requires
+    /// `SETTINGS_ENABLE_CONNECT_PROTOCOL`, and as a draft-16 server it identifies a
+    /// WebTransport client by the draft-16 `SETTINGS_WT_ENABLED` codepoint (§7.1 of the
+    /// draft, applied to a draft-16 peer), so both are sent.
     public static let webTransportPyWebTransportStreamInteropDefaults = HTTP3Settings(unchecked: [
-        WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1
+        WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
+        WebTransportHTTP3DraftConstants.current.settingsWTEnabledDraft16: 1,
     ])
 }

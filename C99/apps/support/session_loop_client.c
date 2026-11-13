@@ -160,12 +160,14 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
   }
   out->established = 1;
 
-  /* The client's SETTINGS, from the one place that owns them: section 3.1 requires SETTINGS_H3_DATAGRAM and the
-   * draft-specific codepoint, and the set also carries the enabling codepoints of the earlier drafts, which is
-   * how section 7.1 negotiates with a peer that predates the rename (WT-145). */
+  /* The client's SETTINGS, from the one place that owns them: section 3.1 requires SETTINGS_H3_DATAGRAM, and
+   * the version codepoints are the profile's -- a DUAL client sends the section 9.2 codepoint AND the draft-16
+   * one, a FINAL client sends neither -- with the enabling codepoints of the earlier drafts beside them
+   * (WT-145). */
   wt_http3_settings_init(&settings);
   {
-    wt_status_t status = wt_webtransport_settings_apply(&settings, 0);
+    wt_status_t status = wt_webtransport_settings_apply_profile(
+        &settings, 0, (wt_webtransport_version_profile_t)config->wt_enabled_profile);
     if (status != WT_OK) {
       record_oracle(&loop, out);
       wt_runtime_session_clear(&loop.session);
@@ -254,6 +256,29 @@ wt_status_t wt_loop_run_client(const wt_loop_config_t *config, wt_loop_result_t 
     out->response_outcome = out->connect_accepted != 0 ? (unsigned)WT_LOOP_RESPONSE_ACCEPTED
                                                        : (unsigned)WT_LOOP_RESPONSE_NOT_ACCEPTED;
     out->status = (uint32_t)response.status;
+    /* Sections 3.1 and 7.1: the server's SETTINGS say whether WebTransport is enabled on this
+     * connection at all, and at which version. A 2xx to a webtransport-h3 CONNECT from a server that
+     * never advertised the setting, or advertised it with a value the client must treat as
+     * H3_SETTINGS_ERROR, is not a session -- the client MUST NOT establish one, and the run reports
+     * the refusal instead of celebrating a peer that broke the setting's only rule. Validated only
+     * when the peer's SETTINGS actually arrived: the HTTP/3 control machine already refuses a
+     * connection whose server never sent any. */
+    if (out->connect_accepted != 0 && loop.side.capsules.peer_settings_received != 0) {
+      wt_webtransport_version_t server_version;
+      wt_http3_error_t version_error = WT_HTTP3_NO_ERROR;
+      wt_status_t enabled = wt_webtransport_client_version(
+          &loop.side.capsules.peer_settings_parsed,
+          (wt_webtransport_version_profile_t)config->wt_enabled_profile, &server_version,
+          &version_error);
+      if (enabled != WT_OK) {
+        out->response_outcome = (unsigned)WT_LOOP_RESPONSE_REFUSED;
+        out->h3_error = (uint64_t)version_error;
+        record_oracle(&loop, out);
+        wt_runtime_session_clear(&loop.session);
+        wt_udp_close(&loop.socket);
+        return enabled;
+      }
+    }
     /* The response establishes the session (section 3.1). The CONNECT stream was marked as a capsule stream by
      * `start_session`, and this response is the one HTTP/3 frame that mark was waiting for -- so the peer's
      * capsules are walked from here on (WT-164). */

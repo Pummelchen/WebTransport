@@ -35,7 +35,7 @@ public struct WebTransportClientConfiguration: Equatable, Sendable {
         availableProtocols: [String] = [],
         transport: WebTransportNetworkTransport = .packet,
         trustPolicy: WebTransportQUICPeerTrustPolicy = .systemTrust,
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft17Strict,
         optimisticCapsules: [WebTransportFlowCapsule] = [],
         timeoutMilliseconds: Int32 = 15_000
     ) {
@@ -63,13 +63,13 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
     public var supportedProtocols: [String]
     /// HTTP/3 WebTransport settings validation profile.
     ///
-    /// Defaults to `.draft16Strict`, which is this implementation's reason for
-    /// existing: out of the box the server is the draft-16 truth and accepts
+    /// Defaults to `.draft17Strict`, which is this implementation's reason for
+    /// existing: out of the box the server is the draft-17 truth and accepts
     /// only peers that speak it.
     ///
     /// Deployed peers — browsers in particular — still implement earlier
-    /// revisions: they send `:protocol = webtransport` rather than the draft-16
-    /// `webtransport-h3` token, and they look for pre-draft-16 SETTINGS
+    /// revisions: they send `:protocol = webtransport` rather than the registered
+    /// `webtransport-h3` token, and they look for pre-draft-17 SETTINGS
     /// identifiers. Serving those peers is a deliberate, explicit choice, so set
     /// `.interoperable` rather than having leniency applied silently.
     public var settingsValidation: HTTP3WebTransportSettingsValidation
@@ -100,7 +100,7 @@ public struct WebTransportServerConfiguration: Equatable, Sendable {
         path: String = "/wt",
         origin: String? = nil,
         supportedProtocols: [String] = [],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft17Strict,
         timeoutMilliseconds: Int32 = 15_000,
         localOnly: Bool = false,
         identity: WebTransportServerIdentity = .developmentSelfSigned,
@@ -174,7 +174,7 @@ public struct WebTransportLogger: Sendable {
 /// carry peer input, close messages, packet bytes, or transport identifiers.
 public enum WebTransportErrorSurface {
     public static func publicDescription(for error: Error) -> String {
-        if let draftError = error as? WebTransportDraft16Error {
+        if let draftError = error as? WebTransportDraft17Error {
             return description(ofDraftError: draftError)
         }
         if error is QUICCodecError {
@@ -186,8 +186,8 @@ public enum WebTransportErrorSurface {
         return "WebTransport operation failed"
     }
 
-    /// The draft-16 names, one switch and no classifier above it.
-    private static func description(ofDraftError error: WebTransportDraft16Error) -> String {
+    /// The draft-17 names, one switch and no classifier above it.
+    private static func description(ofDraftError error: WebTransportDraft17Error) -> String {
         switch error.kind {
         case .sessionGone:
             return "WebTransport session is gone"
@@ -375,7 +375,7 @@ public final class WebTransportSession: @unchecked Sendable {
     /// Whether H3 DATAGRAM was negotiated with the peer.
     ///
     /// True when both endpoints advertised `SETTINGS_H3_DATAGRAM = 1`, which is
-    /// the WebTransport datagram negotiation draft-16 requires. It is not a
+    /// the WebTransport datagram negotiation draft-17 requires. It is not a
     /// promise that the underlying QUIC DATAGRAM channel will carry a frame:
     /// Network.framework only confirms that on first use, so a datagram attempt
     /// can still fail and callers must handle it.
@@ -424,7 +424,7 @@ public final class WebTransportSession: @unchecked Sendable {
         return data
     }
 
-    /// Exports session-bound TLS keying material using the draft-16
+    /// Exports session-bound TLS keying material using the draft-17
     /// `EXPORTER-WebTransport` label and context construction.
     public func exportKeyingMaterial(
         applicationLabel: Data,

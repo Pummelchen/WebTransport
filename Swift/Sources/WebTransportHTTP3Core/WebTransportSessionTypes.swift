@@ -128,12 +128,12 @@ public struct WebTransportServerSessionPolicy: Equatable, Sendable {
 public struct WebTransportServerSessionDecision: Equatable, Sendable {
     public var session: WebTransportSession
     public var responseFrame: HTTP3Frame
-    public var rejectionError: WebTransportDraft16Error?
+    public var rejectionError: WebTransportDraft17Error?
 
     public init(
         session: WebTransportSession,
         responseFrame: HTTP3Frame,
-        rejectionError: WebTransportDraft16Error? = nil
+        rejectionError: WebTransportDraft17Error? = nil
     ) {
         self.session = session
         self.responseFrame = responseFrame

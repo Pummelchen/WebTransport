@@ -474,7 +474,7 @@ wt_status_t wt_quic_transport_parameters_build(
   if (status != WT_OK) return status;
   status = wt_quic_transport_parameters_add_integer(params, WT_QUIC_TP_INITIAL_MAX_STREAMS_UNI, 8U);
   if (status != WT_OK) return status;
-  /* WebTransport over HTTP/3 requires the reliable-stream-reset extension of BOTH roles (draft-16 section 3.1):
+  /* WebTransport over HTTP/3 requires the reliable-stream-reset extension of BOTH roles (draft-17 section 3.1):
    * a WebTransport stream carries its session prefix before any payload, and a reset that dropped the prefix would
    * leave the peer with a stream it cannot attribute to a session at all. The value is empty -- it advertises the
    * extension rather than configuring it. */

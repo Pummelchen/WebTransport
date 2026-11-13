@@ -2,7 +2,7 @@
 
 #include "test_runtime_session_pair_internal.h"
 
-/* WT-182: draft-16 section 6's reset of a terminated session's streams.
+/* WT-182: draft-17 section 6's reset of a terminated session's streams.
  *
  * "Upon learning that the session has been terminated, the endpoint MUST reset the send side and abort reading on
  * the receive side of all unidirectional and bidirectional streams associated with the session ... using the

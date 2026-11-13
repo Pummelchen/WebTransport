@@ -30,7 +30,7 @@ import WebTransportQUICCore
 /// business of `WebTransportSessionManager`.
 internal enum InteroperableCONNECTCapsuleFraming {
     /// The largest CONNECT-stream capsule payload permitted by
-    /// draft-ietf-webtrans-http3-16, in bytes.
+    /// draft-ietf-webtrans-http3-17, in bytes.
     ///
     /// The only CONNECT-stream capsule whose payload is neither empty nor a
     /// single QUIC varint is WT_CLOSE_SESSION: it carries a 32-bit application
@@ -70,7 +70,7 @@ internal enum InteroperableCONNECTCapsuleFraming {
             // (and re-opening flow-control credit) without bound.
             guard payloadLength <= UInt64(maximumCapsulePayloadBytes) else {
                 throw QUICCodecError.valueOutOfRange(
-                    "CONNECT capsule payload length \(payloadLength) exceeds the draft-16 maximum of "
+                    "CONNECT capsule payload length \(payloadLength) exceeds the draft-17 maximum of "
                         + "\(maximumCapsulePayloadBytes) bytes"
                 )
             }

@@ -1,5 +1,5 @@
 /* How a WebTransport session's streams and datagrams are framed
- * (draft-ietf-webtrans-http3-16 sections 4.2 and 4.3).
+ * (draft-ietf-webtrans-http3-17 sections 4.2 and 4.3).
  *
  * A WebTransport stream begins with a stream type and the session it belongs to:
  * 0x41 for a bidirectional stream and 0x54 for a unidirectional one, then the session

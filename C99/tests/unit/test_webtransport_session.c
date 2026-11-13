@@ -1,4 +1,4 @@
-/* A WebTransport session's lifecycle (draft-ietf-webtrans-http3-16 sections 3 to 5).
+/* A WebTransport session's lifecycle (draft-ietf-webtrans-http3-17 sections 3 to 5).
  *
  * The state machine is small and every rule in it is about what a session may DO, so the
  * tests are transitions rather than bytes: a session that is establishing may not carry

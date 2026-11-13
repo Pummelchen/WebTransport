@@ -21,15 +21,15 @@ public enum HTTP3SettingID {
     public static let enableConnectProtocol: UInt64 = 0x08
     public static let h3Datagram: UInt64 = 0x33
 
-    // MARK: - Pre-draft-16 identifiers, for compatibility profiles only
+    // MARK: - Pre-draft-17 identifiers, for compatibility profiles only
     //
-    // These are NOT part of draft-16 and are never advertised by the
-    // `draft16Strict` profile. They exist because deployed peers — browsers in
+    // These are NOT part of draft-17 and are never advertised by the
+    // `draft17Strict` profile. They exist because deployed peers — browsers in
     // particular — still implement earlier revisions and look for the setting
     // identifier of the revision they speak. RFC 9114 §7.2.4.1 requires
     // endpoints to ignore unknown SETTINGS identifiers, so advertising these
-    // alongside the draft-16 set is additive: it cannot change how a conforming
-    // draft-16 peer behaves, and it does not weaken or replace anything this
+    // alongside the draft-17 set is additive: it cannot change how a conforming
+    // draft-17 peer behaves, and it does not weaken or replace anything this
     // implementation sends or enforces.
 
     /// `SETTINGS_WEBTRANSPORT_MAX_SESSIONS` as defined by draft-02.
@@ -67,6 +67,13 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
     public var settingsEnableConnectProtocol: UInt64
     public var settingsH3Datagram: UInt64
     public var settingsWTEnabled: UInt64
+    /// The `SETTINGS_WT_ENABLED` codepoint as defined by draft-16 (§9.2 there).
+    ///
+    /// draft-17 moved the codepoint to ``settingsWTEnabled`` and kept the draft-16
+    /// value recognized so deployed draft-16 peers still interoperate (§7.1):
+    /// an endpoint that supports a draft sends its codepoint alongside the final
+    /// one, and a server uses the codepoints a client sent to select a version.
+    public var settingsWTEnabledDraft16: UInt64
     public var settingsWTInitialMaxStreamsUni: UInt64
     public var settingsWTInitialMaxStreamsBidi: UInt64
     public var settingsWTInitialMaxData: UInt64
@@ -90,14 +97,15 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
     public var wtApplicationErrorRange: ClosedRange<UInt64>
     public var wtCloseSessionMaxMessageBytes: Int
 
-    public static let draft16 = WebTransportHTTP3DraftConstants(
-        name: "draft-ietf-webtrans-http3-16",
-        revision: 16,
-        lastUpdated: "2026-07-06",
+    public static let draft17 = WebTransportHTTP3DraftConstants(
+        name: "draft-ietf-webtrans-http3-17",
+        revision: 17,
+        lastUpdated: "2026-11-02",
         upgradeToken: "webtransport-h3",
         settingsEnableConnectProtocol: HTTP3SettingID.enableConnectProtocol,
         settingsH3Datagram: HTTP3SettingID.h3Datagram,
-        settingsWTEnabled: 0x2c7c_f000,
+        settingsWTEnabled: 0x20b8_933b,
+        settingsWTEnabledDraft16: 0x2c7c_f000,
         settingsWTInitialMaxStreamsUni: 0x2b64,
         settingsWTInitialMaxStreamsBidi: 0x2b65,
         settingsWTInitialMaxData: 0x2b61,
@@ -122,5 +130,5 @@ public struct WebTransportHTTP3DraftConstants: Equatable, Sendable {
         wtCloseSessionMaxMessageBytes: 1_024
     )
 
-    public static let current = draft16
+    public static let current = draft17
 }

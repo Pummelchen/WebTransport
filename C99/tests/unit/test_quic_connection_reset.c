@@ -210,7 +210,7 @@ void test_stop_sending_send(void) {
 
 /* The reliable-stream-reset extension, the SEND half (WT-161).
  *
- * WebTransport over HTTP/3 "relies on the RESET_STREAM_AT frame" (draft-16 section 3.1) because a WebTransport
+ * WebTransport over HTTP/3 "relies on the RESET_STREAM_AT frame" (draft-17 section 3.1) because a WebTransport
  * stream carries its session prefix first: a reset that dropped the prefix leaves the peer with a stream it cannot
  * attribute to a session. This tree could decode the frame and did nothing else with it -- no way to send one, and
  * therefore nothing for the parameter advertised last round to gate. */

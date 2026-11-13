@@ -79,8 +79,8 @@ func goawayFrameNamesTheFirstUnservedRequestStream() throws {
     // bidirectional stream it will NOT process, so everything already accepted
     // stays honoured. Client bidirectional stream IDs advance by four.
     var manager = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
-        settingsValidation: .draft16Strict
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft17Defaults),
+        settingsValidation: .draft17Strict
     )
     let frame = try manager.makeGoawayFrame(streamID: 4)
     #expect(frame.type == HTTP3FrameType.goaway)

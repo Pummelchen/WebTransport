@@ -95,15 +95,16 @@ func reservedCodeHelpersFollowHTTP3Pattern() {
 }
 
 @Test
-func webTransportDraft16ConstantsMatchProtocolBible() {
+func webTransportDraft17ConstantsMatchProtocolBible() {
     let constants = WebTransportHTTP3DraftConstants.current
-    #expect(constants.name == "draft-ietf-webtrans-http3-16")
-    #expect(constants.revision == 16)
-    #expect(constants.lastUpdated == "2026-07-06")
+    #expect(constants.name == "draft-ietf-webtrans-http3-17")
+    #expect(constants.revision == 17)
+    #expect(constants.lastUpdated == "2026-11-02")
     #expect(constants.upgradeToken == "webtransport-h3")
     #expect(constants.settingsEnableConnectProtocol == 0x08)
     #expect(constants.settingsH3Datagram == 0x33)
-    #expect(constants.settingsWTEnabled == 0x2c7c_f000)
+    #expect(constants.settingsWTEnabled == 0x20b8_933b)
+    #expect(constants.settingsWTEnabledDraft16 == 0x2c7c_f000)
     #expect(constants.settingsWTInitialMaxStreamsUni == 0x2b64)
     #expect(constants.settingsWTInitialMaxStreamsBidi == 0x2b65)
     #expect(constants.settingsWTInitialMaxData == 0x2b61)

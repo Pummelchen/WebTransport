@@ -29,6 +29,12 @@ static int wt_usage(const char *program) {
   printf("asks for, over the transport named by --transport, presenting the\n");
   printf("identity --trust describes. It exits non-zero when no session\n");
   printf("completes.\n");
+  printf("\n");
+  printf("--wt-enabled dual|final selects which SETTINGS_WT_ENABLED codepoints are\n");
+  printf("advertised: dual (the default) advertises the codepoint draft-17 section\n");
+  printf("9.2 registers AND the draft-16 one, so a peer written against either draft\n");
+  printf("can open a session; final advertises the section 9.2 codepoint alone, and\n");
+  printf("a draft-16 peer sees no codepoint it knows and never attempts a session.\n");
   return 3;
 }
 
@@ -134,6 +140,10 @@ int main(int argc, char **argv) {
      * and is a statement about how exposed a listener is rather than something the protocol requires. */
     loop.retry = options.retry;
     loop.message = options.message;
+    /* Which SETTINGS_WT_ENABLED codepoints this listener advertises. The enum values are the same
+     * numbers the library's `wt_webtransport_version_profile_t` uses, so this is the selection
+     * itself rather than a translation. */
+    loop.wt_enabled_profile = (int)options.wt_enabled;
     /* An identity generated in memory for a local session: the client reaches it by pinning its fingerprint,
      * which this prints so the other side can be told what to expect. */
     status = wt_tls_self_signed_generate(&identity, "localhost");

@@ -36,7 +36,7 @@
 extern "C" {
 #endif
 
-/* The longest stream prefix a peer can send: a draft-16 WebTransport stream's prefix is the TYPE and then the
+/* The longest stream prefix a peer can send: a WebTransport stream's prefix is the TYPE and then the
  * session ID, each a varint of up to eight bytes, so sixteen rather than eight. A table sized for the type alone
  * would refuse a legal prefix. */
 #define WT_HTTP3_DRIVER_PREFIX_MAX 16U
@@ -55,7 +55,7 @@ extern "C" {
 
 /* One remembered WebTransport data stream. The PREFIX LENGTH is how many bytes of THIS endpoint's prefix are on
  * that stream -- the draft's header that associates it with the session -- and it is 0 for a stream the peer
- * opened, whose prefix is on the peer's own direction. It is here because draft-ietf-webtrans-http3-16 section 4.4
+ * opened, whose prefix is on the peer's own direction. It is here because draft-ietf-webtrans-http3-17 section 4.4
  * requires a reset of a WebTransport stream to commit to at least that many bytes (a Reliable Size), so that the
  * association survives the reset, and a driver that forgot which streams it had written a prefix on could not
  * state it (WT-182). */
@@ -164,7 +164,7 @@ typedef struct wt_http3_driver {
   int session_id_set;
   /* The `:protocol` token the extended CONNECT of `wt_http3_driver_send_session_request` carries. The draft-16
    * value is the default (see `wt_webtransport_upgrade_token_t`, where zero is that value, and
-   * `wt_http3_driver_init` zeroes this whole structure), because draft-ietf-webtrans-http3-16 section 3.2 names
+   * `wt_http3_driver_init` zeroes this whole structure), because draft-ietf-webtrans-http3-17 section 3.2 names
    * `webtransport-h3` and that is what a conforming client sends. The token is not negotiable on the wire: a peer
    * written against an earlier draft knows only `webtransport` and rejects the CONNECT with H3_MESSAGE_ERROR
    * before it reads any setting, so reaching such a peer means being TOLD to send the old value -- which is what
@@ -180,7 +180,7 @@ typedef struct wt_http3_driver {
   /* The WebTransport DATA streams whose prefix is SETTLED, by ID: the ones this endpoint opened, and the ones a
    * peer opened whose prefix this driver classified as WebTransport. The draft's prefix (`0x41` for a
    * bidirectional stream, `0x54` for a unidirectional one, then the session ID) is sent ONCE, by the stream's
-   * initiator (draft-ietf-webtrans-http3-16 sections 4.2 and 4.3), so everything after it on that stream is the
+   * initiator (draft-ietf-webtrans-http3-17 sections 4.2 and 4.3), so everything after it on that stream is the
    * session's payload. Reading the payload as a prefix again closed a connection (WT-135); forgetting the prefix
    * and parsing the payload as HTTP/3 frames did it too, and only a peer that sends the prefix in one STREAM
    * frame and its message in the next could show that -- this tree's own client sends both together (WT-156). */
@@ -216,7 +216,7 @@ void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_
 /* Say which `:protocol` token this endpoint's own CONNECT carries.
  *
  * The default -- and what `wt_http3_driver_init` leaves in place -- is the draft-16 token, `webtransport-h3`
- * (draft-ietf-webtrans-http3-16 section 3.2). `WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY` selects the pre-draft
+ * (draft-ietf-webtrans-http3-17 section 3.2). `WT_WEBTRANSPORT_UPGRADE_TOKEN_LEGACY` selects the pre-draft
  * `webtransport` for a peer that predates the rename. The selection is explicit rather than negotiated because it
  * cannot be negotiated: the peer refuses the extended CONNECT with H3_MESSAGE_ERROR before any SETTINGS exchange,
  * which is how four of the five third-party peers rejected the draft-16 token (F-02b). Only the two values above
@@ -224,7 +224,7 @@ void wt_http3_driver_set_session_id(wt_http3_driver_t *driver, uint64_t session_
 void wt_http3_driver_set_upgrade_token(wt_http3_driver_t *driver,
                                        wt_webtransport_upgrade_token_t token);
 
-/* END THE SESSION'S DATA STREAMS: draft-ietf-webtrans-http3-16 section 6's reset, for every WebTransport stream
+/* END THE SESSION'S DATA STREAMS: draft-ietf-webtrans-http3-17 section 6's reset, for every WebTransport stream
  * this driver remembers.
  *
  * "Upon learning that the session has been terminated, the endpoint MUST reset the send side and abort reading on
@@ -457,7 +457,7 @@ void wt_http3_driver_bind_connection(wt_http3_driver_t *driver, wt_quic_connecti
  * classify. */
 int wt_http3_driver_is_data_stream(const wt_http3_driver_t *driver, uint64_t stream_id);
 
-/* The session a remembered WebTransport data stream's prefix named (draft-16 section 4.2).
+/* The session a remembered WebTransport data stream's prefix named (draft-17 section 4.2).
  *
  * This is what lets a caller apply section 4.6's buffering rule to a STREAM: a stream can arrive before the
  * session it names is known, and the answer to "may I deliver this yet?" is the ID in its prefix rather than

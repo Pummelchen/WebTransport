@@ -53,7 +53,7 @@ static void test_the_layers_are_reachable(void) {
                     (const uint8_t *)entry.name, entry.name_length);
   }
 
-  /* The draft-16 session layer: a drain capsule, which exercises the capsule codec. */
+  /* The draft-17 session layer: a drain capsule, which exercises the capsule codec. */
   {
     wt_webtransport_capsule_t capsule;
     w = wt_writer_init(bytes, sizeof(bytes));
@@ -94,6 +94,6 @@ static void test_the_layers_are_reachable(void) {
 int main(void) {
   test_the_layers_are_reachable();
   WT_EXPECT_STR("the version is reported", WT_TEST_VERSION_STRING, wt_version_string());
-  WT_EXPECT_STR("and the draft", "draft-ietf-webtrans-http3-16", wt_protocol_draft());
+  WT_EXPECT_STR("and the draft", "draft-ietf-webtrans-http3-17", wt_protocol_draft());
   WT_TEST_MAIN_END("wt_public_api");
 }

@@ -1,4 +1,4 @@
-/* WebTransport capsules (draft-ietf-webtrans-http3-16 section 5, on RFC 9297's
+/* WebTransport capsules (draft-ietf-webtrans-http3-17 section 5, on RFC 9297's
  * capsules).
  *
  * The CONNECT stream carries the session's control messages as capsules: a varint
@@ -29,7 +29,7 @@
 extern "C" {
 #endif
 
-/* The draft-16 capsule types, from its own registry. */
+/* The draft's capsule types, from its registry. */
 #define WT_CAPSULE_DRAIN_SESSION ((uint64_t)0x78ae)
 #define WT_CAPSULE_CLOSE_WEBTRANSPORT_SESSION ((uint64_t)0x2843)
 #define WT_CAPSULE_MAX_DATA ((uint64_t)0x190b4d3d)
@@ -76,7 +76,7 @@ wt_status_t wt_webtransport_close_session_parse(const wt_webtransport_capsule_t 
 /* The drain capsule, which has no value. */
 wt_status_t wt_webtransport_drain_session_write(wt_writer_t *w);
 
-/* ------------------------------------- draft-16 section 5.1's flow control capsules
+/* ------------------------------------- draft-17 section 5.1's flow control capsules
  *
  * The session has its own flow control, carried as capsules on the CONNECT stream: a
  * connection-level data limit, a per-stream one, the number of streams of each
@@ -131,7 +131,10 @@ wt_status_t wt_webtransport_streams_blocked_parse(const wt_webtransport_capsule_
  * STRICTLY increase (section 5.1): a value at or below what was sent before is
  * WT_FLOW_CONTROL_ERROR. A repeat is refused along with a decrease because a repeat is
  * what a peer sends when it is confused about what it already granted, and accepting it
- * would hide the confusion. The first capsule establishes a limit; there is no default. */
+ * would hide the confusion. The first capsule establishes a limit, unless a SETTINGS
+ * baseline was recorded for it -- section 5.5's initial values, which stand in for the
+ * "previously received" value section 5.6 names: the first capsule must EXCEED the
+ * baseline, exactly as every later capsule must exceed the one before it. */
 typedef struct wt_webtransport_flow_limits {
   uint64_t max_data;
   int max_data_set;
@@ -139,6 +142,17 @@ typedef struct wt_webtransport_flow_limits {
   int max_streams_bidi_set;
   uint64_t max_streams_uni;
   int max_streams_uni_set;
+  /* The section 5.5 baselines: the SETTINGS_WT_INITIAL_MAX_* values the peer sent, while no
+   * capsule of the corresponding type has been received. The draft closes the session on a
+   * capsule that "does not increase" the previously received value, and the baseline stands
+   * in for that value -- so a first capsule AT or below its baseline is the flow-control
+   * error, and from the first capsule on the strictly-increasing rule governs alone. */
+  int baseline_data_set;
+  uint64_t baseline_data;
+  int baseline_streams_bidi_set;
+  uint64_t baseline_streams_bidi;
+  int baseline_streams_uni_set;
+  uint64_t baseline_streams_uni;
 } wt_webtransport_flow_limits_t;
 
 void wt_webtransport_flow_limits_init(wt_webtransport_flow_limits_t *limits);
@@ -147,6 +161,14 @@ wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limi
 wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *limits,
                                                 int bidirectional, uint64_t maximum,
                                                 uint64_t *out_error);
+
+/* Record the PEER's SETTINGS initial values (section 5.5) as the baselines the first capsule of
+ * each type must exceed. A setting the peer omitted carries no baseline, exactly as it carries no
+ * grant. */
+wt_status_t wt_webtransport_flow_baseline_data(wt_webtransport_flow_limits_t *limits,
+                                               uint64_t initial_max_data);
+wt_status_t wt_webtransport_flow_baseline_streams(wt_webtransport_flow_limits_t *limits,
+                                                  int bidirectional, uint64_t initial_max_streams);
 
 #ifdef __cplusplus
 }

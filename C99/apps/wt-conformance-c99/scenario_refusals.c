@@ -51,7 +51,7 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     message.path = (const uint8_t *)"/other";
     message.path_length = 6U;
     (void)wt_webtransport_session_request_validate(&message, &policy, &decision, &error);
-    add(report, "draft16-request-wrong-path",
+    add(report, "draft17-request-wrong-path",
         decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT && decision.status == 404U,
         "a path this server does not serve is refused with 404");
   }
@@ -63,7 +63,7 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     message.protocol = (const uint8_t *)"websocket";
     message.protocol_length = 9U;
     (void)wt_webtransport_session_request_validate(&message, &policy, &decision, &error);
-    add(report, "draft16-request-other-protocol",
+    add(report, "draft17-request-other-protocol",
         decision.outcome == WT_WEBTRANSPORT_REQUEST_NOT_WEBTRANSPORT,
         "an extended CONNECT for another protocol is not a WebTransport request");
   }
@@ -74,7 +74,7 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
     disabled.wt_enabled = 0;
     make_request(&message);
     (void)wt_webtransport_session_request_validate(&message, &disabled, &decision, &error);
-    add(report, "draft16-server-without-wt-enabled",
+    add(report, "draft17-server-without-wt-enabled",
         decision.outcome == WT_WEBTRANSPORT_REQUEST_REJECT,
         "a server that did not advertise WT_ENABLED refuses the session");
   }
@@ -83,11 +83,12 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
    * identifier is a SETTINGS error, and so is one the RFC reserves. */
   {
     /* WT_ENABLED twice: RFC 9114 section 7.2.4 forbids a repeated identifier. */
-    /* WT_ENABLED as a FOUR-byte varint (its top bits are `10`), twice: the first byte carries the two high bits
-     * of the identifier, so `0xac 0x7c 0xf0 0x00` is 0x2c7cf000 and not the two-byte form a first draft of this
-     * scenario used -- the same MSB-first lesson the tracker keeps recording. */
-    static const uint8_t repeated[] = {0xacU, 0x7cU, 0xf0U, 0x00U, 0x00U,
-                                       0xacU, 0x7cU, 0xf0U, 0x00U, 0x01U};
+    /* WT_ENABLED (0x20b8933b, the codepoint draft-17 section 9.2 registers) as a FOUR-byte varint (its top bits
+     * are `10`), twice: the first byte carries the two high bits of the identifier, so `0xa0 0xb8 0x93 0x3b` is
+     * 0x20b8933b and not the two-byte form a first draft of this scenario used -- the same MSB-first lesson the
+     * tracker keeps recording. */
+    static const uint8_t repeated[] = {0xa0U, 0xb8U, 0x93U, 0x3bU, 0x00U,
+                                       0xa0U, 0xb8U, 0x93U, 0x3bU, 0x01U};
     wt_http3_settings_t settings;
     wt_http3_error_t settings_error = WT_HTTP3_NO_ERROR;
     wt_status_t status =
@@ -147,7 +148,7 @@ void wt_scenario_refusals_run(wt_cli_report_t *report) {
   }
 
   /* The session's own state machine: a drain stops new streams, and the FIRST close code is the one the session
-   * ends with (draft-16 section 5.4). */
+   * ends with (draft-17 section 5.4). */
   {
     wt_webtransport_session_t session;
 

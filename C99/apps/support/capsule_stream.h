@@ -1,4 +1,4 @@
-/* The CONNECT stream's capsules, as an application sees them (draft-ietf-webtrans-http3-16 section 5).
+/* The CONNECT stream's capsules, as an application sees them (draft-ietf-webtrans-http3-17 section 5).
  *
  * A WebTransport session's control messages -- drain, close, and the flow-control grants -- travel on the CONNECT
  * stream as CAPSULES once that stream's one HEADERS frame has passed, inside the HTTP/3 DATA frames RFC 9114
@@ -39,7 +39,9 @@
 typedef struct wt_capsule_stream {
   /* The session those capsules belong to, with the state a drain or a close moves. */
   wt_webtransport_session_t session;
-  /* The limits the peer granted, which is what the caller enforces against. */
+  /* The limits the peer granted, which is what the caller enforces against. The peer's SETTINGS
+   * initial values (section 5.5) are recorded here too when they arrive, so the first grant of each
+   * type is measured against its SETTINGS baseline and not only against grants already received. */
   wt_webtransport_flow_limits_t peer_limits;
   /* Section 5.1's negotiation state for the session's own flow control: whether THIS endpoint's SETTINGS
    * advertised one of the three initial limits, and whether the peer's validated SETTINGS did. A grant is
@@ -53,13 +55,19 @@ typedef struct wt_capsule_stream {
    * settings parser can answer the PEER half of the negotiation above without a second copy of it. */
   uint8_t peer_settings[WT_HTTP3_CONTROL_SETTINGS_MAX];
   size_t peer_settings_length;
+  /* The peer's SETTINGS, parsed, kept because the SETTINGS_WT_ENABLED codepoints say which version
+   * the peer speaks (sections 3.1 and 7.1) and the loops read that answer from here: a server selects
+   * the client's version with `wt_webtransport_version_select`, a client validates the server's
+   * advertisement with `wt_webtransport_client_version`. Cleared until the frame completes. */
+  wt_http3_settings_t peer_settings_parsed;
+  int peer_settings_received;
   uint8_t bytes[WT_CAPSULE_STREAM_MAX];
   size_t length;
   /* How many capsules were walked and how many were refused. Counted rather than inferred, because "the peer sent
    * none" and "the peer's capsules were dropped" leave the same state behind. */
   unsigned walked;
   unsigned refused;
-  /* The draft-16 SESSION error the last refusal named, when it was one -- a grant that does not strictly increase
+  /* The draft's SESSION error the last refusal named, when it was one -- a grant that does not strictly increase
    * is section 5.1's flow-control error, which is a session code and not an HTTP/3 one. It is kept here because a
    * caller has to state it in a close capsule, and the error spaces must not be confused (WT-165). */
   uint64_t refused_session_code;
@@ -68,7 +76,7 @@ typedef struct wt_capsule_stream {
 
 /* An observer for the capsules the session's lifecycle machine does not apply. It may refuse one by returning a
  * status and naming the rule -- in `out_error` when it is an HTTP/3 error, and in the stream's own
- * `refused_session_code` when it is a draft-16 session error -- and the walk stops there. */
+ * `refused_session_code` when it is a draft session error -- and the walk stops there. */
 typedef wt_status_t (*wt_capsule_stream_fn)(void *context, const wt_webtransport_capsule_t *capsule,
                                             wt_http3_error_t *out_error);
 
@@ -133,7 +141,7 @@ wt_status_t wt_capsule_stream_apply_flow(void *context, const wt_webtransport_ca
  *
  * An HTTP/3 error -- a capsule past the caller's bound, or a malformed one -- closes the CONNECTION in the
  * application form, which is the only form that carries an HTTP/3 code (RFC 9114 section 8); this leaves the hint
- * the next refusal uses and returns 1 when there was such a code. A draft-16 SESSION error is a close CAPSULE on
+ * the next refusal uses and returns 1 when there was such a code. A draft SESSION error is a close CAPSULE on
  * the CONNECT stream carrying the session's own code, and the connection stays up (section 5.1); this writes and
  * sends it, and returns 1 when there was one.
  *

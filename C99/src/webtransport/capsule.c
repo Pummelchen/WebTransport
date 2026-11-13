@@ -1,4 +1,4 @@
-/* WebTransport capsules (draft-ietf-webtrans-http3-16 section 5). */
+/* WebTransport capsules (draft-ietf-webtrans-http3-17 section 5). */
 
 #include "webtransport/webtransport/capsule.h"
 
@@ -366,6 +366,33 @@ void wt_webtransport_flow_limits_init(wt_webtransport_flow_limits_t *limits) {
   limits->max_streams_bidi_set = 0;
   limits->max_streams_uni = 0U;
   limits->max_streams_uni_set = 0;
+  limits->baseline_data_set = 0;
+  limits->baseline_data = 0U;
+  limits->baseline_streams_bidi_set = 0;
+  limits->baseline_streams_bidi = 0U;
+  limits->baseline_streams_uni_set = 0;
+  limits->baseline_streams_uni = 0U;
+}
+
+wt_status_t wt_webtransport_flow_baseline_data(wt_webtransport_flow_limits_t *limits,
+                                               uint64_t initial_max_data) {
+  if (limits == NULL) return WT_ERR_INVALID_ARGUMENT;
+  limits->baseline_data = initial_max_data;
+  limits->baseline_data_set = 1;
+  return WT_OK;
+}
+
+wt_status_t wt_webtransport_flow_baseline_streams(wt_webtransport_flow_limits_t *limits,
+                                                  int bidirectional, uint64_t initial_max_streams) {
+  if (limits == NULL) return WT_ERR_INVALID_ARGUMENT;
+  if (bidirectional) {
+    limits->baseline_streams_bidi = initial_max_streams;
+    limits->baseline_streams_bidi_set = 1;
+    return WT_OK;
+  }
+  limits->baseline_streams_uni = initial_max_streams;
+  limits->baseline_streams_uni_set = 1;
+  return WT_OK;
 }
 
 wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limits,
@@ -377,6 +404,17 @@ wt_status_t wt_webtransport_flow_on_max_data(wt_webtransport_flow_limits_t *limi
      * data already sent against the old one, and a limit that repeats says the peer has
      * lost track of what it granted; both are flow-control errors rather than new
      * limits. */
+    if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
+  if (limits->max_data_set == 0 && limits->baseline_data_set != 0 &&
+      maximum <= limits->baseline_data) {
+    /* Section 5.5 with 5.6.4: while no capsule of this type has been received, the
+     * SETTINGS_WT_INITIAL_MAX_DATA value stands in for "the Maximum Data value previously
+     * received", and 5.6.4 closes the session on a capsule that "does not increase" it.
+     * The settings themselves already granted that value, so the first capsule must be
+     * strictly ABOVE the baseline; from the first capsule on, the strictly increasing
+     * rule above governs alone. */
     if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
     return WT_ERR_PROTOCOL;
   }
@@ -401,11 +439,21 @@ wt_status_t wt_webtransport_flow_on_max_streams(wt_webtransport_flow_limits_t *l
       if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
       return WT_ERR_PROTOCOL;
     }
+    if (limits->max_streams_bidi_set == 0 && limits->baseline_streams_bidi_set != 0 &&
+        maximum <= limits->baseline_streams_bidi) {
+      if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
+      return WT_ERR_PROTOCOL;
+    }
     limits->max_streams_bidi = maximum;
     limits->max_streams_bidi_set = 1;
     return WT_OK;
   }
   if (limits->max_streams_uni_set && maximum <= limits->max_streams_uni) {
+    if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
+  if (limits->max_streams_uni_set == 0 && limits->baseline_streams_uni_set != 0 &&
+      maximum <= limits->baseline_streams_uni) {
     if (out_error != NULL) *out_error = WT_WEBTRANSPORT_FLOW_CONTROL_ERROR;
     return WT_ERR_PROTOCOL;
   }

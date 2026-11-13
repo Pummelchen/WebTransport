@@ -1,5 +1,5 @@
 /* Section 4.6's buffering rule for streams and datagrams that arrive before their session
- * (draft-ietf-webtrans-http3-16). See `webtransport/webtransport/buffered.h` for the rule and the
+ * (draft-ietf-webtrans-http3-17). See `webtransport/webtransport/buffered.h` for the rule and the
  * bounds; this file is the mechanism. */
 
 #include "webtransport/webtransport/buffered.h"

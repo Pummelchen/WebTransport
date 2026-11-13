@@ -1,4 +1,4 @@
-/* The WebTransport error-code mapping (draft-ietf-webtrans-http3-16 section 4.4) and the draft's registered codes
+/* The WebTransport error-code mapping (draft-ietf-webtrans-http3-17 section 4.4) and the draft's registered codes
  * (section 9.5).
  *
  * The property that matters is an ALGEBRAIC one, so the test carries the section's own pseudocode as an

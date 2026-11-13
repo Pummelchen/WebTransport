@@ -21,7 +21,7 @@
  *
  * The layers are, from the wire inward: `quic/` (frames, packets, protection, the
  * connection runtime), `tls/` and `crypto/` (the handshake and the primitives it needs),
- * `http3/` (frames, streams, QPACK, messages) and `webtransport/` (the draft-16 session:
+ * `http3/` (frames, streams, QPACK, messages) and `webtransport/` (the draft-17 session:
  * its request, its capsules, its lifecycle and its framing). A consumer that wants only
  * one layer may include that layer's header instead; this one exists so that the whole
  * surface is reachable from one place, and so that the order of the layers is written
@@ -97,7 +97,7 @@
 #include "webtransport/http3/settings.h"
 #include "webtransport/http3/streams.h"
 
-/* The draft-16 WebTransport session layer. */
+/* The draft-17 WebTransport session layer. */
 #include "webtransport/webtransport/capsule.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/webtransport/session.h"

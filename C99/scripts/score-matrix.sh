@@ -35,7 +35,7 @@ done <<ROWS
 $rows
 ROWS
 
-echo "compliance matrix: $draft_tested of $draft_total draft-16 requirements exercised by a test in this tree"
+echo "compliance matrix: $draft_tested of $draft_total draft-17 requirements exercised by a test in this tree"
 echo "compliance matrix: $draft_partial of $draft_total partial, and $layer_total row(s) describing lower layers"
 
 # The nine Definition-of-Done criteria are counted from IMPLEMENTATION_PLAN.md's own audit table, whose State
@@ -69,7 +69,7 @@ echo "definition of done: $dod_met of $dod_total criteria met, $dod_partial part
 echo "  (counted from the table under 'Definition of Done audit' in IMPLEMENTATION_PLAN.md; the matrix coverage"
 echo "   above is the matrix's status cells, whose Evidence names scripts/check-matrix.sh resolves)"
 echo "  met:     CLI local IPv4/IPv6 sessions; sanitizers and static checks; public API documented; no"
-echo "           placeholder exposed as production; the draft-16 matrix itself; all Swift-equivalent"
+echo "           placeholder exposed as production; the draft-17 matrix itself; all Swift-equivalent"
 echo "           conformance coverage (WT-133, closed by the audit that walked the Swift suite scenario by"
 echo "           scenario rather than comparing totals); and the README status, which this script prints"
 echo "           from the matrix rather than from memory."

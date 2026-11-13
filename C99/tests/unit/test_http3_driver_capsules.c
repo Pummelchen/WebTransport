@@ -380,7 +380,7 @@ static void test_a_server_marks_the_connect_stream_as_it_accepts_it(void) {
 
 /* The `:protocol` token on the wire is this endpoint's CHOICE, not a constant (F-02b).
  *
- * Draft-ietf-webtrans-http3-16 section 3.2 names `webtransport-h3`, so that is what the driver must send when
+ * Draft-ietf-webtrans-http3-17 section 3.2 names `webtransport-h3`, so that is what the driver must send when
  * nothing says otherwise -- a zeroed driver, since the draft-16 selection is the enum's zero. The pre-draft
  * `webtransport` is what a peer that predates the rename accepts, and before this selection existed the client
  * could not put it on the wire at all. The assertion is on the DECODED request rather than on the field this code

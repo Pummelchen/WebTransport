@@ -19,6 +19,9 @@ wt_cli_options_t wt_cli_options_default(void) {
   /* Named rather than left to the memset, so the draft-16 default is a decision stated here rather than a zero
    * that happens to mean the current token (F-02b). */
   options.upgrade_token = WT_CLI_UPGRADE_TOKEN_DRAFT16;
+  /* And the SETTINGS posture named too, for the same reason: DUAL is the interoperable default, and a
+   * zero that happened to mean it would stop meaning it the day the enum was reordered. */
+  options.wt_enabled = WT_CLI_WT_ENABLED_DUAL;
   options.timeout_ms = WT_CLI_TIMEOUT_DEFAULT;
   return options;
 }
@@ -69,6 +72,16 @@ const char *wt_cli_upgrade_token_name(wt_cli_upgrade_token_t upgrade_token) {
       return "draft16";
     case WT_CLI_UPGRADE_TOKEN_LEGACY:
       return "legacy";
+  }
+  return "unknown";
+}
+
+const char *wt_cli_wt_enabled_name(wt_cli_wt_enabled_t wt_enabled) {
+  switch (wt_enabled) {
+    case WT_CLI_WT_ENABLED_DUAL:
+      return "dual";
+    case WT_CLI_WT_ENABLED_FINAL:
+      return "final";
   }
   return "unknown";
 }
@@ -137,8 +150,9 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
                is_flag(argument, "--origin") || is_flag(argument, "--authority") ||
                is_flag(argument, "--protocol") || is_flag(argument, "--exchange") ||
                is_flag(argument, "--message") || is_flag(argument, "--upgrade-token") ||
-               is_flag(argument, "--timeout-ms") || is_flag(argument, "--scenario") ||
-               is_flag(argument, "--hostile") || is_flag(argument, "--address")) {
+               is_flag(argument, "--wt-enabled") || is_flag(argument, "--timeout-ms") ||
+               is_flag(argument, "--scenario") || is_flag(argument, "--hostile") ||
+               is_flag(argument, "--address")) {
       const char *value;
       /* A flag that takes a value does not take the NEXT FLAG as its value. */
       if (i + 1 >= argc) return fail("missing value", argument, out_error, out_error_argument);
@@ -196,6 +210,20 @@ wt_status_t wt_cli_options_parse(wt_cli_options_t *options, int argc, const char
           return fail("unsupported upgrade token", value, out_error, out_error_argument);
         }
         options->upgrade_token_set = 1;
+      } else if (is_flag(argument, "--wt-enabled")) {
+        /* The SETTINGS_WT_ENABLED posture, which is a decision about which peers this endpoint
+         * reaches: `dual` advertises and accepts the final codepoint and the draft-16 one, `final`
+         * speaks only the version section 9.2 registers. A value that is neither name is refused
+         * rather than left at the default, for the same reason the token above is: a report that
+         * claims a posture the tool never took is a report nobody can trust. */
+        if (strcmp(value, "dual") == 0) {
+          options->wt_enabled = WT_CLI_WT_ENABLED_DUAL;
+        } else if (strcmp(value, "final") == 0) {
+          options->wt_enabled = WT_CLI_WT_ENABLED_FINAL;
+        } else {
+          return fail("unsupported wt-enabled posture", value, out_error, out_error_argument);
+        }
+        options->wt_enabled_set = 1;
       } else if (is_flag(argument, "--scenario")) {
         if (strcmp(value, "all") != 0) {
           return fail("unsupported scenario", value, out_error, out_error_argument);
@@ -347,6 +375,9 @@ void wt_cli_options_write_json(const wt_cli_options_t *options, FILE *stream) {
   /* Which `:protocol` token the CONNECT carries, so the interop runner's per-peer selection is in the report a
    * reader weighs rather than only in the command line that produced it (F-02b). */
   fprintf(stream, ",\"upgradeToken\":\"%s\"", wt_cli_upgrade_token_name(options->upgrade_token));
+  /* Which SETTINGS_WT_ENABLED codepoints this run advertised and accepted, so the interop runner's
+   * per-peer posture is in the report rather than only in the command line that produced it. */
+  fprintf(stream, ",\"wtEnabled\":\"%s\"", wt_cli_wt_enabled_name(options->wt_enabled));
   fprintf(stream, ",\"scenario\":%s,\"hostile\":", options->scenario_all != 0 ? "\"all\"" : "null");
   if (options->hostile == NULL) {
     fprintf(stream, "null");

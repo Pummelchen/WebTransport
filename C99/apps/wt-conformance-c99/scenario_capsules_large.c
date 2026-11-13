@@ -34,7 +34,7 @@
 #include "scenario_capsules_support.h"
 
 void capsules_run_the_largest_capsule(wt_cli_report_t *report) {
-  static const char *const k_largest = "draft16-the-largest-close-capsule-is-accepted";
+  static const char *const k_largest = "draft17-the-largest-close-capsule-is-accepted";
   scenario_pair_t pair;
   char detail[WT_CLI_SCENARIO_DETAIL_MAX];
   char opened[WT_CLI_SCENARIO_DETAIL_MAX];
@@ -109,9 +109,11 @@ void capsules_run_the_largest_capsule(wt_cli_report_t *report) {
  * capsule applied, rather than the delivery refused for being large -- which is what the arithmetic bound used to do
  * to a peer whose capsules were all tiny. */
 void capsules_run_a_coalesced_delivery(wt_cli_report_t *report) {
-  static const char *const k_many = "draft16-many-capsules-in-one-delivery-are-all-applied";
-  /* Enough grants, at eight bytes each, to be well past the walker's buffer in one delivery. */
-  enum { k_grants = 160 };
+  static const char *const k_many = "draft17-many-capsules-in-one-delivery-are-all-applied";
+  /* Enough grants, at nine bytes each (a four-byte MAX_DATA type, its one-byte length and the four-byte
+   * value), to be past the walker's buffer in one delivery, while the whole STREAM frame still fits the
+   * QUIC packet bound this endpoint sends under (WT_QUIC_MAX_PACKET). */
+  enum { k_grants = 117 };
   scenario_pair_t pair;
   char detail[WT_CLI_SCENARIO_DETAIL_MAX];
   char opened[WT_CLI_SCENARIO_DETAIL_MAX];
@@ -140,8 +142,11 @@ void capsules_run_a_coalesced_delivery(wt_cli_report_t *report) {
   w = wt_http3_frame_data_writer(framed, sizeof(framed));
   for (index = 0U; index < (unsigned)k_grants; index++) {
     /* Strictly increasing, which is what section 5.1 requires of a MAX_DATA: a repeat would be a flow-control
-     * error and the session would end before the interesting half of this ran. */
-    if (wt_webtransport_max_data_write(&w, 1000U + (uint64_t)index) != WT_OK) {
+     * error and the session would end before the interesting half of this ran. The run starts one above the
+     * SETTINGS_WT_INITIAL_MAX_DATA both sides advertise (100000): that value is the section 5.5 baseline the
+     * settings already granted, and section 5.6.4 closes the session on a capsule that does not increase it,
+     * so the first grant must exceed it. */
+    if (wt_webtransport_max_data_write(&w, 100001U + (uint64_t)index) != WT_OK) {
       sent = 0;
       break;
     }
@@ -152,13 +157,13 @@ void capsules_run_a_coalesced_delivery(wt_cli_report_t *report) {
     return;
   }
   for (round = 0U; round < WT_SCENARIO_TIMEOUT_ROUNDS; round++) {
-    if (pair.server_side.capsules.peer_limits.max_data == 1000U + (uint64_t)(k_grants - 1)) break;
+    if (pair.server_side.capsules.peer_limits.max_data == 100001U + (uint64_t)(k_grants - 1)) break;
     scenario_pump_once(&pair);
   }
   {
     int passed =
         pair.server_side.capsules.peer_limits.max_data_set != 0 &&
-        pair.server_side.capsules.peer_limits.max_data == 1000U + (uint64_t)(k_grants - 1) &&
+        pair.server_side.capsules.peer_limits.max_data == 100001U + (uint64_t)(k_grants - 1) &&
         pair.server_side.capsules.refused == 0U &&
         pair.server_side.capsules.refused_session_code_set == 0 &&
         pair.server_side.capsules.session.state != WT_WEBTRANSPORT_SESSION_CLOSED &&
@@ -167,13 +172,13 @@ void capsules_run_a_coalesced_delivery(wt_cli_report_t *report) {
     (void)snprintf(
         detail, sizeof(detail),
         passed != 0
-            ? "all 160 grants in one DATA frame were applied, past the walker's buffer, with "
+            ? "all 117 grants in one DATA frame were applied, past the walker's buffer, with "
               "nothing refused"
             : "the coalesced delivery was not walked (set=%d, limit=%llu, wanted=%llu, "
               "refused=%u, state=%d)",
         pair.server_side.capsules.peer_limits.max_data_set,
         (unsigned long long)pair.server_side.capsules.peer_limits.max_data,
-        (unsigned long long)(1000U + (uint64_t)(k_grants - 1)), pair.server_side.capsules.refused,
+        (unsigned long long)(100001U + (uint64_t)(k_grants - 1)), pair.server_side.capsules.refused,
         (int)pair.server_side.capsules.session.state);
     capsules_add(report, k_many, passed, detail);
   }

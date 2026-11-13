@@ -51,7 +51,7 @@ static void build_parameters(uint8_t *out, size_t capacity, int is_server) {
    * applies here (WT-110's lesson, in a different parameter). */
   WT_EXPECT_OK("max_datagram_frame_size", wt_quic_transport_parameters_add_integer(
                                               &params, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, 1200U));
-  /* The reliable-stream-reset extension, which draft-16 section 3.1 requires of BOTH roles and which a
+  /* The reliable-stream-reset extension, which draft-17 section 3.1 requires of BOTH roles and which a
    * WebTransport stream needs: its session prefix is the first thing on the stream. */
   WT_EXPECT_OK("reset_stream_at", wt_quic_transport_parameters_add_bytes(
                                       &params, WT_QUIC_TP_RESET_STREAM_AT, NULL, 0U));

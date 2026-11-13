@@ -9,15 +9,15 @@ import WebTransportQUICCore
 extension WebTransportSessionManager {
     func writableSession(for sessionID: WebTransportSessionID) throws -> WebTransportSession {
         guard let session = sessionsByID[sessionID] else {
-            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "unknown WebTransport session")
         }
         switch session.state {
         case .accepted, .draining:
             return session
         case .closed:
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session is closed")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session is closed")
         case .rejected:
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session was rejected")
         case .requested:
             throw QUICCodecError.malformed("WebTransport session is not accepted")
         }
@@ -25,15 +25,15 @@ extension WebTransportSessionManager {
 
     func sessionForIngress(_ sessionID: WebTransportSessionID) throws -> WebTransportSession {
         guard let session = sessionsByID[sessionID] else {
-            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "unknown WebTransport session")
         }
         switch session.state {
         case .requested, .accepted, .draining:
             return session
         case .closed:
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session is closed")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session is closed")
         case .rejected:
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session was rejected")
         }
     }
 
@@ -42,22 +42,26 @@ extension WebTransportSessionManager {
             if http3.role == .server {
                 return nil
             }
-            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "unknown WebTransport session")
         }
         switch session.state {
         case .requested, .accepted, .draining:
             return session
         case .closed:
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session is closed")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session is closed")
         case .rejected:
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session was rejected")
         }
     }
 
     func validateSettingsReady() throws {
+        // The local settings are validated as a peer would validate them, so the
+        // sender's own role decides which requirements apply: a strict server must
+        // advertise SETTINGS_WT_ENABLED, while a strict client must not send it
+        // (§3.1 gives the setting no meaning from a client).
         switch settingsValidation {
-        case .draft16Strict:
-            try http3.localSettings.validateWebTransportDraft16Requirements()
+        case .draft17Strict:
+            try http3.localSettings.validateWebTransportDraft17Requirements(peerRole: http3.role)
         case .interoperable, .chromiumInterop:
             try http3.localSettings.validateWebTransportChromiumInteropRequirements()
         case .pywebtransportStreamInterop:
@@ -68,8 +72,8 @@ extension WebTransportSessionManager {
         }
         let peerRole: HTTP3ConnectionRole = http3.role == .client ? .server : .client
         switch settingsValidation {
-        case .draft16Strict:
-            try remoteSettings.validateWebTransportDraft16Requirements(peerRole: peerRole)
+        case .draft17Strict:
+            try remoteSettings.validateWebTransportDraft17Requirements(peerRole: peerRole)
         case .interoperable, .chromiumInterop:
             try remoteSettings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
         case .pywebtransportStreamInterop:
@@ -102,7 +106,7 @@ extension WebTransportSessionManager {
             }
         }.count
         guard activeCount == 0 else {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: http3.role == .server ? .requestRejected : .requirementsNotMet,
                 message: "multiple simultaneous WebTransport sessions require WebTransport flow control"
             )
@@ -121,7 +125,7 @@ extension WebTransportSessionManager {
             return
         }
         guard streamID < goawayID else {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .sessionGone,
                 message: "new WebTransport session is blocked by GOAWAY"
             )

@@ -103,7 +103,7 @@ func runtimeClassifiesForeignSessionDatagramsForRefusal() throws {
             expectedSessionID: servedSessionID
         )
         Issue.record("an empty datagram should be reported as a WebTransport ID error")
-    } catch let error as WebTransportDraft16Error {
+    } catch let error as WebTransportDraft17Error {
         #expect(error.kind == .h3ID)
     }
 }

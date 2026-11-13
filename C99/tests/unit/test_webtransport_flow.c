@@ -1,4 +1,4 @@
-/* WebTransport's session flow control (draft-ietf-webtrans-http3-16 section 5.1).
+/* WebTransport's session flow control (draft-ietf-webtrans-http3-17 section 5.1).
  *
  * Each capsule carries one or two varints, so the tests are about the two ways that goes
  * wrong: a value that is not exactly a number (a trailing byte is not a bigger number)
@@ -246,10 +246,79 @@ static void test_the_stream_count_ceiling(void) {
   WT_EXPECT_U64("as a message error", (uint64_t)WT_HTTP3_MESSAGE_ERROR, (uint64_t)error);
 }
 
+/* Sections 5.5 and 5.6.2/5.6.4: the SETTINGS initial limits are the monotonicity BASELINE. "If an endpoint
+ * receives a WT_MAX_DATA capsule with a Maximum Data value that does not increase the Maximum Data value
+ * previously received, OR THE VALUE OF SETTINGS_WT_INITIAL_MAX_DATA if no WT_MAX_DATA capsule has been
+ * received, it MUST close the WebTransport session with a WT_FLOW_CONTROL_ERROR error code" -- and the same
+ * sentence stands for both WT_MAX_STREAMS capsules. Recording the peer's SETTINGS values as baselines is what
+ * makes the first grant measurable against them: a capsule under the baseline is the session-closing refusal,
+ * one AT it does not increase it and closes the session, exactly as the draft words it. */
+static void test_the_settings_baseline_anchors_the_first_grant(void) {
+  wt_webtransport_flow_limits_t limits;
+  uint64_t error = 0U;
+  wt_status_t status;
+
+  wt_webtransport_flow_limits_init(&limits);
+
+  /* The peer's SETTINGS, recorded the way the capsule_stream records them: the baseline functions, once
+   * per advertised setting. */
+  WT_EXPECT_OK("the SETTINGS data limit is recorded",
+               wt_webtransport_flow_baseline_data(&limits, 100000U));
+  WT_EXPECT_OK("as is the bidirectional stream count",
+               wt_webtransport_flow_baseline_streams(&limits, 1, 8U));
+  WT_EXPECT_OK("and the unidirectional one", wt_webtransport_flow_baseline_streams(&limits, 0, 8U));
+
+  /* A grant BELOW the SETTINGS initial value is the violation the draft names, even though no capsule of
+   * that type had been received before it: the SETTINGS value is the "previously received" value while the
+   * session is new. */
+  status = wt_webtransport_flow_on_max_data(&limits, 50000U, &error);
+  WT_EXPECT_STATUS("a MAX_DATA grant below the SETTINGS initial is refused", WT_ERR_PROTOCOL,
+                   status);
+  WT_EXPECT_U64("with WT_FLOW_CONTROL_ERROR", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+
+  error = 0U;
+  WT_EXPECT_STATUS("as is a stream grant below it", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_streams(&limits, 1, 4U, &error));
+  WT_EXPECT_U64("with the same session code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+
+  error = 0U;
+  WT_EXPECT_STATUS("in the other direction too", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_streams(&limits, 0, 1U, &error));
+  WT_EXPECT_U64("with the same session code again", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+
+  /* A grant AT the SETTINGS value does not increase it: section 5.6.4 closes the session on a
+   * capsule that "does not increase the Maximum Data value previously received, or ... the
+   * value of SETTINGS_WT_INITIAL_MAX_DATA if no WT_MAX_DATA capsule has been received". The
+   * settings already granted that value; the first capsule must be strictly above it. */
+  error = 0U;
+  WT_EXPECT_STATUS("a grant AT the SETTINGS initial does not increase it and is refused",
+                   WT_ERR_PROTOCOL, wt_webtransport_flow_on_max_data(&limits, 100000U, &error));
+  WT_EXPECT_U64("with the flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+
+  error = 0U;
+  WT_EXPECT_STATUS("and a stream grant AT the SETTINGS initial is refused too", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_streams(&limits, 1, 8U, &error));
+  WT_EXPECT_U64("with the same session code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+
+  /* A grant ABOVE the SETTINGS initial is the ordinary grant it is: the baseline anchors the rule,
+   * it does not replace it, and from the first capsule on the strictly-increasing rule governs. */
+  WT_EXPECT_OK("a grant above the SETTINGS initial is accepted",
+               wt_webtransport_flow_on_max_data(&limits, 150000U, &error));
+  WT_EXPECT_U64("and recorded", 150000U, limits.max_data);
+
+  /* From the first capsule on, a repeat of a RECEIVED value is the peer losing track of what it
+   * granted, and the old rule refuses it. */
+  error = 0U;
+  WT_EXPECT_STATUS("a repeat of a received grant is still refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_flow_on_max_data(&limits, 150000U, &error));
+  WT_EXPECT_U64("with the flow-control code", WT_WEBTRANSPORT_FLOW_CONTROL_ERROR, error);
+}
+
 int main(void) {
   test_round_trips();
   test_malformed_values();
   test_limits_only_grow();
   test_the_stream_count_ceiling();
+  test_the_settings_baseline_anchors_the_first_grant();
   WT_TEST_MAIN_END("wt_webtransport_flow");
 }

@@ -119,7 +119,7 @@ int main(void) {
          (unsigned long long)config.session_id);
 
   /* FLOW CONTROL is the peer's SETTINGS. The sample plays the peer and advertises the
-   * draft-16 initial limits, then asks the API whether that turns flow control on. */
+   * the draft-17 initial limits, then asks the API whether that turns flow control on. */
   wt_http3_settings_init(&peer_settings);
   if (wt_http3_settings_set(&peer_settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA, 1024U) != WT_OK ||
       wt_http3_settings_set(&peer_settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_BIDI, 4U) !=

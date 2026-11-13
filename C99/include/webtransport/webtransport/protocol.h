@@ -1,4 +1,4 @@
-/* WebTransport sub-protocol negotiation (draft-ietf-webtrans-http3-16 section 3.2).
+/* WebTransport sub-protocol negotiation (draft-ietf-webtrans-http3-17 section 3.2).
  *
  * A WebTransport session may carry a sub-protocol, and the two endpoints agree on one with the
  * `wt-protocol` header field: the request carries a LIST of the tokens the client offers, and the response

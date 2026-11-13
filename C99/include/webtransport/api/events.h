@@ -60,6 +60,16 @@ extern "C" {
  * build, not a bigger allocation at run time. */
 #define WT_SESSION_STREAM_MAX 64U
 
+/* What `on_stream_reset` carries when the peer's reset named NO application error code.
+ * Section 4.4: a RESET_STREAM, RESET_STREAM_AT or STOP_SENDING whose error code is outside
+ * the WT_APPLICATION_ERROR range "is still considered reset, but the error code is not
+ * mapped to a WebTransport application error code", and the implementation SHOULD deliver
+ * it to the application "as a stream reset with no application error code". Application
+ * error codes are 32-bit values, so a reset whose code is one of the draft's own protocol
+ * codes (WT_SESSION_GONE and friends, section 9.5) or anything else outside the range is
+ * reported through this sentinel -- a value no application error can take. */
+#define WT_SESSION_RESET_NO_APPLICATION_ERROR ((uint64_t)0xffffffffffffffffULL)
+
 typedef struct wt_session_callbacks {
   /* Passed back to every callback below, untouched. */
   void *context;
@@ -74,8 +84,10 @@ typedef struct wt_session_callbacks {
                          int end_stream);
 
   /* The peer reset a stream or asked this endpoint to stop sending on one. `error_code`
-   * is the peer's code, carried through unchanged. No further callback arrives for that
-   * stream. */
+   * is the APPLICATION error the peer's reset carried -- a code in the WT_APPLICATION_ERROR
+   * range remapped back into the 32-bit value the application chose (section 4.4) -- or
+   * WT_SESSION_RESET_NO_APPLICATION_ERROR when the reset carried no application error code.
+   * No further callback arrives for that stream. */
   void (*on_stream_reset)(void *context, uint64_t stream_id, uint64_t error_code);
 
   /* A datagram arrived, already stripped of its quarter stream ID: what is passed is the
@@ -104,7 +116,10 @@ wt_status_t wt_session_on_stream_opened(wt_session_t *session, uint64_t stream_i
 wt_status_t wt_session_on_stream_data(wt_session_t *session, uint64_t stream_id,
                                       const uint8_t *data, size_t length, int end_stream);
 
-/* A reset or a stop-sending from the peer, with its code. */
+/* A reset or a stop-sending from the peer. A code in the WT_APPLICATION_ERROR range is remapped
+ * back into the application error it carries (section 4.4); anything else -- one of the draft's
+ * protocol codes, or a code outside the range -- is delivered to the callback as
+ * WT_SESSION_RESET_NO_APPLICATION_ERROR, and the stream is still reset. */
 wt_status_t wt_session_on_stream_reset(wt_session_t *session, uint64_t stream_id,
                                        uint64_t error_code);
 

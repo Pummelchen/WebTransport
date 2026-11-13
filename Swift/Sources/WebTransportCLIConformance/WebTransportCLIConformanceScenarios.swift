@@ -109,15 +109,15 @@ private func http3ControlScenarios() -> [CLIConformanceScenario] {
     [
         scenario("HTTP/3 Control", "settings-required", "HTTP/3 WebTransport settings requirements are enforced") {
             let constants = WebTransportHTTP3DraftConstants.current
-            try HTTP3Settings.webTransportDraft16Defaults.validateWebTransportDraft16Requirements(peerRole: .server)
-            var missingDatagram = HTTP3Settings.webTransportDraft16Defaults
+            try HTTP3Settings.webTransportDraft17Defaults.validateWebTransportDraft17Requirements(peerRole: .server)
+            var missingDatagram = HTTP3Settings.webTransportDraft17Defaults
             try missingDatagram.set(0, for: constants.settingsH3Datagram)
             try expectThrows {
-                try missingDatagram.validateWebTransportDraft16Requirements(peerRole: .server)
+                try missingDatagram.validateWebTransportDraft17Requirements(peerRole: .server)
             }
-            var serverPeerSettings = HTTP3Settings.webTransportDraft16Defaults
+            var serverPeerSettings = HTTP3Settings.webTransportDraft17Defaults
             try serverPeerSettings.set(0, for: constants.settingsEnableConnectProtocol)
-            try serverPeerSettings.validateWebTransportDraft16Requirements(peerRole: .client)
+            try serverPeerSettings.validateWebTransportDraft17Requirements(peerRole: .client)
         },
         scenario("HTTP/3 Control", "settings-control-stream-errors", "control stream duplicate and request-frame errors are rejected") {
             let connection = HTTP3ConnectionState(role: .client)
@@ -131,8 +131,8 @@ private func http3ControlScenarios() -> [CLIConformanceScenario] {
         },
         scenario("HTTP/3 Control", "zero-rtt-settings", "remembered 0-RTT settings reject reduced WebTransport capacity") {
             let constants = WebTransportHTTP3DraftConstants.current
-            var remembered = HTTP3Settings.webTransportDraft16Defaults
-            var current = HTTP3Settings.webTransportDraft16Defaults
+            var remembered = HTTP3Settings.webTransportDraft17Defaults
+            var current = HTTP3Settings.webTransportDraft17Defaults
             try remembered.set(8, for: constants.settingsWTInitialMaxStreamsBidi)
             try current.set(4, for: constants.settingsWTInitialMaxStreamsBidi)
             try expectThrows {
@@ -310,7 +310,7 @@ private func streamResetScenarios() -> [CLIConformanceScenario] {
                 try pair.server.resetStream(streamID: 4, applicationErrorCode: 0x10)
                     == .resetStreamAt(
                         id: 4,
-                        applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x10),
+                        applicationErrorCode: WebTransportDraft17ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x10),
                         finalSize: 0,
                         reliableSize: 0
                     ), "RESET_STREAM_AT mapped")
@@ -318,7 +318,7 @@ private func streamResetScenarios() -> [CLIConformanceScenario] {
                 try pair.server.stopSendingStream(streamID: 4, applicationErrorCode: 0x11)
                     == .stopSending(
                         id: 4,
-                        applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
+                        applicationErrorCode: WebTransportDraft17ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
                     ), "STOP_SENDING mapped")
         },
     ]
@@ -386,8 +386,8 @@ private func flowControlScenarios() -> [CLIConformanceScenario] {
         },
         scenario("Flow Control", "flow-explicit-zero", "explicit zero stream limit is enforced distinctly from disabled flow control") {
             let constants = WebTransportHTTP3DraftConstants.current
-            var clientSettings = HTTP3Settings.webTransportDraft16Defaults
-            var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+            var clientSettings = HTTP3Settings.webTransportDraft17Defaults
+            var serverSettings = HTTP3Settings.webTransportDraft17Defaults
             try clientSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
             try serverSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
             try clientSettings.set(1, for: constants.settingsWTInitialMaxData)
@@ -415,8 +415,8 @@ private func flowControlLimitScenarios() -> [CLIConformanceScenario] {
         },
         scenario("Flow Control", "flow-receive-violation-close", "receive-side advertised-limit violation closes with WT_FLOW_CONTROL_ERROR") {
             let constants = WebTransportHTTP3DraftConstants.current
-            var clientSettings = HTTP3Settings.webTransportDraft16Defaults
-            var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+            var clientSettings = HTTP3Settings.webTransportDraft17Defaults
+            var serverSettings = HTTP3Settings.webTransportDraft17Defaults
             try clientSettings.set(4, for: constants.settingsWTInitialMaxData)
             try serverSettings.set(4, for: constants.settingsWTInitialMaxData)
             try clientSettings.set(1, for: constants.settingsWTInitialMaxStreamsBidi)
@@ -439,13 +439,13 @@ private func flowControlLimitScenarios() -> [CLIConformanceScenario] {
 private func errorsAndShutdownScenarios() -> [CLIConformanceScenario] {
     [
         scenario("Errors and Shutdown", "error-mapping", "WebTransport app error mapping is reversible and rejects reserved/out-of-range codes") {
-            let code = WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x1234)
-            try require(try WebTransportDraft16ErrorMapper.applicationErrorCode(forHTTPErrorCode: code) == 0x1234, "app error mapping reversible")
+            let code = WebTransportDraft17ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x1234)
+            try require(try WebTransportDraft17ErrorMapper.applicationErrorCode(forHTTPErrorCode: code) == 0x1234, "app error mapping reversible")
             try expectThrows {
-                _ = try WebTransportDraft16ErrorMapper.applicationErrorCode(forHTTPErrorCode: 0x21)
+                _ = try WebTransportDraft17ErrorMapper.applicationErrorCode(forHTTPErrorCode: 0x21)
             }
             try expectThrows {
-                _ = try WebTransportDraft16ErrorMapper.applicationErrorCode(
+                _ = try WebTransportDraft17ErrorMapper.applicationErrorCode(
                     forHTTPErrorCode: WebTransportHTTP3DraftConstants.current.wtApplicationErrorRange.upperBound + 1)
             }
         },
@@ -509,9 +509,9 @@ private func securityScenarios() -> [CLIConformanceScenario] {
                 policy: WebTransportServerSessionPolicy(allowedOrigins: ["https://example.com"])
             )
             try require(decision.rejectionError?.kind == .requirementsNotMet, "bad origin maps to requirements not met")
-            var badSettings = HTTP3Settings.webTransportDraft16Defaults
+            var badSettings = HTTP3Settings.webTransportDraft17Defaults
             try badSettings.set(0, for: WebTransportHTTP3DraftConstants.current.settingsWTEnabled)
-            try expectThrows { try badSettings.validateWebTransportDraft16Requirements(peerRole: .server) }
+            try expectThrows { try badSettings.validateWebTransportDraft17Requirements(peerRole: .server) }
             let wrongPin = Data(repeating: 0xaa, count: TLS13KeySchedule.sha256Length)
             let policy = try TLSPinnedCertificateTrustPolicy(allowedLeafCertificateSHA256Fingerprints: [wrongPin])
             try expectThrows { try policy.evaluate(certificateChainDER: [Data("not a certificate".utf8)]) }

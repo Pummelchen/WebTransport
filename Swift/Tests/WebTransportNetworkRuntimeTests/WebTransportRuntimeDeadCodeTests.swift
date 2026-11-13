@@ -13,11 +13,11 @@ import WebTransportHTTP3Core
 /// request frame.
 @Test
 func runtimeRendersSettingsThroughTheSingleSharedHelper() throws {
-    var settings = HTTP3Settings.webTransportDraft16Defaults
+    var settings = HTTP3Settings.webTransportDraft17Defaults
     try settings.set(2, for: 0x01)
     #expect(
         InteroperableQUICRuntime.renderSettings(settings)
-            == "0x1=2 0x8=1 0x33=1 0x2c7cf000=1",
+            == "0x1=2 0x8=1 0x33=1 0x20b8933b=1",
         "settings must render as sorted 0xid=value pairs")
 }
 
@@ -38,9 +38,9 @@ func runtimeEncodesRequestStreamPayloadWithoutAVestigialStreamID() throws {
 /// from direct users of `WebTransportTLSCore`. The row has to record that boundary
 /// rather than claim the control is wired.
 @Test
-func webTransportDraft16PinnedTrustClaimMatchesTheShippedRuntimeBoundary() throws {
+func webTransportDraft17PinnedTrustClaimMatchesTheShippedRuntimeBoundary() throws {
     guard
-        let security = WebTransportDraft16ComplianceMatrix.definitionOfDone.first(where: {
+        let security = WebTransportDraft17ComplianceMatrix.definitionOfDone.first(where: {
             $0.requirementFamily == "Security and identity handling without prompts"
         })
     else {

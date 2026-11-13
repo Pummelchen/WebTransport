@@ -1,4 +1,4 @@
-/* WebTransport's error codes, and the mapping between its application codes and HTTP/3's (draft-ietf-webtrans-http3-16
+/* WebTransport's error codes, and the mapping between its application codes and HTTP/3's (draft-ietf-webtrans-http3-17
  * sections 4.4 and 9.5).
  *
  * TWO SPACES, AND THE DIFFERENCE MATTERS.

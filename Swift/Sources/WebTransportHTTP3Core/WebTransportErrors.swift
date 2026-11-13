@@ -1,7 +1,7 @@
 import Foundation
 import WebTransportQUICCore
 
-public enum WebTransportDraft16ErrorKind: Equatable, Sendable {
+public enum WebTransportDraft17ErrorKind: Equatable, Sendable {
     case bufferedStreamRejected
     case sessionGone
     case flowControl
@@ -11,26 +11,26 @@ public enum WebTransportDraft16ErrorKind: Equatable, Sendable {
     case requestRejected
 }
 
-public struct WebTransportDraft16Error: Error, Equatable, Sendable {
-    public let kind: WebTransportDraft16ErrorKind
+public struct WebTransportDraft17Error: Error, Equatable, Sendable {
+    public let kind: WebTransportDraft17ErrorKind
     public let message: String
 
-    public init(kind: WebTransportDraft16ErrorKind, message: String) {
+    public init(kind: WebTransportDraft17ErrorKind, message: String) {
         self.kind = kind
         self.message = message
     }
 
     public var code: UInt64 {
-        WebTransportDraft16ErrorMapper.code(for: kind)
+        WebTransportDraft17ErrorMapper.code(for: kind)
     }
 }
 
-public enum WebTransportDraft16StreamSignal: Equatable, Sendable {
+public enum WebTransportDraft17StreamSignal: Equatable, Sendable {
     case resetStream(streamID: UInt64, finalSize: UInt64)
     case stopSending(streamID: UInt64)
 }
 
-public enum WebTransportDraft16ErrorMapper {
+public enum WebTransportDraft17ErrorMapper {
     public static func httpErrorCode(forApplicationErrorCode code: UInt32) -> UInt64 {
         let first = WebTransportHTTP3DraftConstants.current.wtApplicationErrorRange.lowerBound
         return first + UInt64(code) + (UInt64(code) / 0x1e)
@@ -49,8 +49,22 @@ public enum WebTransportDraft16ErrorMapper {
         return UInt32(applicationCode)
     }
 
+    /// The application error code a received RESET_STREAM / RESET_STREAM_AT /
+    /// STOP_SENDING frame carries, per §4.4.
+    ///
+    /// An error code inside the WT_APPLICATION_ERROR range is delivered to the
+    /// application unchanged (after the reserved-codepoint skip the inverse
+    /// mapping performs). A code *outside* the range is not an application
+    /// error: the stream is still considered reset, but the code maps to
+    /// nothing, so the caller delivers the reset with no application error code.
+    /// In particular this is never a session error — the frame is legal on any
+    /// stream, and only the application-facing error code is affected.
+    public static func receivedApplicationErrorCode(forHTTPErrorCode code: UInt64) -> UInt32? {
+        try? applicationErrorCode(forHTTPErrorCode: code)
+    }
+
     public static func code(
-        for kind: WebTransportDraft16ErrorKind,
+        for kind: WebTransportDraft17ErrorKind,
         constants: WebTransportHTTP3DraftConstants = .current
     ) -> UInt64 {
         switch kind {
@@ -72,7 +86,7 @@ public enum WebTransportDraft16ErrorMapper {
     }
 
     public static func connectionCloseFrame(
-        for kind: WebTransportDraft16ErrorKind,
+        for kind: WebTransportDraft17ErrorKind,
         reason: String
     ) -> QUICFrame {
         .connectionClose(
@@ -83,8 +97,8 @@ public enum WebTransportDraft16ErrorMapper {
     }
 
     public static func streamFrame(
-        for kind: WebTransportDraft16ErrorKind,
-        signal: WebTransportDraft16StreamSignal
+        for kind: WebTransportDraft17ErrorKind,
+        signal: WebTransportDraft17StreamSignal
     ) -> QUICFrame {
         switch signal {
         case .resetStream(let streamID, let finalSize):
@@ -95,7 +109,7 @@ public enum WebTransportDraft16ErrorMapper {
     }
 
     public static func closeSessionCapsule(
-        for kind: WebTransportDraft16ErrorKind,
+        for kind: WebTransportDraft17ErrorKind,
         message: String
     ) throws -> Data {
         let errorCode = code(for: kind)

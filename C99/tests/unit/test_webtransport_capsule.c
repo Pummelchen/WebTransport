@@ -1,4 +1,4 @@
-/* WebTransport capsules (draft-ietf-webtrans-http3-16 section 5).
+/* WebTransport capsules (draft-ietf-webtrans-http3-17 section 5).
  *
  * The two session capsules are the ones a session cannot end without, so they are tested
  * in both directions and at their edges: a close with the longest reason the draft

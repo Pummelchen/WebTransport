@@ -552,7 +552,7 @@ func pkcs12IdentityServesALoopbackSession() async throws {
             origin: "https://localhost",
             protocols: ["demo.v1"],
             optimisticCapsules: [],
-            settingsValidation: .draft16Strict,
+            settingsValidation: .draft17Strict,
             timeoutMilliseconds: 8_000
         )
     let serverSession = try await accepted

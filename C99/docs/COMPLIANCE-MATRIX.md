@@ -1,4 +1,4 @@
-# draft-ietf-webtrans-http3-16 compliance matrix (C99)
+# draft-ietf-webtrans-http3-17 compliance matrix (C99)
 
 What the draft requires, where this tree implements it, and which test exercises it. Every symbol named here is
 checked by `scripts/check-matrix.sh`, which greps this file for identifiers and fails if one is not in the tree --
@@ -46,6 +46,9 @@ behaviour exists with a recorded edge; **--** means the layer is deliberately no
 | 5.4 | A close reason above the draft's ceiling is refused | `WT_CAPSULE_CLOSE_MAX_REASON` | `test_webtransport_capsule` | tested |
 | 5.4 | A close reason AT the ceiling is accepted: the length bound a receiver enforces is on one capsule rather than on one delivery of them | `wt_webtransport_capsule_decode` | `wt_conformance_scenarios` | tested |
 | 9.5 | The five error codes the draft registers in HTTP/3's registry carry their registered values | `WT_WEBTRANSPORT_ERROR_FLOW_CONTROL`, `WT_WEBTRANSPORT_ERROR_ALPN`, `WT_WEBTRANSPORT_ERROR_REQUIREMENTS_NOT_MET` | `test_webtransport_error` | tested |
+| 7.1 | The draft version is negotiated through the SETTINGS_WT_ENABLED codepoints: a client that sends the section 9.2 codepoint selects the final version, one that sends only the draft-16 codepoint selects draft-16, one that sends neither is a final client, and a draft-16 codepoint carrying a value other than 1 is H3_SETTINGS_ERROR | `wt_webtransport_version_select`, `wt_webtransport_client_version`, `WT_HTTP3_SETTING_WT_ENABLED_DRAFT16` | `test_webtransport_session_request` | tested |
+| 5.5 | The SETTINGS initial limits are the monotonicity baseline: while no capsule of a type has been received, the SETTINGS value the peer sent stands in for "the value previously received", so a first capsule that does not strictly increase it -- at or below the SETTINGS value -- is the flow-control error that closes the session (section 5.6.2/5.6.4) | `wt_webtransport_flow_on_max_data`, `wt_webtransport_flow_on_max_streams` | `test_webtransport_flow` | tested |
+| 4.4 | A reset whose error code is outside the WT_APPLICATION_ERROR range leaves the stream reset and is delivered to the application with NO application error code | `WT_SESSION_RESET_NO_APPLICATION_ERROR`, `wt_session_on_stream_reset` | `test_api_events` | tested |
 | 3.2 | A sub-protocol is negotiated through `wt-protocol`, a Structured Fields list in the request and a string item in the response | `wt_webtransport_protocol_decode_list`, `wt_webtransport_session_request_negotiate`, `wt_webtransport_session_response_selected_protocol`, `wt_webtransport_protocol_write_field` | `test_webtransport_protocol`, `protocol-negotiation`, `protocol-negotiation-required-refusal`, `protocol-negotiation-unoffered-selection` | tested |
 | 6 | The CONNECT stream ending ends the session | `wt_webtransport_session_on_stream_end` | `test_webtransport_session` | tested |
 | 6 | A terminated session's streams are reset with `WT_SESSION_GONE`, its receive sides aborted, and no new datagram or stream is sent | `wt_http3_driver_end_session_streams`, `wt_webtransport_error_to_http3` | `test_runtime_session_pair` | tested |

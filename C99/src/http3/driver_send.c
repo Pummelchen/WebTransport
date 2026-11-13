@@ -242,7 +242,7 @@ wt_status_t wt_http3_driver_open_session_stream(wt_http3_driver_t *driver,
 
   status = wt_http3_driver_open_request(driver, transport, now, &stream_id, out_error);
   if (status != WT_OK) return status;
-  /* The session IS the request stream (draft-16 section 3.2: "Session IDs are derived from the stream ID of the
+  /* The session IS the request stream (draft-17 section 3.2: "Session IDs are derived from the stream ID of the
    * CONNECT stream"), so this is where the driver learns which session it serves -- and a prefix it writes or
    * reads names this stream's ID. Nothing else sets it, which is why a data stream had no session to name. */
   wt_http3_driver_set_session_id(driver, stream_id);
@@ -271,7 +271,7 @@ wt_status_t wt_http3_driver_send_session_request(wt_http3_driver_t *driver,
     return WT_ERR_INVALID_ARGUMENT;
   }
 
-  /* The extended CONNECT of draft-16 section 3.1, as the fields the request line needs: CONNECT with a
+  /* The extended CONNECT of draft-17 section 3.1, as the fields the request line needs: CONNECT with a
    * :protocol, over https, for the authority and path the caller named. */
   memset(&request, 0, sizeof(request));
   request.type = WT_HTTP3_HEADER_REQUEST;
@@ -321,7 +321,7 @@ wt_status_t wt_http3_driver_send_response(wt_http3_driver_t *driver,
   wt_http3_message_t response;
 
   if (driver == NULL || driver->endpoint == NULL) return WT_ERR_INVALID_ARGUMENT;
-  /* The request stream this answers IS the session (draft-16 section 3.2), so answering it is also the moment
+  /* The request stream this answers IS the session (draft-17 section 3.2), so answering it is also the moment
    * this endpoint knows which session its own streams and prefixes name. */
   wt_http3_driver_set_session_id(driver, stream_id);
   memset(&response, 0, sizeof(response));

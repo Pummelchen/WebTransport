@@ -5,17 +5,17 @@ import WebTransportQUICCore
 @testable import WebTransportNetworkRuntime
 
 /// F-swift-architecture-01: the CONNECT-stream reader must reject a
-/// peer-declared capsule length above the draft-16 maximum as soon as it has
+/// peer-declared capsule length above the draft-17 maximum as soon as it has
 /// the capsule header, instead of waiting for — and buffering — the announced
 /// payload.
 @Test
-func connectStreamCapsuleReaderRejectsDeclaredLengthAboveDraft16Maximum() throws {
+func connectStreamCapsuleReaderRejectsDeclaredLengthAboveDraft17Maximum() throws {
     var buffer = Data()
     buffer.append(try QUICVarInt.encode(WebTransportHTTP3DraftConstants.current.wtCloseSessionCapsule))
     buffer.append(
         try QUICVarInt.encode(UInt64(InteroperableCONNECTCapsuleFraming.maximumCapsulePayloadBytes) + 1))
     // The peer never has to send the payload: announcing a capsule larger than
-    // any CONNECT-stream capsule draft-16 permits is itself the violation, and
+    // any CONNECT-stream capsule draft-17 permits is itself the violation, and
     // the reader must not sit waiting for the rest of it.
     buffer.append(Data(repeating: 0x41, count: 8))
 
@@ -24,11 +24,11 @@ func connectStreamCapsuleReaderRejectsDeclaredLengthAboveDraft16Maximum() throws
     }
 }
 
-/// The bound must not reject the largest capsule draft-16 permits, and a
+/// The bound must not reject the largest capsule draft-17 permits, and a
 /// not-yet-complete capsule inside the bound must stay pending rather than
 /// being treated as an error.
 @Test
-func connectStreamCapsuleReaderAcceptsCapsulesUpToDraft16Maximum() throws {
+func connectStreamCapsuleReaderAcceptsCapsulesUpToDraft17Maximum() throws {
     let maximumPayloadBytes = InteroperableCONNECTCapsuleFraming.maximumCapsulePayloadBytes
     var payload = Data([0x00, 0x00, 0x00, 0x01])
     payload.append(Data(repeating: 0x61, count: maximumPayloadBytes - payload.count))

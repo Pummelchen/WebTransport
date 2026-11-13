@@ -35,7 +35,7 @@ static size_t prefix_needed(const uint8_t *bytes, size_t have) {
 
 /* How many bytes the WHOLE prefix of a unidirectional stream needs, given `have` bytes assembled so far. The
  * prefix is the stream TYPE varint and -- for the draft's WebTransport type -- the SESSION ID varint that
- * follows it (draft-16 section 4.2); the session ID is part of the prefix, not payload, so it is reassembled
+ * follows it (draft-17 section 4.2); the session ID is part of the prefix, not payload, so it is reassembled
  * here exactly as the type is. The answer never exceeds 8 + 8 = 16, which is the pending table's own bound, and
  * a value larger than `have` means more bytes are needed. */
 static size_t uni_prefix_length(const uint8_t *bytes, size_t have) {

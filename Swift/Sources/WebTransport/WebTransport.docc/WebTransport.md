@@ -2,7 +2,7 @@
 
 Native Swift WebTransport over HTTP/3 client and server APIs.
 
-The implementation targets IETF `draft-ietf-webtrans-http3-16` (6 July 2026).
+The implementation targets IETF `draft-ietf-webtrans-http3-17` (2 November 2026).
 
 ## Overview
 
@@ -32,7 +32,7 @@ Opening a locally initiated unidirectional stream is not exposed by the
 Client configurations can provide optimistic CONNECT capsules through
 ``WebTransportClientConfiguration/optimisticCapsules``. The runtime sends them
 with CONNECT, and servers process them only after accepting the session.
-Established sessions expose draft-16 session-bound TLS exporter material through
+Established sessions expose draft-17 session-bound TLS exporter material through
 ``WebTransportSession/exportKeyingMaterial(applicationLabel:applicationContext:outputByteCount:)``.
 
 ## Topics

@@ -178,8 +178,8 @@ internal func runMalformedFlowInteropMatrix() throws {
     }
 
     let constants = WebTransportHTTP3DraftConstants.current
-    var clientSettings = HTTP3Settings.webTransportDraft16Defaults
-    var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+    var clientSettings = HTTP3Settings.webTransportDraft17Defaults
+    var serverSettings = HTTP3Settings.webTransportDraft17Defaults
     try clientSettings.set(4, for: constants.settingsWTInitialMaxData)
     try serverSettings.set(4, for: constants.settingsWTInitialMaxData)
     try clientSettings.set(1, for: constants.settingsWTInitialMaxStreamsBidi)

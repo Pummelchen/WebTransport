@@ -3,7 +3,7 @@ import WebTransportQUICCore
 
 private struct WebTransportSessionRejection: Equatable, Sendable {
     var status: UInt16
-    var error: WebTransportDraft16Error
+    var error: WebTransportDraft17Error
 }
 
 /// ``WebTransportSessionManager``'s session admission and lifecycle: the CONNECT handshake in
@@ -37,7 +37,7 @@ extension WebTransportSessionManager {
         }
         try validateSettingsReady()
         guard !isZeroRTT else {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .requirementsNotMet,
                 message: "WebTransport CONNECT requests are not allowed on 0-RTT"
             )
@@ -91,7 +91,7 @@ extension WebTransportSessionManager {
             if let selectedProtocol {
                 try WebTransportProtocolNegotiation.validate([selectedProtocol])
                 guard session.availableProtocols.contains(selectedProtocol) else {
-                    throw WebTransportDraft16Error(
+                    throw WebTransportDraft17Error(
                         kind: .alpn,
                         message: "server selected a WebTransport protocol the client did not offer"
                     )
@@ -119,7 +119,7 @@ extension WebTransportSessionManager {
 
     public mutating func receivePeerControlStream(_ bytes: Data) throws -> [HTTP3Frame] {
         // Forward this manager's profile rather than letting the underlying
-        // parameter default to draft16Strict. Omitting it made a manager
+        // parameter default to draft17Strict. Omitting it made a manager
         // configured for an earlier revision validate the peer's SETTINGS
         // strictly anyway, which rejects the peers that profile exists to
         // accept — browsers in particular, since they do not send
@@ -201,7 +201,7 @@ extension WebTransportSessionManager {
         }
         try validateSessionAdmission()
         guard frame.type == HTTP3FrameType.headers else {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .requirementsNotMet,
                 message: "WebTransport CONNECT stream must start with HEADERS"
             )
@@ -241,13 +241,13 @@ extension WebTransportSessionManager {
     public mutating func makeDrainSessionCapsule(sessionID: WebTransportSessionID) throws -> Data {
         try validateSettingsReady()
         guard let session = sessionsByID[sessionID] else {
-            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "unknown WebTransport session")
         }
         switch session.state {
         case .closed:
             return try WebTransportFlowCapsuleCodec.serialize(.drainSession)
         case .rejected:
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session was rejected")
         case .requested:
             throw QUICCodecError.malformed("WT_DRAIN_SESSION requires an established session")
         case .accepted, .draining:
@@ -282,7 +282,7 @@ extension WebTransportSessionManager {
     ) throws -> WebTransportCloseSessionCapsuleResult {
         try validateSettingsReady()
         guard let session = sessionsByID[sessionID] else {
-            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport session")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "unknown WebTransport session")
         }
         let capsuleBytes = try WebTransportFlowCapsuleCodec.serialize(
             .closeSession(
@@ -304,7 +304,7 @@ extension WebTransportSessionManager {
                 )
             )
         case .rejected:
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session was rejected")
         case .requested, .accepted, .draining:
             let terminationActions = try markSessionClosed(
                 sessionID,
@@ -322,7 +322,7 @@ extension WebTransportSessionManager {
     @discardableResult
     public mutating func finishConnectStream(streamID: UInt64) throws -> WebTransportSessionTerminationActions {
         guard let sessionID = sessionIDsByRequestStreamID[streamID] else {
-            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport CONNECT stream")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "unknown WebTransport CONNECT stream")
         }
         return try markSessionClosed(
             sessionID,
@@ -340,7 +340,7 @@ extension WebTransportSessionManager {
         flowControlStateBySessionID[session.id] =
             flowControlStateBySessionID[session.id]
             ?? WebTransportFlowControlState(
-                settings: http3.remoteSettings ?? .webTransportDraft16Defaults,
+                settings: http3.remoteSettings ?? .webTransportDraft17Defaults,
                 isEnabled: negotiated
             )
         receiveFlowControlStateBySessionID[session.id] =
@@ -483,27 +483,27 @@ extension WebTransportSessionManager {
         if let allowedAuthorities = policy.allowedAuthorities, !allowedAuthorities.contains(request.authority) {
             return WebTransportSessionRejection(
                 status: 405,
-                error: WebTransportDraft16Error(kind: .requirementsNotMet, message: "WebTransport authority is not allowed")
+                error: WebTransportDraft17Error(kind: .requirementsNotMet, message: "WebTransport authority is not allowed")
             )
         }
         if let allowedPaths = policy.allowedPaths, !allowedPaths.contains(request.path) {
             return WebTransportSessionRejection(
                 status: 405,
-                error: WebTransportDraft16Error(kind: .requirementsNotMet, message: "WebTransport path is not allowed")
+                error: WebTransportDraft17Error(kind: .requirementsNotMet, message: "WebTransport path is not allowed")
             )
         }
         if let allowedOrigins = policy.allowedOrigins {
             guard let origin = request.origin, allowedOrigins.contains(origin) else {
                 return WebTransportSessionRejection(
                     status: 403,
-                    error: WebTransportDraft16Error(kind: .requirementsNotMet, message: "WebTransport origin is not allowed")
+                    error: WebTransportDraft17Error(kind: .requirementsNotMet, message: "WebTransport origin is not allowed")
                 )
             }
         }
         if policy.requireProtocolSelection && selectedProtocol == nil {
             return WebTransportSessionRejection(
                 status: 400,
-                error: WebTransportDraft16Error(kind: .requirementsNotMet, message: "WebTransport protocol selection is required")
+                error: WebTransportDraft17Error(kind: .requirementsNotMet, message: "WebTransport protocol selection is required")
             )
         }
         return nil

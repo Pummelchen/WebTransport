@@ -355,6 +355,70 @@ static void test_the_upgrade_token_flag(void) {
   }
 }
 
+/* The SETTINGS_WT_ENABLED posture (draft-17 sections 3.1 and 7.1): the default is DUAL, both names
+ * select, an unknown one is refused by name, and the report carries it. Unlike the upgrade token the
+ * flag is meaningful for a LISTENER too -- a server advertises the codepoints its profile names -- so
+ * the check refuses it for neither mode. */
+static void test_the_wt_enabled_flag(void) {
+  wt_cli_options_t options;
+  const char *error = NULL;
+  const char *argument = NULL;
+
+  {
+    const char *minimal[] = {"wt-client-c99", "--connect", "localhost:4433"};
+    wt_cli_options_t plain;
+    WT_EXPECT_OK("a minimal command line parses", parse(minimal, 3, &plain, &error));
+    WT_EXPECT_INT("with the DUAL posture as the default", (int)WT_CLI_WT_ENABLED_DUAL,
+                  (int)plain.wt_enabled);
+    WT_EXPECT_INT("which the caller did not have to ask for", 0, plain.wt_enabled_set);
+    WT_EXPECT_STR("under its own name", "dual", wt_cli_wt_enabled_name(plain.wt_enabled));
+  }
+  {
+    const char *argv[] = {"wt-server-c99", "--listen", "h:1", "--wt-enabled", "final"};
+    WT_EXPECT_OK("the final posture parses", parse(argv, 5, &options, &error));
+    WT_EXPECT_INT("and is selected", (int)WT_CLI_WT_ENABLED_FINAL, (int)options.wt_enabled);
+    WT_EXPECT_INT("with the caller's choice recorded", 1, options.wt_enabled_set);
+    WT_EXPECT_STR("under its own name", "final", wt_cli_wt_enabled_name(options.wt_enabled));
+    /* A listener may ask for the posture: advertising fewer codepoints is a listener's decision. */
+    WT_EXPECT_OK("and passes the check for a listener", wt_cli_options_check(&options, &error));
+  }
+  {
+    const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--wt-enabled", "dual"};
+    WT_EXPECT_OK("the dual posture parses", parse(argv, 5, &options, &error));
+    WT_EXPECT_INT("and is selected", (int)WT_CLI_WT_ENABLED_DUAL, (int)options.wt_enabled);
+    WT_EXPECT_OK("and passes the check for a client too", wt_cli_options_check(&options, &error));
+  }
+  {
+    const char *argv[] = {"wt-client-c99", "--connect", "h:1", "--wt-enabled", "draft16"};
+    WT_EXPECT_STATUS("an unknown posture is refused", WT_ERR_INVALID_ARGUMENT,
+                     wt_cli_options_parse(&options, 5, argv, &error, &argument));
+    WT_EXPECT_STR("with a message naming what was refused", "unsupported wt-enabled posture",
+                  error);
+    WT_EXPECT_STR("and the value that caused it", "draft16", argument);
+  }
+  /* And the posture is in the report a script reads, not only on the command line. */
+  {
+    FILE *stream;
+    char buffer[512];
+    size_t read_length;
+    options = wt_cli_options_default();
+    options.mode = WT_CLI_MODE_CONNECT;
+    options.address = "localhost:4433";
+    options.wt_enabled = WT_CLI_WT_ENABLED_FINAL;
+    stream = tmpfile();
+    WT_EXPECT_TRUE("a temporary stream opens", stream != NULL);
+    if (stream != NULL) {
+      wt_cli_options_write_json(&options, stream);
+      rewind(stream);
+      read_length = fread(buffer, 1U, sizeof(buffer) - 1U, stream);
+      buffer[read_length] = '\0';
+      fclose(stream);
+      WT_EXPECT_TRUE("the report names the posture",
+                     strstr(buffer, "\"wtEnabled\":\"final\"") != NULL);
+    }
+  }
+}
+
 int main(void) {
   test_help_and_version_are_not_flags_to_refuse();
   test_the_required_flags();
@@ -363,6 +427,7 @@ int main(void) {
   test_timeouts_are_digits_only();
   test_the_check_is_one_place();
   test_the_names_and_the_json();
+  test_the_wt_enabled_flag();
   test_the_upgrade_token_flag();
   WT_TEST_MAIN_END("wt_cli_options");
 }

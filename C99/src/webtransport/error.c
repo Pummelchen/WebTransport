@@ -1,4 +1,4 @@
-/* The WebTransport error-code mapping (draft-ietf-webtrans-http3-16 section 4.4). See the header for what the
+/* The WebTransport error-code mapping (draft-ietf-webtrans-http3-17 section 4.4). See the header for what the
  * two spaces are and why the protocol codes do not travel through this mapping. */
 
 #include "webtransport/webtransport/error.h"

@@ -1,4 +1,4 @@
-/* The WebTransport session request (draft-ietf-webtrans-http3-16 section 3.1). */
+/* The WebTransport session request (draft-ietf-webtrans-http3-17 section 3.1). */
 
 #include "webtransport/webtransport/session_request.h"
 
@@ -67,21 +67,42 @@ static int authority_matches(const uint8_t *bytes, size_t length, const char *ex
 }
 
 wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is_server) {
+  /* The DUAL profile is the default posture: it is the only one that reaches the draft-16 peers this
+   * tree interoperates with, so the long-standing entry point keeps meaning it. */
+  return wt_webtransport_settings_apply_profile(settings, is_server, WT_WEBTRANSPORT_PROFILE_DUAL);
+}
+
+wt_status_t wt_webtransport_settings_apply_profile(wt_http3_settings_t *settings, int is_server,
+                                                   wt_webtransport_version_profile_t profile) {
   wt_status_t status;
 
   if (settings == NULL) return WT_ERR_INVALID_ARGUMENT;
 
   /* Section 3.1's list for BOTH roles, and the first is the one this function exists because of: an endpoint
-   * that omits SETTINGS_H3_DATAGRAM is not a WebTransport endpoint in draft-16's terms, and a peer that checks
+   * that omits SETTINGS_H3_DATAGRAM is not a WebTransport endpoint in the draft's terms, and a peer that checks
    * -- `web-transport`'s `supports_webtransport()` requires it plus a WebTransport setting -- will not accept
    * the session at all (WT-145). */
   status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U);
   if (status != WT_OK) return status;
 
-  /* The draft-specific codepoint that identifies the version this tree implements. Section 7.1 makes it
-   * mandatory for a client of a draft version, and a server sends it too. */
-  status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
-  if (status != WT_OK) return status;
+  /* The version codepoints of sections 3.1 and 7.1. A server always advertises the codepoint section 9.2
+   * registers; an endpoint that also serves a draft version sends that draft's codepoint beside it, one per
+   * version (section 7.1). A client of the FINAL profile sends NO SETTINGS_WT_ENABLED at all -- section 3.1's
+   * client list carries none -- while a client that also supports draft-16 sends both codepoints so the server
+   * can identify which version it will use. */
+  if (is_server != 0) {
+    status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+    if (status != WT_OK) return status;
+    if (profile != WT_WEBTRANSPORT_PROFILE_FINAL) {
+      status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U);
+      if (status != WT_OK) return status;
+    }
+  } else if (profile != WT_WEBTRANSPORT_PROFILE_FINAL) {
+    status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+    if (status != WT_OK) return status;
+    status = wt_http3_settings_set(settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U);
+    if (status != WT_OK) return status;
+  }
 
   /* Section 5.1's three INITIAL flow-control limits, advertised here because this function is where a
    * WebTransport endpoint's SETTINGS are assembled and because an endpoint that wants the session's own flow
@@ -255,4 +276,84 @@ wt_webtransport_session_response_selected_protocol(const uint8_t *value, size_t 
   out->bytes = NULL;
   out->length = 0U;
   return WT_ERR_PROTOCOL;
+}
+
+wt_status_t wt_webtransport_version_select(const wt_http3_settings_t *client_settings,
+                                           wt_webtransport_version_t *out_version,
+                                           wt_http3_error_t *out_error) {
+  int final_present = 0;
+  int draft_present = 0;
+  uint64_t draft_value = 0U;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (client_settings == NULL || out_version == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  (void)wt_http3_settings_get(client_settings, WT_HTTP3_SETTING_WT_ENABLED, &final_present);
+  draft_value =
+      wt_http3_settings_get(client_settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, &draft_present);
+
+  /* The draft-16 codepoint names its sender a draft-16 client, and a draft client sends the value 1 --
+   * the value is how the era's `SETTINGS_WT_ENABLED` said "this endpoint serves WebTransport". A value
+   * other than 1 is not a version selection; it is the connection error section 3.1 gives the setting. */
+  if (draft_present != 0 && draft_value != 1U) {
+    if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
+  /* The section 9.2 codepoint selects the final version, and its VALUE is ignored: section 3.1 makes
+   * SETTINGS_WT_ENABLED meaningless from a client, and section 7.1's exception is about WHICH codepoints
+   * were sent, not about what they carry. */
+  if (final_present != 0) {
+    *out_version = WT_WEBTRANSPORT_VERSION_FINAL;
+    return WT_OK;
+  }
+  if (draft_present != 0) {
+    /* Only a draft-16 client sends only the draft-16 codepoint, so the draft-16 version is selected. */
+    *out_version = WT_WEBTRANSPORT_VERSION_DRAFT16;
+    return WT_OK;
+  }
+  /* No codepoint at all is a FINAL client: section 3.1's client list carries no SETTINGS_WT_ENABLED,
+   * so silence selects the final version rather than refusing the connection. */
+  *out_version = WT_WEBTRANSPORT_VERSION_FINAL;
+  return WT_OK;
+}
+
+wt_status_t wt_webtransport_client_version(const wt_http3_settings_t *server_settings,
+                                           wt_webtransport_version_profile_t profile,
+                                           wt_webtransport_version_t *out_version,
+                                           wt_http3_error_t *out_error) {
+  int final_present = 0;
+  int draft_present = 0;
+  uint64_t final_value = 0U;
+  uint64_t draft_value = 0U;
+
+  if (out_error != NULL) *out_error = WT_HTTP3_NO_ERROR;
+  if (server_settings == NULL || out_version == NULL) return WT_ERR_INVALID_ARGUMENT;
+
+  final_value = wt_http3_settings_get(server_settings, WT_HTTP3_SETTING_WT_ENABLED, &final_present);
+  draft_value =
+      wt_http3_settings_get(server_settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, &draft_present);
+
+  /* Section 3.1: "Clients MUST treat values greater than 1 as a connection error of type
+   * H3_SETTINGS_ERROR." Read before anything else, because a value the client must treat as a
+   * connection error is not an advertisement to weigh against the draft codepoint. */
+  if (final_present != 0 && final_value > 1U) {
+    if (out_error != NULL) *out_error = WT_HTTP3_SETTINGS_ERROR;
+    return WT_ERR_PROTOCOL;
+  }
+  if (final_present != 0 && final_value == 1U) {
+    /* The final version, preferred over any draft codepoint beside it: the higher version is the one
+     * section 7.1 selects. */
+    *out_version = WT_WEBTRANSPORT_VERSION_FINAL;
+    return WT_OK;
+  }
+  if (profile != WT_WEBTRANSPORT_PROFILE_FINAL && draft_present != 0 && draft_value == 1U) {
+    /* The section 9.2 codepoint was absent, so the draft-16 codepoint is the only advertisement left,
+     * and a DUAL profile accepts it. A FINAL profile does not: a server that sent none of the
+     * codepoints this profile requires does not serve WebTransport for it. */
+    *out_version = WT_WEBTRANSPORT_VERSION_DRAFT16;
+    return WT_OK;
+  }
+  /* The default value of SETTINGS_WT_ENABLED is 0, "meaning that the server does not support
+   * WebTransport" (section 3.1): no session may be attempted on this connection. */
+  return WT_ERR_STATE;
 }

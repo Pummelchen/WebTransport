@@ -44,26 +44,32 @@ public enum HTTP3DataFramePolicy: Equatable, Sendable {
 /// Which peer WebTransport settings and `:protocol` tokens are acceptable.
 ///
 /// The distinction that matters operationally is between *conformance* and
-/// *serving*. `draft16Strict` asserts the peer speaks draft-16 exactly, which is
-/// what the conformance suite needs and what a client should send. A server
-/// exposed to arbitrary clients needs the opposite posture: browsers send
-/// `:protocol = webtransport`, not the draft-16 `webtransport-h3` token, so a
-/// strict server rejects every browser. Use ``interoperable`` there.
+/// *serving*. `draft17Strict` speaks draft-17 only: a server advertises the
+/// §9.2 `SETTINGS_WT_ENABLED` codepoint alone, and a client sends no
+/// `SETTINGS_WT_ENABLED` at all (§3.1 — it has no meaning from a client), so a
+/// draft-16 peer finds none of its codepoints in the strict server's SETTINGS
+/// and never attempts a session, which is the point of strict. A server exposed
+/// to draft-16-era peers needs ``interoperable`` instead: browsers send
+/// `:protocol = webtransport`, not the `webtransport-h3` token, and draft-16
+/// peers identify WebTransport support through the draft-16 codepoint, so a
+/// strict server rejects every one of them.
 public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
-    /// Draft-16 exactly. Correct for conformance testing and for what a client sends.
-    case draft16Strict
-    /// Superset profile: accepts the draft-16 token and the bare `webtransport`
-    /// token, and advertises the legacy WebTransport setting alongside the
-    /// draft-16 ones. This is the profile a publicly reachable server wants,
-    /// because it is liberal in what it accepts without weakening what it sends.
+    /// Draft-17 exactly. Correct for conformance testing and for what a client sends.
+    case draft17Strict
+    /// Superset profile: advertises the final §9.2 `SETTINGS_WT_ENABLED`
+    /// codepoint alongside the draft-16 one and the legacy WebTransport settings,
+    /// selects the peer's version per §7.1, and accepts the `webtransport-h3`
+    /// and bare `webtransport` tokens. This is the profile a publicly reachable
+    /// server wants, because it is liberal in what it accepts without weakening
+    /// what it sends.
     case interoperable
     case chromiumInterop
     case pywebtransportStreamInterop
 
     public static func parse(_ value: String) throws -> HTTP3WebTransportSettingsValidation {
         switch value {
-        case "draft16-strict":
-            return .draft16Strict
+        case "draft17-strict":
+            return .draft17Strict
         case "interoperable":
             return .interoperable
         case "chromium-interop":
@@ -75,10 +81,17 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
         }
     }
 
-    public var localSettings: HTTP3Settings {
+    /// The SETTINGS this endpoint sends, which differ by role under the current
+    /// draft: a strict server advertises `SETTINGS_WT_ENABLED` (§3.1), while a
+    /// strict client sends none — §3.1 gives the setting no meaning from a
+    /// client. The interoperable profiles send the same set from either role,
+    /// because their draft-16-era peers read client SETTINGS too (§7.1).
+    public func localSettings(for role: HTTP3ConnectionRole) -> HTTP3Settings {
         switch self {
-        case .draft16Strict:
-            return .webTransportDraft16Defaults
+        case .draft17Strict:
+            return role == .client
+                ? .webTransportDraft17ClientDefaults
+                : .webTransportDraft17Defaults
         case .interoperable, .chromiumInterop:
             return .webTransportChromiumInteropDefaults
         case .pywebtransportStreamInterop:
@@ -88,11 +101,12 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
 
     /// The token this endpoint sends on its own CONNECT request.
     ///
-    /// `interoperable` still *sends* the draft-16 token: broadening what a
-    /// server accepts should not change what it claims to speak.
+    /// `interoperable` still *sends* the registered `webtransport-h3` token:
+    /// broadening what a server accepts should not change what it claims to
+    /// speak.
     public var upgradeToken: String {
         switch self {
-        case .draft16Strict, .interoperable:
+        case .draft17Strict, .interoperable:
             return WebTransportHTTP3DraftConstants.current.upgradeToken
         case .chromiumInterop, .pywebtransportStreamInterop:
             return "webtransport"
@@ -101,7 +115,7 @@ public enum HTTP3WebTransportSettingsValidation: Equatable, Sendable {
 
     public var acceptedUpgradeTokens: Set<String> {
         switch self {
-        case .draft16Strict:
+        case .draft17Strict:
             return [WebTransportHTTP3DraftConstants.current.upgradeToken]
         case .interoperable, .chromiumInterop, .pywebtransportStreamInterop:
             return [WebTransportHTTP3DraftConstants.current.upgradeToken, "webtransport"]
@@ -242,7 +256,7 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
     public private(set) var receivedGoawayID: UInt64?
     public private(set) var requestStreams: [UInt64: HTTP3RequestStream]
 
-    public init(role: HTTP3ConnectionRole, localSettings: HTTP3Settings = HTTP3Settings.webTransportDraft16Defaults) {
+    public init(role: HTTP3ConnectionRole, localSettings: HTTP3Settings = HTTP3Settings.webTransportDraft17Defaults) {
         self.role = role
         self.localSettings = localSettings
         self.remoteSettings = nil
@@ -262,7 +276,7 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
     public mutating func receivePeerControlStream(
         _ bytes: Data,
         zeroRTTRememberedSettings: HTTP3Settings? = nil,
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft17Strict
     ) throws -> [HTTP3Frame] {
         guard !receivedPeerControlStream else {
             throw QUICCodecError.malformed("duplicate HTTP/3 control stream")
@@ -301,14 +315,15 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
         zeroRTTRememberedSettings: HTTP3Settings?
     ) throws {
         switch validation {
-        case .draft16Strict:
-            try settings.validateWebTransportDraft16Requirements(peerRole: peerRole)
+        case .draft17Strict:
+            try settings.validateWebTransportDraft17Requirements(peerRole: peerRole)
         case .interoperable, .chromiumInterop:
-            // The strict validator demands SETTINGS_WT_ENABLE_WEBTRANSPORT = 1
-            // from a client peer as well. Browsers do not send that setting —
-            // they send the legacy SETTINGS_WEBTRANSPORT_MAX_SESSIONS — so a
-            // strict server rejects browser SETTINGS on top of rejecting the
-            // browser's `:protocol` token. This validator accepts either.
+            // Browsers do not send SETTINGS_WT_ENABLE_WEBTRANSPORT — they send
+            // the legacy SETTINGS_WEBTRANSPORT_MAX_SESSIONS — and a draft-17
+            // final client sends no SETTINGS_WT_ENABLED at all (§3.1), so a
+            // server here accepts either WebTransport enable setting instead of
+            // demanding one. It also serves draft-16-era peers, which identify
+            // themselves with the draft-16 SETTINGS_WT_ENABLED codepoint (§7.1).
             try settings.validateWebTransportChromiumInteropRequirements(peerRole: peerRole)
         case .pywebtransportStreamInterop:
             try settings.validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: peerRole)
@@ -408,12 +423,27 @@ public struct HTTP3ConnectionState: Equatable, Sendable {
 }
 
 extension HTTP3Settings {
-    public func validateWebTransportDraft16Requirements(peerRole: HTTP3ConnectionRole? = nil) throws {
+    /// The strict draft-17 requirements.
+    ///
+    /// `peerRole` is the role of the endpoint whose settings these are. A server
+    /// must advertise `SETTINGS_WT_ENABLED` = 1 (the §9.2 codepoint); a client
+    /// must NOT be required to send it, because §3.1 gives the setting no
+    /// meaning from a client. A client that did send the draft-16 codepoint is a
+    /// draft-16 client (§7.1), and its value must be 1. Values greater than 1 on
+    /// either `SETTINGS_WT_ENABLED` codepoint are an H3_SETTINGS_ERROR
+    /// connection error (§3.1), from either direction.
+    public func validateWebTransportDraft17Requirements(peerRole: HTTP3ConnectionRole? = nil) throws {
         let constants = WebTransportHTTP3DraftConstants.current
         if let value = self[constants.settingsWTEnabled], value > 1 {
             throw HTTP3ConnectionError(
                 code: .settingsError,
                 reason: "SETTINGS_WT_ENABLED values greater than 1 are invalid"
+            )
+        }
+        if let value = self[constants.settingsWTEnabledDraft16], value != 1 {
+            throw HTTP3ConnectionError(
+                code: .settingsError,
+                reason: "draft-16 SETTINGS_WT_ENABLED values other than 1 are invalid"
             )
         }
         if peerRole != .client {
@@ -424,13 +454,27 @@ extension HTTP3Settings {
         guard self[constants.settingsH3Datagram] == 1 else {
             throw QUICCodecError.malformed("WebTransport over HTTP/3 requires SETTINGS_H3_DATAGRAM = 1")
         }
-        guard self[constants.settingsWTEnabled] == 1 else {
-            throw QUICCodecError.malformed("WebTransport over HTTP/3 requires SETTINGS_WT_ENABLE_WEBTRANSPORT = 1")
+        if peerRole == .server {
+            guard self[constants.settingsWTEnabled] == 1 else {
+                throw QUICCodecError.malformed("WebTransport over HTTP/3 requires SETTINGS_WT_ENABLE_WEBTRANSPORT = 1")
+            }
         }
     }
 
     public func validateWebTransportChromiumInteropRequirements(peerRole: HTTP3ConnectionRole? = nil) throws {
         let constants = WebTransportHTTP3DraftConstants.current
+        if let value = self[constants.settingsWTEnabled], value > 1 {
+            throw HTTP3ConnectionError(
+                code: .settingsError,
+                reason: "SETTINGS_WT_ENABLED values greater than 1 are invalid"
+            )
+        }
+        if let value = self[constants.settingsWTEnabledDraft16], value != 1 {
+            throw HTTP3ConnectionError(
+                code: .settingsError,
+                reason: "draft-16 SETTINGS_WT_ENABLED values other than 1 are invalid"
+            )
+        }
         if peerRole != .client {
             guard self[constants.settingsEnableConnectProtocol] == 1 else {
                 throw QUICCodecError.malformed("Chromium WebTransport interop requires server SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")
@@ -440,7 +484,11 @@ extension HTTP3Settings {
             throw QUICCodecError.malformed("Chromium WebTransport interop requires SETTINGS_H3_DATAGRAM = 1")
         }
         if peerRole != .client {
-            guard self[constants.settingsWTEnabled] == 1 || self[HTTP3SettingID.legacyEnableWebTransport] == 1 else {
+            guard
+                self[constants.settingsWTEnabled] == 1
+                    || self[constants.settingsWTEnabledDraft16] == 1
+                    || self[HTTP3SettingID.legacyEnableWebTransport] == 1
+            else {
                 throw QUICCodecError.malformed("Chromium WebTransport interop requires a WebTransport enable setting")
             }
         }
@@ -448,21 +496,37 @@ extension HTTP3Settings {
 
     public func validateWebTransportPyWebTransportStreamInteropRequirements(peerRole: HTTP3ConnectionRole? = nil) throws {
         let constants = WebTransportHTTP3DraftConstants.current
+        if let value = self[constants.settingsWTEnabled], value > 1 {
+            throw HTTP3ConnectionError(
+                code: .settingsError,
+                reason: "SETTINGS_WT_ENABLED values greater than 1 are invalid"
+            )
+        }
+        if let value = self[constants.settingsWTEnabledDraft16], value != 1 {
+            throw HTTP3ConnectionError(
+                code: .settingsError,
+                reason: "draft-16 SETTINGS_WT_ENABLED values other than 1 are invalid"
+            )
+        }
         if peerRole != .client {
             guard self[constants.settingsEnableConnectProtocol] == 1 else {
                 throw QUICCodecError.malformed("pywebtransport stream interop requires server SETTINGS_ENABLE_CONNECT_PROTOCOL = 1")
             }
         }
         if self[constants.settingsH3Datagram] == 1 {
-            guard self[constants.settingsWTEnabled] == 1 || self[HTTP3SettingID.legacyEnableWebTransport] == 1 else {
+            guard
+                self[constants.settingsWTEnabled] == 1
+                    || self[constants.settingsWTEnabledDraft16] == 1
+                    || self[HTTP3SettingID.legacyEnableWebTransport] == 1
+            else {
                 throw QUICCodecError.malformed("pywebtransport stream interop requires a WebTransport enable setting when H3_DATAGRAM is advertised")
             }
         }
     }
 
     public func validateWebTransportZeroRTTCompatibility(remembered: HTTP3Settings) throws {
-        try remembered.validateWebTransportDraft16Requirements()
-        try validateWebTransportDraft16Requirements()
+        try remembered.validateWebTransportDraft17Requirements()
+        try validateWebTransportDraft17Requirements()
 
         let constants = WebTransportHTTP3DraftConstants.current
         try requireUnchanged(constants.settingsEnableConnectProtocol, remembered: remembered, label: "SETTINGS_ENABLE_CONNECT_PROTOCOL")
@@ -483,7 +547,7 @@ extension HTTP3Settings {
         label: String
     ) throws {
         guard effectiveValue(identifier) == remembered.effectiveValue(identifier) else {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .requirementsNotMet,
                 message: "\(label) is not compatible with accepted 0-RTT WebTransport data"
             )

@@ -13,8 +13,8 @@ internal struct ManagerPair {
 
 // internal because the scenario catalogue in WebTransportCLIConformanceScenarios.swift calls it
 internal func makeReadyPair(
-    clientSettings: HTTP3Settings = .webTransportDraft16Defaults,
-    serverSettings: HTTP3Settings = .webTransportDraft16Defaults,
+    clientSettings: HTTP3Settings = .webTransportDraft17Defaults,
+    serverSettings: HTTP3Settings = .webTransportDraft17Defaults,
     maxStreamReceiveBufferBytes: Int = 64 * 1024,
     maxDatagramFrameSize: Int = 1_200,
     maxDatagramReceiveBufferBytes: Int = 64 * 1024,

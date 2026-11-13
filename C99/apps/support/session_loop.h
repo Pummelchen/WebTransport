@@ -34,7 +34,7 @@ typedef struct wt_loop_config {
    * listener's exposure rather than something a protocol requires. */
   int retry;
   /* CLIENT only: send the message BEFORE the CONNECT rather than after the response, which is the single flight
-   * draft-16 section 4.6 describes ("clients can ... send ... multiple WebTransport CONNECT requests,
+   * draft-17 section 4.6 describes ("clients can ... send ... multiple WebTransport CONNECT requests,
    * WebTransport data streams, and WebTransport datagrams all within a single flight"). It is the only order in
    * which a server has something to park, so it is what reaches that path from the tools (WT-189). */
   int early_stream;
@@ -44,6 +44,12 @@ typedef struct wt_loop_config {
    * headers, the same shape `trust` uses. The client cannot negotiate the token and a pre-draft peer refuses the
    * session before any SETTINGS exchange, so the tool is told which one to send (F-02b). */
   int upgrade_token;
+  /* BOTH modes: the SETTINGS_WT_ENABLED posture, as the `wt_webtransport_version_profile_t` value
+   * (0 is DUAL, the interoperable default; 1 is FINAL). A DUAL run advertises and accepts both the
+   * section 9.2 codepoint and the draft-16 one, a FINAL run only the section 9.2 codepoint -- a
+   * client of that profile sends no WT_ENABLED at all. An int so this header does not depend on the
+   * HTTP/3 headers, the same shape `upgrade_token` uses. */
+  int wt_enabled_profile;
   /* The server's identity, and the pin the client checks it against. Exactly one of the two is used per side. */
   const wt_tls_self_signed_t *identity;
   const uint8_t *pin; /* WT_SHA256_LEN bytes, or NULL for the loopback development bypass */
@@ -173,7 +179,7 @@ typedef struct wt_loop_result {
   uint64_t request_stream_id;
   unsigned streams_opened_bidi;
   unsigned streams_opened_uni;
-  /* What the peer's CONNECT-stream CAPSULES carried (draft-16 section 5). The session's flow control arrives
+  /* What the peer's CONNECT-stream CAPSULES carried (draft-17 section 5). The session's flow control arrives
    * there, and before WT-164 this endpoint parsed those bytes as HTTP/3 frames: a flow-control grant's type is an
    * unknown frame type, so its length was read as a frame length and the grant was dropped without a word. These
    * fields are the fact that says it was not dropped -- `peer_max_data` is the send limit the peer granted, and

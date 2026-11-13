@@ -112,7 +112,7 @@ public struct WebTransportQUICClient: Sendable {
         origin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
         optimisticCapsules: [WebTransportFlowCapsule] = [],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft17Strict,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSession {
         let trustConfiguration = try trustPolicy.runtimeConfiguration(endpoint: endpoint, authority: authority)
@@ -223,7 +223,7 @@ extension WebTransportQUICClient {
 
         var http3 = HTTP3ConnectionState(
             role: .client,
-            localSettings: prelude.settingsValidation.localSettings
+            localSettings: prelude.settingsValidation.localSettings(for: .client)
         )
         let (localControlStream, qpackStreams) = try await openClientControlStreams(prelude: prelude, http3: http3)
         let useDatagrams = try await exchangeControlStreams(
@@ -243,7 +243,7 @@ extension WebTransportQUICClient {
         let response = try await awaitServerResponse(prelude: prelude, requestStream: requestStream)
         let session = try manager.receiveServerSessionResponse(streamID: requestStreamID, frame: response.frame)
         guard session.state == .accepted else {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .requirementsNotMet,
                 message: "WebTransport session was rejected"
             )
@@ -495,7 +495,7 @@ extension WebTransportQUICClient {
         path: String = "/wt",
         origin: String? = "https://localhost",
         protocols: [String] = ["demo.v1"],
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict,
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft17Strict,
         exchangeMode: WebTransportNetworkExchangeMode = .auto,
         timeoutMilliseconds: Int32 = 1_000
     ) async throws -> WebTransportNetworkSessionResult {

@@ -139,7 +139,7 @@ static inline wt_status_t data_stream_on_data(void *context, uint64_t stream_id,
 /* A transport that hands out the stream IDs a REAL connection would: client-initiated bidirectional IDs
  * (0, 4, 8, ...) for a bidirectional open and client-initiated unidirectional ones (2, 6, 10, ...) otherwise. The
  * recording transport above returns 0, 1, 2, 3..., which cannot carry a session: a session IS its CONNECT
- * stream, so only some stream IDs can be one (draft-16 section 3.2), and the prefix writer refuses the rest. */
+ * stream, so only some stream IDs can be one (draft-17 section 3.2), and the prefix writer refuses the rest. */
 typedef struct class_fake {
   uint64_t next_bidi; /* 0, 4, 8, ... */
   uint64_t next_uni;  /* 2, 6, 10, ... */

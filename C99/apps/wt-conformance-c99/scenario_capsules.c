@@ -34,8 +34,8 @@
 #include "scenario_capsules_support.h"
 
 static void capsules_run_refusals(wt_cli_report_t *report) {
-  static const char *const k_bound = "draft16-a-capsule-past-the-bound-is-named";
-  static const char *const k_flow = "draft16-a-decreasing-grant-closes-the-session";
+  static const char *const k_bound = "draft17-a-capsule-past-the-bound-is-named";
+  static const char *const k_flow = "draft17-a-decreasing-grant-closes-the-session";
   scenario_pair_t pair;
   char detail[WT_CLI_SCENARIO_DETAIL_MAX];
   char opened[WT_CLI_SCENARIO_DETAIL_MAX];
@@ -113,7 +113,10 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
   scenario_pair_close(&pair);
 
   /* The flow-control row, on a pair of its own: the grant is accepted and then repeated, and a repeat is what the
-   * draft refuses as a limit that does not strictly increase. */
+   * draft refuses as a limit that does not strictly increase. The value is one above the SETTINGS_WT_INITIAL_MAX_DATA
+   * both sides advertise (100000), because the section 5.5 baseline is the value the settings already granted and
+   * the first capsule must strictly increase it (section 5.6.4) -- the repeat is what turns it into the flow-control
+   * error, exactly as the draft says. */
   opened[0] = '\0';
   result = scenario_pair_open(&pair, 0, opened, sizeof(opened));
   if (result != WT_CLI_RESULT_PASSED) {
@@ -135,7 +138,7 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
 
     for (grant = 0U; grant < 2U; grant++) {
       w = wt_http3_frame_data_writer(framed, sizeof(framed));
-      if (wt_webtransport_max_data_write(&w, grant == 0U ? 4096U : 4096U) != WT_OK ||
+      if (wt_webtransport_max_data_write(&w, grant == 0U ? 100001U : 100001U) != WT_OK ||
           capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
         sent = 0;
       }
@@ -177,7 +180,7 @@ static void capsules_run_refusals(wt_cli_report_t *report) {
  * account EMPTY rather than move it. Both connections stay up and nothing is refused -- the capsule is ignored,
  * not an error (WT-252). */
 static void capsules_run_unnegotiated(wt_cli_report_t *report) {
-  static const char *const k_ignored = "draft16-a-flow-capsule-with-no-negotiation-is-ignored";
+  static const char *const k_ignored = "draft17-a-flow-capsule-with-no-negotiation-is-ignored";
   scenario_pair_t pair;
   char detail[WT_CLI_SCENARIO_DETAIL_MAX];
   char opened[WT_CLI_SCENARIO_DETAIL_MAX];
@@ -245,8 +248,8 @@ static void capsules_run_unnegotiated(wt_cli_report_t *report) {
  * connection was closed over a message the peer was entitled to send. The same happened to any peer that put more
  * than 1024 bytes of capsules in one DATA frame, however small those capsules were. */
 void wt_scenario_capsules_run(wt_cli_report_t *report) {
-  static const char *const k_grant = "draft16-a-sessions-grant-moves-the-limit-the-peer-enforces";
-  static const char *const k_ends = "draft16-a-drain-and-a-close-capsule-end-the-session";
+  static const char *const k_grant = "draft17-a-sessions-grant-moves-the-limit-the-peer-enforces";
+  static const char *const k_ends = "draft17-a-drain-and-a-close-capsule-end-the-session";
   scenario_pair_t pair;
   char detail[WT_CLI_SCENARIO_DETAIL_MAX];
   char opened[WT_CLI_SCENARIO_DETAIL_MAX];
@@ -274,9 +277,12 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
   }
 
   /* The client grants the server credit: a MAX_DATA capsule, whose value only the session layer knows how to read.
-   * Before WT-164 the server skipped it as an unknown HTTP/3 frame. */
+   * Before WT-164 the server skipped it as an unknown HTTP/3 frame. The value is one above the
+   * SETTINGS_WT_INITIAL_MAX_DATA the receiver advertised (100000, `wt_webtransport_settings_apply`): the
+   * section 5.5 baseline is the value the settings already granted, so a first capsule must strictly increase
+   * it (section 5.6.4), and 100001 is the smallest grant that does. */
   w = wt_http3_frame_data_writer(framed, sizeof(framed));
-  if (wt_webtransport_max_data_write(&w, 65536U) != WT_OK ||
+  if (wt_webtransport_max_data_write(&w, 100001U) != WT_OK ||
       capsules_send(&pair, 1, framed, wt_writer_offset(&w)) != WT_OK) {
     capsules_add(report, k_grant, 0, "the grant could not be sent");
     capsules_add(report, k_ends, 0, "the grant could not be sent");
@@ -289,13 +295,13 @@ void wt_scenario_capsules_run(wt_cli_report_t *report) {
   }
   {
     int passed = pair.server_side.capsules.peer_limits.max_data_set != 0 &&
-                 pair.server_side.capsules.peer_limits.max_data == 65536U &&
+                 pair.server_side.capsules.peer_limits.max_data == 100001U &&
                  pair.server_side.capsules.walked > 0U;
     (void)snprintf(
         detail, sizeof(detail),
         passed != 0
             ? "the peer's MAX_DATA capsule reached the session and moved the limit it enforces "
-              "to 65536"
+              "to 100001"
             : "the grant did not reach the session (set=%d, value=%llu, capsules=%u)",
         pair.server_side.capsules.peer_limits.max_data_set,
         (unsigned long long)pair.server_side.capsules.peer_limits.max_data,

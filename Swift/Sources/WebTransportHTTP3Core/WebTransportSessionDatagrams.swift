@@ -37,7 +37,7 @@ extension WebTransportSessionManager {
         do {
             parsed = try WebTransportDatagramSignaling.parse(payload)
         } catch {
-            throw WebTransportDraft16Error(kind: .h3ID, message: "invalid WebTransport datagram session ID")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "invalid WebTransport datagram session ID")
         }
         let session = try sessionForIngressOrPending(parsed.sessionID)
         let currentBytes = datagramPayloadBytesBySessionID[parsed.sessionID] ?? 0

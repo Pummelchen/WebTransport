@@ -76,7 +76,7 @@ extension WebTransportSessionManager {
         if let prefix = result.prefix {
             return prefix
         }
-        throw WebTransportDraft16Error(
+        throw WebTransportDraft17Error(
             kind: .bufferedStreamRejected,
             message: "buffered WebTransport stream exceeds receive limit"
         )
@@ -115,7 +115,7 @@ extension WebTransportSessionManager {
         )
         do {
             try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, buffering: session?.state == .requested || session == nil)
-        } catch let error as WebTransportDraft16Error where error.kind == .bufferedStreamRejected {
+        } catch let error as WebTransportDraft17Error where error.kind == .bufferedStreamRejected {
             return WebTransportIncomingStreamResult(prefix: nil, rejectionFrame: bufferedStreamRejectedFrame(streamID: streamID))
         }
         if session?.state == .accepted || session?.state == .draining {
@@ -123,7 +123,7 @@ extension WebTransportSessionManager {
         } else {
             do {
                 try buffer(stream)
-            } catch let error as WebTransportDraft16Error where error.kind == .bufferedStreamRejected {
+            } catch let error as WebTransportDraft17Error where error.kind == .bufferedStreamRejected {
                 return WebTransportIncomingStreamResult(prefix: nil, rejectionFrame: bufferedStreamRejectedFrame(streamID: streamID))
             }
         }
@@ -138,7 +138,7 @@ extension WebTransportSessionManager {
         if let prefix = result.prefix {
             return prefix
         }
-        throw WebTransportDraft16Error(
+        throw WebTransportDraft17Error(
             kind: .bufferedStreamRejected,
             message: "buffered WebTransport stream exceeds receive limit"
         )
@@ -177,7 +177,7 @@ extension WebTransportSessionManager {
         )
         do {
             try receiveInitialPayloadIfPresent(prefix.remainingPayload, into: &stream, buffering: session?.state == .requested || session == nil)
-        } catch let error as WebTransportDraft16Error where error.kind == .bufferedStreamRejected {
+        } catch let error as WebTransportDraft17Error where error.kind == .bufferedStreamRejected {
             return WebTransportIncomingStreamResult(prefix: nil, rejectionFrame: bufferedStreamRejectedFrame(streamID: streamID))
         }
         if session?.state == .accepted || session?.state == .draining {
@@ -185,7 +185,7 @@ extension WebTransportSessionManager {
         } else {
             do {
                 try buffer(stream)
-            } catch let error as WebTransportDraft16Error where error.kind == .bufferedStreamRejected {
+            } catch let error as WebTransportDraft17Error where error.kind == .bufferedStreamRejected {
                 return WebTransportIncomingStreamResult(prefix: nil, rejectionFrame: bufferedStreamRejectedFrame(streamID: streamID))
             }
         }
@@ -229,9 +229,9 @@ extension WebTransportSessionManager {
             {
                 switch state {
                 case .closed:
-                    throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session is closed")
+                    throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session is closed")
                 case .rejected:
-                    throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport session was rejected")
+                    throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport session was rejected")
                 case .requested, .accepted, .draining:
                     break
                 }
@@ -349,7 +349,7 @@ extension WebTransportSessionManager {
         guard bufferedStreamIDs.count < maxBufferedStreamsPerSession,
             bufferedPayloadBytes + stream.bufferedPayloadBytes <= maxStreamReceiveBufferBytes
         else {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .bufferedStreamRejected,
                 message: "buffered WebTransport stream exceeds receive limit"
             )
@@ -370,7 +370,7 @@ extension WebTransportSessionManager {
             try stream.receivePayload(payload)
         } catch {
             if buffering {
-                throw WebTransportDraft16Error(
+                throw WebTransportDraft17Error(
                     kind: .bufferedStreamRejected,
                     message: "buffered WebTransport stream exceeds receive limit"
                 )
@@ -414,7 +414,7 @@ extension WebTransportSessionManager {
 
     func ensureCanBufferIngress(for sessionID: WebTransportSessionID) throws {
         guard hasBufferedIngress(for: sessionID) || bufferedIngressSessionCount < maxBufferedSessions else {
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .bufferedStreamRejected,
                 message: "buffered WebTransport session count exceeds receive limit"
             )
@@ -469,7 +469,7 @@ extension WebTransportSessionManager {
         if let sessionID = closedStreamSessionIDsByStreamID[streamID],
             sessionsByID[sessionID] != nil
         {
-            throw WebTransportDraft16Error(kind: .sessionGone, message: "WebTransport stream belongs to a terminated session")
+            throw WebTransportDraft17Error(kind: .sessionGone, message: "WebTransport stream belongs to a terminated session")
         }
 
         guard QUICStreamID.direction(of: streamID) == direction else {

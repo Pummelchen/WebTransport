@@ -115,7 +115,7 @@ func droppingASessionWithoutClosingItReleasesTheConnection() async throws {
         origin: "https://localhost",
         protocols: ["demo.v1"],
         optimisticCapsules: [],
-        settingsValidation: .draft16Strict,
+        settingsValidation: .draft17Strict,
         timeoutMilliseconds: 8_000
     )
     let serverHalf = try await accepted
@@ -145,7 +145,7 @@ private func connectSessionPair(
         origin: "https://localhost",
         protocols: ["demo.v1"],
         optimisticCapsules: [],
-        settingsValidation: .draft16Strict,
+        settingsValidation: .draft17Strict,
         timeoutMilliseconds: 8_000
     )
     return (client, try await accepted)

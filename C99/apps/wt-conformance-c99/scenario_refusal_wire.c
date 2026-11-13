@@ -27,8 +27,8 @@ static void refusal_wire_add(wt_cli_report_t *report, const char *name, wt_cli_r
 }
 
 void wt_scenario_refusal_wire_run(wt_cli_report_t *report) {
-  static const char *const k_closed = "draft16-a-truncated-frame-is-an-application-close";
-  static const char *const k_told = "draft16-the-refusal-reaches-the-peer-as-its-http3-code";
+  static const char *const k_closed = "draft17-a-truncated-frame-is-an-application-close";
+  static const char *const k_told = "draft17-the-refusal-reaches-the-peer-as-its-http3-code";
   /* The HEADERS frame type (RFC 9114 section 7.2.2) followed by a 64-byte length that never arrives: the stream
    * ends first, which is the truncated frame. */
   static const uint8_t k_truncated_headers[2] = {0x01U, 0x40U};

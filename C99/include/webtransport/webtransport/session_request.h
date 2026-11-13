@@ -1,4 +1,4 @@
-/* The WebTransport session request: an extended CONNECT (draft-ietf-webtrans-http3-16
+/* The WebTransport session request: an extended CONNECT (draft-ietf-webtrans-http3-17
  * section 3.1, over RFC 9220's extended CONNECT).
  *
  * A WebTransport session begins with a request that is a CONNECT carrying the
@@ -37,16 +37,16 @@ extern "C" {
 #endif
 
 /* The `:protocol` value that makes a CONNECT a WebTransport request, and the one this endpoint SENDS.
- * Draft-ietf-webtrans-http3-16 sections 3.2 and 9.1 name it `webtransport-h3`; the Swift reference's draft-16
+ * Draft-ietf-webtrans-http3-17 sections 3.2 and 9.1 name it `webtransport-h3`; the Swift reference's
  * constants use the same string (Swift/Sources/WebTransportHTTP3Core/HTTP3Constants.swift). */
 #define WT_WEBTRANSPORT_PROTOCOL_TOKEN "webtransport-h3"
 
-/* The PRE-DRAFT token draft-16 renamed away from: `webtransport` is the WebTransport-over-HTTP/2 token of
+/* The PRE-DRAFT token the drafts renamed away from: `webtransport` is the WebTransport-over-HTTP/2 token of
  * draft-16 section 2.1.2, a DIFFERENT string from the HTTP/3 token above. This server deliberately ACCEPTS it as
- * well as the draft-16 one, and that acceptance is not a courtesy: four of the five independent implementations
+ * well as the current one, and that acceptance is not a courtesy: four of the five independent implementations
  * this tree interoperates with were written against the earlier drafts, and a server that refused the old token
  * would refuse every one of them -- the same split the Swift reference calls its interoperable mode. Both tokens
- * are accepted; only the draft-16 token is sent. */
+ * are accepted; only the current token is sent. */
 #define WT_WEBTRANSPORT_PROTOCOL_TOKEN_LEGACY "webtransport"
 
 /* Which of the two tokens THIS endpoint puts on its OWN CONNECT.
@@ -72,13 +72,24 @@ typedef enum wt_webtransport_upgrade_token {
  * strings this returns. */
 const char *wt_webtransport_upgrade_token_value(wt_webtransport_upgrade_token_t token);
 
-/* Where a CLIENT offers its sub-protocols (draft-16 section 3.3). `wt-protocol` -- the name in protocol.h -- is
+/* Where a CLIENT offers its sub-protocols (draft-17 section 3.3). `wt-protocol` -- the name in protocol.h -- is
  * the RESPONSE field that names the one the server selected (section 9.7); the pre-draft shape used `wt-protocol`
  * for both, which is why this constant exists next to the parser that only knows the value. */
 #define WT_WEBTRANSPORT_AVAILABLE_PROTOCOLS_HEADER "wt-available-protocols"
 
-/* The draft-16 setting a server advertises to say it can serve WebTransport at all. */
-#define WT_HTTP3_SETTING_WT_ENABLED ((uint64_t)0x2c7cf000)
+/* The setting a server advertises to say it can serve WebTransport at all: the codepoint draft-17
+ * section 9.2 registers for `SETTINGS_WT_ENABLED`. A client reads it (a value of 1 means the server
+ * supports this version, and a value greater than 1 is H3_SETTINGS_ERROR); a server MUST ignore it
+ * when a client sends it, with the draft-selection exception of section 7.1. */
+#define WT_HTTP3_SETTING_WT_ENABLED ((uint64_t)0x20b8933b)
+
+/* The DRAFT-16 codepoint 0x2c7cf000, kept recognised for compatibility: before draft-17 moved the
+ * registration this was `SETTINGS_WT_ENABLED`, and a peer written against draft-16 gates WebTransport
+ * on the setting IT knows. Section 7.1 is explicit that every draft version has its own codepoint and
+ * that an endpoint supporting several sends one per version, so a server that also serves draft-16
+ * clients advertises this codepoint beside the one above, and selects the draft-16 version when a
+ * client sends it. */
+#define WT_HTTP3_SETTING_WT_ENABLED_DRAFT16 ((uint64_t)0x2c7cf000)
 
 /* The enabling codepoints a peer implementing the "max sessions" era of the draft looks for
  * (`WEBTRANSPORT_MAX_SESSIONS`, and the pair it replaced in draft 06). Draft-16 section 7.1 is explicit that
@@ -91,7 +102,7 @@ const char *wt_webtransport_upgrade_token_value(wt_webtransport_upgrade_token_t 
 #define WT_HTTP3_SETTING_WT_ENABLE_DEPRECATED ((uint64_t)0x2b603742)
 #define WT_HTTP3_SETTING_WT_MAX_SESSIONS_DEPRECATED ((uint64_t)0x2b603743)
 
-/* The draft-16 settings that carry a session's INITIAL flow-control limits (section 5.1).
+/* The draft settings that carry a session's INITIAL flow-control limits (section 5.1).
  * They are what turns the session's own flow control on: an endpoint that omits all three
  * is not doing it, and a session enabled by one of them starts the other two at zero. */
 #define WT_HTTP3_SETTING_WT_INITIAL_MAX_DATA ((uint64_t)0x2b61)
@@ -183,6 +194,70 @@ wt_status_t wt_webtransport_session_request_validate(const wt_http3_message_t *m
  * pass `100000, 4096, 8, 8`). An endpoint that wants no flow control must not use this call, and a peer that
  * did not negotiate it ignores the flow-control capsules (WT-252). */
 wt_status_t wt_webtransport_settings_apply(wt_http3_settings_t *settings, int is_server);
+
+/* How far THIS endpoint reaches across the draft-16/draft-17 split (section 7.1).
+ *
+ * The final version's client sends NO SETTINGS_WT_ENABLED at all, and its server reads none; the
+ * draft versions negotiate through per-version codepoints. An endpoint that serves only final
+ * clients picks FINAL, and an endpoint that must still reach draft-16 peers -- the tools' default,
+ * because the peers this tree interoperates with are written against draft-16 -- picks DUAL, which
+ * sends and accepts both codepoints. */
+typedef enum wt_webtransport_version_profile {
+  /* Advertise and accept BOTH the section 9.2 codepoint and the draft-16 one. The DEFAULT. */
+  WT_WEBTRANSPORT_PROFILE_DUAL = 0,
+  /* Final version only: a server advertises the section 9.2 codepoint alone, a client sends no
+   * WT_ENABLED and requires the server's. A draft-16 peer sees none of its codepoints and never
+   * attempts a session -- which is the point of the strict posture. */
+  WT_WEBTRANSPORT_PROFILE_FINAL = 1
+} wt_webtransport_version_profile_t;
+
+/* The version a §7.1 negotiation selected. The wire formats -- streams, capsules, the exporter, the
+ * token -- are identical between draft-16 and draft-17, so the selection changes only advertisement
+ * and validation, and one code path serves both peers. */
+typedef enum wt_webtransport_version {
+  /* This document, draft-17. */
+  WT_WEBTRANSPORT_VERSION_FINAL = 0,
+  /* The draft-16 codepoint's version. */
+  WT_WEBTRANSPORT_VERSION_DRAFT16 = 1
+} wt_webtransport_version_t;
+
+/* What a WebTransport endpoint advertises for one profile (section 3.1's list, section 7.1's draft
+ * codepoints), with the same rule `wt_webtransport_settings_apply` states: a caller that had to
+ * remember each one eventually forgets one. A DUAL endpoint sends the section 9.2 codepoint AND the
+ * draft-16 codepoint, both with value 1; a FINAL server sends the section 9.2 codepoint alone and a
+ * FINAL client sends neither. Everything else -- datagrams, the flow-control settings, the enabling
+ * codepoints of the earlier drafts -- is exactly what `wt_webtransport_settings_apply` sends. */
+wt_status_t wt_webtransport_settings_apply_profile(wt_http3_settings_t *settings, int is_server,
+                                                   wt_webtransport_version_profile_t profile);
+
+/* The server's half of section 7.1: select the version the CLIENT's SETTINGS name.
+ *
+ * A client that sent the section 9.2 codepoint -- whatever its value, which a server MUST ignore
+ * (section 3.1) -- selected the final version. Otherwise a client that sent the draft-16 codepoint
+ * selected draft-16, and being a draft-16 client it MUST have sent the value 1: any other value is
+ * WT_ERR_PROTOCOL with H3_SETTINGS_ERROR. A client that sent neither is a final client (final clients
+ * send no SETTINGS_WT_ENABLED), so the final version is selected.
+ *
+ * WT_OK with `out_version` set on every selection. WT_ERR_INVALID_ARGUMENT for a null settings. */
+wt_status_t wt_webtransport_version_select(const wt_http3_settings_t *client_settings,
+                                           wt_webtransport_version_t *out_version,
+                                           wt_http3_error_t *out_error);
+
+/* The client's half of sections 3.1 and 7.1: what the SERVER's SETTINGS say.
+ *
+ * WT_OK with `out_version` naming the version when WebTransport is enabled: the section 9.2 codepoint
+ * with the value 1, or -- DUAL profiles only -- the draft-16 codepoint with the value 1. A server that
+ * sent neither does not serve WebTransport, which is WT_ERR_STATE: the client MUST NOT attempt a
+ * session, and section 3.1 lets it close the connection with WT_REQUIREMENTS_NOT_MET to aid debugging.
+ * The section 9.2 codepoint with a value greater than 1 is the connection error section 3.1 names:
+ * WT_ERR_PROTOCOL with H3_SETTINGS_ERROR.
+ *
+ * A FINAL profile requires the section 9.2 codepoint: the draft-16 codepoint alone does not enable
+ * WebTransport for it. */
+wt_status_t wt_webtransport_client_version(const wt_http3_settings_t *server_settings,
+                                           wt_webtransport_version_profile_t profile,
+                                           wt_webtransport_version_t *out_version,
+                                           wt_http3_error_t *out_error);
 
 #ifdef __cplusplus
 }

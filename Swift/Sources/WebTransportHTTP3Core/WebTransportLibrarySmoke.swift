@@ -302,8 +302,8 @@ public enum WebTransportLibrarySmokeMatrix {
 public extension WebTransportLibrarySmokePair {
     static func connectedWithFlowControl() throws -> WebTransportLibrarySmokePair {
         let constants = WebTransportHTTP3DraftConstants.current
-        var clientSettings = HTTP3Settings.webTransportDraft16Defaults
-        var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+        var clientSettings = HTTP3Settings.webTransportDraft17Defaults
+        var serverSettings = HTTP3Settings.webTransportDraft17Defaults
         for settings in [constants.settingsWTInitialMaxStreamsBidi, constants.settingsWTInitialMaxStreamsUni] {
             try clientSettings.set(16, for: settings)
             try serverSettings.set(16, for: settings)

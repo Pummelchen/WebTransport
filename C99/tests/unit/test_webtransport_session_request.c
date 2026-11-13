@@ -1,4 +1,4 @@
-/* The WebTransport session request (draft-ietf-webtrans-http3-16 section 3.1).
+/* The WebTransport session request (draft-ietf-webtrans-http3-17 section 3.1).
  *
  * A request that is not WebTransport must be REPORTED rather than refused -- an
  * ordinary GET, a plain CONNECT and an extended CONNECT for another protocol are all
@@ -139,22 +139,26 @@ static int has_setting(const wt_http3_settings_t *settings, uint64_t identifier,
   return present != 0 && read == value;
 }
 
-/* What a WebTransport endpoint MUST advertise (draft-16 section 3.1), asserted as a set because a missing member
- * is what the third-party peer refused: this tree's client sent only SETTINGS_WT_ENABLED, so `web-transport`'s
- * `supports_webtransport()` -- datagram support AND a WebTransport setting -- saw no WebTransport endpoint and
- * never answered the CONNECT (WT-145). The earlier drafts' enabling codepoints are asserted too, because section
- * 7.1 negotiates a version with one codepoint per version and a peer that predates the rename recognises none of
- * the others. */
+/* What a WebTransport endpoint MUST advertise (draft-17 section 3.1, with section 7.1's draft codepoints),
+ * asserted as a set because a missing member is what the third-party peer refused: this tree's client sent only
+ * SETTINGS_WT_ENABLED, so `web-transport`'s `supports_webtransport()` -- datagram support AND a WebTransport
+ * setting -- saw no WebTransport endpoint and never answered the CONNECT (WT-145). The DUAL profile -- the
+ * default -- sends the section 9.2 codepoint AND the draft-16 one, one per version supported; the FINAL profile
+ * is the section 9.2 codepoint alone for a server, and NO version codepoint at all for a client, which is what
+ * section 3.1's client list carries. */
 static void test_the_settings_a_webtransport_endpoint_advertises(void) {
   wt_http3_settings_t settings;
 
-  /* A client: the datagram setting and the version codepoints, and NOT the CONNECT-protocol setting, which is
-   * the server's to advertise (RFC 9220 section 3: a client may only send `:protocol` once the server has). */
+  /* A DUAL client: the datagram setting and BOTH version codepoints, and NOT the CONNECT-protocol setting,
+   * which is the server's to advertise (RFC 9220 section 3: a client may only send `:protocol` once the server
+   * has). */
   wt_http3_settings_init(&settings);
   WT_EXPECT_OK("a client's settings apply", wt_webtransport_settings_apply(&settings, 0));
   WT_EXPECT_INT("with H3_DATAGRAM", 1, has_setting(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
-  WT_EXPECT_INT("with the draft-specific WT_ENABLED codepoint", 1,
+  WT_EXPECT_INT("with the section 9.2 WT_ENABLED codepoint", 1,
                 has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_INT("with the draft-16 codepoint beside it", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U));
   WT_EXPECT_INT("with the earlier drafts' session codepoint", 1,
                 has_setting(&settings, WT_HTTP3_SETTING_WT_MAX_SESSIONS, 1U));
   WT_EXPECT_INT("and with the codepoint it replaced", 1,
@@ -170,13 +174,15 @@ static void test_the_settings_a_webtransport_endpoint_advertises(void) {
   WT_EXPECT_INT("and with the unidirectional stream limit", 1,
                 has_setting(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI, 8U));
 
-  /* A server: everything the client sends, plus the extended-CONNECT advertisement and the limit half of the
-   * older pair. */
+  /* A DUAL server: everything the client sends, plus the extended-CONNECT advertisement and the limit half of
+   * the older pair. */
   wt_http3_settings_init(&settings);
   WT_EXPECT_OK("a server's settings apply", wt_webtransport_settings_apply(&settings, 1));
   WT_EXPECT_INT("with H3_DATAGRAM", 1, has_setting(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
-  WT_EXPECT_INT("with the draft-specific WT_ENABLED codepoint", 1,
+  WT_EXPECT_INT("with the section 9.2 WT_ENABLED codepoint", 1,
                 has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_INT("with the draft-16 codepoint beside it", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U));
   WT_EXPECT_INT("with ENABLE_CONNECT_PROTOCOL", 1,
                 has_setting(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U));
   WT_EXPECT_INT("with the earlier drafts' session codepoint", 1,
@@ -191,8 +197,163 @@ static void test_the_settings_a_webtransport_endpoint_advertises(void) {
   WT_EXPECT_INT("and with the unidirectional stream limit", 1,
                 has_setting(&settings, WT_HTTP3_SETTING_WT_INITIAL_MAX_STREAMS_UNI, 8U));
 
+  /* The two codepoints are DISTINCT, which is the fact that makes "one per version" a rule with content: the
+   * section 9.2 registration and the draft-16 codepoint are different numbers a peer can tell apart. */
+  WT_EXPECT_TRUE("the section 9.2 codepoint is not the draft-16 one",
+                 WT_HTTP3_SETTING_WT_ENABLED != WT_HTTP3_SETTING_WT_ENABLED_DRAFT16);
+  WT_EXPECT_TRUE("and the draft-16 codepoint is the value the earlier draft registered",
+                 WT_HTTP3_SETTING_WT_ENABLED_DRAFT16 == (uint64_t)0x2c7cf000U);
+  WT_EXPECT_TRUE("while the section 9.2 one is the final registration",
+                 WT_HTTP3_SETTING_WT_ENABLED == (uint64_t)0x20b8933bU);
+
+  /* A FINAL client sends NO version codepoint at all: section 3.1's client list carries none, and
+   * section 7.1 is explicit that a client supporting only the final version does not send the setting. */
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("a FINAL client's settings apply",
+               wt_webtransport_settings_apply_profile(&settings, 0, WT_WEBTRANSPORT_PROFILE_FINAL));
+  WT_EXPECT_INT("with H3_DATAGRAM still", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
+  WT_EXPECT_INT("but with NO section 9.2 codepoint", 0,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_INT("and NO draft-16 codepoint", 0,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U));
+
+  /* A FINAL server advertises the section 9.2 codepoint alone: a draft-16 peer finds none of its
+   * codepoints and never attempts a session, which is the point of the strict posture. */
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("a FINAL server's settings apply",
+               wt_webtransport_settings_apply_profile(&settings, 1, WT_WEBTRANSPORT_PROFILE_FINAL));
+  WT_EXPECT_INT("with H3_DATAGRAM", 1, has_setting(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U));
+  WT_EXPECT_INT("with the section 9.2 codepoint", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U));
+  WT_EXPECT_INT("but with NO draft-16 codepoint", 0,
+                has_setting(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U));
+  WT_EXPECT_INT("and still with ENABLE_CONNECT_PROTOCOL", 1,
+                has_setting(&settings, WT_HTTP3_SETTING_ENABLE_CONNECT_PROTOCOL, 1U));
+
   WT_EXPECT_STATUS("a NULL settings is refused", WT_ERR_INVALID_ARGUMENT,
                    wt_webtransport_settings_apply(NULL, 0));
+}
+
+/* Section 7.1's selection matrix, as a table: which codepoints the CLIENT sent, and the version the server
+ * selects. One test per row, because the matrix is the normative answer and each row names a different rule. */
+static void test_the_section_7_1_selection_matrix(void) {
+  wt_http3_settings_t settings;
+  wt_webtransport_version_t version;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  /* A client that sent the section 9.2 codepoint selected the final version. Its VALUE is ignored:
+   * section 3.1 makes SETTINGS_WT_ENABLED meaningless from a client, so even a value a client of the
+   * server's SETTINGS would refuse is not this server's business. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_H3_DATAGRAM, 1U);
+  WT_EXPECT_OK("a client that sent the section 9.2 codepoint selects",
+               wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("the final version", (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
+
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 7U);
+  WT_EXPECT_OK("and so does one whose section 9.2 value is not 1",
+               wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("still the final version", (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
+
+  /* A client that sent ONLY the draft-16 codepoint, with the value 1 a draft client sends, is a draft-16
+   * client, and the draft-16 version is selected. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U);
+  WT_EXPECT_OK("a draft-16-only client selects",
+               wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("the draft-16 version", (int)WT_WEBTRANSPORT_VERSION_DRAFT16, (int)version);
+
+  /* A draft-16 codepoint with any other value is not a selection: it is the connection error section 3.1
+   * gives the setting. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 2U);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS("a draft-16 codepoint that is not 1 is refused", WT_ERR_PROTOCOL,
+                   wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("with H3_SETTINGS_ERROR", (int)WT_HTTP3_SETTINGS_ERROR, (int)error);
+
+  /* A client that sent NO version codepoint is a FINAL client -- section 3.1's client list carries none --
+   * so silence selects the final version rather than refusing the connection. */
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_OK("a client that sent nothing selects",
+               wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("the final version too", (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
+
+  /* Both codepoints together: the section 9.2 one wins, which is the highest version both support. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U);
+  WT_EXPECT_OK("a client that sent both selects",
+               wt_webtransport_version_select(&settings, &version, &error));
+  WT_EXPECT_INT("the final version over the draft", (int)WT_WEBTRANSPORT_VERSION_FINAL,
+                (int)version);
+
+  WT_EXPECT_STATUS("a NULL settings is refused", WT_ERR_INVALID_ARGUMENT,
+                   wt_webtransport_version_select(NULL, &version, &error));
+}
+
+/* The client's half of the same matrix: what the SERVER's SETTINGS enable, per profile. */
+static void test_the_client_version_matrix(void) {
+  wt_http3_settings_t settings;
+  wt_webtransport_version_t version;
+  wt_http3_error_t error = WT_HTTP3_NO_ERROR;
+
+  /* The section 9.2 codepoint with the value 1 enables the final version, preferred over any draft
+   * codepoint beside it. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 1U);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U);
+  WT_EXPECT_OK(
+      "a server that sent both codepoints enables",
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
+  WT_EXPECT_INT("the final version", (int)WT_WEBTRANSPORT_VERSION_FINAL, (int)version);
+
+  /* A value greater than 1 is the connection error section 3.1 names, whatever else the set carried. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED, 2U);
+  error = WT_HTTP3_NO_ERROR;
+  WT_EXPECT_STATUS(
+      "a section 9.2 value greater than 1 is refused", WT_ERR_PROTOCOL,
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
+  WT_EXPECT_INT("with H3_SETTINGS_ERROR", (int)WT_HTTP3_SETTINGS_ERROR, (int)error);
+
+  /* Only the draft-16 codepoint, with the value 1: a DUAL client accepts it, and the draft-16 version
+   * is what the two ends speak. */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 1U);
+  WT_EXPECT_OK(
+      "a draft-16-only server enables a DUAL client",
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
+  WT_EXPECT_INT("at the draft-16 version", (int)WT_WEBTRANSPORT_VERSION_DRAFT16, (int)version);
+
+  /* The same advertisement leaves a FINAL client without WebTransport: a server that sent none of the
+   * codepoints its profile requires does not serve WebTransport for it, and no session may be
+   * attempted on the connection. */
+  WT_EXPECT_STATUS(
+      "it does not enable a FINAL client", WT_ERR_STATE,
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_FINAL, &version, &error));
+
+  /* A server that sent neither codepoint does not serve WebTransport for any profile: the setting's
+   * default value is 0, which means the server does not support it. */
+  wt_http3_settings_init(&settings);
+  WT_EXPECT_STATUS(
+      "a server that advertised nothing enables nothing", WT_ERR_STATE,
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
+
+  /* A draft-16 codepoint with a value other than 1 is not an advertisement either: the value is how
+   * the era's setting said "supported". */
+  wt_http3_settings_init(&settings);
+  (void)wt_http3_settings_set(&settings, WT_HTTP3_SETTING_WT_ENABLED_DRAFT16, 5U);
+  WT_EXPECT_STATUS(
+      "a draft-16 codepoint that is not 1 enables nothing", WT_ERR_STATE,
+      wt_webtransport_client_version(&settings, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
+
+  WT_EXPECT_STATUS(
+      "a NULL settings is refused", WT_ERR_INVALID_ARGUMENT,
+      wt_webtransport_client_version(NULL, WT_WEBTRANSPORT_PROFILE_DUAL, &version, &error));
 }
 
 /* An authority a real client sends carries the port, and a policy names a HOST: RFC 9114 section 4.3.1 makes
@@ -251,7 +412,7 @@ static void test_an_authority_may_name_the_port_it_is_talking_to(void) {
   WT_EXPECT_INT("as an acceptance", (int)WT_WEBTRANSPORT_REQUEST_ACCEPT, (int)request.outcome);
 }
 
-/* Draft-ietf-webtrans-http3-16 sections 3.2 and 9.1 name the `:protocol` value `webtransport-h3`; the drafts
+/* Draft-ietf-webtrans-http3-17 sections 3.2 and 9.1 name the `:protocol` value `webtransport-h3`; the drafts
  * before it used `webtransport`, which section 2.1.2 defines as the WebTransport-over-HTTP/2 token. They are
  * DIFFERENT strings, and this server accepts BOTH: the draft-16 token because that is what a conforming peer
  * sends, the pre-draft one deliberately, because four of the five interop peers send it (see the constant's
@@ -318,6 +479,8 @@ int main(void) {
   test_accepted_and_not_ours();
   test_rejections();
   test_the_settings_a_webtransport_endpoint_advertises();
+  test_the_section_7_1_selection_matrix();
+  test_the_client_version_matrix();
   test_an_authority_may_name_the_port_it_is_talking_to();
   test_both_protocol_tokens_are_accepted_and_distinct();
   WT_TEST_MAIN_END("wt_webtransport_session_request");

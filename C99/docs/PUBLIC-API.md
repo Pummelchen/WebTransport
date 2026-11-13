@@ -6,7 +6,7 @@ for the parts a program is written against, and it says what is NOT there yet as
 as what is, because a documented absence is a design decision and an undocumented one is a
 bug report waiting to happen.
 
-The API is the consumer's view of draft-ietf-webtrans-http3-16. It is not a protocol
+The API is the consumer's view of draft-ietf-webtrans-http3-17. It is not a protocol
 library with a public face bolted on: the layers below (`quic/`, `tls/`, `http3/`,
 `webtransport/`) are public too, and a program that wants to drive QUIC itself can. What
 the `api/` layer adds is the part a program that just wants WebTransport sessions should
@@ -142,7 +142,7 @@ wt_session_callbacks_t callbacks = {0};
 callbacks.context = &my_state;
 callbacks.on_stream_opened = ...;   /* a peer stream, once, before its data */
 callbacks.on_stream_data = ...;     /* data, with end_stream on the last one */
-callbacks.on_stream_reset = ...;    /* the peer's code, carried through */
+callbacks.on_stream_reset = ...;    /* the application error, or "no application error code" */
 callbacks.on_datagram = ...;        /* the payload alone, quarter stream ID stripped */
 callbacks.on_drain = ...;           /* the peer is going away */
 callbacks.on_close = ...;           /* the peer closed, with its code */
@@ -185,7 +185,7 @@ at all is `WT_ERR_PROTOCOL`, because a datagram IS the unit: unlike a stream, th
 
 ## Backpressure and flow control
 
-Draft-16 gives the session its own flow control as capsules on the CONNECT stream. The
+Draft-17 gives the session its own flow control as capsules on the CONNECT stream. The
 peer's SETTINGS carry the initial limits, and `wt_session_flow_configure` applies them:
 
 ```c

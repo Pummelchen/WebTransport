@@ -158,7 +158,7 @@ func webTransportDisabledFlowControlRejectsMultipleSimultaneousSessions() throws
     )
     _ = try pair.client.receiveServerSessionResponse(streamID: 0, frame: firstDecision.responseFrame)
 
-    #expect(throws: WebTransportDraft16Error.self) {
+    #expect(throws: WebTransportDraft17Error.self) {
         _ = try pair.client.makeClientSessionRequest(
             streamID: 4,
             request: try WebTransportSessionRequest(authority: "example.com", path: "/two")
@@ -169,8 +169,8 @@ func webTransportDisabledFlowControlRejectsMultipleSimultaneousSessions() throws
 @Test
 func webTransportExplicitZeroFlowControlLimitIsEnforced() throws {
     let constants = WebTransportHTTP3DraftConstants.current
-    var clientSettings = HTTP3Settings.webTransportDraft16Defaults
-    var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+    var clientSettings = HTTP3Settings.webTransportDraft17Defaults
+    var serverSettings = HTTP3Settings.webTransportDraft17Defaults
     try clientSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
     try serverSettings.set(0, for: constants.settingsWTInitialMaxStreamsBidi)
     try clientSettings.set(1, for: constants.settingsWTInitialMaxData)

@@ -190,7 +190,7 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
                 "refusing inbound stream \(stream.streamID): prefix names session \(foreignSessionID), "
                     + "this connection serves \(sessionID)"
             )
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .sessionGone,
                 message: "WebTransport inbound stream names session \(foreignSessionID), not \(sessionID)"
             )
@@ -209,14 +209,14 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             // and let go of the handle instead of dropping the stream silently.
             stream.streamApplicationErrorCode =
                 WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .bufferedStreamRejected,
                 message: "WebTransport inbound stream was refused by the session manager"
             )
         }
         guard prefix.form == .bidirectional, prefix.sessionID.rawValue == sessionID else {
             stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .sessionGone,
                 message: "WebTransport inbound stream names session \(prefix.sessionID.rawValue), not \(sessionID)"
             )
@@ -280,14 +280,14 @@ public final class WebTransportNetworkSession: @unchecked Sendable {
             guard let prefix = accepted.prefix, accepted.rejectionFrame == nil else {
                 stream.streamApplicationErrorCode =
                     WebTransportHTTP3DraftConstants.current.wtBufferedStreamRejectedError
-                throw WebTransportDraft16Error(
+                throw WebTransportDraft17Error(
                     kind: .bufferedStreamRejected,
                     message: "WebTransport inbound unidirectional stream was refused by the session manager"
                 )
             }
             guard prefix.form == .unidirectional, prefix.sessionID.rawValue == sessionID else {
                 stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtSessionGoneError
-                throw WebTransportDraft16Error(
+                throw WebTransportDraft17Error(
                     kind: .sessionGone,
                     message: "WebTransport inbound stream names session \(prefix.sessionID.rawValue), not \(sessionID)"
                 )
@@ -320,7 +320,7 @@ extension WebTransportNetworkSession {
             "refusing inbound unidirectional stream \(stream.streamID): prefix names session "
                 + "\(foreignSessionID), this connection serves \(sessionID)"
         )
-        throw WebTransportDraft16Error(
+        throw WebTransportDraft17Error(
             kind: .sessionGone,
             message: "WebTransport inbound stream names session \(foreignSessionID), not \(sessionID)"
         )
@@ -446,15 +446,15 @@ extension WebTransportNetworkSession {
 
     /// The reset code for a failed CONNECT-stream read.
     ///
-    /// draft-ietf-webtrans-http3-16 section 5.6.2 names the code for a flow-control
+    /// draft-ietf-webtrans-http3-17 section 5.6.2 names the code for a flow-control
     /// violation. The session manager has already closed the session with it by the time
     /// this runs, so the CONNECT stream is reset with the same code rather than a generic
     /// H3_MESSAGE_ERROR: otherwise the peer cannot tell a malformed capsule from an
     /// over-limit flow-control value, and the code the draft requires it close the session
     /// with never reaches it.
     private static func resetAfterReceiveFailure(_ error: Error, stream: QUIC.Stream<QUICStream>) async {
-        if let draft16Error = error as? WebTransportDraft16Error,
-            draft16Error.kind == .flowControl
+        if let draft17Error = error as? WebTransportDraft17Error,
+            draft17Error.kind == .flowControl
         {
             stream.streamApplicationErrorCode = WebTransportHTTP3DraftConstants.current.wtFlowControlError
         } else {
@@ -467,7 +467,7 @@ extension WebTransportNetworkSession {
     ///
     /// Bytes that never completed a frame or a capsule are a truncation, and a truncation is
     /// a reset rather than the orderly close a bare FIN is. A clean FIN ends the session
-    /// (draft-16 section 4.4), so the connection has no further use either.
+    /// (draft-17 section 4.4), so the connection has no further use either.
     private static func finishConnectStream(
         stream: QUIC.Stream<QUICStream>,
         manager: WebTransportNetworkSessionManagerState,
@@ -537,7 +537,7 @@ extension WebTransportNetworkSession {
                 "refusing inbound datagram: prefix names session \(foreignSessionID), "
                     + "this connection serves \(sessionID)"
             )
-            throw WebTransportDraft16Error(
+            throw WebTransportDraft17Error(
                 kind: .sessionGone,
                 message: "WebTransport datagram names session \(foreignSessionID), not \(sessionID)"
             )
@@ -692,7 +692,7 @@ extension WebTransportNetworkSession {
     /// `firstPayload` verbatim, with no WebTransport prefix in front of it.
     ///
     /// HTTP/3 stream types and WebTransport streams share the unidirectional
-    /// direction (RFC 9114 section 6.2; draft-ietf-webtrans-http3-16 section 4.4),
+    /// direction (RFC 9114 section 6.2; draft-ietf-webtrans-http3-17 section 4.4),
     /// so a peer can open a stream this runtime does not serve. The shipped
     /// surface never produces one, which leaves a loopback test no way to make a
     /// peer do it; this helper does, so the runtime's classification of an

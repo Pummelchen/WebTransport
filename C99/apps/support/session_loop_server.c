@@ -317,12 +317,15 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
 
   /* A WebTransport endpoint's SETTINGS, in the one place that owns them, and the server's own streams: this
    * server sent NEITHER before, so it had no control stream and no SETTINGS frame at all. RFC 9114 section 6.2.1
-   * makes both mandatory for any HTTP/3 endpoint, and draft-16 section 3.1 makes the settings the thing a client
-   * waits for -- so this tool was not a server a third-party client could have talked to, and its own client
-   * never checked. Sent as soon as the handshake can carry 1-RTT data, which is before the response (WT-145). */
+   * makes both mandatory for any HTTP/3 endpoint, and section 3.1 makes the settings the thing a client waits
+   * for -- so this tool was not a server a third-party client could have talked to, and its own client never
+   * checked. Sent as soon as the handshake can carry 1-RTT data, which is before the response (WT-145). The
+   * version codepoints follow the profile: a DUAL server advertises the section 9.2 codepoint AND the draft-16
+   * one, a FINAL server the section 9.2 codepoint alone. */
   wt_http3_settings_init(&settings);
   {
-    wt_status_t status = wt_webtransport_settings_apply(&settings, 1);
+    wt_status_t status = wt_webtransport_settings_apply_profile(
+        &settings, 1, (wt_webtransport_version_profile_t)config->wt_enabled_profile);
     if (status != WT_OK) {
       record_oracle(&loop, out);
       wt_runtime_session_clear(&loop.session);
@@ -342,7 +345,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     }
   }
 
-  /* The CONNECT, its section assembled from the driver's pieces, and the draft-16 decision. */
+  /* The CONNECT, its section assembled from the driver's pieces, and the draft-17 decision. */
   for (round = 0U;
        round < deadline_rounds && loop.side.section_complete == 0 && loop_is_closed(&loop) == 0;
        round++) {
@@ -395,6 +398,27 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
   policy.authority = config->authority;
   policy.path = config->path;
   policy.wt_enabled = 1;
+  /* Sections 3.1 and 7.1: the client's SETTINGS select the version. The client's SETTINGS_WT_ENABLED
+   * is otherwise ignored -- a final client sends none, and the section 9.2 codepoint's VALUE from a
+   * client means nothing -- with the one exception section 7.1 keeps: a client that sent the draft-16
+   * codepoint is a draft-16 client, and it MUST have sent the value 1. A value that is not 1 is the
+   * connection error section 3.1 names, stated to the peer before anything else is read. Validated
+   * only when the client's SETTINGS have arrived; the request-before-SETTINGS case is the one
+   * section 4.6 buffers streams for, and this tool serves the request either way. */
+  if (loop.side.capsules.peer_settings_received != 0) {
+    wt_webtransport_version_t client_version;
+    wt_http3_error_t version_error = WT_HTTP3_NO_ERROR;
+    wt_status_t selected = wt_webtransport_version_select(&loop.side.capsules.peer_settings_parsed,
+                                                          &client_version, &version_error);
+    if (selected != WT_OK) {
+      wt_quic_connection_refuse_application(&loop.session.connection, (uint64_t)version_error, 0U);
+      out->h3_error = (uint64_t)version_error;
+      record_oracle(&loop, out);
+      wt_runtime_session_clear(&loop.session);
+      wt_udp_close(&loop.socket);
+      return selected;
+    }
+  }
   {
     wt_status_t validated =
         wt_webtransport_session_request_validate(&request, &policy, &decision, &h3_error);
@@ -454,7 +478,7 @@ wt_status_t wt_loop_run_server(const wt_loop_config_t *config, wt_loop_result_t 
     }
   }
   out->connect_accepted = 1;
-  /* The CONNECT was accepted: the session has an ID now, so what arrived before it can be associated (draft-16
+  /* The CONNECT was accepted: the session has an ID now, so what arrived before it can be associated (draft-17
    * section 4.6). */
   side_session_known(&loop.side);
   out->status = 200U;

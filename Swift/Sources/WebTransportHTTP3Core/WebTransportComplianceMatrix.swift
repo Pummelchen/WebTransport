@@ -5,7 +5,7 @@
 /// nothing could record a gap. `partial` is the honest state for a family whose
 /// protocol implementation exists and is conformance-tested but is not wired
 /// into every shipped entry point (see the flow-control row).
-public enum WebTransportDraft16ComplianceStatus: String, Equatable, Sendable {
+public enum WebTransportDraft17ComplianceStatus: String, Equatable, Sendable {
     /// The family is implemented, conformance-tested, and reachable from the
     /// shipped products.
     case pass = "PASS"
@@ -18,15 +18,15 @@ public enum WebTransportDraft16ComplianceStatus: String, Equatable, Sendable {
     case unknown = "UNKNOWN"
 }
 
-public struct WebTransportDraft16ComplianceItem: Equatable, Sendable {
+public struct WebTransportDraft17ComplianceItem: Equatable, Sendable {
     public var requirementFamily: String
-    public var status: WebTransportDraft16ComplianceStatus
+    public var status: WebTransportDraft17ComplianceStatus
     public var documentedBehavior: String
     public var evidence: [String]
 
     public init(
         requirementFamily: String,
-        status: WebTransportDraft16ComplianceStatus,
+        status: WebTransportDraft17ComplianceStatus,
         documentedBehavior: String,
         evidence: [String]
     ) {
@@ -37,17 +37,17 @@ public struct WebTransportDraft16ComplianceItem: Equatable, Sendable {
     }
 }
 
-public enum WebTransportDraft16ComplianceMatrix {
-    public static let definitionOfDone: [WebTransportDraft16ComplianceItem] = [
-        WebTransportDraft16ComplianceItem(
+public enum WebTransportDraft17ComplianceMatrix {
+    public static let definitionOfDone: [WebTransportDraft17ComplianceItem] = [
+        WebTransportDraft17ComplianceItem(
             requirementFamily: "Session establishment and application protocol negotiation",
             status: .pass,
             documentedBehavior:
                 "Extended CONNECT setup, protocol negotiation, 405 resource rejection, excess-session rejection, optimistic capsules, and session ID "
                 + "mapping are implemented and documented.",
-            evidence: ["WebTransportSessionTests", "WebTransportDraft16Tests", "WebTransportPublicAPITests"]
+            evidence: ["WebTransportSessionTests", "WebTransportDraft17Tests", "WebTransportPublicAPITests"]
         ),
-        WebTransportDraft16ComplianceItem(
+        WebTransportDraft17ComplianceItem(
             requirementFamily: "Streams and datagrams, including buffered ingress and rejection behavior",
             status: .pass,
             documentedBehavior:
@@ -65,27 +65,28 @@ public enum WebTransportDraft16ComplianceMatrix {
                 "run-third-party-interop.sh datagram exchange proof",
             ]
         ),
-        WebTransportDraft16ComplianceItem(
+        WebTransportDraft17ComplianceItem(
             requirementFamily: "Session close/drain behavior",
             status: .pass,
             documentedBehavior:
                 "WT_DRAIN_SESSION, 1024-byte UTF-8 WT_CLOSE_SESSION validation, H3_MESSAGE_ERROR reset behavior, CONNECT FIN close equivalence, "
                 + "stream cleanup, and post-close gating are implemented and documented.",
-            evidence: ["WebTransportDraft16Tests", "WebTransportPhase13Tests", "WebTransportLibrarySmokeMatrix"]
+            evidence: ["WebTransportDraft17Tests", "WebTransportPhase13Tests", "WebTransportLibrarySmokeMatrix"]
         ),
-        WebTransportDraft16ComplianceItem(
+        WebTransportDraft17ComplianceItem(
             requirementFamily: "Flow-control and error codes",
             status: .partial,
             documentedBehavior:
                 "Both-peer flow-control negotiation, directional stream-byte accounting, missing-setting zero defaults, strictly increasing WT_MAX_* "
-                + "capsules, the 2^60 stream ceiling, blocked capsules, and prohibited HTTP/2 capsule handling are implemented in "
+                + "capsules anchored to the peer's SETTINGS_WT_INITIAL_MAX_* values, the 2^60 stream ceiling, blocked capsules, and prohibited "
+                + "HTTP/2 capsule handling are implemented in "
                 + "WebTransportHTTP3Core and exercised by the conformance suite. The shipped Network.framework runtime does not advertise "
                 + "SETTINGS_WT_INITIAL_MAX_* and so never negotiates WebTransport flow control; it admits one session per connection, and the "
                 + "multi-session path that flow control gates is reachable only through WebTransportSessionManager, not through "
                 + "WebTransportNetworkRuntime.",
-            evidence: ["WebTransportDraft16Tests", "WebTransportFlowControlTests", "WebTransportPhase13Tests"]
+            evidence: ["WebTransportDraft17Tests", "WebTransportFlowControlTests", "WebTransportPhase13Tests"]
         ),
-        WebTransportDraft16ComplianceItem(
+        WebTransportDraft17ComplianceItem(
             requirementFamily: "H3 control and request stream constraints",
             status: .pass,
             documentedBehavior:
@@ -93,7 +94,7 @@ public enum WebTransportDraft16ComplianceMatrix {
                 + "and documented.",
             evidence: ["HTTP3ConnectionTests", "HTTP3CoreTests", "WebTransportPhase13Tests"]
         ),
-        WebTransportDraft16ComplianceItem(
+        WebTransportDraft17ComplianceItem(
             requirementFamily: "Security and identity handling without prompts",
             status: .partial,
             documentedBehavior:

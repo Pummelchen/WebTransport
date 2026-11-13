@@ -303,7 +303,7 @@ static void test_an_extended_connect_requires_scheme_and_path(void) {
   WT_EXPECT_U64("and no protocol", 0U, (uint64_t)message.protocol_length);
 }
 
-/* The Origin field, which is how a WebTransport server can apply draft-ietf-webtrans-http3-16 section 3.2 at
+/* The Origin field, which is how a WebTransport server can apply draft-ietf-webtrans-http3-17 section 3.2 at
  * all: "When the request contains the Origin header, the WebTransport server MUST verify the Origin header ...
  * If the verification fails ... SHOULD reply with status code 403."
  *

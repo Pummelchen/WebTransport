@@ -39,7 +39,7 @@ enum WebTransportServerRequestHandling {
         if WebTransportStreamSignaling.hasStreamPrefix(requestPayload) {
             let prefixed = try WebTransportStreamSignaling.parsePrefix(requestPayload)
             guard prefixed.form == .bidirectional else {
-                throw WebTransportDraft16Error(
+                throw WebTransportDraft17Error(
                     kind: .h3ID,
                     message: "WebTransport CONNECT request stream carried a unidirectional stream marker"
                 )

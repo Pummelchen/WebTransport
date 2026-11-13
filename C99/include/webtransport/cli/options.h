@@ -48,13 +48,22 @@ typedef enum wt_cli_exchange {
 
 /* CLIENT only: which `:protocol` token the CONNECT carries. The values match
  * `wt_webtransport_upgrade_token_t` (zero is the draft-16 token) so the loop's configuration does not have to
- * translate them, and the DEFAULT is draft-16 for the reason that enum gives: draft-ietf-webtrans-http3-16
+ * translate them, and the DEFAULT is draft-16 for the reason that enum gives: draft-ietf-webtrans-http3-17
  * section 3.2 names `webtransport-h3`, while a pre-draft peer refuses that value with H3_MESSAGE_ERROR and knows
  * only `webtransport` (F-02b). */
 typedef enum wt_cli_upgrade_token {
   WT_CLI_UPGRADE_TOKEN_DRAFT16 = 0,
   WT_CLI_UPGRADE_TOKEN_LEGACY = 1
 } wt_cli_upgrade_token_t;
+
+/* Which SETTINGS_WT_ENABLED codepoints this endpoint advertises and accepts (draft-17 sections 3.1
+ * and 7.1). The values match `wt_webtransport_version_profile_t`, so the loop's configuration does
+ * not have to translate them, and the DEFAULT is DUAL: it is the posture that still reaches the
+ * draft-16 peers this tree interoperates with. */
+typedef enum wt_cli_wt_enabled {
+  WT_CLI_WT_ENABLED_DUAL = 0,
+  WT_CLI_WT_ENABLED_FINAL = 1
+} wt_cli_wt_enabled_t;
 
 typedef struct wt_cli_options {
   wt_cli_mode_t mode;
@@ -81,8 +90,15 @@ typedef struct wt_cli_options {
    * that does not send a CONNECT without refusing every listener that simply left it alone. */
   wt_cli_upgrade_token_t upgrade_token;
   int upgrade_token_set;
+  /* BOTH modes: the SETTINGS_WT_ENABLED posture. A listener advertises the codepoints its profile
+   * names (both, or the section 9.2 one alone) and a client sends the ones its profile names, so the
+   * flag is meaningful for a listener too and is NOT refused for one the way `--upgrade-token` is.
+   * `wt_enabled_set` distinguishes the dual default from a caller who asked for it, so a report can
+   * tell the posture the command line chose from the posture the tool would have taken anyway. */
+  wt_cli_wt_enabled_t wt_enabled;
+  int wt_enabled_set;
   /* CLIENT only: send the message as a WebTransport stream (or datagram) BEFORE the CONNECT, which is the
-   * single flight draft-16 section 4.6 describes and the order that reaches the server's parking path (WT-189). */
+   * single flight draft-17 section 4.6 describes and the order that reaches the server's parking path (WT-189). */
   int early_stream;
   const char *message;
   uint64_t timeout_ms;
@@ -125,6 +141,7 @@ const char *wt_cli_transport_name(wt_cli_transport_t transport);
 const char *wt_cli_trust_name(wt_cli_trust_t trust);
 const char *wt_cli_exchange_name(wt_cli_exchange_t exchange);
 const char *wt_cli_upgrade_token_name(wt_cli_upgrade_token_t upgrade_token);
+const char *wt_cli_wt_enabled_name(wt_cli_wt_enabled_t wt_enabled);
 
 /* Print the parsed options as one JSON object, so a script reads them rather than parsing
  * prose. Written straight to `stream`; the caller owns the file. */

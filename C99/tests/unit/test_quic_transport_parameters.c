@@ -69,9 +69,9 @@ static void test_build_sends_the_mandatory_connection_ids(void) {
       WT_EXPECT_OK("with max_datagram_frame_size present",
                    wt_quic_transport_parameters_integer(
                        &read_back, WT_QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, &limit));
-      WT_EXPECT_TRUE("and non-zero, because draft-16 section 3.1 requires QUIC datagram support",
+      WT_EXPECT_TRUE("and non-zero, because draft-17 section 3.1 requires QUIC datagram support",
                      limit > 0U);
-      /* And the reliable-stream-reset flag draft-16 section 3.1 requires of BOTH roles, which is EMPTY: it
+      /* And the reliable-stream-reset flag draft-17 section 3.1 requires of BOTH roles, which is EMPTY: it
        * advertises the extension rather than configuring it. */
       WT_EXPECT_OK("with the reset_stream_at parameter present",
                    wt_quic_transport_parameters_get(&read_back, WT_QUIC_TP_RESET_STREAM_AT, &value,
@@ -173,7 +173,7 @@ static void test_a_retry_is_named_only_when_one_was_sent(void) {
 }
 
 /* F-04: the reliable-stream-reset extension's transport parameter is registered as 0x1d by
- * draft-ietf-quic-reliable-stream-reset-09 section 8.1, and draft-ietf-webtrans-http3-16 section 3.1 makes an
+ * draft-ietf-quic-reliable-stream-reset-09 section 8.1, and draft-ietf-webtrans-http3-17 section 3.1 makes an
  * empty `reset_stream_at` a requirement of EVERY WebTransport endpoint. The pre-registration value this tree
  * advertised (0x17f7586d2cb570, a greased 8-byte varint) is not the identifier a conforming draft-16 peer
  * looks for, so the extension was never negotiated. The assertion is on the WIRE byte and not on the C

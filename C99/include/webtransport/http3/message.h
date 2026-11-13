@@ -68,7 +68,7 @@ wt_status_t wt_http3_message_decode(wt_http3_message_t *message, wt_http3_header
  *
  * The message above carries the pseudo-headers and the status, because those are what identifies a message; this
  * is for the regular fields a layer ABOVE HTTP/3 defines a rule for, and it exists because one such layer has
- * one and could not reach it otherwise. Draft-ietf-webtrans-http3-16 section 3.2: "When the request contains the
+ * one and could not reach it otherwise. Draft-ietf-webtrans-http3-17 section 3.2: "When the request contains the
  * Origin header, the WebTransport server MUST verify the Origin header ... If the verification fails ... SHOULD
  * reply with status code 403." An Origin is a regular field, so `wt_http3_message_decode` validated it and then
  * dropped it, and a consumer of the public API had no way to apply the draft's rule at all. The alternative was

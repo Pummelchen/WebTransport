@@ -393,7 +393,7 @@ enum NativeQUICCoreSpike {
         try WebTransportHTTP3Headers.validateConnectRequest(try QPACK.decodeHeadersFrame(connectFrame))
         let responseFrame = try WebTransportHTTP3Headers.successfulResponseHeadersFrame()
         try WebTransportHTTP3Headers.validateSuccessfulResponse(try QPACK.decodeHeadersFrame(responseFrame))
-        print("http3: frame headers, SETTINGS, stream types, draft-16 constants, and QPACK HEADERS passed")
+        print("http3: frame headers, SETTINGS, stream types, draft-17 constants, and QPACK HEADERS passed")
     }
 
     private static func proveHTTP3ConnectionLayer() throws {
@@ -401,8 +401,8 @@ enum NativeQUICCoreSpike {
         var server = HTTP3ConnectionState(role: .server)
         _ = try server.receivePeerControlStream(client.localControlStreamBytes())
         _ = try client.receivePeerControlStream(server.localControlStreamBytes())
-        try assert(client.remoteSettings?.entries == HTTP3Settings.webTransportDraft16Defaults.entries, "client received server SETTINGS")
-        try assert(server.remoteSettings?.entries == HTTP3Settings.webTransportDraft16Defaults.entries, "server received client SETTINGS")
+        try assert(client.remoteSettings?.entries == HTTP3Settings.webTransportDraft17Defaults.entries, "client received server SETTINGS")
+        try assert(server.remoteSettings?.entries == HTTP3Settings.webTransportDraft17Defaults.entries, "server received client SETTINGS")
 
         var clientStream = try client.openRequestStream(streamID: 0)
         var serverStream = try server.acceptRequestStream(streamID: 0)
@@ -433,8 +433,8 @@ enum NativeQUICCoreSpike {
 
     private static func proveWebTransportSessionEstablishment() throws {
         let constants = WebTransportHTTP3DraftConstants.current
-        var clientSettings = HTTP3Settings.webTransportDraft16Defaults
-        var serverSettings = HTTP3Settings.webTransportDraft16Defaults
+        var clientSettings = HTTP3Settings.webTransportDraft17Defaults
+        var serverSettings = HTTP3Settings.webTransportDraft17Defaults
         for setting in [constants.settingsWTInitialMaxStreamsBidi, constants.settingsWTInitialMaxStreamsUni] {
             try clientSettings.set(16, for: setting)
             try serverSettings.set(16, for: setting)
@@ -501,12 +501,12 @@ enum NativeQUICCoreSpike {
     }
 
     private static func proveWebTransportComplianceMatrix() throws {
-        try assert(WebTransportDraft16ComplianceMatrix.allPass, "draft-16 compliance matrix all pass")
+        try assert(WebTransportDraft17ComplianceMatrix.allPass, "draft-17 compliance matrix all pass")
         try assert(
-            WebTransportDraft16ComplianceMatrix.definitionOfDone.count == 6,
-            "draft-16 compliance matrix covers Phase 13J requirement families"
+            WebTransportDraft17ComplianceMatrix.definitionOfDone.count == 6,
+            "draft-17 compliance matrix covers Phase 13J requirement families"
         )
-        print("compliance: draft-16 Phase 13 definition-of-done matrix passed")
+        print("compliance: draft-17 Phase 13 definition-of-done matrix passed")
     }
 }
 

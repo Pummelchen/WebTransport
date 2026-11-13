@@ -252,6 +252,35 @@ void test_an_early_stream_is_parked_and_rejected_over_the_bound(void) {
     WT_EXPECT_TRUE("the rejected stream is not among them", delivery.stream_ids[index] != over);
   }
 
+  /* Section 4.6: "Rejecting a buffered stream does not affect the session it was intended for."
+   * Asserted the way the section words it: two streams were already rejected, and the client can
+   * still open a NEW stream for the SAME session, have it arrive, and have its byte delivered -- the
+   * session the rejections were aimed at is untouched, and an endpoint can open new streams on it
+   * "to resend any data that was rejected". A rejection that had torn the session down would fail
+   * the open or strand the byte. */
+  {
+    uint64_t after = 0U;
+    uint8_t payload = (uint8_t)'!';
+    size_t base = server.stream_bytes;
+    /* Bidirectional, because the client's unidirectional stream allowance (eight, the transport
+     * parameters' default) is already spent on the QPACK streams and the early flight. */
+    WT_EXPECT_OK("a new stream opens for the rejected-on session",
+                 wt_http3_driver_open_data_stream(&client.driver, &client_transport, 0, &payload,
+                                                  1U, 0, pair.now, &after));
+    for (rounds = 0U; rounds < 400U && server.stream_bytes < base + 1U; rounds++) {
+      (void)wt_udp_wait(&pair.server_socket, 2000U);
+      (void)wt_udp_wait(&pair.client_socket, 2000U);
+      if (wt_runtime_session_pump(&pair.server, pair.now) != WT_OK) break;
+      if (wt_runtime_session_pump(&pair.client, pair.now) != WT_OK) break;
+      pair.now += 1000U;
+    }
+    WT_EXPECT_U64("and its byte arrives at the session that rejected the others", base + 1U,
+                  (uint64_t)server.stream_bytes);
+    WT_EXPECT_TRUE("with both connections still up",
+                   wt_quic_connection_is_closed(&pair.client.connection) == 0 &&
+                       wt_quic_connection_is_closed(&pair.server.connection) == 0);
+  }
+
   wt_runtime_session_clear(&pair.client);
   wt_runtime_session_clear(&pair.server);
   wt_udp_close(&pair.client_socket);

@@ -126,25 +126,27 @@ func unspecifiedFlowControlLimitAcceptsItsFirstValueThenLocksMonotonic() throws 
 /// with, not with the strict default.
 ///
 /// `receivePeerControlStream` previously omitted the argument and inherited the
-/// parameter default, so a manager built for an earlier revision still applied
-/// draft-16 rules to the peer. That rejects exactly the peers the profile exists
-/// to accept: a browser does not send SETTINGS_WT_ENABLE_WEBTRANSPORT, so strict
-/// validation refuses it.
+/// parameter default, so a manager built for a laxer profile still applied
+/// strict rules to the peer. That rejects exactly the peers the profile exists
+/// to accept: a draft-16-era server advertises the draft-16 SETTINGS_WT_ENABLED
+/// codepoint, which a strict client requires the final §9.2 codepoint instead
+/// of, so strict validation refuses it.
 @Test
 func managerValidatesPeerSettingsWithItsConfiguredProfile() throws {
-    // Settings a browser-like peer sends: no draft-16 WT enable setting.
-    let browserish = try HTTP3Settings([
+    // Settings a draft-16-era server sends: the draft-16 WT enable codepoint
+    // and not the final §9.2 one.
+    let draft16EraServer = try HTTP3Settings([
         HTTP3SettingID.enableConnectProtocol: 1,
         HTTP3SettingID.h3Datagram: 1,
-        HTTP3SettingID.legacyEnableWebTransport: 1,
+        WebTransportHTTP3DraftConstants.current.settingsWTEnabledDraft16: 1,
     ])
-    let peer = HTTP3ConnectionState(role: .client, localSettings: browserish)
+    let peer = HTTP3ConnectionState(role: .server, localSettings: draft16EraServer)
     let peerControl = try peer.localControlStreamBytes()
 
-    // Strict: must reject, since the draft-16 enable setting is absent.
+    // Strict: must reject, since the final SETTINGS_WT_ENABLED codepoint is absent.
     var strict = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
-        settingsValidation: .draft16Strict
+        http3: HTTP3ConnectionState(role: .client, localSettings: .webTransportDraft17ClientDefaults),
+        settingsValidation: .draft17Strict
     )
     #expect(throws: Error.self) {
         _ = try strict.receivePeerControlStream(peerControl)
@@ -152,7 +154,7 @@ func managerValidatesPeerSettingsWithItsConfiguredProfile() throws {
 
     // Interoperable: must accept the same bytes, or the profile is inert.
     var interoperable = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportChromiumInteropDefaults),
+        http3: HTTP3ConnectionState(role: .client, localSettings: .webTransportChromiumInteropDefaults),
         settingsValidation: .interoperable
     )
     #expect(throws: Never.self) {
@@ -174,7 +176,7 @@ func managerValidatesPeerSettingsWithItsConfiguredProfile() throws {
 func datagramSendCeilingStaysDeliverableWhileReceiveCeilingMatchesAdvertisement() throws {
     // Advertised ceiling large, as the runtime advertises 65535.
     let manager = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft17Defaults),
         maxDatagramFrameSize: 65_535
     )
     #expect(manager.maxDatagramFrameSize == 65_535, "must accept what was advertised")
@@ -186,14 +188,14 @@ func datagramSendCeilingStaysDeliverableWhileReceiveCeilingMatchesAdvertisement(
     // A ceiling below the guaranteed size must also bound sends: an endpoint
     // must never send more than it would itself accept.
     let tiny = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft17Defaults),
         maxDatagramFrameSize: 4
     )
     #expect(tiny.maxSendableDatagramFrameSize == 4)
 
     // An explicit value still wins.
     let explicit = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft17Defaults),
         maxDatagramFrameSize: 65_535,
         maxSendableDatagramFrameSize: 900
     )
@@ -214,7 +216,7 @@ func datagramSendCeilingStaysDeliverableWhileReceiveCeilingMatchesAdvertisement(
 @Test
 func closedStreamTombstonesAreBounded() throws {
     let manager = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft17Defaults),
         maxRetainedClosedStreams: 8
     )
     #expect(manager.maxRetainedClosedStreams == 8)
@@ -225,7 +227,7 @@ func closedStreamTombstonesAreBounded() throws {
 
     // A zero bound is accepted and means "retain nothing", rather than trapping.
     let none = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft17Defaults),
         maxRetainedClosedSessions: 0,
         maxRetainedClosedStreams: 0
     )
@@ -235,7 +237,7 @@ func closedStreamTombstonesAreBounded() throws {
     // Negative values are clamped rather than producing a negative ceiling that
     // would make the eviction loop misbehave.
     let clamped = WebTransportSessionManager(
-        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft16Defaults),
+        http3: HTTP3ConnectionState(role: .server, localSettings: .webTransportDraft17Defaults),
         maxRetainedClosedSessions: -5,
         maxRetainedClosedStreams: -5
     )

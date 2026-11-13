@@ -657,7 +657,7 @@ wt_quic_connection_issued_id(const wt_quic_connection_t *connection, uint64_t se
  *
  * Draft-ietf-quic-reliable-stream-reset makes a Reliable Size larger than the Final Size a FRAME_ENCODING_ERROR at
  * the receiver -- and the final size of a stream this endpoint resets is the bytes it sent -- so a caller that
- * wants to commit to a prefix (which is what draft-ietf-webtrans-http3-16 section 4.4 requires when a WebTransport
+ * wants to commit to a prefix (which is what draft-ietf-webtrans-http3-17 section 4.4 requires when a WebTransport
  * stream is reset) has to know how much of it went out. The connection knows; this is how it says so.
  *
  * WT_ERR_STATE when the stream is not in this connection's table, which is not an error about the caller's number

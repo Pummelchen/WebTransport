@@ -1,5 +1,5 @@
 /* Buffering a stream or datagram that arrives before its session is known
- * (draft-ietf-webtrans-http3-16 section 4.6).
+ * (draft-ietf-webtrans-http3-17 section 4.6).
  *
  * The section's rule has four parts and each is asserted here at the interface: the item is PARKED
  * rather than refused or delivered, the parking is BOUNDED, the bound's two halves have the two

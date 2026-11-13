@@ -114,7 +114,7 @@ int main(int argc, char **argv) {
   if (options.scenario_all == 0) return wt_usage(argv[0]);
 
   /* The scenarios this build can actually RUN are the in-process ones: a codec, a capsule, a
-   * field section and the draft-16 decision. The session scenarios need two endpoints and a
+   * field section and the draft-17 decision. The session scenarios need two endpoints and a
    * socket, which is the rest of Phase 9, and they are reported as UNSUPPORTED with the reason
    * rather than left out -- a report whose green line cannot be told from "not attempted" is
    * worth nothing. */
@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
                                       : "the close capsule did not round trip");
     }
 
-    /* The draft-16 decision on a decoded request: the layer that says yes or no. */
+    /* The draft-17 decision on a decoded request: the layer that says yes or no. */
     {
       wt_http3_message_t message;
       wt_webtransport_request_policy_t policy;
@@ -208,7 +208,7 @@ int main(int argc, char **argv) {
           decision.outcome == WT_WEBTRANSPORT_REQUEST_ACCEPT) {
         ok = 1;
       }
-      (void)wt_cli_report_add(&report, "draft16-session-request",
+      (void)wt_cli_report_add(&report, "draft17-session-request",
                               ok != 0 ? WT_CLI_RESULT_PASSED : WT_CLI_RESULT_FAILED,
                               ok != 0 ? "an extended CONNECT is accepted for its own path"
                                       : "the request decision differed");
@@ -253,7 +253,7 @@ int main(int argc, char **argv) {
      * already exercised above. */
     wt_scenario_refusal_wire_run(&report);
 
-    /* And the session's OWN capsules over the same pair: a flow-control grant, a drain and a close, which draft-16
+    /* And the session's OWN capsules over the same pair: a flow-control grant, a drain and a close, which draft-17
      * section 5 carries on the CONNECT stream (WT-164). */
     wt_scenario_capsules_run(&report);
 

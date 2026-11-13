@@ -54,7 +54,7 @@ void init_side(loop_side_t *side, wt_http3_role_t role) {
   side->sink.on_datagram = side_on_datagram;
 }
 
-/* The session's streams, ended when the session is (draft-16 section 6).
+/* The session's streams, ended when the session is (draft-17 section 6).
  *
  * The capsule stream -- shared with the conformance tool -- owns the session object and knows when it closes; the
  * DRIVER owns the data streams; this is where the two meet, one call, and the driver's own flag makes it
@@ -124,7 +124,7 @@ static wt_status_t side_on_stream_data(void *context, uint64_t stream_id, const 
   wt_status_t status;
 
   /* The CONNECT stream is the session's, not a data stream's: its bytes after the one HEADERS frame are capsules
-   * (draft-16 section 5), and the driver routes them here rather than framing them (WT-164). */
+   * (draft-17 section 5), and the driver routes them here rather than framing them (WT-164). */
   if (stream_id == side->request_stream_id) {
     wt_http3_error_t error = WT_HTTP3_NO_ERROR;
 

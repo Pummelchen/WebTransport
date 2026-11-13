@@ -5,8 +5,10 @@
  * recording callbacks are appended to a log the test reads afterwards, in order); the
  * library does not re-enter itself, so the log is a faithful sequence; a value over a bound
  * this endpoint published is refused, while an event nobody asked about is accepted and
- * discarded rather than turned into a connection error; and the PEER's code travels through
- * a stream reset and a session close unchanged. */
+ * discarded rather than turned into a connection error; a reset's application error travels
+ * through remapped into the value the application chose (and a reset that carried no
+ * application error code is delivered as exactly that); and the peer's session close code
+ * travels through unchanged. */
 
 #include "wt_test.h"
 
@@ -14,6 +16,7 @@
 
 #include "webtransport/api/events.h"
 #include "webtransport/webtransport/capsule.h"
+#include "webtransport/webtransport/error.h"
 #include "webtransport/webtransport/framing.h"
 #include "webtransport/writer.h"
 
@@ -148,13 +151,32 @@ static void test_streams(void) {
                    wt_session_on_stream_data(session, 12U, bytes, 1U, 0));
   WT_EXPECT_STATUS("as is a reset", WT_ERR_STATE, wt_session_on_stream_reset(session, 12U, 7U));
 
-  /* A reset carries the peer's code through, and stops the tracking. */
+  /* A reset carries the peer's APPLICATION error through, and stops the tracking. The peer's code
+   * arrives as a WT_APPLICATION_ERROR codepoint, so what the application sees is the 32-bit value it
+   * chose (section 4.4's remapping, read back). */
   WT_EXPECT_OK("a second stream opens", wt_session_on_stream_opened(session, 12U, 0, 4U));
   WT_EXPECT_STATUS("opening it twice is refused", WT_ERR_STATE,
                    wt_session_on_stream_opened(session, 12U, 0, 4U));
-  WT_EXPECT_OK("and a reset is applied", wt_session_on_stream_reset(session, 12U, 0x01020304U));
-  WT_EXPECT_U64("with the peer's code", 0x01020304U, recorder.last_code);
+  WT_EXPECT_OK(
+      "and a reset is applied",
+      wt_session_on_stream_reset(session, 12U, wt_webtransport_error_to_http3(0x01020304U)));
+  WT_EXPECT_U64("with the application error the codepoint carries", 0x01020304U,
+                recorder.last_code);
   WT_EXPECT_U64("and nothing tracked", 0U, (uint64_t)wt_session_stream_count(session));
+
+  /* A reset whose code is OUTSIDE the WT_APPLICATION_ERROR range -- one of the draft's own protocol
+   * codes, or anything else -- still resets the stream, and section 4.4 says the error code "is not
+   * mapped to a WebTransport application error code": the application is told the stream was reset
+   * with NO application error code, which is the sentinel no 32-bit application error can take. The
+   * run keeps going: no session error, no stream error, only the reset itself. */
+  WT_EXPECT_OK("a third stream opens", wt_session_on_stream_opened(session, 24U, 0, 4U));
+  WT_EXPECT_OK("and an out-of-range reset is applied too",
+               wt_session_on_stream_reset(session, 24U, WT_WEBTRANSPORT_ERROR_SESSION_GONE));
+  WT_EXPECT_U64("delivered as no application error code", WT_SESSION_RESET_NO_APPLICATION_ERROR,
+                recorder.last_code);
+  WT_EXPECT_INT("with the run's own error surface clean", (int)WT_OK,
+                (int)wt_session_last_error(session).status);
+  WT_EXPECT_U64("and nothing left tracked", 0U, (uint64_t)wt_session_stream_count(session));
 
   /* The bound this endpoint published: max_streams is 2, and the table is the handle's. */
   WT_EXPECT_OK("a stream opens", wt_session_on_stream_opened(session, 16U, 1, 4U));

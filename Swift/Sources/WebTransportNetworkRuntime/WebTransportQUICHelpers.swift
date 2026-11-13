@@ -238,7 +238,7 @@ enum InteroperableQUICHelpers {
         do {
             parsed = try WebTransportDatagramSignaling.parse(payload)
         } catch {
-            throw WebTransportDraft16Error(kind: .h3ID, message: "invalid WebTransport datagram session ID")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "invalid WebTransport datagram session ID")
         }
         let namedSessionID = parsed.sessionID.rawValue
         guard namedSessionID != expectedSessionID else {

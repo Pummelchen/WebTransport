@@ -1,4 +1,4 @@
-/* A WebTransport session's lifecycle (draft-ietf-webtrans-http3-16 sections 3 to 5).
+/* A WebTransport session's lifecycle (draft-ietf-webtrans-http3-17 sections 3 to 5).
  *
  * A session is created by a CONNECT request that passes the session-request rules,
  * established when the response is sent, and ends in one of two ways: a graceful drain,
@@ -91,7 +91,7 @@ typedef wt_status_t (*wt_webtransport_capsule_fn)(void *context,
 /* Walk the capsules a peer sent on the CONNECT stream, applying the ones this layer owns.
  *
  * A session's control messages arrive on the CONNECT stream as capsules once that stream's one HEADERS frame has
- * passed (draft-16 section 5), and they arrive in whatever pieces the connection delivered: the caller keeps the
+ * passed (draft-17 section 5), and they arrive in whatever pieces the connection delivered: the caller keeps the
  * bytes -- a bound belongs to whoever owns the memory -- and this walks as many COMPLETE capsules as the cursor
  * holds. The drain and close capsules are applied here, because they ARE the state machine; everything else is
  * handed to `observe`, or dropped when it is NULL, which RFC 9297 section 2 makes legal for a capsule a receiver

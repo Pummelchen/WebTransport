@@ -4,7 +4,7 @@ import WebTransportHTTP3Core
 import WebTransportQUICCore
 
 @Test
-func webTransportDraft16SettingsVectorIsRoundTripCompatible() throws {
+func webTransportDraft17SettingsVectorIsRoundTripCompatible() throws {
     let constants = WebTransportHTTP3DraftConstants.current
     let expectedPayload = Data([
         0x08,
@@ -17,7 +17,7 @@ func webTransportDraft16SettingsVectorIsRoundTripCompatible() throws {
         0x00,
         0x6b, 0x65,
         0x00,
-        0xac, 0x7c, 0xf0, 0x00,
+        0xa0, 0xb8, 0x93, 0x3b,
         0x01,
     ])
     let frame = try HTTP3Frame(type: HTTP3FrameType.settings, payload: expectedPayload)
@@ -30,6 +30,7 @@ func webTransportDraft16SettingsVectorIsRoundTripCompatible() throws {
     #expect(settings[constants.settingsEnableConnectProtocol] == 1)
     #expect(settings[constants.settingsH3Datagram] == 1)
     #expect(settings[constants.settingsWTEnabled] == 1)
+    #expect(settings[constants.settingsWTEnabledDraft16] == nil)
     #expect(settings[constants.settingsWTInitialMaxStreamsUni] == 0)
     #expect(settings[constants.settingsWTInitialMaxStreamsBidi] == 0)
     #expect(settings[constants.settingsWTInitialMaxData] == 0)

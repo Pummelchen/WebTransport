@@ -35,7 +35,7 @@ extension WebTransportSessionManager {
         let parsed: WebTransportFlowCapsuleEnvelope
         do {
             parsed = try WebTransportFlowCapsuleCodec.parse(bytes)
-        } catch let error as WebTransportDraft16Error where error.kind == .flowControl {
+        } catch let error as WebTransportDraft17Error where error.kind == .flowControl {
             try closeForFlowControlViolation(sessionID)
             throw error
         }
@@ -58,7 +58,7 @@ extension WebTransportSessionManager {
         var state = flowControlStateBySessionID[sessionID] ?? .init()
         do {
             try state.apply(parsed.capsule)
-        } catch let error as WebTransportDraft16Error where error.kind == .flowControl {
+        } catch let error as WebTransportDraft17Error where error.kind == .flowControl {
             try closeForFlowControlViolation(sessionID)
             throw error
         }
@@ -81,7 +81,7 @@ extension WebTransportSessionManager {
         bytes: Data
     ) throws -> WebTransportConnectStreamCapsuleResult {
         guard let sessionID = sessionIDsByRequestStreamID[streamID] else {
-            throw WebTransportDraft16Error(kind: .h3ID, message: "unknown WebTransport CONNECT stream")
+            throw WebTransportDraft17Error(kind: .h3ID, message: "unknown WebTransport CONNECT stream")
         }
 
         var remaining = bytes
@@ -106,8 +106,8 @@ extension WebTransportSessionManager {
                 received.append(result)
                 terminationActions = result.terminationActions ?? terminationActions
                 remaining.removeFirst(parsed.bytesConsumed)
-            } catch let error as WebTransportDraft16Error where error.kind == .flowControl {
-                // draft-ietf-webtrans-http3-16 section 5.6.2: a flow-control
+            } catch let error as WebTransportDraft17Error where error.kind == .flowControl {
+                // draft-ietf-webtrans-http3-17 section 5.6.2: a flow-control
                 // capsule whose value exceeds the draft's maximum is a
                 // session-level violation, and the session must be closed with
                 // WT_FLOW_CONTROL_ERROR. The parse above runs before
@@ -273,7 +273,7 @@ extension WebTransportSessionManager {
         guard applicationErrorCode <= UInt64(UInt32.max) else {
             throw QUICCodecError.valueOutOfRange("WebTransport application error code exceeds UInt32")
         }
-        return WebTransportDraft16ErrorMapper.httpErrorCode(
+        return WebTransportDraft17ErrorMapper.httpErrorCode(
             forApplicationErrorCode: UInt32(applicationErrorCode)
         )
     }

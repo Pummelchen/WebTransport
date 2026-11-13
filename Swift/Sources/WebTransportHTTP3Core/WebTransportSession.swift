@@ -90,7 +90,7 @@ public struct WebTransportSessionManager: Equatable, Sendable {
         maxBufferedSessions: Int = 64,
         maxRetainedClosedSessions: Int = 256,
         maxRetainedClosedStreams: Int = 4_096,
-        settingsValidation: HTTP3WebTransportSettingsValidation = .draft16Strict
+        settingsValidation: HTTP3WebTransportSettingsValidation = .draft17Strict
     ) {
         self.http3 = http3
         self.sessionsByID = [:]

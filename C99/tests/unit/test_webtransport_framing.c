@@ -1,4 +1,4 @@
-/* WebTransport stream and datagram framing (draft-ietf-webtrans-http3-16 sections 4.2
+/* WebTransport stream and datagram framing (draft-ietf-webtrans-http3-17 sections 4.2
  * and 4.3).
  *
  * The prefix is two varints and the datagram is one plus the payload, so the tests are

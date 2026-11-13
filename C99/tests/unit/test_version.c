@@ -21,7 +21,7 @@ int main(void) {
   WT_EXPECT_INT("the ABI version is the header's", WT_ABI_VERSION, wt_abi_version());
   WT_EXPECT_TRUE("the ABI version is positive", WT_ABI_VERSION > 0);
   WT_EXPECT_TRUE("the draft string is not NULL", draft != NULL);
-  WT_EXPECT_STR("the draft is the one the plan targets", "draft-ietf-webtrans-http3-16", draft);
+  WT_EXPECT_STR("the draft is the one the plan targets", "draft-ietf-webtrans-http3-17", draft);
 
   /* The version string is static storage, so it is the same pointer on every
    * call and must not be freed by the caller. */

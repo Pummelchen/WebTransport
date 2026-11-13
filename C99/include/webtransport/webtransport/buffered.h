@@ -1,5 +1,5 @@
 /* What a WebTransport endpoint does with a stream or datagram that arrives BEFORE the
- * session it names is known (draft-ietf-webtrans-http3-16 section 4.6).
+ * session it names is known (draft-ietf-webtrans-http3-17 section 4.6).
  *
  * The draft's own words: a client can send "a SETTINGS frame, multiple WebTransport CONNECT
  * requests, WebTransport data streams, and WebTransport datagrams all within a single flight.

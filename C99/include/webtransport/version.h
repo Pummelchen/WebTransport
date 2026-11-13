@@ -44,7 +44,7 @@ const char *wt_version_string(void);
 int wt_abi_version(void);
 
 /* The protocol draft this implementation targets, as a string for a User-Agent
- * or a diagnostic -- "draft-ietf-webtrans-http3-16". Static storage. */
+ * or a diagnostic -- "draft-ietf-webtrans-http3-17". Static storage. */
 const char *wt_protocol_draft(void);
 
 #ifdef __cplusplus

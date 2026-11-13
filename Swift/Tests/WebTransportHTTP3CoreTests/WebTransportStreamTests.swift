@@ -171,7 +171,7 @@ func webTransportStreamResetAndStopSendingEmitFrames() throws {
         resetFrame
             == .resetStreamAt(
                 id: 4,
-                applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x10),
+                applicationErrorCode: WebTransportDraft17ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x10),
                 finalSize: 0,
                 reliableSize: 0
             ))
@@ -179,7 +179,7 @@ func webTransportStreamResetAndStopSendingEmitFrames() throws {
         stopSendingFrame
             == .stopSending(
                 id: 4,
-                applicationErrorCode: WebTransportDraft16ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
+                applicationErrorCode: WebTransportDraft17ErrorMapper.httpErrorCode(forApplicationErrorCode: 0x11)
             ))
 }
 

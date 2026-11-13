@@ -65,7 +65,7 @@ wt_cli_result_t wt_scenario_session_run(int ipv6, char *detail, size_t detail_si
   policy.wt_enabled = 1;
   if (wt_webtransport_session_request_validate(&decoded, &policy, &decision, &h3_error) != WT_OK ||
       decision.outcome != WT_WEBTRANSPORT_REQUEST_ACCEPT) {
-    scenario_detail_set(detail, detail_size, "the draft-16 layer did not accept the CONNECT");
+    scenario_detail_set(detail, detail_size, "the draft-17 layer did not accept the CONNECT");
     goto done_failed;
   }
 

@@ -13,8 +13,8 @@ func http3ControlStreamsExchangeAndValidateSettings() throws {
 
     #expect(clientFrames.first?.type == HTTP3FrameType.settings)
     #expect(serverFrames.first?.type == HTTP3FrameType.settings)
-    #expect(client.remoteSettings?.entries == HTTP3Settings.webTransportDraft16Defaults.entries)
-    #expect(server.remoteSettings?.entries == HTTP3Settings.webTransportDraft16Defaults.entries)
+    #expect(client.remoteSettings?.entries == HTTP3Settings.webTransportDraft17Defaults.entries)
+    #expect(server.remoteSettings?.entries == HTTP3Settings.webTransportDraft17Defaults.entries)
 
     #expect(throws: Error.self) {
         _ = try server.receivePeerControlStream(client.localControlStreamBytes())
@@ -23,48 +23,53 @@ func http3ControlStreamsExchangeAndValidateSettings() throws {
 
 @Test
 func http3SettingsValidationRejectsMissingWebTransportRequirements() throws {
-    var missingConnect = HTTP3Settings.webTransportDraft16Defaults
+    var missingConnect = HTTP3Settings.webTransportDraft17Defaults
     try missingConnect.set(0, for: WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol)
     #expect(throws: Error.self) {
-        try missingConnect.validateWebTransportDraft16Requirements()
+        try missingConnect.validateWebTransportDraft17Requirements()
     }
-    try missingConnect.validateWebTransportDraft16Requirements(peerRole: .client)
+    try missingConnect.validateWebTransportDraft17Requirements(peerRole: .client)
 
-    let invalidControl = try HTTP3StreamTypeParser.encodePrefix(
-        type: HTTP3StreamType.control,
-        payload: try HTTP3Settings([
-            WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
-            WebTransportHTTP3DraftConstants.current.settingsH3Datagram: 1,
-        ]).frame().encode()
-    )
-    var server = HTTP3ConnectionState(role: .server)
+    let missingDatagram = try HTTP3Settings([
+        WebTransportHTTP3DraftConstants.current.settingsEnableConnectProtocol: 1,
+        WebTransportHTTP3DraftConstants.current.settingsWTEnabled: 1,
+    ])
+    var client = HTTP3ConnectionState(role: .client)
     #expect(throws: Error.self) {
-        _ = try server.receivePeerControlStream(invalidControl)
+        _ = try client.receivePeerControlStream(
+            try HTTP3StreamTypeParser.encodePrefix(
+                type: HTTP3StreamType.control,
+                payload: try missingDatagram.frame().encode()
+            ))
     }
 }
 
+/// draft-17 section 3.1: SETTINGS_WT_ENABLED has no meaning when sent by a
+/// client and the server must ignore it, so a strict server accepts a final
+/// client that sends none. Serving draft-16-era peers is what the
+/// interoperable profiles are for, not something strict grows.
 @Test
-func http3ChromiumInteropValidationAcceptsMissingDraft16ClientMarker() throws {
+func http3StrictServerAcceptsClientSettingsWithoutWebTransportEnabled() throws {
     let constants = WebTransportHTTP3DraftConstants.current
-    let chromiumClientSettings = try HTTP3Settings([
-        constants.settingsH3Datagram: 1
+    let clientSettings = try HTTP3Settings([
+        constants.settingsEnableConnectProtocol: 1,
+        constants.settingsH3Datagram: 1,
     ])
     let controlBytes = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
-        payload: try chromiumClientSettings.frame().encode()
+        payload: try clientSettings.frame().encode()
     )
 
     var strictServer = HTTP3ConnectionState(role: .server)
-    #expect(throws: Error.self) {
-        _ = try strictServer.receivePeerControlStream(controlBytes)
-    }
+    _ = try strictServer.receivePeerControlStream(controlBytes)
+    #expect(strictServer.remoteSettings?.entries == clientSettings.entries)
 
     var chromiumInteropServer = HTTP3ConnectionState(role: .server)
     _ = try chromiumInteropServer.receivePeerControlStream(
         controlBytes,
         settingsValidation: .chromiumInterop
     )
-    #expect(chromiumInteropServer.remoteSettings?.entries == chromiumClientSettings.entries)
+    #expect(chromiumInteropServer.remoteSettings?.entries == clientSettings.entries)
 }
 
 @Test
@@ -92,7 +97,7 @@ func http3ServerAcceptsClientSettingsWithoutEnableConnectProtocol() throws {
 @Test
 func http3ZeroRTTSettingsCompatibilityRejectsReducedOrChangedWebTransportSettings() throws {
     let constants = WebTransportHTTP3DraftConstants.current
-    var remembered = HTTP3Settings.webTransportDraft16Defaults
+    var remembered = HTTP3Settings.webTransportDraft17Defaults
     try remembered.set(4, for: constants.settingsWTInitialMaxStreamsBidi)
     try remembered.set(8, for: constants.settingsWTInitialMaxData)
 
@@ -120,10 +125,10 @@ func http3ZeroRTTSettingsCompatibilityRejectsReducedOrChangedWebTransportSetting
 @Test
 func http3ControlStreamCanValidateRememberedZeroRTTSettings() throws {
     let constants = WebTransportHTTP3DraftConstants.current
-    var remembered = HTTP3Settings.webTransportDraft16Defaults
+    var remembered = HTTP3Settings.webTransportDraft17Defaults
     try remembered.set(8, for: constants.settingsWTInitialMaxData)
 
-    var current = HTTP3Settings.webTransportDraft16Defaults
+    var current = HTTP3Settings.webTransportDraft17Defaults
     try current.set(1, for: constants.settingsWTInitialMaxData)
     let controlBytes = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
@@ -144,20 +149,20 @@ func http3ControlStreamRejectsRequestFramesAndProcessesGoaway() throws {
     let controlBytes = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
         payload: try HTTP3Frame.encodeFrames([
-            HTTP3Settings.webTransportDraft16Defaults.frame(),
+            HTTP3Settings.webTransportDraft17Defaults.frame(),
             goaway,
         ])
     )
 
     let frames = try connection.receivePeerControlStream(controlBytes)
-    #expect(frames == [try HTTP3Settings.webTransportDraft16Defaults.frame(), goaway])
+    #expect(frames == [try HTTP3Settings.webTransportDraft17Defaults.frame(), goaway])
     #expect(connection.receivedGoawayID == 4)
 
     var badConnection = HTTP3ConnectionState(role: .client)
     let badControlBytes = try HTTP3StreamTypeParser.encodePrefix(
         type: HTTP3StreamType.control,
         payload: try HTTP3Frame.encodeFrames([
-            HTTP3Settings.webTransportDraft16Defaults.frame(),
+            HTTP3Settings.webTransportDraft17Defaults.frame(),
             try HTTP3Frame(type: HTTP3FrameType.headers),
         ])
     )

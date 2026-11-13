@@ -304,7 +304,7 @@ private struct NetworkClientOptionsBuilder {
     var origin: String? = "https://localhost"
     var protocols = ["demo.v1"]
     var trustPolicy: WebTransportQUICPeerTrustPolicy?
-    var settingsValidation = HTTP3WebTransportSettingsValidation.draft16Strict
+    var settingsValidation = HTTP3WebTransportSettingsValidation.draft17Strict
     var exchangeMode = WebTransportNetworkExchangeMode.auto
 
     func build() throws -> NetworkClientOptions {

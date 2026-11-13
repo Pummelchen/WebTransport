@@ -1,4 +1,4 @@
-/* Sub-protocol negotiation: the `wt-protocol` field's Structured Fields values (draft-16 section 3.2).
+/* Sub-protocol negotiation: the `wt-protocol` field's Structured Fields values (draft-17 section 3.2).
  *
  * The rules here decide APPLICATION semantics -- which sub-protocol two endpoints speak -- so the cases that
  * matter are the ones where two implementations could disagree: a token that contains one of the bytes the
